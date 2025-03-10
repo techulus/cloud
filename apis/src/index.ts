@@ -9,5 +9,4 @@ app.get("/", (c) => {
 export default {
 	fetch: app.fetch,
 	port: process.env.PORT || 3000,
-	hostname: process.env.HOSTNAME || "[::]",
 };
