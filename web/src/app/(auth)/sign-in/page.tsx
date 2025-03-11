@@ -1,18 +1,18 @@
 "use client";
 
-import { Button } from "@/components/button";
-import { Heading } from "@/components/heading";
+import { Button } from "@/components/ui/button";
+import { Heading } from "@/components/ui/heading";
 import { signIn } from "@/lib/auth-client";
 
 export default function SignIn() {
 	return (
 		<div className="min-h-screen flex items-center justify-center">
 			<div className="max-w-md text-center">
-				<Heading level={1}>Sign In</Heading>
+				<Heading>Sign In</Heading>
 				<div className="grid gap-4 mt-4">
 					<div className="w-full gap-2 flex items-center justify-center">
 						<Button
-							className="flex items-center justify-center gap-2"
+							className="flex items-center justify-center gap-2 cursor-pointer"
 							onClick={async () => {
 								await signIn.social({
 									provider: "github",
@@ -22,8 +22,8 @@ export default function SignIn() {
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
-								width="1em"
-								height="1em"
+								width="1.2em"
+								height="1.2em"
 								viewBox="0 0 24 24"
 							>
 								<title>Github</title>
