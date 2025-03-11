@@ -10,6 +10,7 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "Techulus Cloud",
   description: "Simple cloud deployment for your projects",
+  metadataBase: new URL("https://techulus.cloud"),
   openGraph: {
     title: "Techulus Cloud",
     description: "Simple cloud deployment for your projects",
