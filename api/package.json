@@ -5,6 +5,7 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
+    "@temporalio/client": "^1.11.7",
     "hono": "^4.7.4"
   },
   "devDependencies": {

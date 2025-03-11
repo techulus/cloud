@@ -6,17 +6,14 @@ settings:
 
 dependencies:
   '@temporalio/activity':
-    specifier: ^1.8.6
+    specifier: ^1.11.7
     version: 1.11.7
   '@temporalio/worker':
-    specifier: ^1.8.6
+    specifier: ^1.11.7
     version: 1.11.7
   '@temporalio/workflow':
-    specifier: ^1.8.6
+    specifier: ^1.11.7
     version: 1.11.7
-  nanoid:
-    specifier: 3.x
-    version: 3.3.9
 
 devDependencies:
   '@biomejs/biome':
@@ -1158,12 +1155,6 @@ packages:
   /ms@3.0.0-canary.1:
     resolution: {integrity: sha512-kh8ARjh8rMN7Du2igDRO9QJnqCb2xYTJxyQYK7vJJS4TvLLmsbyhiKpSW+t+y26gyOyMd0riphX0GeWKU3ky5g==}
     engines: {node: '>=12.13'}
-    dev: false
-
-  /nanoid@3.3.9:
-    resolution: {integrity: sha512-SppoicMGpZvbF1l3z4x7No3OlIjP7QJvC9XR7AhZr1kL133KHnKPztkKDc+Ir4aJ/1VhTySrtKhrsycmrMQfvg==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
     dev: false
 
   /neo-async@2.6.2:
