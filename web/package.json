@@ -4,9 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "prebuild": "drizzle-kit migrate",
-    "build": "next build",
-    "start": "next start",
+    "build": "true",
+    "start": "drizzle-kit migrate && next build && next start",
     "lint": "next lint"
   },
   "dependencies": {
