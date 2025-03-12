@@ -15,8 +15,7 @@ export type Organization = {
 type Result = {
 	ownerId: string;
 	userId: string;
-	orgId: string | null;
-	orgSlug: string;
+	orgId: string;
 };
 
 export async function getUser(): Promise<User> {

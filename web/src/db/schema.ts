@@ -92,8 +92,8 @@ export const project = pgTable("project", {
 	organizationId: text("organization_id")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
-	createdAt: timestamp("created_at").notNull(),
 	metadata: text("metadata"),
+	createdAt: timestamp("created_at").notNull(),
 });
 
 export const service = pgTable("service", {
