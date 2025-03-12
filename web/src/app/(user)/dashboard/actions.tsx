@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 // import { temporalClient } from "@/lib/temporal";
 import db from "@/db";
 import { project } from "@/db/schema";
+import { getOwner } from "@/lib/user";
 
 const flyToken = process.env.FLY_API_TOKEN;
 
@@ -25,12 +26,13 @@ export async function createProject({ name }: { name: string }) {
 		// );
 		// const result = await handle.result();
 		// console.log(result);
+		const { orgId } = await getOwner();
 
 		await db.insert(project).values({
 			id: randomUUID(),
-			name,
-			organizationId: "org_1",
-			ownerId: "user_1",
+			name: name ?? "Untitled Project",
+			organizationId: orgId,
+			createdAt: new Date(),
 		});
 	} catch (error) {
 		console.error(error);
