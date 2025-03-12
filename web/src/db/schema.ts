@@ -21,6 +21,7 @@ export const session = pgTable("session", {
 	userId: text("user_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
+	activeOrganizationId: text("active_organization_id"),
 });
 
 export const account = pgTable("account", {
@@ -83,4 +84,24 @@ export const invitation = pgTable("invitation", {
 	inviterId: text("inviter_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
+});
+
+export const project = pgTable("project", {
+	id: text("id").primaryKey(),
+	name: text("name").notNull(),
+	organizationId: text("organization_id")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	createdAt: timestamp("created_at").notNull(),
+	metadata: text("metadata"),
+});
+
+export const service = pgTable("service", {
+	id: text("id").primaryKey(),
+	name: text("name").notNull(),
+	projectId: text("project_id")
+		.notNull()
+		.references(() => project.id, { onDelete: "cascade" }),
+	createdAt: timestamp("created_at").notNull(),
+	configuration: text("configuration"),
 });

@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1741693486086,
-      "tag": "0000_serious_tempest",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1741773929667,
-      "tag": "0001_greedy_zaladane",
+      "when": 1741782490689,
+      "tag": "0000_white_giant_man",
       "breakpoints": true
     }
   ]

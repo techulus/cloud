@@ -11,30 +11,52 @@ import {
 	SidebarSection,
 } from "@/components/ui/sidebar";
 import { StackedLayout } from "@/components/ui/stacked-layout";
+import { getOrganizations, getOwner, getUser } from "@/lib/user";
 import { ChevronDownIcon } from "@heroicons/react/16/solid";
-import { Toaster } from "sonner";
+import { redirect } from "next/navigation";
 
 const navItems = [
 	{ label: "Dashboard", url: "/dashboard" },
 	{ label: "Settings", url: "/settings" },
 ];
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
 	children,
 }: { children: React.ReactNode }) {
+	const user = await getUser();
+	const organizations = await getOrganizations();
+
+	if (organizations.length === 0) {
+		redirect("/start");
+	}
+
+	const { orgId } = await getOwner();
+	const activeOrganization = organizations.find((org) => org.id === orgId);
+
+	if (!activeOrganization) {
+		redirect("/start");
+	}
+
 	return (
 		<StackedLayout
-			navbar={<MainNav navItems={navItems} />}
+			navbar={
+				<MainNav
+					navItems={navItems}
+					user={user}
+					activeOrganization={activeOrganization}
+					organizations={organizations}
+				/>
+			}
 			sidebar={
 				<Sidebar>
 					<SidebarHeader>
 						<Dropdown>
 							<DropdownButton as={SidebarItem} className="lg:mb-2.5">
-								<Avatar src="/logo.png" />
-								<SidebarLabel>Techulus</SidebarLabel>
+								<Avatar src={activeOrganization?.logo} />
+								<SidebarLabel>{activeOrganization?.name}</SidebarLabel>
 								<ChevronDownIcon />
 							</DropdownButton>
-							<TeamsNav />
+							<TeamsNav organizations={organizations} />
 						</Dropdown>
 					</SidebarHeader>
 					<SidebarBody>
@@ -50,7 +72,6 @@ export default function DashboardLayout({
 			}
 		>
 			{children}
-			<Toaster position="bottom-center" />
 		</StackedLayout>
 	);
 }
