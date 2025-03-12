@@ -1,3 +1,6 @@
+import { Button } from "@/components/ui/button";
+import { EnvelopeIcon } from "@heroicons/react/16/solid";
+
 export default function Home() {
   return (
     <div className="relative isolate overflow-hidden bg-gray-900 min-h-screen">
@@ -41,11 +44,20 @@ export default function Home() {
       <div className="mx-auto max-w-7xl px-6 pb-24 pt-10 sm:pb-32 lg:flex lg:px-8 lg:py-40 flex items-center justify-center min-h-screen">
         <div className="mx-auto max-w-2xl text-center">
           <h1 className="mt-10 text-pretty text-3xl font-semibold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-red-100 to-blue-500 sm:text-5xl">
-            The Future of Simple, Scalable Deployment
+            The Future of Simple, Scalable Container Deployment
           </h1>
           <p className="mt-8 text-pretty text-lg font-medium text-gray-400 sm:text-xl/8">
-            Effortless container deployment on your own infrastructure. No complexity, no cloud lock-in—just a seamless way to run and manage your apps with high availability and automatic failover. Built for speed, reliability, and control. Coming soon. 🚀
+            A seamless way to run and manage your apps with high availability and automatic failover. Built for speed, reliability, and control.
           </p>
+          <div className="mt-10 flex items-center justify-center gap-x-6">
+            <Button
+              color="rose"
+              href="mailto:cloud+invite@techulus.com"
+            >
+              <EnvelopeIcon  />
+              Request Invite
+            </Button>
+          </div>
         </div>
       </div>
     </div>

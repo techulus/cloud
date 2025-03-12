@@ -45,12 +45,9 @@ export function MainNav({ navItems }: { navItems: { label: string; url: string }
           </NavbarSection>
           <NavbarSpacer />
           <NavbarSection>
-            <NavbarItem href="/search" aria-label="Search">
-              <MagnifyingGlassIcon />
-            </NavbarItem>
-            <NavbarItem href="/inbox" aria-label="Inbox">
+            {/* <NavbarItem href="/inbox" aria-label="Inbox">
               <InboxIcon />
-            </NavbarItem>
+            </NavbarItem> */}
             <Dropdown>
               <DropdownButton as={NavbarItem}>
                 <Avatar src="/logo.png" square />
