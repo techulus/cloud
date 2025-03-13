@@ -1,3 +1,4 @@
+import { relations } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -96,6 +97,10 @@ export const project = pgTable("project", {
 	createdAt: timestamp("created_at").notNull(),
 });
 
+export const projectRelation = relations(project, ({ many }) => ({
+	services: many(service),
+}));
+
 export const service = pgTable("service", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -105,3 +110,10 @@ export const service = pgTable("service", {
 	createdAt: timestamp("created_at").notNull(),
 	configuration: text("configuration"),
 });
+
+export const serviceRelation = relations(service, ({ one }) => ({
+	project: one(project, {
+		fields: [service.projectId],
+		references: [project.id],
+	}),
+}));

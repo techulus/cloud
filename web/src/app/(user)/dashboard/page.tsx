@@ -8,8 +8,16 @@ import { project } from "@/db/schema";
 
 export default async function Dashboard() {
 	const { orgId } = await getOwner();
+
 	const projects = await db.query.project.findMany({
 		where: eq(project.organizationId, orgId),
+		with: {
+			services: {
+				columns: {
+					id: true,
+				},
+			},
+		},
 	});
 
 	return (
@@ -30,7 +38,7 @@ export default async function Dashboard() {
 					{projects.map((project) => (
 						<div
 							key={project.id}
-							className="group relative bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-6 hover:shadow-lg transition-all duration-200 flex flex-col"
+							className="group relative bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-xl p-6 transition-all duration-200 flex flex-col"
 						>
 							<div>
 								<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
@@ -43,7 +51,8 @@ export default async function Dashboard() {
 									</a>
 								</h3>
 								<p className="mt-8 text-sm text-zinc-500 dark:text-zinc-400">
-									0 services
+									{project.services.length} service
+									{project.services.length === 1 ? "" : "s"}
 								</p>
 							</div>
 						</div>
