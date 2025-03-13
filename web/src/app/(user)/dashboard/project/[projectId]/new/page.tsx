@@ -140,7 +140,7 @@ export default function CreateService() {
 									/>
 									<label htmlFor="github" className="ml-2 flex items-center">
 										<GitBranchIcon className="w-4 h-4 mr-2" />
-										GitHub Repository
+										Public GitHub Repository
 									</label>
 								</div>
 							</Field>

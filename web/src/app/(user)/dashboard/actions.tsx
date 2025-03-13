@@ -72,3 +72,5 @@ export async function deployService({
 		console.error(error);
 	}
 }
+
+export async function deleteService({ serviceId }: { serviceId: string }) {}
