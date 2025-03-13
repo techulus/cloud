@@ -17,6 +17,7 @@ import { redirect } from "next/navigation";
 
 const navItems = [
 	{ label: "Dashboard", url: "/dashboard" },
+	{ label: "Servers", url: "/servers" },
 	{ label: "Settings", url: "/settings" },
 ];
 
