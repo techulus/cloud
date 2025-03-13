@@ -59,9 +59,9 @@ export default async function Dashboard() {
 					))}
 				</div>
 			) : (
-				<div className="mt-8">
-					<p className="text-sm text-zinc-500 dark:text-zinc-400">
-						No projects found
+				<div className="mt-8 rounded-xl border border-zinc-200 dark:border-zinc-700 p-8 text-center bg-white dark:bg-zinc-800">
+					<p className="text-zinc-500 dark:text-zinc-400">
+						No projects found. Add your first project to get started.
 					</p>
 				</div>
 			)}

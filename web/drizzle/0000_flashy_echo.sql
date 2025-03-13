@@ -46,8 +46,17 @@ CREATE TABLE "project" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"organization_id" text NOT NULL,
-	"created_at" timestamp NOT NULL,
-	"metadata" text
+	"metadata" text,
+	"created_at" timestamp NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "server" (
+	"id" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"token" text NOT NULL,
+	"organization_id" text NOT NULL,
+	"metadata" text,
+	"created_at" timestamp NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "service" (
@@ -55,7 +64,8 @@ CREATE TABLE "service" (
 	"name" text NOT NULL,
 	"project_id" text NOT NULL,
 	"created_at" timestamp NOT NULL,
-	"configuration" text
+	"configuration" text,
+	"status" text DEFAULT 'unknown' NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "session" (
@@ -97,5 +107,6 @@ ALTER TABLE "invitation" ADD CONSTRAINT "invitation_inviter_id_user_id_fk" FOREI
 ALTER TABLE "member" ADD CONSTRAINT "member_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "member" ADD CONSTRAINT "member_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "project" ADD CONSTRAINT "project_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "server" ADD CONSTRAINT "server_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "service" ADD CONSTRAINT "service_project_id_project_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."project"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
