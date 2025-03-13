@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Space_Grotesk } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 
-const spaceGrotesk = Space_Grotesk({
-	variable: "--font-space-grotesk",
+const mainFont = Inter({
+	variable: "--font-main",
 	subsets: ["latin"],
 });
 
@@ -48,7 +48,7 @@ export default function RootLayout({
 			lang="en"
 			className="bg-white lg:bg-zinc-100 dark:bg-zinc-900 dark:lg:bg-zinc-950"
 		>
-			<body className={`${spaceGrotesk.variable} antialiased`}>
+			<body className={`${mainFont.variable} antialiased`}>
 				{children}
 				<Toaster position="bottom-center" />
 			</body>

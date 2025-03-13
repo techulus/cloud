@@ -47,7 +47,7 @@ export function MainNav({
 		<Navbar>
 			<Dropdown>
 				<DropdownButton as={NavbarItem} className="max-lg:hidden">
-					<Avatar src={activeOrganization.logo} />
+					<Avatar src={activeOrganization.logo ?? "/logo.png"} />
 					<NavbarLabel>{activeOrganization.name}</NavbarLabel>
 					<ChevronDownIcon />
 				</DropdownButton>
