@@ -2,10 +2,26 @@
 
 import { randomUUID } from "node:crypto";
 import db from "@/db";
-import { project, service } from "@/db/schema";
+import { project, server, service } from "@/db/schema";
 import { getOwner } from "@/lib/user";
 import { tasks } from "@trigger.dev/sdk/v3";
 import type { deployServiceJob } from "@/trigger/deploy-service";
+
+export async function createServer({ name }: { name: string }) {
+	try {
+		const { orgId } = await getOwner();
+
+		await db.insert(server).values({
+			id: randomUUID(),
+			name: name ?? "Untitled Server",
+			token: randomUUID(),
+			organizationId: orgId,
+			createdAt: new Date(),
+		});
+	} catch (error) {
+		console.error(error);
+	}
+}
 
 export async function createProject({ name }: { name: string }) {
 	try {
