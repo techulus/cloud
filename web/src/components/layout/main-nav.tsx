@@ -30,6 +30,7 @@ import TeamsNav from "./teams-nav";
 import { useRouter } from "next/navigation";
 import type { User } from "better-auth";
 import type { Organization } from "@/lib/user";
+
 export function MainNav({
 	navItems,
 	user,
