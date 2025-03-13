@@ -73,4 +73,14 @@ export async function deployService({
 	}
 }
 
-export async function deleteService({ serviceId }: { serviceId: string }) {}
+export async function createSecret({
+	serviceId,
+	key,
+	value,
+}: {
+	serviceId: string;
+	key: string;
+	value: string;
+}) {
+	console.log(serviceId, key, value);
+}

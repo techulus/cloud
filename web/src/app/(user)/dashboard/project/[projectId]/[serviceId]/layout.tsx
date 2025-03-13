@@ -7,6 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ServiceDetailTabs } from "@/components/services/service-detail-tabs";
+import { deployService } from "../../../actions";
 
 export default async function ServiceDetailsLayout({
 	params,
@@ -47,7 +48,16 @@ export default async function ServiceDetailsLayout({
 					/ {serviceDetails.name}
 				</Heading>
 				<div className="flex gap-4">
-					<Button outline>Redeploy</Button>
+					<form
+						action={async () => {
+							"use server";
+							await deployService({ serviceId });
+						}}
+					>
+						<Button type="submit" outline>
+							Redeploy
+						</Button>
+					</form>
 					<Button>Restart</Button>
 				</div>
 			</div>
