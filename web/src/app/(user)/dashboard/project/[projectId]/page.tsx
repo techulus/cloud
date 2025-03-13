@@ -6,9 +6,9 @@ import { getOwner } from "@/lib/user";
 import { PlusIcon } from "@heroicons/react/16/solid";
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { deployService } from "../../actions";
+import { ServiceItem } from "@/components/services/service-item";
 
-export default async function Project({
+export default async function ProjectServices({
 	params,
 }: { params: Promise<{ projectId: string }> }) {
 	const { projectId } = await params;
@@ -21,16 +21,9 @@ export default async function Project({
 		notFound();
 	}
 
-	const services = await db.query.service
-		.findMany({
-			where: eq(service.projectId, projectDetails.id),
-		})
-		.then((services) =>
-			services.map((service) => ({
-				...service,
-				configuration: JSON.parse(service.configuration || "{}"),
-			})),
-		);
+	const services = await db.query.service.findMany({
+		where: eq(service.projectId, projectDetails.id),
+	});
 
 	return (
 		<>
@@ -46,45 +39,11 @@ export default async function Project({
 			</div>
 
 			{services?.length ? (
-				<div className="mt-8 relative min-h-[calc(90vh-12rem)] rounded-xl bg-zinc-50 dark:bg-zinc-800">
+				<div className="mt-8 relative min-h-[calc(90vh-12rem)] rounded-xl bg-zinc-50 dark:bg-zinc-800 flex flex-col">
 					<div className="absolute inset-0 rounded-xl [background-size:40px_40px] [background-image:radial-gradient(circle,rgb(0_0_0/0.1)_1px,transparent_1px)] dark:[background-image:radial-gradient(circle,rgb(255_255_255/0.1)_1px,transparent_1px)]" />
-
-					<div className="relative p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 content-center justify-items-center min-h-full">
+					<div className="relative p-8 flex flex-col items-center justify-center flex-1 w-full">
 						{services.map((service) => (
-							<div
-								key={service.id}
-								className="group w-full max-w-sm bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 hover:shadow-lg transition-all duration-200 flex flex-col"
-							>
-								<div className="flex-1">
-									<div className="flex items-center justify-between">
-										<h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-											{service.name}
-										</h3>
-										<div className="h-2 w-2 rounded-full bg-green-500" />
-									</div>
-									<div className="mt-4 space-y-2">
-										<div className="flex items-center text-sm text-zinc-500 dark:text-zinc-400">
-											<span className="font-medium">Image:</span>
-											<span className="ml-2">
-												{service.configuration?.image}
-											</span>
-										</div>
-									</div>
-								</div>
-								<form
-									action={async () => {
-										"use server";
-										await deployService({
-											serviceId: service.id,
-										});
-									}}
-									className="mt-6"
-								>
-									<Button type="submit" className="w-full">
-										Deploy
-									</Button>
-								</form>
-							</div>
+							<ServiceItem key={service.id} item={service} />
 						))}
 					</div>
 				</div>

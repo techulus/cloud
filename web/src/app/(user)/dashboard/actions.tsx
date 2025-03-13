@@ -67,7 +67,7 @@ export async function deployService({
 			},
 		);
 
-		console.log(handle);
+		return handle;
 	} catch (error) {
 		console.error(error);
 	}
