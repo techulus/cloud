@@ -52,7 +52,7 @@ export default async function DashboardLayout({
 					<SidebarHeader>
 						<Dropdown>
 							<DropdownButton as={SidebarItem} className="lg:mb-2.5">
-								<Avatar src={activeOrganization?.logo} />
+								<Avatar src={activeOrganization.logo ?? "/logo.png"} />
 								<SidebarLabel>{activeOrganization?.name}</SidebarLabel>
 								<ChevronDownIcon />
 							</DropdownButton>

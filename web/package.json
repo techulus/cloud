@@ -11,21 +11,28 @@
   "dependencies": {
     "@headlessui/react": "^2.2.0",
     "@heroicons/react": "^2.2.0",
-    "@temporalio/client": "^1.11.7",
+    "@hookform/resolvers": "^4.1.3",
+    "@trigger.dev/react-hooks": "^3.3.17",
+    "@trigger.dev/sdk": "^3.3.17",
     "better-auth": "^1.2.3",
+    "classnames": "^2.5.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.40.0",
     "framer-motion": "^12.4.11",
+    "lucide-react": "^0.479.0",
     "next": "15.2.1",
     "pg": "^8.13.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sonner": "^2.0.1"
+    "react-hook-form": "^7.54.2",
+    "sonner": "^2.0.1",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "@tailwindcss/postcss": "^4",
+    "@trigger.dev/build": "^3.3.17",
     "@types/node": "^20",
     "@types/pg": "^8.11.11",
     "@types/react": "^19",
@@ -33,5 +40,6 @@
     "drizzle-kit": "^0.30.5",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0"
 }

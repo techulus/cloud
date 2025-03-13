@@ -9,13 +9,12 @@ export class FlyClient {
 	private defaultHeaders: Record<string, string>;
 	private apiToken: string;
 
-	constructor(apiToken: string) {
+	constructor() {
 		this.baseUrl = "https://api.machines.dev/v1";
-		this.apiToken = apiToken;
-
-		if (!this.apiToken) {
+		if (!process.env.FLY_API_TOKEN) {
 			throw new Error("FLY_API_TOKEN is not set");
 		}
+		this.apiToken = process.env.FLY_API_TOKEN;
 
 		this.defaultHeaders = {
 			Authorization: `Bearer ${this.apiToken}`,
@@ -41,13 +40,15 @@ export class FlyClient {
 			requestOptions.body = JSON.stringify(payload);
 		}
 
-		console.log("Requesting", `${this.baseUrl}${path}`, requestOptions);
-
 		const response = await fetch(`${this.baseUrl}${path}`, requestOptions);
 
 		if (!response.ok) {
-			console.error("Error", response.status, response.statusText);
-			return response.json();
+			const errorData = await response.json();
+			throw {
+				status: response.status,
+				statusText: response.statusText,
+				data: errorData,
+			};
 		}
 
 		return response.json();

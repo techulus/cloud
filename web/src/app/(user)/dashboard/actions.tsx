@@ -1,31 +1,14 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-// import { temporalClient } from "@/lib/temporal";
 import db from "@/db";
-import { project } from "@/db/schema";
+import { project, service } from "@/db/schema";
 import { getOwner } from "@/lib/user";
-
-const flyToken = process.env.FLY_API_TOKEN;
+import { tasks } from "@trigger.dev/sdk/v3";
+import type { deployServiceJob } from "@/trigger/deploy-service";
 
 export async function createProject({ name }: { name: string }) {
 	try {
-		// const client = await temporalClient();
-		// const handle = await client.start("createApp", {
-		// 	args: [
-		// 		flyToken,
-		// 		{
-		// 			app_name: `${randomUUID()}-${name}`,
-		// 		},
-		// 	],
-		// 	taskQueue: "service-deployment",
-		// 	workflowId: randomUUID(),
-		// });
-		// console.log(
-		// 	`Started Workflow ${handle.workflowId} with RunID ${handle.firstExecutionRunId}`,
-		// );
-		// const result = await handle.result();
-		// console.log(result);
 		const { orgId } = await getOwner();
 
 		await db.insert(project).values({
@@ -37,5 +20,55 @@ export async function createProject({ name }: { name: string }) {
 	} catch (error) {
 		console.error(error);
 		return { error: "Failed to create project" };
+	}
+}
+
+export async function createService({
+	name,
+	image,
+	tag,
+	projectId,
+	type,
+}: {
+	name: string;
+	image: string;
+	tag: string;
+	projectId: string;
+	type: string;
+}) {
+	try {
+		await db.insert(service).values({
+			id: randomUUID(),
+			name: name ?? "Untitled Service",
+			projectId,
+			configuration: JSON.stringify({
+				type,
+				image,
+				tag,
+			}),
+			createdAt: new Date(),
+		});
+	} catch (error) {
+		console.error(error);
+		return { error: "Failed to create project" };
+	}
+}
+
+export async function deployService({
+	serviceId,
+}: {
+	serviceId: string;
+}) {
+	try {
+		const handle = await tasks.trigger<typeof deployServiceJob>(
+			"deploy-service",
+			{
+				serviceId,
+			},
+		);
+
+		console.log(handle);
+	} catch (error) {
+		console.error(error);
 	}
 }
