@@ -87,6 +87,17 @@ export const invitation = pgTable("invitation", {
 		.references(() => user.id, { onDelete: "cascade" }),
 });
 
+export const server = pgTable("server", {
+	id: text("id").primaryKey(),
+	name: text("name").notNull(),
+	token: text("token").notNull(),
+	organizationId: text("organization_id")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	metadata: text("metadata"),
+	createdAt: timestamp("created_at").notNull(),
+});
+
 export const project = pgTable("project", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -109,6 +120,7 @@ export const service = pgTable("service", {
 		.references(() => project.id, { onDelete: "cascade" }),
 	createdAt: timestamp("created_at").notNull(),
 	configuration: text("configuration"),
+	status: text("status").default("unknown").notNull(),
 });
 
 export const serviceRelation = relations(service, ({ one }) => ({

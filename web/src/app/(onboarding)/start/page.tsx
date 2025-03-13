@@ -19,7 +19,7 @@ export default function Start() {
 	const router = useRouter();
 
 	return (
-		<div className="min-h-[80vh] flex items-center justify-center">
+		<div className="min-h-[70vh] flex items-center justify-center">
 			<div className="max-w-md w-full text-center">
 				<Heading className="text-3xl md:text-4xl mb-8 font-bold">
 					Get Started
