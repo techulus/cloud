@@ -40,7 +40,7 @@ export default async function ProjectServices({
 
 			{services?.length ? (
 				<div className="mt-8 relative min-h-[calc(90vh-12rem)] rounded-xl bg-zinc-50 dark:bg-zinc-800 flex flex-col">
-					<div className="absolute inset-0 rounded-xl [background-size:40px_40px] [background-image:radial-gradient(circle,rgb(0_0_0/0.1)_1px,transparent_1px)] dark:[background-image:radial-gradient(circle,rgb(255_255_255/0.1)_1px,transparent_1px)]" />
+					<div className="absolute inset-0 rounded-xl [background-size:40px_40px] [background-image:radial-gradient(circle,rgb(0_0_0/0.2)_1px,transparent_1px)] dark:[background-image:radial-gradient(circle,rgb(255_255_255/0.2)_1px,transparent_1px)]" />
 					<div className="relative p-8 flex flex-col items-center justify-center flex-1 w-full">
 						{services.map((service) => (
 							<ServiceItem key={service.id} item={service} />

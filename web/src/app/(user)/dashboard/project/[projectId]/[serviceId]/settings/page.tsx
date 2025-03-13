@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 
 export default async function ServiceDetails({
@@ -7,8 +8,15 @@ export default async function ServiceDetails({
 	console.log(projectId, serviceId);
 
 	return (
-		<>
-			<Heading>Settings</Heading>
-		</>
+		<div className="flex flex-col gap-4">
+			<div>
+				<Heading>Delete Service</Heading>
+				<p className="text-sm text-zinc-600 dark:text-zinc-400 py-4">
+					Are you sure you want to delete this service? This action cannot be
+					undone.
+				</p>
+				<Button color="red">Delete</Button>
+			</div>
+		</div>
 	);
 }

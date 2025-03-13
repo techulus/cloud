@@ -26,11 +26,6 @@ export function ServiceDetailTabs({
 			current: pathname.endsWith("variables"),
 		},
 		{
-			name: "Logs",
-			href: `/dashboard/project/${projectId}/${serviceId}/logs`,
-			current: pathname.endsWith("logs"),
-		},
-		{
 			name: "Settings",
 			href: `/dashboard/project/${projectId}/${serviceId}/settings`,
 			current: pathname.endsWith("settings"),
