@@ -1,17 +1,37 @@
-use axum::{response::Html, routing::get, Router};
+use tokio::{signal, time::{sleep, Duration}};
+use reqwest::Client;
+
+async fn perform_task(client: &Client) {
+    let url = "https://example.com/api";
+    match client.get(url).send().await {
+        Ok(response) => {
+            if let Ok(body) = response.text().await {
+                println!("Received response: {}", body);
+            }
+        }
+        Err(err) => eprintln!("Request failed: {}", err),
+    }
+}
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/", get(handler));
+    let client = Client::new();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
-        .await
-        .unwrap();
+    let task_loop = tokio::spawn(async move {
+        loop {
+            perform_task(&client).await;
+            sleep(Duration::from_secs(5)).await;
+        }
+    });
 
-    println!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
-}
+    let shutdown_signal = async {
+        signal::ctrl_c().await.expect("Failed to install Ctrl+C handler");
+    };
 
-async fn handler() -> Html<&'static str> {
-    Html("<h1>Hello, World!</h1>")
+    tokio::select! {
+        _ = shutdown_signal => {
+            println!("Shutting down agent...");
+        }
+        _ = task_loop => {}
+    }
 }
