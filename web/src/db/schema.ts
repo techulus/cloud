@@ -95,6 +95,8 @@ export const server = pgTable("server", {
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
 	metadata: text("metadata"),
+	status: text("status").default("unknown").notNull(),
+	configuration: text("configuration"),
 	createdAt: timestamp("created_at").notNull(),
 });
 

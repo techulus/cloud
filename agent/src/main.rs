@@ -1,9 +1,40 @@
-use tokio::{signal, time::{sleep, Duration}};
+use bollard::{
+    container::ListContainersOptions,
+    image::ListImagesOptions,
+    network::ListNetworksOptions,
+    secret::{ContainerSummary, ImageSummary, Network},
+    Docker, API_DEFAULT_VERSION,
+};
 use reqwest::Client;
+use serde_json::json;
+use tokio::{
+    signal,
+    time::{sleep, Duration},
+};
 
-async fn perform_task(client: &Client) {
-    let url = "https://example.com/api";
-    match client.get(url).send().await {
+async fn send_status_update(
+    containers: &Vec<ContainerSummary>,
+    images: &Vec<ImageSummary>,
+    networks: &Vec<Network>,
+) {
+    let client = Client::new();
+
+    let url = "http://localhost:3000/api/v1/agent/status";
+
+    let body = json!({
+        "containers": containers,
+        "images": images,
+        "networks": networks,
+    });
+
+    match client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("x-agent-token", "10dbcfc6-9e9b-478f-be81-bbd8b1df176e")
+        .body(body.to_string())
+        .send()
+        .await
+    {
         Ok(response) => {
             if let Ok(body) = response.text().await {
                 println!("Received response: {}", body);
@@ -14,18 +45,47 @@ async fn perform_task(client: &Client) {
 }
 
 #[tokio::main]
-async fn main() {
-    let client = Client::new();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let docker = Docker::connect_with_socket(
+        "/Users/arjunkomath/.docker/run/docker.sock",
+        120,
+        API_DEFAULT_VERSION,
+    )?;
 
     let task_loop = tokio::spawn(async move {
         loop {
-            perform_task(&client).await;
-            sleep(Duration::from_secs(5)).await;
+            let containers = &docker
+                .list_containers(Some(ListContainersOptions::<String> {
+                    all: true,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+
+            let images = &docker
+                .list_images(Some(ListImagesOptions::<String> {
+                    all: true,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+
+            let networks = &docker
+                .list_networks(Some(ListNetworksOptions::<String> {
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+
+            send_status_update(containers, images, networks).await;
+            sleep(Duration::from_secs(15)).await;
         }
     });
 
     let shutdown_signal = async {
-        signal::ctrl_c().await.expect("Failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
     };
 
     tokio::select! {
@@ -34,4 +94,6 @@ async fn main() {
         }
         _ = task_loop => {}
     }
+
+    Ok(())
 }
