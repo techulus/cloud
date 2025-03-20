@@ -37,9 +37,14 @@ export default async function Servers() {
 									</h3>
 								</div>
 								<div className="mt-4 space-y-2">
-									<div className="flex items-center text-sm text-zinc-500 dark:text-zinc-400">
+									<div className="flex items-center text-sm text-zinc-500 dark:text-zinc-400 font-mono">
 										<KeyIcon className="w-4 h-4" />
 										<span className="ml-2">{server.token}</span>
+									</div>
+
+									<div className="flex items-center text-sm text-zinc-500 dark:text-zinc-400 font-mono">
+										<KeyIcon className="w-4 h-4" />
+										<span className="ml-2">{server.secret}</span>
 									</div>
 								</div>
 							</div>

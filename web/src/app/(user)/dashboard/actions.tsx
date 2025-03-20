@@ -2,10 +2,12 @@
 
 import { randomUUID } from "node:crypto";
 import db from "@/db";
-import { project, server, service } from "@/db/schema";
+import { deployment, project, server, service } from "@/db/schema";
 import { getOwner } from "@/lib/user";
 import { tasks } from "@trigger.dev/sdk/v3";
 import type { deployServiceJob } from "@/trigger/deploy-service";
+import { eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 
 export async function createServer({ name }: { name: string }) {
 	try {
@@ -15,6 +17,7 @@ export async function createServer({ name }: { name: string }) {
 			id: randomUUID(),
 			name: name ?? "Untitled Server",
 			token: randomUUID(),
+			secret: randomUUID(),
 			organizationId: orgId,
 			createdAt: new Date(),
 		});
@@ -57,11 +60,11 @@ export async function createService({
 			id: randomUUID(),
 			name: name ?? "Untitled Service",
 			projectId,
-			configuration: JSON.stringify({
+			configuration: {
 				type,
 				image,
 				tag,
-			}),
+			},
 			createdAt: new Date(),
 		});
 	} catch (error) {
@@ -99,4 +102,25 @@ export async function createSecret({
 	value: string;
 }) {
 	console.log(serviceId, key, value);
+}
+
+export async function deployAllServices({
+	projectId,
+}: {
+	projectId: string;
+}) {
+	const services = await db.query.service.findMany({
+		where: eq(service.projectId, projectId),
+	});
+
+	for (const service of services) {
+		await db.insert(deployment).values({
+			id: randomUUID(),
+			serviceId: service.id,
+			status: "pending",
+			createdAt: new Date(),
+		});
+	}
+
+	revalidatePath(`/dashboard/project/${projectId}`);
 }
