@@ -97,7 +97,33 @@ export const server = pgTable("server", {
 		.references(() => organization.id, { onDelete: "cascade" }),
 	metadata: jsonb("metadata").default({}),
 	status: text("status").default("unknown").notNull(),
-	configuration: jsonb("configuration").default({}),
+	configuration: jsonb("configuration")
+		.$type<{
+			containers: {
+				Id: string;
+				Names: string[];
+				Image: string;
+				Status: string;
+				NetworkSettings: {
+					Networks: {
+						bridge: {
+							IPAddress: string;
+						};
+					};
+				};
+			}[];
+			images: {
+				Id: string;
+			}[];
+			networks: {
+				Id: string;
+			}[];
+		}>()
+		.default({
+			containers: [],
+			images: [],
+			networks: [],
+		}),
 	createdAt: timestamp("created_at").notNull(),
 });
 
