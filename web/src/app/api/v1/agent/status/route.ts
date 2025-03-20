@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
 		.update(server)
 		.set({
 			status: "active",
-			configuration: JSON.stringify({ containers, images, networks }),
+			configuration: { containers, images, networks },
 		})
 		.where(eq(server.id, serverDetails.id));
 
