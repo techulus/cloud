@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
 	id: text("id").primaryKey(),
@@ -91,12 +91,13 @@ export const server = pgTable("server", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	token: text("token").notNull(),
+	secret: text("secret").notNull(),
 	organizationId: text("organization_id")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
-	metadata: text("metadata"),
+	metadata: jsonb("metadata").default({}),
 	status: text("status").default("unknown").notNull(),
-	configuration: text("configuration"),
+	configuration: jsonb("configuration").default({}),
 	createdAt: timestamp("created_at").notNull(),
 });
 
@@ -106,7 +107,7 @@ export const project = pgTable("project", {
 	organizationId: text("organization_id")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
-	metadata: text("metadata"),
+	metadata: jsonb("metadata").default({}),
 	createdAt: timestamp("created_at").notNull(),
 });
 
@@ -121,13 +122,35 @@ export const service = pgTable("service", {
 		.notNull()
 		.references(() => project.id, { onDelete: "cascade" }),
 	createdAt: timestamp("created_at").notNull(),
-	configuration: text("configuration"),
+	configuration: jsonb("configuration").$type<{
+		image: string;
+		tag?: string;
+		type: string;
+	}>(),
 	status: text("status").default("unknown").notNull(),
 });
 
-export const serviceRelation = relations(service, ({ one }) => ({
+export const serviceRelation = relations(service, ({ one, many }) => ({
 	project: one(project, {
 		fields: [service.projectId],
 		references: [project.id],
+	}),
+	deployments: many(deployment),
+}));
+
+export const deployment = pgTable("deployment", {
+	id: text("id").primaryKey(),
+	serviceId: text("service_id")
+		.notNull()
+		.references(() => service.id, { onDelete: "cascade" }),
+	status: text("status").default("unknown").notNull(),
+	logs: jsonb("logs"),
+	createdAt: timestamp("created_at").notNull(),
+});
+
+export const deploymentRelation = relations(deployment, ({ one }) => ({
+	service: one(service, {
+		fields: [deployment.serviceId],
+		references: [service.id],
 	}),
 }));

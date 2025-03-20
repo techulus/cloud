@@ -7,6 +7,8 @@ import { PlusIcon } from "@heroicons/react/16/solid";
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ServiceItem } from "@/components/services/service-item";
+import { ArrowUpRightIcon } from "lucide-react";
+import { deployAllServices } from "../../actions";
 
 export default async function ProjectServices({
 	params,
@@ -23,7 +25,14 @@ export default async function ProjectServices({
 
 	const services = await db.query.service.findMany({
 		where: eq(service.projectId, projectDetails.id),
+		with: {
+			deployments: true,
+		},
 	});
+
+	const havePendingDeployments = services.some(
+		(service) => service.deployments.length === 0,
+	);
 
 	return (
 		<>
@@ -46,6 +55,23 @@ export default async function ProjectServices({
 							<ServiceItem key={service.id} item={service} />
 						))}
 					</div>
+
+					{havePendingDeployments ? (
+						<form
+							action={async () => {
+								"use server";
+								await deployAllServices({ projectId });
+							}}
+						>
+							<Button
+								type="submit"
+								className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 max-w-[180px]"
+							>
+								<ArrowUpRightIcon />
+								Deploy All
+							</Button>
+						</form>
+					) : null}
 				</div>
 			) : (
 				<div className="mt-8 rounded-xl border border-zinc-200 dark:border-zinc-700 p-8 text-center bg-white dark:bg-zinc-800">
