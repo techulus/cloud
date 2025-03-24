@@ -45,6 +45,31 @@ type StatusUpdate struct {
 	Networks   []network.Inspect   `json:"networks"`
 }
 
+func makeRequest(method string, url string, body []byte) ([]byte, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	signature := ComputeSignature(
+		[]byte(agentSecret),
+		body,
+	)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-agent-token", agentToken)
+	req.Header.Set("x-message-signature", signature)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
 // SendStatusUpdate sends a status update to the server
 func SendStatusUpdate() error {
 	ctx := context.Background()
@@ -73,47 +98,25 @@ func SendStatusUpdate() error {
 		return err
 	}
 
-	client := &http.Client{}
-	url := fmt.Sprintf("%s/agent/status", serverBaseURL)
-
 	statusUpdate := StatusUpdate{
 		Containers: containers,
 		Images:     images,
 		Networks:   networks,
 	}
 
-	body, err := json.Marshal(statusUpdate)
+	url := fmt.Sprintf("%s/agent/status", serverBaseURL)
+	statusUpdateBytes, err := json.Marshal(statusUpdate)
 	if err != nil {
 		return fmt.Errorf("failed to marshal status update: %v", err)
 	}
 
-	signature := ComputeSignature(
-		[]byte(agentSecret),
-		body,
-	)
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	response, err := makeRequest("POST", url, statusUpdateBytes)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-agent-token", agentToken)
-	req.Header.Set("x-message-signature", signature)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err)
+		return fmt.Errorf("failed to make request: %v", err)
 	}
 
 	var serverResp ServerResponse
-	if err := json.Unmarshal(respBody, &serverResp); err != nil {
+	if err := json.Unmarshal(response, &serverResp); err != nil {
 		return fmt.Errorf("failed to parse response as JSON: %v", err)
 	}
 
@@ -139,9 +142,6 @@ type DeploymentLogsUpdate struct {
 
 // SendDeploymentLogs sends a deployment logs update
 func SendDeploymentLogs(deploymentID string, logs []string) error {
-	client := &http.Client{}
-	url := fmt.Sprintf("%s/agent/deployment/logs", serverBaseURL)
-
 	logsUpdate := DeploymentLogsUpdate{
 		DeploymentID: deploymentID,
 		Logs:         logs,
@@ -152,32 +152,13 @@ func SendDeploymentLogs(deploymentID string, logs []string) error {
 		return fmt.Errorf("failed to marshal logs update: %v", err)
 	}
 
-	signature := ComputeSignature(
-		[]byte(agentSecret),
-		body,
-	)
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	url := fmt.Sprintf("%s/agent/deployment/logs", serverBaseURL)
+	response, err := makeRequest("POST", url, body)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
+		return fmt.Errorf("failed to make request: %v", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-agent-token", agentToken)
-	req.Header.Set("x-message-signature", signature)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	fmt.Printf("Response from server: %s\n", string(respBody))
+	fmt.Printf("Response from server: %s\n", string(response))
 
 	return nil
 }

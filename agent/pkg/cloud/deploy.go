@@ -66,7 +66,7 @@ func ExecuteAction(action *ServiceAction) error {
 			environment = append(environment, fmt.Sprintf("%s=%s", secret.Name, secret.Value))
 		}
 
-		resp, err := cli.ContainerCreate(ctx, &container.Config{
+		serviceContainer, err := cli.ContainerCreate(ctx, &container.Config{
 			Image: action.Image,
 			Labels: map[string]string{
 				"techulus.cloud.service": action.ServiceID,
@@ -74,6 +74,7 @@ func ExecuteAction(action *ServiceAction) error {
 			},
 			Env: environment,
 		}, nil, nil, nil, action.ServiceID)
+
 		if err != nil {
 			if strings.Contains(err.Error(), fmt.Sprintf("The container name \"/%s\" is already in use by container", action.ServiceID)) {
 				fmt.Printf("Container is already created\n")
@@ -82,13 +83,13 @@ func ExecuteAction(action *ServiceAction) error {
 			}
 		}
 
-		fmt.Printf("Container created: %s\n", resp.ID)
+		fmt.Printf("Container created: %s\n", serviceContainer.ID)
 
-		if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		if err := cli.ContainerStart(ctx, serviceContainer.ID, container.StartOptions{}); err != nil {
 			return fmt.Errorf("failed to start container: %v", err)
 		}
 
-		fmt.Printf("Container started: %s\n", resp.ID)
+		fmt.Printf("Container started: %s\n", serviceContainer.ID)
 
 	case "update":
 		fmt.Printf("Updating service: %s:%s\n", action.Image, action.Tag)
