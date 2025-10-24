@@ -4,123 +4,106 @@ import { randomUUID } from "node:crypto";
 import db from "@/db";
 import { deployment, project, server, service } from "@/db/schema";
 import { getOwner } from "@/lib/user";
-import { tasks } from "@trigger.dev/sdk/v3";
-import type { deployServiceJob } from "@/trigger/deploy-service";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 export async function createServer({ name }: { name: string }) {
-	try {
-		const { orgId } = await getOwner();
+  try {
+    const { orgId } = await getOwner();
 
-		await db.insert(server).values({
-			id: randomUUID(),
-			name: name ?? "Untitled Server",
-			token: randomUUID(),
-			secret: randomUUID(),
-			organizationId: orgId,
-			createdAt: new Date(),
-		});
-	} catch (error) {
-		console.error(error);
-	}
+    await db.insert(server).values({
+      id: randomUUID(),
+      name: name ?? "Untitled Server",
+      token: randomUUID(),
+      secret: randomUUID(),
+      organizationId: orgId,
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 export async function createProject({ name }: { name: string }) {
-	try {
-		const { orgId } = await getOwner();
+  try {
+    const { orgId } = await getOwner();
 
-		await db.insert(project).values({
-			id: randomUUID(),
-			name: name ?? "Untitled Project",
-			organizationId: orgId,
-			createdAt: new Date(),
-		});
-	} catch (error) {
-		console.error(error);
-		return { error: "Failed to create project" };
-	}
+    await db.insert(project).values({
+      id: randomUUID(),
+      name: name ?? "Untitled Project",
+      organizationId: orgId,
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.error(error);
+    return { error: "Failed to create project" };
+  }
 }
 
 export async function createService({
-	name,
-	image,
-	tag,
-	projectId,
-	type,
+  name,
+  image,
+  tag,
+  projectId,
+  type,
 }: {
-	name: string;
-	image: string;
-	tag: string;
-	projectId: string;
-	type: string;
+  name: string;
+  image: string;
+  tag: string;
+  projectId: string;
+  type: string;
 }) {
-	try {
-		await db.insert(service).values({
-			id: randomUUID(),
-			name: name ?? "Untitled Service",
-			projectId,
-			configuration: {
-				type,
-				image,
-				tag,
-			},
-			createdAt: new Date(),
-		});
-	} catch (error) {
-		console.error(error);
-		return { error: "Failed to create project" };
-	}
+  try {
+    await db.insert(service).values({
+      id: randomUUID(),
+      name: name ?? "Untitled Service",
+      projectId,
+      configuration: {
+        type,
+        image,
+        tag,
+      },
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.error(error);
+    return { error: "Failed to create project" };
+  }
 }
 
-export async function deployService({
-	serviceId,
-}: {
-	serviceId: string;
-}) {
-	try {
-		const handle = await tasks.trigger<typeof deployServiceJob>(
-			"deploy-service",
-			{
-				serviceId,
-			},
-		);
-
-		return handle;
-	} catch (error) {
-		console.error(error);
-	}
+export async function deployService({ serviceId }: { serviceId: string }) {
+  try {
+    return serviceId;
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 export async function createSecret({
-	serviceId,
-	key,
-	value,
+  serviceId,
+  key,
+  value,
 }: {
-	serviceId: string;
-	key: string;
-	value: string;
+  serviceId: string;
+  key: string;
+  value: string;
 }) {
-	console.log(serviceId, key, value);
+  console.log(serviceId, key, value);
 }
 
-export async function deployAllServices({
-	projectId,
-}: {
-	projectId: string;
-}) {
-	const services = await db.query.service.findMany({
-		where: eq(service.projectId, projectId),
-	});
+export async function deployAllServices({ projectId }: { projectId: string }) {
+  const services = await db.query.service.findMany({
+    where: eq(service.projectId, projectId),
+  });
 
-	for (const service of services) {
-		await db.insert(deployment).values({
-			id: randomUUID(),
-			serviceId: service.id,
-			status: "pending",
-			createdAt: new Date(),
-		});
-	}
+  for (const service of services) {
+    await db.insert(deployment).values({
+      id: randomUUID(),
+      serviceId: service.id,
+      status: "pending",
+      createdAt: new Date(),
+    });
+  }
 
-	revalidatePath(`/dashboard/project/${projectId}`);
+  revalidatePath(`/dashboard/project/${projectId}`);
 }
