@@ -13,8 +13,8 @@ A stateless container deployment platform with three core principles:
 |-----------|--------|-----------|
 | Control Plane | Next.js (full-stack) | Single deployment, React frontend + API routes |
 | Database | SQLite + Drizzle | Simple, no external deps, single file, easy backup |
-| Server Agent | Go | Single binary, excellent containerd libraries |
-| Container Runtime | containerd | Lightweight, battle-tested, used by K8s |
+| Server Agent | Go | Single binary, shells out to Podman |
+| Container Runtime | Podman | Docker-compatible, daemonless, easy IP-bound port mapping |
 | Reverse Proxy | Caddy | Automatic HTTPS, simple config |
 | Private Network | WireGuard (self-managed) | Control plane coordinates, agents manage local config |
 | Agent Communication | Polling | Simpler, works through NAT/firewalls |
@@ -54,7 +54,7 @@ A stateless container deployment platform with three core principles:
 │  │  │ │  Agent  │ │  │ │  Agent  │ │  │ │  Agent  │ │ │       │
 │  │  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │ │       │
 │  │  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │ │       │
-│  │  │ │containerd│ │  │ │containerd│ │  │ │containerd│ │ │       │
+│  │  │ │ Podman  │ │  │ │ Podman  │ │  │ │ Podman  │ │ │       │
 │  │  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │ │       │
 │  │  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │ │       │
 │  │  │ │WireGuard│ │  │ │WireGuard│ │  │ │WireGuard│ │ │       │
@@ -79,23 +79,39 @@ A stateless container deployment platform with three core principles:
 **Server Health Detection:**
 - Agent polling IS the heartbeat - each poll updates `lastHeartbeat`
 - Server is "online" if `lastHeartbeat > (now - threshold)`
+- Server is "offline" if `lastHeartbeat < (now - threshold)`
 - No scheduled jobs - control plane stays simple
+
+**Offline Server Recovery:**
+- When a server goes offline, control plane detects stale heartbeat
+- All deployments on that server are marked as "failed"
+- Workloads are rescheduled to healthy servers
+- Failed server can be brought back online by restarting the agent
+
+**Work Queue Timeout:**
+- Jobs in `processing` state have a 5-minute timeout
+- When an agent polls, control plane checks for stuck jobs where `now - startedAt > 5 minutes`
+- Stuck jobs are reset to `pending` with `attempts` incremented
+- After 3 failed attempts, job is marked as `failed` permanently
+- This handles agent crashes without requiring scheduled cleanup jobs
 
 ### 2. Server Agent (Go)
 
 **Responsibilities:**
 - Polls control plane for work (deployments, config changes)
-- Manages local containerd (pull images, start/stop containers)
+- Manages containers via Podman (pull images, start/stop containers)
 - Manages local WireGuard interface
 - Reports container status, resource usage, logs
-- Exposes container ports on WireGuard IP
+- Binds container ports to WireGuard IP only (not exposed on public interface)
 
 **Agent Lifecycle:**
-1. Install agent binary + systemd service
-2. Agent generates WireGuard keypair
-3. Agent registers with control plane (sends public key, gets WireGuard IP)
-4. Agent joins WireGuard mesh
-5. Agent polls for work
+1. User creates server in control plane, receives agent token
+2. User manually installs agent binary + systemd service on target machine with token
+3. Agent generates WireGuard keypair locally
+4. Agent registers with control plane (sends public key, token validates registration)
+5. Control plane assigns WireGuard IP and peer configurations
+6. Agent configures local WireGuard interface
+7. Agent begins polling for work
 
 ### 3. WireGuard Mesh (Self-Managed)
 
@@ -103,6 +119,12 @@ A stateless container deployment platform with three core principles:
 - Each server gets a unique WireGuard IP (e.g., 10.100.x.x)
 - Control plane is the source of truth for peer configs
 - Full mesh topology: every server can reach every other server
+- Services communicate directly via WireGuard IPs regardless of which server they run on
+
+**Scalability:**
+- Full mesh works well for <10 servers
+- At higher scale (20+ servers), consider hub-and-spoke: proxy becomes hub, all inter-service traffic routes through proxy's WireGuard interface
+- Future enhancement: partial mesh with backbone topology
 
 **Peer Updates (via work queue):**
 - New server joins → control plane queues `update_wireguard` for all existing servers
@@ -123,6 +145,11 @@ A stateless container deployment platform with three core principles:
 - Isolation: proxy failure doesn't kill workloads, workload failure doesn't kill ingress
 - Lightweight: can be a small/cheap server
 - Security: only server with public ports open
+
+**High Availability (v1 Limitation):**
+- Proxy server is a single point of failure for external traffic
+- v1 design accepts this limitation for simplicity
+- v2+ should implement proxy HA with load balancing across multiple proxy instances
 
 **Responsibilities:**
 - Terminates SSL for all exposed services
@@ -153,11 +180,14 @@ servers
   publicIp
   wireguardIp
   wireguardPublicKey
-  status: pending | online | offline
+  status: pending | online | offline | unknown
   lastHeartbeat
   resourcesCpu
   resourcesMemory
   resourcesDisk
+  agentToken (nullable)
+  tokenCreatedAt (nullable)
+  tokenUsedAt (nullable)
 
 projects
   id
@@ -195,6 +225,8 @@ workQueue
   payload (JSON)
   status: pending | processing | completed | failed
   createdAt
+  startedAt (nullable)
+  attempts (default: 0)
 
 proxyRoutes
   id
@@ -275,16 +307,34 @@ Internet                 Master Proxy              Backend Servers
 
 ## Security Model
 
-1. **Agent Authentication**: Each agent gets a unique token on registration
+1. **Agent Authentication**: WireGuard key signature (see below)
 2. **WireGuard**: All inter-server traffic encrypted
 3. **No Public Ports**: Containers only bind to WireGuard interface
 4. **Secrets**: Env vars encrypted at rest in Convex, decrypted by agent
+
+**Registration Token:**
+- One-time-use token for initial server registration only
+- Expires 24 hours after creation
+- Invalidated immediately after successful registration
+
+**Agent Authentication (Ongoing):**
+- Agent signs poll requests with its WireGuard private key
+- Control plane verifies signature using stored public key
+- No additional secrets to manage - uses existing keypair
+
+**Agent Identity Binding:**
+- WireGuard public key is locked to server record after registration
+- If public key changes on heartbeat:
+  - Server status → `unknown`
+  - Workloads on that server paused
+  - Requires manual approval to accept new key
+- Detects server replacement, agent reinstalls, or compromise
 
 ## Design Decisions
 
 | Decision | Choice |
 |----------|--------|
-| Placement Strategy | Resource-based by default, with manual server override |
+| Placement Strategy | Manual server selection, or capacity-based bidding (servers report available resources, control plane selects best fit) |
 | Health Checks | Agent-reported only (agent monitors containers, reports to control plane) |
 | Logs | Real-time streaming only (no persistence) |
 | Auth | Better Auth (self-hosted, handles users/sessions) |
@@ -298,19 +348,25 @@ Internet                 Master Proxy              Backend Servers
 │                     CONTROL PLANE                           │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │ Platform Master Key (env var or secure storage)     │   │
+│  │ Platform Master Key (passed to agent during install) │   │
 │  │                                                     │   │
 │  │ Secrets stored encrypted per service:               │   │
 │  │   service-abc: { DB_URL: enc(...), API_KEY: enc(...) } │
 │  │   service-xyz: { TOKEN: enc(...) }                  │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    Agent receives encrypted secrets,
-                    decrypts using master key,
-                    passes to container as env vars
+                               │
+                               ▼
+         Agent receives encrypted secrets via work queue,
+         decrypts locally using master key (from install),
+         passes decrypted values to container as env vars
 ```
+
+**Master Key Management:**
+- Master key provided to agent during installation (via agent binary or config file)
+- Key is stored locally on agent server (protected by OS file permissions)
+- Agent uses key to decrypt secrets at runtime
+- Master key never transmitted over the network after initial setup
 
 ## Project Structure
 
@@ -331,9 +387,9 @@ techulus-cloud/
 │   │       └── main.go
 │   ├── internal/
 │   │   ├── api/               # Control plane client
-│   │   ├── containerd/        # Container management
+│   │   ├── podman/            # Container management via Podman CLI
 │   │   ├── wireguard/         # WG interface management
-│   │   └── worker/            # Work execution
+│   │   └── crypto/            # Ed25519 key management
 │   └── go.mod
 │
 └── docs/
