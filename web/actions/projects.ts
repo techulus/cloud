@@ -47,12 +47,39 @@ export async function createProject(name: string) {
 }
 
 export async function listProjects() {
-	return db.select().from(projects).orderBy(projects.createdAt);
+	const projectList = await db.select().from(projects).orderBy(projects.createdAt);
+
+	const projectsWithCounts = await Promise.all(
+		projectList.map(async (project) => {
+			const serviceCount = await db
+				.select({ count: services.id })
+				.from(services)
+				.where(eq(services.projectId, project.id));
+			return {
+				...project,
+				serviceCount: serviceCount.length,
+			};
+		})
+	);
+
+	return projectsWithCounts;
 }
 
 export async function getProject(id: string) {
 	const results = await db.select().from(projects).where(eq(projects.id, id));
 	return results[0] || null;
+}
+
+export async function getProjectBySlug(slug: string) {
+	const results = await db.select().from(projects).where(eq(projects.slug, slug));
+	return results[0] || null;
+}
+
+async function revalidateProject(projectId: string) {
+	const project = await getProject(projectId);
+	if (project) {
+		revalidatePath(`/dashboard/projects/${project.slug}`);
+	}
 }
 
 export async function deleteProject(id: string) {
@@ -84,7 +111,7 @@ export async function createService(
 		});
 	}
 
-	revalidatePath(`/dashboard/projects/${projectId}`);
+	await revalidateProject(projectId);
 	return { id, name, image, ports };
 }
 
@@ -143,7 +170,7 @@ export async function deleteService(serviceId: string) {
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
-	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	await revalidateProject(service.projectId);
 	return { success: true };
 }
 
@@ -238,7 +265,7 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 		await deployService(serviceId, placements);
 	}
 
-	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	await revalidateProject(service.projectId);
 	return { success: true, redeployed: runningDeployments.length > 0 };
 }
 
@@ -420,7 +447,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		}
 	}
 
-	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	await revalidateProject(service.projectId);
 	return { deploymentIds, replicaCount: totalReplicas };
 }
 
@@ -452,7 +479,7 @@ export async function deleteDeployment(deploymentId: string) {
 
 	const service = await getService(dep.serviceId);
 	if (service) {
-		revalidatePath(`/dashboard/projects/${service.projectId}`);
+		await revalidateProject(service.projectId);
 	}
 
 	return { success: true };
@@ -491,7 +518,7 @@ export async function stopDeployment(deploymentId: string) {
 
 	const service = await getService(dep.serviceId);
 	if (service) {
-		revalidatePath(`/dashboard/projects/${service.projectId}`);
+		await revalidateProject(service.projectId);
 	}
 
 	return { success: true };

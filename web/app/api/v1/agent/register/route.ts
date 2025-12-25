@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
-import { eq, and, isNull, gt, ne } from "drizzle-orm";
-import { assignWireGuardIp, getWireGuardPeers } from "@/lib/wireguard";
+import { eq, and, isNull, gt } from "drizzle-orm";
+import { assignWireGuardIp, getWireGuardPeers, isProxyServer } from "@/lib/wireguard";
+import { PROXY_WIREGUARD_IP } from "@/lib/constants";
 import { randomUUID } from "crypto";
 
 const TOKEN_EXPIRY_HOURS = 24;
@@ -59,26 +60,32 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(servers.id, server.id));
 
-    const peers = await getWireGuardPeers(server.id);
+    const peers = await getWireGuardPeers(server.id, wireguardIp);
 
-    const otherServers = await db
-      .select({ id: servers.id })
-      .from(servers)
-      .where(
-        and(
-          ne(servers.id, server.id),
-          eq(servers.status, "online")
+    if (!isProxyServer(wireguardIp)) {
+      const proxyServer = await db
+        .select({ id: servers.id, wireguardIp: servers.wireguardIp })
+        .from(servers)
+        .where(
+          and(
+            eq(servers.status, "online"),
+            eq(servers.wireguardIp, PROXY_WIREGUARD_IP)
+          )
         )
-      );
+        .then((r) => r[0]);
 
-    for (const otherServer of otherServers) {
-      const otherPeers = await getWireGuardPeers(otherServer.id);
-      await db.insert(workQueue).values({
-        id: randomUUID(),
-        serverId: otherServer.id,
-        type: "update_wireguard",
-        payload: JSON.stringify({ peers: otherPeers }),
-      });
+      if (proxyServer) {
+        const proxyPeers = await getWireGuardPeers(
+          proxyServer.id,
+          proxyServer.wireguardIp!
+        );
+        await db.insert(workQueue).values({
+          id: randomUUID(),
+          serverId: proxyServer.id,
+          type: "update_wireguard",
+          payload: JSON.stringify({ peers: proxyPeers }),
+        });
+      }
     }
 
     return NextResponse.json({

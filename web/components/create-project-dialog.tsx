@@ -29,7 +29,7 @@ export function CreateProjectDialog() {
 			const project = await createProject(name.trim());
 			setIsOpen(false);
 			setName("");
-			router.push(`/dashboard/projects/${project.id}`);
+			router.push(`/dashboard/projects/${project.slug}`);
 		} catch (error) {
 			console.error("Failed to create project:", error);
 		} finally {

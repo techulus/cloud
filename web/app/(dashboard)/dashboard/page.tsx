@@ -39,11 +39,20 @@ export default async function DashboardPage() {
 				) : (
 					<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 						{projects.map((project) => (
-							<Link key={project.id} href={`/dashboard/projects/${project.id}`}>
+							<Link
+								key={project.id}
+								href={`/dashboard/projects/${project.slug}`}
+							>
 								<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-									<CardHeader>
+									<CardHeader className="min-h-24">
 										<CardTitle>{project.name}</CardTitle>
-										<CardDescription>{project.slug}</CardDescription>
+										<CardDescription>
+											{project.serviceCount === 0
+												? "No services"
+												: project.serviceCount === 1
+													? "1 service"
+													: `${project.serviceCount} services`}
+										</CardDescription>
 									</CardHeader>
 								</Card>
 							</Link>

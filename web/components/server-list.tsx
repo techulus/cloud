@@ -11,9 +11,9 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ActionButton } from "@/components/action-button";
 import { CreateServerDialog } from "@/components/create-server-dialog";
-import { syncWireGuard } from "@/actions/servers";
+import { PageHeader } from "@/components/page-header";
+import { Settings } from "lucide-react";
 
 type Server = {
 	id: string;
@@ -48,18 +48,21 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<div>
-					<h2 className="text-2xl font-bold">Servers</h2>
-					<p className="text-muted-foreground">Manage your server fleet</p>
-				</div>
-				<div className="flex gap-2">
-					<Link href="/dashboard/proxy">
-						<Button variant="outline">Proxy</Button>
-					</Link>
-					<CreateServerDialog />
-				</div>
-			</div>
+			<PageHeader
+				title="Servers"
+				description="Manage your server fleet"
+				actions={
+					<div className="flex gap-2">
+						<Link href="/dashboard/proxy">
+							<Button variant="outline">
+								<Settings className="h-4 w-4 mr-1" />
+								Proxy
+							</Button>
+						</Link>
+						<CreateServerDialog />
+					</div>
+				}
+			/>
 
 			{!servers || servers.length === 0 ? (
 				<Card>
@@ -71,32 +74,33 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 					</CardContent>
 				</Card>
 			) : (
-				<div className="grid gap-4">
+				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 					{servers.map((server) => (
 						<Link key={server.id} href={`/dashboard/servers/${server.id}`}>
-							<Card className="hover:border-primary/50 transition-colors cursor-pointer">
-								<CardHeader>
+							<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
+								<CardHeader className="min-h-24">
 									<div className="flex items-center justify-between">
-										<CardTitle className="text-base">{server.name}</CardTitle>
+										<CardTitle>{server.name}</CardTitle>
 										<StatusBadge status={server.status} />
 									</div>
-									<CardDescription>
-										{server.wireguardIp || "Not registered"}{" "}
-										{server.publicIp && `• ${server.publicIp}`}
-									</CardDescription>
+									<div className="text-sm text-muted-foreground space-y-1 pt-1">
+									<div>
+										<span className="font-medium">WireGuard:</span>{" "}
+										{server.wireguardIp || "Not registered"}
+									</div>
+									{server.publicIp && (
+										<div>
+											<span className="font-medium">Public:</span>{" "}
+											{server.publicIp}
+										</div>
+									)}
+								</div>
 								</CardHeader>
 							</Card>
 						</Link>
 					))}
 				</div>
 			)}
-
-			<ActionButton
-				action={syncWireGuard}
-				label="Sync WireGuard"
-				loadingLabel="Syncing..."
-				variant="outline"
-			/>
 		</div>
 	);
 }

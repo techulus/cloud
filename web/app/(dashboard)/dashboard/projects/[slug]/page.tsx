@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProject, listServices, listDeployments, getServicePorts, getDeploymentPorts } from "@/actions/projects";
+import { getProjectBySlug, listServices, listDeployments, getServicePorts, getDeploymentPorts } from "@/actions/projects";
 import { ServiceList } from "@/components/service-list";
 import { PageHeader } from "@/components/page-header";
 import { CreateServiceDialog } from "@/components/create-service-dialog";
@@ -10,16 +10,16 @@ import { eq } from "drizzle-orm";
 export default async function ProjectPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }) {
-  const { id } = await params;
-  const project = await getProject(id);
+  const { slug } = await params;
+  const project = await getProjectBySlug(slug);
 
   if (!project) {
     notFound();
   }
 
-  const servicesList = await listServices(id);
+  const servicesList = await listServices(project.id);
 
   const initialServices = await Promise.all(
     servicesList.map(async (service) => {
@@ -60,10 +60,10 @@ export default async function ProjectPage({
       <PageHeader
         title={project.name}
         backHref="/dashboard"
-        actions={<CreateServiceDialog projectId={id} />}
+        actions={<CreateServiceDialog projectId={project.id} />}
       />
 
-      <ServiceList projectId={id} initialServices={initialServices} />
+      <ServiceList projectId={project.id} initialServices={initialServices} />
     </div>
   );
 }
