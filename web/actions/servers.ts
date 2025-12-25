@@ -2,12 +2,10 @@
 
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { eq, and, lt, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { broadcastWireGuardUpdate } from "@/lib/wireguard";
 import { revalidatePath } from "next/cache";
-
-const OFFLINE_THRESHOLD_MS = 60 * 1000;
 
 function generateId(): string {
   return randomBytes(12).toString("hex");
@@ -61,20 +59,4 @@ export async function syncWireGuard() {
   const count = await broadcastWireGuardUpdate();
   revalidatePath("/dashboard");
   return count;
-}
-
-export async function refreshServerStatuses() {
-  const threshold = new Date(Date.now() - OFFLINE_THRESHOLD_MS);
-
-  await db
-    .update(servers)
-    .set({ status: "offline" })
-    .where(
-      and(
-        eq(servers.status, "online"),
-        lt(servers.lastHeartbeat, threshold)
-      )
-    );
-
-  revalidatePath("/dashboard");
 }

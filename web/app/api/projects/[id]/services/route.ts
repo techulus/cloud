@@ -1,0 +1,89 @@
+export const dynamic = "force-dynamic";
+
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { db } from "@/db";
+import {
+  services,
+  servicePorts,
+  deployments,
+  deploymentPorts,
+  servers,
+} from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id: projectId } = await params;
+
+  const servicesList = await db
+    .select()
+    .from(services)
+    .where(eq(services.projectId, projectId))
+    .orderBy(services.createdAt);
+
+  const result = await Promise.all(
+    servicesList.map(async (service) => {
+      const [ports, serviceDeployments] = await Promise.all([
+        db
+          .select()
+          .from(servicePorts)
+          .where(eq(servicePorts.serviceId, service.id))
+          .orderBy(servicePorts.port),
+        db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.serviceId, service.id))
+          .orderBy(deployments.createdAt),
+      ]);
+
+      const deploymentsWithDetails = await Promise.all(
+        serviceDeployments.map(async (deployment) => {
+          const [depPorts, server] = await Promise.all([
+            db
+              .select({
+                id: deploymentPorts.id,
+                hostPort: deploymentPorts.hostPort,
+                containerPort: servicePorts.port,
+              })
+              .from(deploymentPorts)
+              .innerJoin(
+                servicePorts,
+                eq(deploymentPorts.servicePortId, servicePorts.id)
+              )
+              .where(eq(deploymentPorts.deploymentId, deployment.id)),
+            db
+              .select({ wireguardIp: servers.wireguardIp })
+              .from(servers)
+              .where(eq(servers.id, deployment.serverId))
+              .then((r) => r[0]),
+          ]);
+
+          return {
+            ...deployment,
+            ports: depPorts,
+            server,
+          };
+        })
+      );
+
+      return {
+        ...service,
+        ports,
+        deployments: deploymentsWithDetails,
+      };
+    })
+  );
+
+  return Response.json(result);
+}

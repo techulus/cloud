@@ -184,7 +184,7 @@ export const deployments = sqliteTable("deployments", {
     .references(() => servers.id),
   containerId: text("container_id"),
   status: text("status", {
-    enum: ["pending", "pulling", "running", "stopped", "failed"],
+    enum: ["pending", "pulling", "running", "stopping", "stopped", "failed"],
   })
     .notNull()
     .default("pending"),
@@ -224,16 +224,4 @@ export const workQueue = sqliteTable("work_queue", {
     .notNull(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   attempts: integer("attempts").notNull().default(0),
-});
-
-export const proxyRoutes = sqliteTable("proxy_routes", {
-  id: text("id").primaryKey(),
-  serviceId: text("service_id")
-    .notNull()
-    .references(() => services.id),
-  domain: text("domain").notNull(),
-  sslEnabled: integer("ssl_enabled", { mode: "boolean" }).notNull().default(true),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
 });

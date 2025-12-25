@@ -8,6 +8,7 @@ import {
 	deploymentPorts,
 	deployments,
 	projects,
+	secrets,
 	servers,
 	servicePorts,
 	services,
@@ -104,6 +105,36 @@ export async function listServices(projectId: string) {
 export async function getService(id: string) {
 	const results = await db.select().from(services).where(eq(services.id, id));
 	return results[0] || null;
+}
+
+export async function deleteService(serviceId: string) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	const activeDeployments = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.serviceId, serviceId));
+
+	const hasActiveDeployments = activeDeployments.some(
+		(d) => d.status === "running" || d.status === "stopping" || d.status === "pulling"
+	);
+
+	if (hasActiveDeployments) {
+		throw new Error("Stop all deployments before deleting the service");
+	}
+
+	for (const deployment of activeDeployments) {
+		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, deployment.id));
+	}
+	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
+	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
+	await db.delete(services).where(eq(services.id, serviceId));
+
+	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	return { success: true };
 }
 
 export async function getServicePorts(serviceId: string) {
@@ -281,6 +312,11 @@ export async function stopDeployment(deploymentId: string) {
 	if (!dep.containerId) {
 		throw new Error("No container to stop");
 	}
+
+	await db
+		.update(deployments)
+		.set({ status: "stopping" })
+		.where(eq(deployments.id, deploymentId));
 
 	await db.insert(workQueue).values({
 		id: randomUUID(),
