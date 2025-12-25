@@ -140,76 +140,86 @@ export async function getServicePorts(serviceId: string) {
 		.orderBy(servicePorts.port);
 }
 
-export async function addServicePort(
-	serviceId: string,
-	port: number,
-	isPublic: boolean,
-	subdomain?: string,
-) {
+type PortChange = {
+	action: "add" | "remove";
+	portId?: string;
+	port?: number;
+	isPublic?: boolean;
+	subdomain?: string;
+};
+
+export async function updateServicePorts(serviceId: string, changes: PortChange[]) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
 	}
 
-	const existing = await db
+	for (const change of changes) {
+		if (change.action === "remove" && change.portId) {
+			await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, change.portId));
+			await db.delete(servicePorts).where(eq(servicePorts.id, change.portId));
+		} else if (change.action === "add" && change.port) {
+			const existing = await db
+				.select()
+				.from(servicePorts)
+				.where(eq(servicePorts.serviceId, serviceId));
+
+			if (existing.some((p) => p.port === change.port)) {
+				throw new Error(`Port ${change.port} already exists`);
+			}
+
+			if (change.isPublic) {
+				if (!change.subdomain) {
+					throw new Error("Subdomain is required for public ports");
+				}
+
+				const slug = slugify(change.subdomain);
+				if (!slug) {
+					throw new Error("Invalid subdomain");
+				}
+
+				const existingSubdomain = await db
+					.select()
+					.from(servicePorts)
+					.where(eq(servicePorts.subdomain, slug));
+
+				if (existingSubdomain.length > 0) {
+					throw new Error("Subdomain already in use");
+				}
+
+				await db.insert(servicePorts).values({
+					id: randomUUID(),
+					serviceId,
+					port: change.port,
+					isPublic: true,
+					subdomain: slug,
+				});
+			} else {
+				await db.insert(servicePorts).values({
+					id: randomUUID(),
+					serviceId,
+					port: change.port,
+					isPublic: false,
+				});
+			}
+		}
+	}
+
+	const existingDeployments = await db
 		.select()
-		.from(servicePorts)
-		.where(eq(servicePorts.serviceId, serviceId));
+		.from(deployments)
+		.where(eq(deployments.serviceId, serviceId));
 
-	if (existing.some((p) => p.port === port)) {
-		throw new Error("Port already exists");
-	}
+	const hasRunningDeployment = existingDeployments.some(
+		(d) => d.status === "running"
+	);
 
-	if (isPublic) {
-		if (!subdomain) {
-			throw new Error("Subdomain is required for public ports");
-		}
-
-		const slug = slugify(subdomain);
-		if (!slug) {
-			throw new Error("Invalid subdomain");
-		}
-
-		const existingSubdomain = await db
-			.select()
-			.from(servicePorts)
-			.where(eq(servicePorts.subdomain, slug));
-
-		if (existingSubdomain.length > 0) {
-			throw new Error("Subdomain already in use");
-		}
-
-		await db.insert(servicePorts).values({
-			id: randomUUID(),
-			serviceId,
-			port,
-			isPublic: true,
-			subdomain: slug,
-		});
-	} else {
-		await db.insert(servicePorts).values({
-			id: randomUUID(),
-			serviceId,
-			port,
-			isPublic: false,
-		});
+	if (hasRunningDeployment) {
+		await deployService(serviceId);
 	}
 
 	revalidatePath(`/dashboard/projects/${service.projectId}`);
-	return { success: true };
-}
-
-export async function removeServicePort(serviceId: string, portId: string) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, portId));
-	await db.delete(servicePorts).where(eq(servicePorts.id, portId));
-
-	revalidatePath(`/dashboard/projects/${service.projectId}`);
-	return { success: true };
+	return { success: true, redeployed: hasRunningDeployment };
 }
 
 export async function getDeploymentPorts(deploymentId: string) {

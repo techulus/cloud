@@ -92,14 +92,23 @@ func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP 
 }
 
 type StatusRequest struct {
-	Resources *Resources `json:"resources,omitempty"`
-	PublicIP  string     `json:"publicIp,omitempty"`
+	Resources  *Resources       `json:"resources,omitempty"`
+	PublicIP   string           `json:"publicIp,omitempty"`
+	Containers []ContainerInfo  `json:"containers,omitempty"`
 }
 
 type Resources struct {
 	CPU    int `json:"cpu,omitempty"`
 	Memory int `json:"memory,omitempty"`
 	Disk   int `json:"disk,omitempty"`
+}
+
+type ContainerInfo struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Image   string `json:"image"`
+	State   string `json:"state"`
+	Created int64  `json:"created"`
 }
 
 type StatusResponse struct {
@@ -112,14 +121,15 @@ type Work struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-func (c *Client) SendStatus(resources *Resources, publicIP string) (*StatusResponse, error) {
+func (c *Client) SendStatus(resources *Resources, publicIP string, containers []ContainerInfo) (*StatusResponse, error) {
 	if c.keyPair == nil || c.serverID == "" {
 		return nil, fmt.Errorf("client not configured with server ID and key pair")
 	}
 
 	req := StatusRequest{
-		Resources: resources,
-		PublicIP:  publicIP,
+		Resources:  resources,
+		PublicIP:   publicIP,
+		Containers: containers,
 	}
 
 	body, err := json.Marshal(req)

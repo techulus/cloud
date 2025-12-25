@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { servers } from "@/db/schema";
+import { servers, serverContainers } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { broadcastWireGuardUpdate } from "@/lib/wireguard";
@@ -59,4 +59,37 @@ export async function syncWireGuard() {
   const count = await broadcastWireGuardUpdate();
   revalidatePath("/dashboard");
   return count;
+}
+
+export async function getServerWithContainers(id: string) {
+  const serverResults = await db
+    .select({
+      id: servers.id,
+      name: servers.name,
+      publicIp: servers.publicIp,
+      wireguardIp: servers.wireguardIp,
+      status: servers.status,
+      lastHeartbeat: servers.lastHeartbeat,
+      resourcesCpu: servers.resourcesCpu,
+      resourcesMemory: servers.resourcesMemory,
+      resourcesDisk: servers.resourcesDisk,
+      createdAt: servers.createdAt,
+    })
+    .from(servers)
+    .where(eq(servers.id, id));
+
+  const server = serverResults[0];
+  if (!server) {
+    return null;
+  }
+
+  const containers = await db
+    .select()
+    .from(serverContainers)
+    .where(eq(serverContainers.serverId, id));
+
+  return {
+    ...server,
+    containers,
+  };
 }

@@ -185,7 +185,8 @@ func main() {
 
 func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP string) int {
 	resources := getSystemStats()
-	resp, err := client.SendStatus(resources, publicIP)
+	containers := getContainerList()
+	resp, err := client.SendStatus(resources, publicIP, containers)
 	if err != nil {
 		consecutiveFails++
 		log.Printf("Status poll failed (%d/%d): %v", consecutiveFails, maxConsecutiveFails, err)
@@ -198,6 +199,27 @@ func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP str
 	}
 
 	return 0
+}
+
+func getContainerList() []api.ContainerInfo {
+	podmanContainers, err := podman.ListContainers()
+	if err != nil {
+		log.Printf("Failed to list containers: %v", err)
+		return nil
+	}
+
+	containers := make([]api.ContainerInfo, len(podmanContainers))
+	for i, c := range podmanContainers {
+		containers[i] = api.ContainerInfo{
+			ID:      c.ID,
+			Name:    c.Name,
+			Image:   c.Image,
+			State:   c.State,
+			Created: c.Created,
+		}
+	}
+
+	return containers
 }
 
 func handleWork(client *api.Client, work *api.Work, dataDir string) {

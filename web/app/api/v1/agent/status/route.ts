@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { servers, workQueue, deployments } from "@/db/schema";
-import { eq, and, lt, ne } from "drizzle-orm";
+import { servers, workQueue, deployments, serverContainers } from "@/db/schema";
+import { eq, and, lt, ne, notInArray } from "drizzle-orm";
 import { verifyEd25519Signature } from "@/lib/crypto";
 import { getWireGuardPeers } from "@/lib/wireguard";
 import { randomUUID } from "crypto";
+
+type ContainerInfo = {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  created: number;
+};
 
 const WORK_TIMEOUT_MINUTES = 5;
 const MAX_ATTEMPTS = 3;
@@ -63,7 +71,11 @@ export async function POST(request: NextRequest) {
     }
 
     const parsedBody = body ? JSON.parse(body) : {};
-    const { resources, publicIp } = parsedBody;
+    const { resources, publicIp, containers } = parsedBody as {
+      resources?: { cpu?: number; memory?: number; disk?: number };
+      publicIp?: string;
+      containers?: ContainerInfo[];
+    };
 
     const updateData: Record<string, unknown> = {
       lastHeartbeat: new Date(),
@@ -100,6 +112,72 @@ export async function POST(request: NextRequest) {
           payload: JSON.stringify({ peers }),
         });
       }
+    }
+
+    if (containers && containers.length > 0) {
+      const allDeployments = await db
+        .select({ containerId: deployments.containerId })
+        .from(deployments)
+        .where(eq(deployments.serverId, serverId));
+
+      const managedContainerIds = new Set(
+        allDeployments.map((d) => d.containerId).filter(Boolean)
+      );
+
+      const seenContainerIds: string[] = [];
+
+      for (const container of containers) {
+        seenContainerIds.push(container.id);
+        const isManaged = managedContainerIds.has(container.id);
+
+        const existing = await db
+          .select()
+          .from(serverContainers)
+          .where(
+            and(
+              eq(serverContainers.serverId, serverId),
+              eq(serverContainers.containerId, container.id)
+            )
+          );
+
+        if (existing.length > 0) {
+          await db
+            .update(serverContainers)
+            .set({
+              name: container.name,
+              image: container.image,
+              state: container.state,
+              isManaged,
+              lastSeen: new Date(),
+            })
+            .where(eq(serverContainers.id, existing[0].id));
+        } else {
+          await db.insert(serverContainers).values({
+            id: randomUUID(),
+            serverId,
+            containerId: container.id,
+            name: container.name,
+            image: container.image,
+            state: container.state,
+            isManaged,
+          });
+        }
+      }
+
+      if (seenContainerIds.length > 0) {
+        await db
+          .delete(serverContainers)
+          .where(
+            and(
+              eq(serverContainers.serverId, serverId),
+              notInArray(serverContainers.containerId, seenContainerIds)
+            )
+          );
+      }
+    } else if (containers && containers.length === 0) {
+      await db
+        .delete(serverContainers)
+        .where(eq(serverContainers.serverId, serverId));
     }
 
     await handleStuckJobs();

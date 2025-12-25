@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -80,4 +81,50 @@ func CheckPrerequisites() error {
 		return fmt.Errorf("podman not found: %w", err)
 	}
 	return nil
+}
+
+type Container struct {
+	ID      string `json:"Id"`
+	Name    string `json:"Name"`
+	Image   string `json:"Image"`
+	State   string `json:"State"`
+	Created int64  `json:"Created"`
+}
+
+type podmanContainer struct {
+	Id      string   `json:"Id"`
+	Names   []string `json:"Names"`
+	Image   string   `json:"Image"`
+	State   string   `json:"State"`
+	Created int64    `json:"Created"`
+}
+
+func ListContainers() ([]Container, error) {
+	cmd := exec.Command("podman", "ps", "-a", "--format", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %s: %w", string(output), err)
+	}
+
+	var podmanContainers []podmanContainer
+	if err := json.Unmarshal(output, &podmanContainers); err != nil {
+		return nil, fmt.Errorf("failed to parse container list: %w", err)
+	}
+
+	containers := make([]Container, len(podmanContainers))
+	for i, pc := range podmanContainers {
+		name := ""
+		if len(pc.Names) > 0 {
+			name = pc.Names[0]
+		}
+		containers[i] = Container{
+			ID:      pc.Id,
+			Name:    name,
+			Image:   pc.Image,
+			State:   pc.State,
+			Created: pc.Created,
+		}
+	}
+
+	return containers, nil
 }

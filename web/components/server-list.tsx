@@ -79,18 +79,20 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
       ) : (
         <div className="grid gap-4">
           {servers.map((server) => (
-            <Card key={server.id}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{server.name}</CardTitle>
-                  <StatusBadge status={server.status} />
-                </div>
-                <CardDescription>
-                  {server.wireguardIp || "Not registered"}{" "}
-                  {server.publicIp && `• ${server.publicIp}`}
-                </CardDescription>
-              </CardHeader>
-            </Card>
+            <Link key={server.id} href={`/dashboard/servers/${server.id}`}>
+              <Card className="hover:border-primary/50 transition-colors cursor-pointer">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">{server.name}</CardTitle>
+                    <StatusBadge status={server.status} />
+                  </div>
+                  <CardDescription>
+                    {server.wireguardIp || "Not registered"}{" "}
+                    {server.publicIp && `• ${server.publicIp}`}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
           ))}
         </div>
       )}

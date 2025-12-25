@@ -226,3 +226,21 @@ export const workQueue = sqliteTable("work_queue", {
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   attempts: integer("attempts").notNull().default(0),
 });
+
+export const serverContainers = sqliteTable("server_containers", {
+  id: text("id").primaryKey(),
+  serverId: text("server_id")
+    .notNull()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  containerId: text("container_id").notNull(),
+  name: text("name").notNull(),
+  image: text("image").notNull(),
+  state: text("state").notNull(),
+  isManaged: integer("is_managed", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  lastSeen: integer("last_seen", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});

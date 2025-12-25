@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { signOut, useSession } from "@/lib/auth-client";
+import Link from "next/link";
 
 export default function DashboardLayout({
 	children,
@@ -35,7 +37,18 @@ export default function DashboardLayout({
 		<div className="min-h-screen">
 			<header className="border-b">
 				<div className="container mx-auto px-4 h-14 flex items-center justify-between">
-					<img src="/logo.png" alt="Techulus Cloud" className="h-8" />
+					<Link href="/dashboard" className="flex items-center gap-2 text-sm">
+						<Image
+							src="/logo.png"
+							alt="Techulus Cloud"
+							className="h-6"
+							width={24}
+							height={24}
+						/>
+						<p>
+							<span className="font-semibold">techulus</span>.cloud
+						</p>
+					</Link>
 					<div className="flex items-center gap-4">
 						<span className="text-sm text-muted-foreground">
 							{session.user.email}
