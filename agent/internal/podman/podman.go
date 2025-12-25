@@ -29,7 +29,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		return nil, fmt.Errorf("failed to pull image: %s: %w", string(output), err)
 	}
 
-	args := []string{"run", "-d", "--name", config.Name, "--restart", "unless-stopped"}
+	args := []string{"run", "-d", "--name", config.Name, "--replace", "--restart", "unless-stopped"}
 
 	for _, pm := range config.PortMappings {
 		portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)

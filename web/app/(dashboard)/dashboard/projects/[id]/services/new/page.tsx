@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function NewServicePage({
   params,
@@ -17,23 +18,15 @@ export default function NewServicePage({
   const router = useRouter();
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
-  const [ports, setPorts] = useState("80");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !image.trim()) return;
 
-    const portNumbers = ports
-      .split(",")
-      .map((p) => parseInt(p.trim()))
-      .filter((p) => !isNaN(p) && p > 0);
-
-    if (portNumbers.length === 0) return;
-
     setIsLoading(true);
     try {
-      await createService(projectId, name.trim(), image.trim(), portNumbers);
+      await createService(projectId, name.trim(), image.trim(), []);
       router.push(`/dashboard/projects/${projectId}`);
     } catch (error) {
       console.error("Failed to create service:", error);
@@ -42,62 +35,64 @@ export default function NewServicePage({
   };
 
   return (
-    <div className="max-w-md mx-auto">
-      <Card>
+    <div className="max-w-md mx-auto pt-32">
+      <Card className="w-full">
         <CardHeader>
           <CardTitle>New Service</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Service Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="my-service"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="image">Docker Image</Label>
-              <Input
-                id="image"
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder="nginx:latest"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ports">Container Ports</Label>
-              <Input
-                id="ports"
-                value={ports}
-                onChange={(e) => setPorts(e.target.value)}
-                placeholder="80, 443"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Comma-separated list of ports
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => router.back()}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isLoading || !name.trim() || !image.trim()}
-              >
-                {isLoading ? "Creating..." : "Create Service"}
-              </Button>
-            </div>
-          </form>
+          <Tabs defaultValue="docker">
+            <TabsList>
+              <TabsTrigger value="docker">Docker Image</TabsTrigger>
+              <TabsTrigger value="github">GitHub Repo</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="docker">
+              <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Service Name</Label>
+                  <Input
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="my-service"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="image">Docker Image</Label>
+                  <Input
+                    id="image"
+                    value={image}
+                    onChange={(e) => setImage(e.target.value)}
+                    placeholder="nginx:latest"
+                    required
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => router.back()}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isLoading || !name.trim() || !image.trim()}
+                  >
+                    {isLoading ? "Creating..." : "Create Service"}
+                  </Button>
+                </div>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="github">
+              <div className="py-8 text-center text-muted-foreground">
+                Planned
+              </div>
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>

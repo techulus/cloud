@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { deployments, deploymentPorts, servers, services, servicePorts, workQueue } from "@/db/schema";
+import { deployments, deploymentPorts, servers, servicePorts, workQueue } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 
-export async function getServiceUpstreams(serviceId: string): Promise<string[]> {
+export async function getPortUpstreams(
+  serviceId: string,
+  servicePortId: string,
+): Promise<string[]> {
   const runningDeployments = await db
     .select({
       deploymentId: deployments.id,
@@ -24,65 +27,76 @@ export async function getServiceUpstreams(serviceId: string): Promise<string[]> 
 
     if (!server?.wireguardIp) continue;
 
-    const ports = await db
-      .select({ hostPort: deploymentPorts.hostPort, containerPort: servicePorts.port })
+    const [portMapping] = await db
+      .select({ hostPort: deploymentPorts.hostPort })
       .from(deploymentPorts)
-      .innerJoin(servicePorts, eq(deploymentPorts.servicePortId, servicePorts.id))
-      .where(eq(deploymentPorts.deploymentId, dep.deploymentId));
+      .where(
+        and(
+          eq(deploymentPorts.deploymentId, dep.deploymentId),
+          eq(deploymentPorts.servicePortId, servicePortId)
+        )
+      );
 
-    const primaryPort = ports[0];
-    if (primaryPort) {
-      upstreams.push(`${server.wireguardIp}:${primaryPort.hostPort}`);
+    if (portMapping) {
+      upstreams.push(`${server.wireguardIp}:${portMapping.hostPort}`);
     }
   }
 
   return upstreams;
 }
 
-export async function broadcastCaddySync(serviceId: string): Promise<void> {
-  const [service] = await db
+export async function syncPublicPorts(serviceId: string): Promise<void> {
+  const publicPorts = await db
     .select()
-    .from(services)
-    .where(eq(services.id, serviceId));
-
-  if (!service?.exposedDomain) return;
-
-  const upstreams = await getServiceUpstreams(serviceId);
-
-  const route = upstreams.length > 0 ? {
-    "@id": service.exposedDomain,
-    match: [{ host: [service.exposedDomain] }],
-    handle: [
-      {
-        handler: "reverse_proxy",
-        upstreams: upstreams.map((u) => ({ dial: u })),
-      },
-    ],
-  } : null;
-
-  const payload = {
-    action: upstreams.length > 0 ? "upsert" : "delete",
-    domain: service.exposedDomain,
-    route,
-  };
+    .from(servicePorts)
+    .where(
+      and(
+        eq(servicePorts.serviceId, serviceId),
+        eq(servicePorts.isPublic, true)
+      )
+    );
 
   const onlineServers = await db
     .select()
     .from(servers)
     .where(eq(servers.status, "online"));
 
-  for (const server of onlineServers) {
-    await db.insert(workQueue).values({
-      id: randomUUID(),
-      serverId: server.id,
-      type: "sync_caddy",
-      payload: JSON.stringify(payload),
-    });
-  }
+  for (const port of publicPorts) {
+    if (!port.subdomain) continue;
 
-  console.log(`Broadcast sync_caddy for ${service.exposedDomain} to ${onlineServers.length} servers`);
+    const domain = `${port.subdomain}.techulus.app`;
+    const upstreams = await getPortUpstreams(serviceId, port.id);
+
+    const route = upstreams.length > 0 ? {
+      "@id": domain,
+      match: [{ host: [domain] }],
+      handle: [
+        {
+          handler: "reverse_proxy",
+          upstreams: upstreams.map((u) => ({ dial: u })),
+        },
+      ],
+    } : null;
+
+    const payload = {
+      action: upstreams.length > 0 ? "upsert" : "delete",
+      domain,
+      route,
+    };
+
+    for (const server of onlineServers) {
+      await db.insert(workQueue).values({
+        id: randomUUID(),
+        serverId: server.id,
+        type: "sync_caddy",
+        payload: JSON.stringify(payload),
+      });
+    }
+
+    console.log(`Broadcast sync_caddy for ${domain} to ${onlineServers.length} servers`);
+  }
 }
 
 export async function syncServiceRoute(serviceId: string): Promise<void> {
-  return broadcastCaddySync(serviceId);
+  return syncPublicPorts(serviceId);
 }

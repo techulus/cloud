@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { services } from "@/db/schema";
+import { servicePorts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
@@ -10,12 +10,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing domain" }, { status: 400 });
   }
 
-  const [service] = await db
-    .select()
-    .from(services)
-    .where(eq(services.exposedDomain, domain));
+  const subdomain = domain.replace(".techulus.app", "");
 
-  if (service) {
+  const [port] = await db
+    .select()
+    .from(servicePorts)
+    .where(eq(servicePorts.subdomain, subdomain));
+
+  if (port) {
     return NextResponse.json({ allowed: true }, { status: 200 });
   }
 

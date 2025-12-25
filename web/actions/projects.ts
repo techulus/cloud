@@ -62,10 +62,6 @@ export async function deleteProject(id: string) {
 	revalidatePath("/dashboard");
 }
 
-function generateSubdomain(): string {
-	return randomUUID().replace(/-/g, "").slice(0, 8);
-}
-
 export async function createService(
 	projectId: string,
 	name: string,
@@ -73,14 +69,12 @@ export async function createService(
 	ports: number[],
 ) {
 	const id = randomUUID();
-	const subdomain = generateSubdomain();
 
 	await db.insert(services).values({
 		id,
 		projectId,
 		name,
 		image,
-		exposedDomain: `${subdomain}.techulus.app`,
 	});
 
 	for (const port of ports) {
@@ -92,7 +86,7 @@ export async function createService(
 	}
 
 	revalidatePath(`/dashboard/projects/${projectId}`);
-	return { id, name, image, ports, exposedDomain: `${subdomain}.techulus.app` };
+	return { id, name, image, ports };
 }
 
 export async function listServices(projectId: string) {
@@ -146,6 +140,78 @@ export async function getServicePorts(serviceId: string) {
 		.orderBy(servicePorts.port);
 }
 
+export async function addServicePort(
+	serviceId: string,
+	port: number,
+	isPublic: boolean,
+	subdomain?: string,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	const existing = await db
+		.select()
+		.from(servicePorts)
+		.where(eq(servicePorts.serviceId, serviceId));
+
+	if (existing.some((p) => p.port === port)) {
+		throw new Error("Port already exists");
+	}
+
+	if (isPublic) {
+		if (!subdomain) {
+			throw new Error("Subdomain is required for public ports");
+		}
+
+		const slug = slugify(subdomain);
+		if (!slug) {
+			throw new Error("Invalid subdomain");
+		}
+
+		const existingSubdomain = await db
+			.select()
+			.from(servicePorts)
+			.where(eq(servicePorts.subdomain, slug));
+
+		if (existingSubdomain.length > 0) {
+			throw new Error("Subdomain already in use");
+		}
+
+		await db.insert(servicePorts).values({
+			id: randomUUID(),
+			serviceId,
+			port,
+			isPublic: true,
+			subdomain: slug,
+		});
+	} else {
+		await db.insert(servicePorts).values({
+			id: randomUUID(),
+			serviceId,
+			port,
+			isPublic: false,
+		});
+	}
+
+	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	return { success: true };
+}
+
+export async function removeServicePort(serviceId: string, portId: string) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, portId));
+	await db.delete(servicePorts).where(eq(servicePorts.id, portId));
+
+	revalidatePath(`/dashboard/projects/${service.projectId}`);
+	return { success: true };
+}
+
 export async function getDeploymentPorts(deploymentId: string) {
 	return db
 		.select({
@@ -197,14 +263,28 @@ export async function deployService(serviceId: string) {
 		throw new Error("Service not found");
 	}
 
+	const existingDeployments = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.serviceId, serviceId));
+
+	const hasInProgressDeployment = existingDeployments.some(
+		(d) => d.status === "pending" || d.status === "pulling" || d.status === "stopping"
+	);
+
+	if (hasInProgressDeployment) {
+		throw new Error("A deployment is already in progress");
+	}
+
+	for (const dep of existingDeployments) {
+		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
+		await db.delete(deployments).where(eq(deployments.id, dep.id));
+	}
+
 	const servicePortsList = await db
 		.select()
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, serviceId));
-
-	if (servicePortsList.length === 0) {
-		throw new Error("Service has no ports defined");
-	}
 
 	const onlineServers = await db
 		.select()

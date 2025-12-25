@@ -145,7 +145,6 @@ export const services = sqliteTable("services", {
   name: text("name").notNull(),
   image: text("image").notNull(),
   replicas: integer("replicas").notNull().default(1),
-  exposedDomain: text("exposed_domain"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
@@ -157,6 +156,8 @@ export const servicePorts = sqliteTable("service_ports", {
     .notNull()
     .references(() => services.id, { onDelete: "cascade" }),
   port: integer("port").notNull(),
+  isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
+  subdomain: text("subdomain").unique(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
