@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/techulus/cloud-agent/internal/api"
 	"github.com/techulus/cloud-agent/internal/crypto"
+	"github.com/techulus/cloud-agent/internal/dns"
 	"github.com/techulus/cloud-agent/internal/podman"
 	"github.com/techulus/cloud-agent/internal/wireguard"
 )
@@ -89,6 +91,16 @@ func main() {
 		}
 
 		log.Printf("Loaded config: serverID=%s, wireguardIP=%s", config.ServerID, config.WireGuardIP)
+
+		if isProxy {
+			if err := dns.SetupProxyDNS(config.WireGuardIP); err != nil {
+				log.Printf("Warning: Failed to setup dnsmasq: %v", err)
+			}
+		} else {
+			if err := dns.ConfigureClientDNS(dns.ProxyWireGuardIP); err != nil {
+				log.Printf("Warning: Failed to configure DNS: %v", err)
+			}
+		}
 	} else {
 		if token == "" {
 			log.Fatal("--token is required for first-time registration")
@@ -151,6 +163,22 @@ func main() {
 		}
 
 		log.Println("WireGuard interface is up!")
+
+		if isProxy {
+			log.Println("Setting up proxy DNS (dnsmasq)...")
+			if err := dns.SetupProxyDNS(config.WireGuardIP); err != nil {
+				log.Printf("Warning: Failed to setup dnsmasq: %v", err)
+			} else {
+				log.Println("dnsmasq configured successfully")
+			}
+		} else {
+			log.Println("Configuring DNS for .internal resolution...")
+			if err := dns.ConfigureClientDNS(dns.ProxyWireGuardIP); err != nil {
+				log.Printf("Warning: Failed to configure DNS: %v", err)
+			} else {
+				log.Println("DNS configured to use proxy for .internal")
+			}
+		}
 	}
 
 	client.SetServerID(config.ServerID)
@@ -190,6 +218,10 @@ func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP str
 	var proxyRoutes []api.ProxyRouteInfo
 	if isProxy {
 		proxyRoutes = getCaddyRoutes()
+
+		if err := reconcileCaddy(client); err != nil {
+			log.Printf("Caddy reconcile failed: %v", err)
+		}
 	}
 
 	resp, err := client.SendStatus(resources, publicIP, containers, proxyRoutes)
@@ -256,17 +288,7 @@ func handleWork(client *api.Client, work *api.Work, dataDir string) {
 			status = "failed"
 		}
 	case "sync_caddy":
-		if isProxy {
-			if err := handleCaddySync(work); err != nil {
-				log.Printf("Caddy sync failed: %v", err)
-				status = "failed"
-				logs = err.Error()
-			} else {
-				logs = "Caddy route synced"
-			}
-		} else {
-			logs = "Skipped (not proxy)"
-		}
+		logs = "Deprecated - using reconciliation"
 	default:
 		log.Printf("Unknown work type: %s", work.Type)
 	}
@@ -370,82 +392,6 @@ func handleWireguardUpdate(work *api.Work, dataDir string) error {
 	}
 
 	return wireguard.Reload(wireguard.DefaultInterface)
-}
-
-func handleCaddySync(work *api.Work) error {
-	var payload struct {
-		Action string          `json:"action"`
-		Domain string          `json:"domain"`
-		Route  json.RawMessage `json:"route"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return fmt.Errorf("failed to parse payload: %w", err)
-	}
-
-	log.Printf("Syncing Caddy route for %s (action: %s)", payload.Domain, payload.Action)
-
-	caddyURL := "http://localhost:2019"
-
-	if payload.Action == "delete" {
-		req, err := http.NewRequest("DELETE", caddyURL+"/id/"+payload.Domain, nil)
-		if err != nil {
-			return err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		resp.Body.Close()
-
-		persistResp, _ := http.Post(caddyURL+"/config/persist", "application/json", nil)
-		if persistResp != nil {
-			persistResp.Body.Close()
-		}
-		return nil
-	}
-
-	req, err := http.NewRequest("PUT", caddyURL+"/id/"+payload.Domain, strings.NewReader(string(payload.Route)))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to sync route: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		postResp, err := http.Post(
-			caddyURL+"/config/apps/http/servers/srv0/routes",
-			"application/json",
-			strings.NewReader(string(payload.Route)),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create route: %w", err)
-		}
-		defer postResp.Body.Close()
-
-		if postResp.StatusCode >= 400 {
-			body, _ := io.ReadAll(postResp.Body)
-			return fmt.Errorf("caddy returned error on create: %s", string(body))
-		}
-	} else if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("caddy returned error: %s", string(body))
-	}
-
-	persistResp, err := http.Post(caddyURL+"/config/persist", "application/json", nil)
-	if err != nil {
-		log.Printf("Warning: failed to persist Caddy config: %v", err)
-	} else {
-		persistResp.Body.Close()
-	}
-
-	log.Printf("Caddy route synced for %s", payload.Domain)
-	return nil
 }
 
 func convertPeers(apiPeers []api.Peer) []wireguard.Peer {
@@ -583,3 +529,58 @@ func getCaddyRoutes() []api.ProxyRouteInfo {
 
 	return proxyRoutes
 }
+
+func reconcileCaddy(client *api.Client) error {
+	desiredConfig, err := client.FetchCaddyConfig()
+	if err != nil {
+		return fmt.Errorf("failed to fetch desired config: %w", err)
+	}
+
+	var routes []any
+	for _, route := range desiredConfig.Routes {
+		routes = append(routes, route.CaddyConfig)
+	}
+
+	routesJSON, err := json.Marshal(routes)
+	if err != nil {
+		return fmt.Errorf("failed to marshal routes: %w", err)
+	}
+
+	caddyURL := "http://localhost:2019"
+	endpoint := caddyURL + "/config/apps/http/servers/srv0/routes"
+
+	req, err := http.NewRequest("PATCH", endpoint, bytes.NewReader(routesJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update routes: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		req, err = http.NewRequest("PUT", endpoint, bytes.NewReader(routesJSON))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to create routes: %w", err)
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("caddy returned %d: %s", resp.StatusCode, body)
+	}
+
+	log.Printf("Synced %d routes to Caddy", len(routes))
+	return nil
+}
+

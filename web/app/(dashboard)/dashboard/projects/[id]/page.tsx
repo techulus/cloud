@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getProject, listServices, listDeployments, getServicePorts, getDeploymentPorts } from "@/actions/projects";
-import { Button } from "@/components/ui/button";
 import { ServiceList } from "@/components/service-list";
+import { PageHeader } from "@/components/page-header";
+import { CreateServiceDialog } from "@/components/create-service-dialog";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -33,7 +33,7 @@ export default async function ProjectPage({
           const [depPorts, server] = await Promise.all([
             getDeploymentPorts(deployment.id),
             db
-              .select({ wireguardIp: servers.wireguardIp })
+              .select({ name: servers.name, wireguardIp: servers.wireguardIp })
               .from(servers)
               .where(eq(servers.id, deployment.serverId))
               .then((r) => r[0]),
@@ -57,21 +57,11 @@ export default async function ProjectPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-            <Link href="/dashboard" className="hover:underline">
-              Dashboard
-            </Link>
-            <span>/</span>
-            <span>{project.name}</span>
-          </div>
-          <h2 className="text-2xl font-bold">{project.name}</h2>
-        </div>
-        <Link href={`/dashboard/projects/${id}/services/new`}>
-          <Button>Add Service</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title={project.name}
+        backHref="/dashboard"
+        actions={<CreateServiceDialog projectId={id} />}
+      />
 
       <ServiceList projectId={id} initialServices={initialServices} />
     </div>

@@ -63,7 +63,7 @@ export async function GET(
               )
               .where(eq(deploymentPorts.deploymentId, deployment.id)),
             db
-              .select({ wireguardIp: servers.wireguardIp })
+              .select({ name: servers.name, wireguardIp: servers.wireguardIp })
               .from(servers)
               .where(eq(servers.id, deployment.serverId))
               .then((r) => r[0]),

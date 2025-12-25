@@ -1,8 +1,6 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getServerWithContainers } from "@/actions/servers";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -10,7 +8,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Box, Server } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { Box } from "lucide-react";
 
 function getStatusVariant(status: string) {
   switch (status) {
@@ -72,22 +71,15 @@ export default async function ServerDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/dashboard">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div className="flex items-center gap-3">
-          <Server className="h-6 w-6 text-muted-foreground" />
-          <div>
-            <h1 className="text-2xl font-bold">{server.name}</h1>
-            <Badge variant={getStatusVariant(server.status)}>
-              {server.status}
-            </Badge>
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title={server.name}
+        backHref="/dashboard"
+        actions={
+          <Badge variant={getStatusVariant(server.status)}>
+            {server.status}
+          </Badge>
+        }
+      />
 
       <Card>
         <CardHeader>

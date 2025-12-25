@@ -1,7 +1,6 @@
 "use client";
 
 import useSWR from "swr";
-import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,10 +25,12 @@ import {
 	deleteService,
 	stopDeployment,
 	deleteDeployment,
-	syncDeploymentRoute,
 	updateServicePorts,
+	getOnlineServers,
+	type ServerPlacement,
 } from "@/actions/projects";
 import { Spinner } from "./ui/spinner";
+import { CreateServiceDialog } from "./create-service-dialog";
 
 type DeploymentPort = {
 	id: string;
@@ -44,7 +45,7 @@ type Deployment = {
 	containerId: string | null;
 	status: string;
 	ports: DeploymentPort[];
-	server: { wireguardIp: string | null } | null;
+	server: { name: string; wireguardIp: string | null } | null;
 };
 
 type ServicePort = {
@@ -60,6 +61,7 @@ type Service = {
 	projectId: string;
 	name: string;
 	image: string;
+	replicas: number;
 	ports: ServicePort[];
 	deployments: Deployment[];
 };
@@ -145,6 +147,184 @@ type PortChange = {
 	isPublic?: boolean;
 	subdomain?: string;
 };
+
+type ServerInfo = {
+	id: string;
+	name: string;
+	wireguardIp: string | null;
+};
+
+function DeployDialog({
+	service,
+	onUpdate,
+}: {
+	service: Service;
+	onUpdate: () => void;
+}) {
+	const [isOpen, setIsOpen] = useState(false);
+	const [servers, setServers] = useState<ServerInfo[]>([]);
+	const [placements, setPlacements] = useState<Record<string, number>>({});
+	const [isLoading, setIsLoading] = useState(false);
+	const [isDeploying, setIsDeploying] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const totalReplicas = Object.values(placements).reduce((sum, n) => sum + n, 0);
+	const isValid = totalReplicas >= 1 && totalReplicas <= 10;
+
+	const loadServers = async () => {
+		setIsLoading(true);
+		setError(null);
+		try {
+			const onlineServers = await getOnlineServers();
+			setServers(onlineServers);
+
+			const currentPlacements: Record<string, number> = {};
+			for (const s of onlineServers) {
+				const count = service.deployments.filter(
+					(d) => d.serverId === s.id && (d.status === "running" || d.status === "pending" || d.status === "pulling")
+				).length;
+				currentPlacements[s.id] = count;
+			}
+			setPlacements(currentPlacements);
+		} catch (err) {
+			setError("Failed to load servers");
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
+	const handleOpenChange = (open: boolean) => {
+		setIsOpen(open);
+		if (open) {
+			loadServers();
+		}
+	};
+
+	const handleDeploy = async () => {
+		setIsDeploying(true);
+		setError(null);
+		try {
+			const placementList: ServerPlacement[] = Object.entries(placements).map(
+				([serverId, replicas]) => ({ serverId, replicas })
+			);
+			await deployService(service.id, placementList);
+			onUpdate();
+			setIsOpen(false);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Deployment failed");
+		} finally {
+			setIsDeploying(false);
+		}
+	};
+
+	const updateReplicas = (serverId: string, value: number) => {
+		setPlacements((prev) => ({
+			...prev,
+			[serverId]: Math.max(0, Math.min(10, value)),
+		}));
+	};
+
+	return (
+		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
+			<DialogTrigger render={<Button size="sm" />}>Deploy</DialogTrigger>
+			<DialogContent className="sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>Deploy {service.name}</DialogTitle>
+				</DialogHeader>
+
+				{isLoading ? (
+					<div className="flex items-center justify-center py-8">
+						<Spinner />
+					</div>
+				) : servers.length === 0 ? (
+					<p className="text-sm text-muted-foreground py-4">
+						No online servers available
+					</p>
+				) : (
+					<div className="space-y-4">
+						<p className="text-sm text-muted-foreground">
+							Set replicas per server (0-10 each, at least 1 total)
+						</p>
+						<div className="space-y-3">
+							{servers.map((server) => (
+								<div
+									key={server.id}
+									className="flex items-center justify-between gap-4 p-3 bg-muted rounded-md"
+								>
+									<div className="flex-1 min-w-0">
+										<p className="font-medium truncate">{server.name}</p>
+										<p className="text-xs text-muted-foreground font-mono">
+											{server.wireguardIp}
+										</p>
+									</div>
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="icon"
+											className="h-8 w-8"
+											onClick={() =>
+												updateReplicas(server.id, (placements[server.id] || 0) - 1)
+											}
+											disabled={(placements[server.id] || 0) <= 0}
+										>
+											-
+										</Button>
+										<Input
+											type="number"
+											value={placements[server.id] || 0}
+											onChange={(e) =>
+												updateReplicas(server.id, parseInt(e.target.value) || 0)
+											}
+											min={0}
+											max={10}
+											className="w-16 h-8 text-center"
+										/>
+										<Button
+											variant="outline"
+											size="icon"
+											className="h-8 w-8"
+											onClick={() =>
+												updateReplicas(server.id, (placements[server.id] || 0) + 1)
+											}
+											disabled={(placements[server.id] || 0) >= 10}
+										>
+											+
+										</Button>
+									</div>
+								</div>
+							))}
+						</div>
+						<div className="flex items-center justify-between pt-2 border-t">
+							<span className="text-sm">
+								Total replicas: <strong>{totalReplicas}</strong>
+							</span>
+							{!isValid && totalReplicas === 0 && (
+								<span className="text-sm text-destructive">
+									At least 1 replica required
+								</span>
+							)}
+							{totalReplicas > 10 && (
+								<span className="text-sm text-destructive">
+									Maximum 10 replicas
+								</span>
+							)}
+						</div>
+						{error && (
+							<p className="text-sm text-destructive">{error}</p>
+						)}
+						<Button
+							onClick={handleDeploy}
+							disabled={!isValid || isDeploying}
+							className="w-full"
+						>
+							{isDeploying ? "Deploying..." : "Deploy"}
+						</Button>
+					</div>
+				)}
+			</DialogContent>
+		</Dialog>
+	);
+}
 
 function PortManagerDialog({
 	service,
@@ -441,9 +621,7 @@ export function ServiceList({
 					<p className="text-muted-foreground mb-4">
 						No services yet. Add your first service to deploy.
 					</p>
-					<Link href={`/dashboard/projects/${projectId}/services/new`}>
-						<Button>Add Service</Button>
-					</Link>
+					<CreateServiceDialog projectId={projectId} />
 				</CardContent>
 			</Card>
 		);
@@ -458,9 +636,15 @@ export function ServiceList({
 							<div>
 								<CardTitle>{service.name}</CardTitle>
 								<CardDescription>{service.image}</CardDescription>
-								{service.ports.filter((p) => p.isPublic && p.subdomain).length >
-									0 && (
-									<div className="flex flex-wrap gap-2 mt-2">
+								{(service.ports.filter((p) => p.isPublic && p.subdomain).length > 0 ||
+									service.deployments.some((d) => d.status === "running")) && (
+									<div className="flex flex-wrap gap-3 mt-2">
+										{service.deployments.some((d) => d.status === "running") && (
+											<span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+												<Lock className="h-4 w-4" />
+												{service.name}.internal
+											</span>
+										)}
 										{service.ports
 											.filter((p) => p.isPublic && p.subdomain)
 											.map((port) => (
@@ -469,9 +653,9 @@ export function ServiceList({
 													href={`https://${port.subdomain}.techulus.app`}
 													target="_blank"
 													rel="noopener noreferrer"
-													className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+													className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
 												>
-													<Globe className="h-3 w-3" />
+													<Globe className="h-4 w-4" />
 													{port.subdomain}.techulus.app
 												</a>
 											))}
@@ -483,11 +667,9 @@ export function ServiceList({
 									service={service}
 									onUpdate={handleActionComplete}
 								/>
-								<ActionButton
-									action={() => deployService(service.id)}
-									label="Deploy"
-									loadingLabel="Deploying..."
-									onComplete={handleActionComplete}
+								<DeployDialog
+									service={service}
+									onUpdate={handleActionComplete}
 								/>
 								<ActionButton
 									action={() => deleteService(service.id)}
@@ -522,24 +704,13 @@ export function ServiceList({
 												</div>
 												<div className="flex items-center gap-2">
 													{deployment.status === "running" && (
-														<>
-															<ActionButton
-																action={() =>
-																	syncDeploymentRoute(deployment.id)
-																}
-																label="Sync"
-																loadingLabel="Syncing..."
-																variant="outline"
-																onComplete={handleActionComplete}
-															/>
-															<ActionButton
-																action={() => stopDeployment(deployment.id)}
-																label="Stop"
-																loadingLabel="Stopping..."
-																variant="destructive"
-																onComplete={handleActionComplete}
-															/>
-														</>
+														<ActionButton
+															action={() => stopDeployment(deployment.id)}
+															label="Stop"
+															loadingLabel="Stopping..."
+															variant="destructive"
+															onComplete={handleActionComplete}
+														/>
 													)}
 													{(deployment.status === "stopped" ||
 														deployment.status === "failed") && (
@@ -556,8 +727,13 @@ export function ServiceList({
 											<div className="grid grid-cols-4 gap-x-4 gap-y-1 text-sm">
 												<div className="flex items-center gap-2">
 													<span className="text-muted-foreground">Server</span>
-													<span className="font-mono">
-														{deployment.server?.wireguardIp || "—"}
+													<span>
+														{deployment.server?.name || "—"}
+														{deployment.server?.wireguardIp && (
+															<span className="text-muted-foreground font-mono ml-1">
+																({deployment.server.wireguardIp})
+															</span>
+														)}
 													</span>
 												</div>
 												{deployment.containerId && (

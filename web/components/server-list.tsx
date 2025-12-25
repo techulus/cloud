@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ActionButton } from "@/components/action-button";
+import { CreateServerDialog } from "@/components/create-server-dialog";
 import { syncWireGuard } from "@/actions/servers";
 
 type Server = {
@@ -56,10 +57,7 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 					<Link href="/dashboard/proxy">
 						<Button variant="outline">Proxy</Button>
 					</Link>
-
-					<Link href="/dashboard/servers/new">
-						<Button variant="outline">Add Server</Button>
-					</Link>
+					<CreateServerDialog />
 				</div>
 			</div>
 
@@ -69,9 +67,7 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 						<p className="text-muted-foreground mb-4">
 							No servers yet. Add your first server to get started.
 						</p>
-						<Link href="/dashboard/servers/new">
-							<Button>Add Server</Button>
-						</Link>
+						<CreateServerDialog />
 					</CardContent>
 				</Card>
 			) : (

@@ -6,6 +6,10 @@ The proxy is platform infrastructure that handles external traffic for all servi
 
 Follow: https://caddyserver.com/docs/install
 
+## Install `dnsmasq`
+
+dnsmasq provides DNS resolution for the `.internal` domain used by services within the WireGuard mesh network. It resolves `{service-name}.internal` to the WireGuard IP of the container running that service.
+
 ## Environment Variables
 
 | Variable | Description |

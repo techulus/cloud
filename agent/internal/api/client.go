@@ -187,6 +187,18 @@ type CompleteRequest struct {
 	Logs   string `json:"logs,omitempty"`
 }
 
+type CaddyRoute struct {
+	ID          string   `json:"id"`
+	Domain      string   `json:"domain"`
+	Upstreams   []string `json:"upstreams"`
+	Internal    bool     `json:"internal"`
+	CaddyConfig any      `json:"caddyConfig"`
+}
+
+type CaddyConfigResponse struct {
+	Routes []CaddyRoute `json:"routes"`
+}
+
 func (c *Client) CompleteWork(workID, status, logs string) error {
 	if c.keyPair == nil || c.serverID == "" {
 		return fmt.Errorf("client not configured with server ID and key pair")
@@ -229,4 +241,28 @@ func (c *Client) CompleteWork(workID, status, logs string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) FetchCaddyConfig() (*CaddyConfigResponse, error) {
+	resp, err := c.http.Get(c.baseURL + "/api/v1/agent/caddy-config")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch caddy config: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("caddy config request failed: %s (status %d)", string(respBody), resp.StatusCode)
+	}
+
+	var result CaddyConfigResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
 }

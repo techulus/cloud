@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
@@ -14,8 +14,6 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
-import { syncServiceRoute, deleteRoute } from "@/lib/caddy";
-import { selectBestServer } from "@/lib/placement";
 
 function slugify(text: string): string {
 	return text
@@ -75,6 +73,7 @@ export async function createService(
 		projectId,
 		name,
 		image,
+		replicas: 0,
 	});
 
 	for (const port of ports) {
@@ -100,6 +99,22 @@ export async function listServices(projectId: string) {
 export async function getService(id: string) {
 	const results = await db.select().from(services).where(eq(services.id, id));
 	return results[0] || null;
+}
+
+export type ServerPlacement = {
+	serverId: string;
+	replicas: number;
+};
+
+export async function getOnlineServers() {
+	return db
+		.select({
+			id: servers.id,
+			name: servers.name,
+			wireguardIp: servers.wireguardIp,
+		})
+		.from(servers)
+		.where(eq(servers.status, "online"));
 }
 
 export async function deleteService(serviceId: string) {
@@ -156,15 +171,6 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 
 	for (const change of changes) {
 		if (change.action === "remove" && change.portId) {
-			const [portToRemove] = await db
-				.select()
-				.from(servicePorts)
-				.where(eq(servicePorts.id, change.portId));
-
-			if (portToRemove?.isPublic && portToRemove.subdomain) {
-				await deleteRoute(portToRemove.subdomain);
-			}
-
 			await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, change.portId));
 			await db.delete(servicePorts).where(eq(servicePorts.id, change.portId));
 		} else if (change.action === "add" && change.port) {
@@ -219,16 +225,21 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
-	const hasRunningDeployment = existingDeployments.some(
-		(d) => d.status === "running"
-	);
+	const runningDeployments = existingDeployments.filter((d) => d.status === "running");
 
-	if (hasRunningDeployment) {
-		await deployService(serviceId);
+	if (runningDeployments.length > 0) {
+		const placementMap = new Map<string, number>();
+		for (const dep of runningDeployments) {
+			placementMap.set(dep.serverId, (placementMap.get(dep.serverId) || 0) + 1);
+		}
+		const placements: ServerPlacement[] = Array.from(placementMap.entries()).map(
+			([serverId, replicas]) => ({ serverId, replicas })
+		);
+		await deployService(serviceId, placements);
 	}
 
 	revalidatePath(`/dashboard/projects/${service.projectId}`);
-	return { success: true, redeployed: hasRunningDeployment };
+	return { success: true, redeployed: runningDeployments.length > 0 };
 }
 
 export async function getDeploymentPorts(deploymentId: string) {
@@ -276,10 +287,45 @@ async function allocateHostPorts(
 	return allocated;
 }
 
-export async function deployService(serviceId: string) {
+export async function deployService(serviceId: string, placements: ServerPlacement[]) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
+	}
+
+	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
+	if (totalReplicas < 1) {
+		throw new Error("At least one replica is required");
+	}
+	if (totalReplicas > 10) {
+		throw new Error("Maximum 10 replicas allowed");
+	}
+
+	const serverIds = placements.filter(p => p.replicas > 0).map(p => p.serverId);
+	if (serverIds.length === 0) {
+		throw new Error("No servers selected for deployment");
+	}
+
+	const selectedServers = await db
+		.select()
+		.from(servers)
+		.where(inArray(servers.id, serverIds));
+
+	const serverMap = new Map(selectedServers.map(s => [s.id, s]));
+
+	for (const placement of placements) {
+		if (placement.replicas > 0) {
+			const server = serverMap.get(placement.serverId);
+			if (!server) {
+				throw new Error(`Server ${placement.serverId} not found`);
+			}
+			if (server.status !== "online") {
+				throw new Error(`Server ${server.name} is not online`);
+			}
+			if (!server.wireguardIp) {
+				throw new Error(`Server ${server.name} has no WireGuard IP`);
+			}
+		}
 	}
 
 	const existingDeployments = await db
@@ -316,66 +362,66 @@ export async function deployService(serviceId: string) {
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, serviceId));
 
-	const onlineServers = await db
-		.select()
-		.from(servers)
-		.where(eq(servers.status, "online"));
+	await db
+		.update(services)
+		.set({ replicas: totalReplicas })
+		.where(eq(services.id, serviceId));
 
-	if (onlineServers.length === 0) {
-		throw new Error("No online servers available");
+	const deploymentIds: string[] = [];
+	let replicaIndex = 0;
+
+	for (const placement of placements) {
+		if (placement.replicas <= 0) continue;
+
+		const server = serverMap.get(placement.serverId)!;
+
+		for (let i = 0; i < placement.replicas; i++) {
+			replicaIndex++;
+			const hostPorts = await allocateHostPorts(server.id, servicePortsList.length);
+
+			const deploymentId = randomUUID();
+			deploymentIds.push(deploymentId);
+
+			await db.insert(deployments).values({
+				id: deploymentId,
+				serviceId,
+				serverId: server.id,
+				status: "pending",
+			});
+
+			const portMappings: { containerPort: number; hostPort: number }[] = [];
+			for (let j = 0; j < servicePortsList.length; j++) {
+				const sp = servicePortsList[j];
+				const hostPort = hostPorts[j];
+
+				await db.insert(deploymentPorts).values({
+					id: randomUUID(),
+					deploymentId,
+					servicePortId: sp.id,
+					hostPort,
+				});
+
+				portMappings.push({ containerPort: sp.port, hostPort });
+			}
+
+			await db.insert(workQueue).values({
+				id: randomUUID(),
+				serverId: server.id,
+				type: "deploy",
+				payload: JSON.stringify({
+					deploymentId,
+					serviceId,
+					image: normalizeImage(service.image),
+					portMappings,
+					wireguardIp: server.wireguardIp,
+					name: `${service.name}-${replicaIndex}`,
+				}),
+			});
+		}
 	}
-
-	const server = await selectBestServer(onlineServers);
-
-	if (!server) {
-		throw new Error("No suitable server available");
-	}
-
-	if (!server.wireguardIp) {
-		throw new Error("Server has no WireGuard IP");
-	}
-
-	const hostPorts = await allocateHostPorts(server.id, servicePortsList.length);
-
-	const deploymentId = randomUUID();
-	await db.insert(deployments).values({
-		id: deploymentId,
-		serviceId,
-		serverId: server.id,
-		status: "pending",
-	});
-
-	const portMappings: { containerPort: number; hostPort: number }[] = [];
-	for (let i = 0; i < servicePortsList.length; i++) {
-		const sp = servicePortsList[i];
-		const hostPort = hostPorts[i];
-
-		await db.insert(deploymentPorts).values({
-			id: randomUUID(),
-			deploymentId,
-			servicePortId: sp.id,
-			hostPort,
-		});
-
-		portMappings.push({ containerPort: sp.port, hostPort });
-	}
-
-	await db.insert(workQueue).values({
-		id: randomUUID(),
-		serverId: server.id,
-		type: "deploy",
-		payload: JSON.stringify({
-			deploymentId,
-			serviceId,
-			image: normalizeImage(service.image),
-			portMappings,
-			wireguardIp: server.wireguardIp,
-			name: service.name,
-		}),
-	});
 
 	revalidatePath(`/dashboard/projects/${service.projectId}`);
-	return { deploymentId, serverId: server.id };
+	return { deploymentIds, replicaCount: totalReplicas };
 }
 
 export async function listDeployments(serviceId: string) {
@@ -451,26 +497,3 @@ export async function stopDeployment(deploymentId: string) {
 	return { success: true };
 }
 
-export async function syncDeploymentRoute(deploymentId: string) {
-	const [dep] = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.id, deploymentId));
-
-	if (!dep) {
-		throw new Error("Deployment not found");
-	}
-
-	if (dep.status !== "running") {
-		throw new Error("Deployment is not running");
-	}
-
-	await syncServiceRoute(dep.serviceId);
-
-	const service = await getService(dep.serviceId);
-	if (service) {
-		revalidatePath(`/dashboard/projects/${service.projectId}`);
-	}
-
-	return { success: true };
-}

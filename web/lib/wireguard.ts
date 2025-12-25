@@ -2,8 +2,7 @@ import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
 import { eq, isNotNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
-
-const WIREGUARD_SUBNET = "10.100";
+import { WIREGUARD_SUBNET_PREFIX } from "./constants";
 
 export async function assignWireGuardIp(): Promise<string> {
   const existingServers = await db
@@ -15,7 +14,7 @@ export async function assignWireGuardIp(): Promise<string> {
 
   for (let third = 0; third <= 255; third++) {
     for (let fourth = 1; fourth <= 254; fourth++) {
-      const ip = `${WIREGUARD_SUBNET}.${third}.${fourth}`;
+      const ip = `${WIREGUARD_SUBNET_PREFIX}.${third}.${fourth}`;
       if (!usedIps.has(ip)) {
         return ip;
       }

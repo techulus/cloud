@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { getProxyRoutes } from "@/actions/proxy";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -9,7 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Globe, Network } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { Globe } from "lucide-react";
 
 function formatRelativeTime(date: Date | null) {
   if (!date) return "Never";
@@ -34,22 +33,11 @@ export default async function ProxyPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/dashboard">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div className="flex items-center gap-3">
-          <Network className="h-6 w-6 text-muted-foreground" />
-          <div>
-            <h1 className="text-2xl font-bold">Proxy</h1>
-            <p className="text-sm text-muted-foreground">
-              {routes.length} route{routes.length !== 1 ? "s" : ""} configured
-            </p>
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title="Proxy"
+        description={`${routes.length} route${routes.length !== 1 ? "s" : ""} configured`}
+        backHref="/dashboard"
+      />
 
       <Card>
         <CardHeader>

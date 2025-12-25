@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { servers, workQueue, deployments } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyEd25519Signature } from "@/lib/crypto";
-import { syncServiceRoute } from "@/lib/caddy";
 
 export async function POST(
   request: NextRequest,
@@ -107,10 +106,6 @@ export async function POST(
               containerId,
             })
             .where(eq(deployments.id, deploymentId));
-
-          if (serviceId) {
-            syncServiceRoute(serviceId).catch(console.error);
-          }
         } else {
           await db
             .update(deployments)
@@ -125,19 +120,10 @@ export async function POST(
       const deploymentId = payload.deploymentId;
 
       if (deploymentId && status === "completed") {
-        const [dep] = await db
-          .select({ serviceId: deployments.serviceId })
-          .from(deployments)
-          .where(eq(deployments.id, deploymentId));
-
         await db
           .update(deployments)
           .set({ status: "stopped" })
           .where(eq(deployments.id, deploymentId));
-
-        if (dep?.serviceId) {
-          syncServiceRoute(dep.serviceId).catch(console.error);
-        }
       }
     }
 

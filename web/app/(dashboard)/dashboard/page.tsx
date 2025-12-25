@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { listServers } from "@/actions/servers";
 import { listProjects } from "@/actions/projects";
-import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -10,6 +9,8 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { ServerList } from "@/components/server-list";
+import { PageHeader } from "@/components/page-header";
+import { CreateProjectDialog } from "@/components/create-project-dialog";
 
 export default async function DashboardPage() {
 	const [servers, projects] = await Promise.all([
@@ -20,15 +21,11 @@ export default async function DashboardPage() {
 	return (
 		<div className="space-y-8">
 			<div className="space-y-6">
-				<div className="flex items-center justify-between">
-					<div>
-						<h2 className="text-2xl font-bold">Projects</h2>
-						<p className="text-muted-foreground">Deploy and manage services</p>
-					</div>
-					<Link href="/dashboard/projects/new">
-						<Button>New Project</Button>
-					</Link>
-				</div>
+				<PageHeader
+					title="Projects"
+					description="Deploy and manage services"
+					actions={<CreateProjectDialog />}
+				/>
 
 				{projects.length === 0 ? (
 					<Card>
@@ -36,9 +33,7 @@ export default async function DashboardPage() {
 							<p className="text-muted-foreground mb-4">
 								No projects yet. Create your first project to deploy services.
 							</p>
-							<Link href="/dashboard/projects/new">
-								<Button>New Project</Button>
-							</Link>
+							<CreateProjectDialog />
 						</CardContent>
 					</Card>
 				) : (

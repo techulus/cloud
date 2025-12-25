@@ -1,9 +1,16 @@
-import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { deployments, deploymentPorts, servers, servicePorts, workQueue } from "@/db/schema";
+import { deployments, deploymentPorts, servers, servicePorts, services } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { WIREGUARD_SUBNET_CIDR } from "./constants";
 
-export async function getPortUpstreams(
+export type CaddyRoute = {
+  id: string;
+  domain: string;
+  upstreams: string[];
+  internal: boolean;
+};
+
+async function getPortUpstreams(
   serviceId: string,
   servicePortId: string,
 ): Promise<string[]> {
@@ -45,84 +52,74 @@ export async function getPortUpstreams(
   return upstreams;
 }
 
-export async function syncPublicPorts(serviceId: string): Promise<void> {
-  const publicPorts = await db
-    .select()
-    .from(servicePorts)
-    .where(
-      and(
-        eq(servicePorts.serviceId, serviceId),
-        eq(servicePorts.isPublic, true)
-      )
-    );
+export async function getAllRoutes(): Promise<CaddyRoute[]> {
+  const routes: CaddyRoute[] = [];
 
-  const onlineServers = await db
-    .select()
-    .from(servers)
-    .where(eq(servers.status, "online"));
+  const allServices = await db.select().from(services);
 
-  for (const port of publicPorts) {
-    if (!port.subdomain) continue;
+  for (const service of allServices) {
+    const ports = await db
+      .select()
+      .from(servicePorts)
+      .where(eq(servicePorts.serviceId, service.id));
 
-    const domain = `${port.subdomain}.techulus.app`;
-    const upstreams = await getPortUpstreams(serviceId, port.id);
+    if (ports.length === 0) continue;
 
-    const route = upstreams.length > 0 ? {
-      "@id": domain,
-      match: [{ host: [domain] }],
+    const firstPort = ports[0];
+    const upstreams = await getPortUpstreams(service.id, firstPort.id);
+
+    if (upstreams.length === 0) continue;
+
+    routes.push({
+      id: `${service.name}.internal`,
+      domain: `${service.name}.internal`,
+      upstreams,
+      internal: true,
+    });
+
+    for (const port of ports) {
+      if (port.isPublic && port.subdomain) {
+        const portUpstreams = await getPortUpstreams(service.id, port.id);
+        if (portUpstreams.length > 0) {
+          routes.push({
+            id: `${port.subdomain}.techulus.app`,
+            domain: `${port.subdomain}.techulus.app`,
+            upstreams: portUpstreams,
+            internal: false,
+          });
+        }
+      }
+    }
+  }
+
+  return routes;
+}
+
+export function buildCaddyRoute(route: CaddyRoute): object {
+  if (route.internal) {
+    return {
+      "@id": route.id,
+      match: [
+        { host: [route.domain] },
+        { remote_ip: { ranges: [WIREGUARD_SUBNET_CIDR] } }
+      ],
       handle: [
         {
           handler: "reverse_proxy",
-          upstreams: upstreams.map((u) => ({ dial: u })),
+          upstreams: route.upstreams.map((u) => ({ dial: u })),
         },
       ],
-    } : null;
-
-    const payload = {
-      action: upstreams.length > 0 ? "upsert" : "delete",
-      domain,
-      route,
     };
-
-    for (const server of onlineServers) {
-      await db.insert(workQueue).values({
-        id: randomUUID(),
-        serverId: server.id,
-        type: "sync_caddy",
-        payload: JSON.stringify(payload),
-      });
-    }
-
-    console.log(`Broadcast sync_caddy for ${domain} to ${onlineServers.length} servers`);
   }
-}
 
-export async function syncServiceRoute(serviceId: string): Promise<void> {
-  return syncPublicPorts(serviceId);
-}
-
-export async function deleteRoute(subdomain: string): Promise<void> {
-  const domain = `${subdomain}.techulus.app`;
-
-  const onlineServers = await db
-    .select()
-    .from(servers)
-    .where(eq(servers.status, "online"));
-
-  const payload = {
-    action: "delete",
-    domain,
-    route: null,
+  return {
+    "@id": route.id,
+    match: [{ host: [route.domain] }],
+    handle: [
+      {
+        handler: "reverse_proxy",
+        upstreams: route.upstreams.map((u) => ({ dial: u })),
+      },
+    ],
   };
-
-  for (const server of onlineServers) {
-    await db.insert(workQueue).values({
-      id: randomUUID(),
-      serverId: server.id,
-      type: "sync_caddy",
-      payload: JSON.stringify(payload),
-    });
-  }
-
-  console.log(`Broadcast delete route for ${domain} to ${onlineServers.length} servers`);
 }
