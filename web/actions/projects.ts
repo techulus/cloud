@@ -5,12 +5,15 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
+	deploymentPorts,
 	deployments,
 	projects,
 	servers,
+	servicePorts,
 	services,
 	workQueue,
 } from "@/db/schema";
+import { syncServiceRoute } from "@/lib/caddy";
 
 function slugify(text: string): string {
 	return text
@@ -57,24 +60,37 @@ export async function deleteProject(id: string) {
 	revalidatePath("/dashboard");
 }
 
+function generateSubdomain(): string {
+	return randomUUID().replace(/-/g, "").slice(0, 8);
+}
+
 export async function createService(
 	projectId: string,
 	name: string,
 	image: string,
-	port: number,
+	ports: number[],
 ) {
 	const id = randomUUID();
+	const subdomain = generateSubdomain();
 
 	await db.insert(services).values({
 		id,
 		projectId,
 		name,
 		image,
-		port,
+		exposedDomain: `${subdomain}.techulus.app`,
 	});
 
+	for (const port of ports) {
+		await db.insert(servicePorts).values({
+			id: randomUUID(),
+			serviceId: id,
+			port,
+		});
+	}
+
 	revalidatePath(`/dashboard/projects/${projectId}`);
-	return { id, name, image, port };
+	return { id, name, image, ports, exposedDomain: `${subdomain}.techulus.app` };
 }
 
 export async function listServices(projectId: string) {
@@ -90,32 +106,72 @@ export async function getService(id: string) {
 	return results[0] || null;
 }
 
+export async function getServicePorts(serviceId: string) {
+	return db
+		.select()
+		.from(servicePorts)
+		.where(eq(servicePorts.serviceId, serviceId))
+		.orderBy(servicePorts.port);
+}
+
+export async function getDeploymentPorts(deploymentId: string) {
+	return db
+		.select({
+			id: deploymentPorts.id,
+			hostPort: deploymentPorts.hostPort,
+			containerPort: servicePorts.port,
+		})
+		.from(deploymentPorts)
+		.innerJoin(servicePorts, eq(deploymentPorts.servicePortId, servicePorts.id))
+		.where(eq(deploymentPorts.deploymentId, deploymentId));
+}
+
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
 
-async function getNextAvailablePort(serverId: string): Promise<number> {
-	const existingDeployments = await db
-		.select({ port: deployments.port })
-		.from(deployments)
+async function getUsedPorts(serverId: string): Promise<Set<number>> {
+	const existingPorts = await db
+		.select({ hostPort: deploymentPorts.hostPort })
+		.from(deploymentPorts)
+		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
 		.where(eq(deployments.serverId, serverId));
 
-	const usedPorts = new Set(
-		existingDeployments.map((d) => d.port).filter((p) => p !== null),
-	);
+	return new Set(existingPorts.map((p) => p.hostPort));
+}
 
-	for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
+async function allocateHostPorts(
+	serverId: string,
+	count: number,
+): Promise<number[]> {
+	const usedPorts = await getUsedPorts(serverId);
+	const allocated: number[] = [];
+
+	for (let port = PORT_RANGE_START; port <= PORT_RANGE_END && allocated.length < count; port++) {
 		if (!usedPorts.has(port)) {
-			return port;
+			allocated.push(port);
 		}
 	}
 
-	throw new Error("No available ports on this server");
+	if (allocated.length < count) {
+		throw new Error("Not enough available ports on this server");
+	}
+
+	return allocated;
 }
 
 export async function deployService(serviceId: string) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
+	}
+
+	const servicePortsList = await db
+		.select()
+		.from(servicePorts)
+		.where(eq(servicePorts.serviceId, serviceId));
+
+	if (servicePortsList.length === 0) {
+		throw new Error("Service has no ports defined");
 	}
 
 	const onlineServers = await db
@@ -133,7 +189,7 @@ export async function deployService(serviceId: string) {
 		throw new Error("Server has no WireGuard IP");
 	}
 
-	const hostPort = await getNextAvailablePort(server.id);
+	const hostPorts = await allocateHostPorts(server.id, servicePortsList.length);
 
 	const deploymentId = randomUUID();
 	await db.insert(deployments).values({
@@ -141,9 +197,22 @@ export async function deployService(serviceId: string) {
 		serviceId,
 		serverId: server.id,
 		status: "pending",
-		wireguardIp: server.wireguardIp,
-		port: hostPort,
 	});
+
+	const portMappings: { containerPort: number; hostPort: number }[] = [];
+	for (let i = 0; i < servicePortsList.length; i++) {
+		const sp = servicePortsList[i];
+		const hostPort = hostPorts[i];
+
+		await db.insert(deploymentPorts).values({
+			id: randomUUID(),
+			deploymentId,
+			servicePortId: sp.id,
+			hostPort,
+		});
+
+		portMappings.push({ containerPort: sp.port, hostPort });
+	}
 
 	await db.insert(workQueue).values({
 		id: randomUUID(),
@@ -153,8 +222,7 @@ export async function deployService(serviceId: string) {
 			deploymentId,
 			serviceId,
 			image: normalizeImage(service.image),
-			port: service.port,
-			hostPort,
+			portMappings,
 			wireguardIp: server.wireguardIp,
 			name: service.name,
 		}),
@@ -223,6 +291,30 @@ export async function stopDeployment(deploymentId: string) {
 			containerId: dep.containerId,
 		}),
 	});
+
+	const service = await getService(dep.serviceId);
+	if (service) {
+		revalidatePath(`/dashboard/projects/${service.projectId}`);
+	}
+
+	return { success: true };
+}
+
+export async function syncDeploymentRoute(deploymentId: string) {
+	const [dep] = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.id, deploymentId));
+
+	if (!dep) {
+		throw new Error("Deployment not found");
+	}
+
+	if (dep.status !== "running") {
+		throw new Error("Deployment is not running");
+	}
+
+	await syncServiceRoute(dep.serviceId);
 
 	const service = await getService(dep.serviceId);
 	if (service) {

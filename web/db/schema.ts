@@ -144,9 +144,19 @@ export const services = sqliteTable("services", {
     .references(() => projects.id),
   name: text("name").notNull(),
   image: text("image").notNull(),
-  port: integer("port").notNull(),
   replicas: integer("replicas").notNull().default(1),
   exposedDomain: text("exposed_domain"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
+
+export const servicePorts = sqliteTable("service_ports", {
+  id: text("id").primaryKey(),
+  serviceId: text("service_id")
+    .notNull()
+    .references(() => services.id, { onDelete: "cascade" }),
+  port: integer("port").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
@@ -178,8 +188,20 @@ export const deployments = sqliteTable("deployments", {
   })
     .notNull()
     .default("pending"),
-  wireguardIp: text("wireguard_ip"),
-  port: integer("port"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
+
+export const deploymentPorts = sqliteTable("deployment_ports", {
+  id: text("id").primaryKey(),
+  deploymentId: text("deployment_id")
+    .notNull()
+    .references(() => deployments.id, { onDelete: "cascade" }),
+  servicePortId: text("service_port_id")
+    .notNull()
+    .references(() => servicePorts.id),
+  hostPort: integer("host_port").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
@@ -190,7 +212,7 @@ export const workQueue = sqliteTable("work_queue", {
   serverId: text("server_id")
     .notNull()
     .references(() => servers.id),
-  type: text("type", { enum: ["deploy", "stop", "update_wireguard"] }).notNull(),
+  type: text("type", { enum: ["deploy", "stop", "update_wireguard", "sync_caddy"] }).notNull(),
   payload: text("payload").notNull(),
   status: text("status", {
     enum: ["pending", "processing", "completed", "failed"],
