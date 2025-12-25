@@ -1,0 +1,16 @@
+{
+  on_demand_tls {
+    ask {env.CONTROL_PLANE_URL}/api/v1/caddy/check
+  }
+}
+
+:80 {
+  redir https://{host}{uri} permanent
+}
+
+:443 {
+  tls {
+    on_demand
+  }
+  respond /__caddy_health__ "ok" 200
+}
