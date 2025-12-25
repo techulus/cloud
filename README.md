@@ -2,6 +2,8 @@
 
 A stateless container deployment platform with private-first networking.
 
+> ⚠️ **Experimental**: This is a very experimental project and is nowhere near production ready. Use at your own risk.
+
 ## Features
 
 - **Container Orchestration**: Deploy containers via Podman with automatic port binding

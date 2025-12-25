@@ -46,7 +46,8 @@ export default function DashboardLayout({
 							height={24}
 						/>
 						<p>
-							<span className="font-semibold">techulus</span>.cloud
+							<span className="font-semibold">techulus</span>.cloud{" "}
+							<span className="text-muted-foreground">[alpha]</span>
 						</p>
 					</Link>
 					<div className="flex items-center gap-4">
