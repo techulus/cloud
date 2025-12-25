@@ -157,9 +157,14 @@ export function ServiceList({
                     {service.image} • Ports: {portsList}
                   </CardDescription>
                   {service.exposedDomain && (
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <a
+                      href={`https://${service.exposedDomain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-muted-foreground mt-1 hover:underline block"
+                    >
                       {service.exposedDomain}
-                    </p>
+                    </a>
                   )}
                 </div>
                 <div className="flex items-center gap-2">

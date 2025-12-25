@@ -14,6 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/techulus/cloud-agent/internal/api"
 	"github.com/techulus/cloud-agent/internal/crypto"
 	"github.com/techulus/cloud-agent/internal/podman"
@@ -181,7 +184,8 @@ func main() {
 }
 
 func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP string) int {
-	resp, err := client.SendStatus(nil, publicIP)
+	resources := getSystemStats()
+	resp, err := client.SendStatus(resources, publicIP)
 	if err != nil {
 		consecutiveFails++
 		log.Printf("Status poll failed (%d/%d): %v", consecutiveFails, maxConsecutiveFails, err)
@@ -435,6 +439,27 @@ func saveConfig(path string, config *Config) error {
 	}
 
 	return os.WriteFile(path, data, 0600)
+}
+
+func getSystemStats() *api.Resources {
+	resources := &api.Resources{}
+
+	cpuPercent, err := cpu.Percent(0, false)
+	if err == nil && len(cpuPercent) > 0 {
+		resources.CPU = int(cpuPercent[0])
+	}
+
+	memInfo, err := mem.VirtualMemory()
+	if err == nil {
+		resources.Memory = int(memInfo.UsedPercent)
+	}
+
+	diskInfo, err := disk.Usage("/")
+	if err == nil {
+		resources.Disk = int(diskInfo.UsedPercent)
+	}
+
+	return resources
 }
 
 func getPublicIP() string {

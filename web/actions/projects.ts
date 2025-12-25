@@ -15,6 +15,7 @@ import {
 	workQueue,
 } from "@/db/schema";
 import { syncServiceRoute } from "@/lib/caddy";
+import { selectBestServer } from "@/lib/placement";
 
 function slugify(text: string): string {
 	return text
@@ -214,7 +215,11 @@ export async function deployService(serviceId: string) {
 		throw new Error("No online servers available");
 	}
 
-	const server = onlineServers[0];
+	const server = selectBestServer(onlineServers);
+
+	if (!server) {
+		throw new Error("No suitable server available");
+	}
 
 	if (!server.wireguardIp) {
 		throw new Error("Server has no WireGuard IP");
