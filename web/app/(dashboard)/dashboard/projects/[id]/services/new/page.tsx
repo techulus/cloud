@@ -17,16 +17,23 @@ export default function NewServicePage({
   const router = useRouter();
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
-  const [port, setPort] = useState("80");
+  const [ports, setPorts] = useState("80");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !image.trim()) return;
 
+    const portNumbers = ports
+      .split(",")
+      .map((p) => parseInt(p.trim()))
+      .filter((p) => !isNaN(p) && p > 0);
+
+    if (portNumbers.length === 0) return;
+
     setIsLoading(true);
     try {
-      await createService(projectId, name.trim(), image.trim(), parseInt(port));
+      await createService(projectId, name.trim(), image.trim(), portNumbers);
       router.push(`/dashboard/projects/${projectId}`);
     } catch (error) {
       console.error("Failed to create service:", error);
@@ -63,15 +70,17 @@ export default function NewServicePage({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="port">Container Port</Label>
+              <Label htmlFor="ports">Container Ports</Label>
               <Input
-                id="port"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="80"
+                id="ports"
+                value={ports}
+                onChange={(e) => setPorts(e.target.value)}
+                placeholder="80, 443"
                 required
               />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated list of ports
+              </p>
             </div>
             <div className="flex gap-2">
               <Button

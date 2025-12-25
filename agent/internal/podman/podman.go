@@ -6,12 +6,16 @@ import (
 	"strings"
 )
 
+type PortMapping struct {
+	ContainerPort int
+	HostPort      int
+}
+
 type DeployConfig struct {
-	Name        string
-	Image       string
-	Port        int
-	WireGuardIP string
-	HostPort    int
+	Name         string
+	Image        string
+	WireGuardIP  string
+	PortMappings []PortMapping
 }
 
 type DeployResult struct {
@@ -25,17 +29,16 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		return nil, fmt.Errorf("failed to pull image: %s: %w", string(output), err)
 	}
 
-	portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, config.HostPort, config.Port)
-	containerName := fmt.Sprintf("%s-%d", config.Name, config.HostPort)
+	args := []string{"run", "-d", "--name", config.Name, "--restart", "unless-stopped"}
 
-	runCmd := exec.Command("podman", "run",
-		"-d",
-		"--name", containerName,
-		"-p", portMapping,
-		"--restart", "unless-stopped",
-		image,
-	)
+	for _, pm := range config.PortMappings {
+		portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
+		args = append(args, "-p", portMapping)
+	}
 
+	args = append(args, image)
+
+	runCmd := exec.Command("podman", args...)
 	output, err := runCmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to run container: %s: %w", string(output), err)

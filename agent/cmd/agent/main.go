@@ -31,6 +31,8 @@ type Config struct {
 	WireGuardIP string `json:"wireguardIp"`
 }
 
+var isProxy bool
+
 func main() {
 	var (
 		controlPlaneURL string
@@ -43,6 +45,7 @@ func main() {
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
 	flag.DurationVar(&pollInterval, "poll-interval", defaultPollInterval, "Poll interval for status updates")
+	flag.BoolVar(&isProxy, "proxy", false, "Enable proxy mode (handles Caddy sync)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -220,6 +223,18 @@ func handleWork(client *api.Client, work *api.Work, dataDir string) {
 			log.Printf("WireGuard update failed: %v", err)
 			status = "failed"
 		}
+	case "sync_caddy":
+		if isProxy {
+			if err := handleCaddySync(work); err != nil {
+				log.Printf("Caddy sync failed: %v", err)
+				status = "failed"
+				logs = err.Error()
+			} else {
+				logs = "Caddy route synced"
+			}
+		} else {
+			logs = "Skipped (not proxy)"
+		}
 	default:
 		log.Printf("Unknown work type: %s", work.Type)
 	}
@@ -236,24 +251,33 @@ func handleDeploy(work *api.Work) (*podman.DeployResult, error) {
 		DeploymentID string `json:"deploymentId"`
 		ServiceID    string `json:"serviceId"`
 		Image        string `json:"image"`
-		Port         int    `json:"port"`
-		HostPort     int    `json:"hostPort"`
-		WireGuardIP  string `json:"wireguardIp"`
-		Name         string `json:"name"`
+		PortMappings []struct {
+			ContainerPort int `json:"containerPort"`
+			HostPort      int `json:"hostPort"`
+		} `json:"portMappings"`
+		WireGuardIP string `json:"wireguardIp"`
+		Name        string `json:"name"`
 	}
 
 	if err := json.Unmarshal(work.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	log.Printf("Deploying %s (image: %s, port: %d -> %s:%d)", payload.Name, payload.Image, payload.Port, payload.WireGuardIP, payload.HostPort)
+	portMappings := make([]podman.PortMapping, len(payload.PortMappings))
+	for i, pm := range payload.PortMappings {
+		portMappings[i] = podman.PortMapping{
+			ContainerPort: pm.ContainerPort,
+			HostPort:      pm.HostPort,
+		}
+	}
+
+	log.Printf("Deploying %s (image: %s, ports: %d mappings)", payload.Name, payload.Image, len(portMappings))
 
 	result, err := podman.Deploy(&podman.DeployConfig{
-		Name:        payload.Name,
-		Image:       payload.Image,
-		Port:        payload.Port,
-		HostPort:    payload.HostPort,
-		WireGuardIP: payload.WireGuardIP,
+		Name:         payload.Name,
+		Image:        payload.Image,
+		WireGuardIP:  payload.WireGuardIP,
+		PortMappings: portMappings,
 	})
 	if err != nil {
 		return nil, err
@@ -314,6 +338,68 @@ func handleWireguardUpdate(work *api.Work, dataDir string) error {
 	}
 
 	return wireguard.Reload(wireguard.DefaultInterface)
+}
+
+func handleCaddySync(work *api.Work) error {
+	var payload struct {
+		Action string          `json:"action"`
+		Domain string          `json:"domain"`
+		Route  json.RawMessage `json:"route"`
+	}
+
+	if err := json.Unmarshal(work.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to parse payload: %w", err)
+	}
+
+	log.Printf("Syncing Caddy route for %s (action: %s)", payload.Domain, payload.Action)
+
+	caddyURL := "http://localhost:2019"
+
+	if payload.Action == "delete" {
+		req, err := http.NewRequest("DELETE", caddyURL+"/id/"+payload.Domain, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		persistResp, _ := http.Post(caddyURL+"/config/persist", "application/json", nil)
+		if persistResp != nil {
+			persistResp.Body.Close()
+		}
+		return nil
+	}
+
+	deleteReq, _ := http.NewRequest("DELETE", caddyURL+"/id/"+payload.Domain, nil)
+	http.DefaultClient.Do(deleteReq)
+
+	resp, err := http.Post(
+		caddyURL+"/config/apps/http/servers/srv0/routes",
+		"application/json",
+		strings.NewReader(string(payload.Route)),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to sync route: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("caddy returned error: %s", string(body))
+	}
+
+	persistResp, err := http.Post(caddyURL+"/config/persist", "application/json", nil)
+	if err != nil {
+		log.Printf("Warning: failed to persist Caddy config: %v", err)
+	} else {
+		persistResp.Body.Close()
+	}
+
+	log.Printf("Caddy route synced for %s", payload.Domain)
+	return nil
 }
 
 func convertPeers(apiPeers []api.Peer) []wireguard.Peer {
