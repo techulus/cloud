@@ -244,3 +244,20 @@ export const serverContainers = sqliteTable("server_containers", {
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
 });
+
+export const proxyRoutes = sqliteTable("proxy_routes", {
+  id: text("id").primaryKey(),
+  serverId: text("server_id")
+    .notNull()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  routeId: text("route_id").notNull(),
+  domain: text("domain").notNull(),
+  upstreams: text("upstreams").notNull(),
+  isManaged: integer("is_managed", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  lastSeen: integer("last_seen", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});

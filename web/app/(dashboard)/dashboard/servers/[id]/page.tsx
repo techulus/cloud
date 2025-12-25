@@ -109,15 +109,15 @@ export default async function ServerDetailPage({
             </div>
             <div>
               <p className="text-sm text-muted-foreground">CPU</p>
-              <p>{server.resourcesCpu !== null ? `${server.resourcesCpu}%` : "—"}</p>
+              <p>{server.resourcesCpu !== null ? `${server.resourcesCpu} cores` : "—"}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Memory</p>
-              <p>{server.resourcesMemory !== null ? `${server.resourcesMemory}%` : "—"}</p>
+              <p>{server.resourcesMemory !== null ? `${Math.round(server.resourcesMemory / 1024 * 10) / 10} GB` : "—"}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Disk</p>
-              <p>{server.resourcesDisk !== null ? `${server.resourcesDisk}%` : "—"}</p>
+              <p>{server.resourcesDisk !== null ? `${server.resourcesDisk} GB` : "—"}</p>
             </div>
           </div>
         </CardContent>

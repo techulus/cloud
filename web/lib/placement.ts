@@ -1,3 +1,7 @@
+import { db } from "@/db";
+import { serverContainers } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+
 type ServerWithResources = {
   id: string;
   resourcesCpu: number | null;
@@ -5,20 +9,40 @@ type ServerWithResources = {
   resourcesDisk: number | null;
 };
 
-export function calculateServerScore(server: ServerWithResources): number {
-  const cpuFree = 100 - (server.resourcesCpu ?? 100);
-  const memoryFree = 100 - (server.resourcesMemory ?? 100);
-  const diskFree = 100 - (server.resourcesDisk ?? 100);
+export function calculateCapacityScore(server: ServerWithResources): number {
+  const cpuCores = server.resourcesCpu ?? 1;
+  const memoryMB = server.resourcesMemory ?? 1024;
+  const diskGB = server.resourcesDisk ?? 10;
 
-  const score = (cpuFree * 0.3) + (memoryFree * 0.5) + (diskFree * 0.2);
-
-  return score;
+  return cpuCores + (memoryMB / 1024) + (diskGB / 100);
 }
 
-export function selectBestServer<T extends ServerWithResources>(servers: T[]): T | null {
+export async function selectBestServer<T extends ServerWithResources>(servers: T[]): Promise<T | null> {
   if (servers.length === 0) return null;
 
-  return servers.reduce((best, current) => {
-    return calculateServerScore(current) > calculateServerScore(best) ? current : best;
-  });
+  const containerCounts = await db
+    .select({
+      serverId: serverContainers.serverId,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(serverContainers)
+    .groupBy(serverContainers.serverId);
+
+  const countMap = new Map(containerCounts.map((c) => [c.serverId, c.count]));
+
+  let bestServer: T | null = null;
+  let bestScore = -1;
+
+  for (const server of servers) {
+    const containerCount = countMap.get(server.id) ?? 0;
+    const capacityScore = calculateCapacityScore(server);
+    const finalScore = capacityScore / (containerCount + 1);
+
+    if (finalScore > bestScore) {
+      bestScore = finalScore;
+      bestServer = server;
+    }
+  }
+
+  return bestServer;
 }

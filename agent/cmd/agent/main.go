@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/techulus/cloud-agent/internal/api"
@@ -186,7 +186,13 @@ func main() {
 func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP string) int {
 	resources := getSystemStats()
 	containers := getContainerList()
-	resp, err := client.SendStatus(resources, publicIP, containers)
+
+	var proxyRoutes []api.ProxyRouteInfo
+	if isProxy {
+		proxyRoutes = getCaddyRoutes()
+	}
+
+	resp, err := client.SendStatus(resources, publicIP, containers, proxyRoutes)
 	if err != nil {
 		consecutiveFails++
 		log.Printf("Status poll failed (%d/%d): %v", consecutiveFails, maxConsecutiveFails, err)
@@ -399,20 +405,34 @@ func handleCaddySync(work *api.Work) error {
 		return nil
 	}
 
-	deleteReq, _ := http.NewRequest("DELETE", caddyURL+"/id/"+payload.Domain, nil)
-	http.DefaultClient.Do(deleteReq)
+	req, err := http.NewRequest("PUT", caddyURL+"/id/"+payload.Domain, strings.NewReader(string(payload.Route)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.Post(
-		caddyURL+"/config/apps/http/servers/srv0/routes",
-		"application/json",
-		strings.NewReader(string(payload.Route)),
-	)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to sync route: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode == 404 {
+		postResp, err := http.Post(
+			caddyURL+"/config/apps/http/servers/srv0/routes",
+			"application/json",
+			strings.NewReader(string(payload.Route)),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create route: %w", err)
+		}
+		defer postResp.Body.Close()
+
+		if postResp.StatusCode >= 400 {
+			body, _ := io.ReadAll(postResp.Body)
+			return fmt.Errorf("caddy returned error on create: %s", string(body))
+		}
+	} else if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("caddy returned error: %s", string(body))
 	}
@@ -466,19 +486,16 @@ func saveConfig(path string, config *Config) error {
 func getSystemStats() *api.Resources {
 	resources := &api.Resources{}
 
-	cpuPercent, err := cpu.Percent(0, false)
-	if err == nil && len(cpuPercent) > 0 {
-		resources.CPU = int(cpuPercent[0])
-	}
+	resources.CpuCores = runtime.NumCPU()
 
 	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		resources.Memory = int(memInfo.UsedPercent)
+		resources.MemoryTotalMB = int(memInfo.Total / 1024 / 1024)
 	}
 
 	diskInfo, err := disk.Usage("/")
 	if err == nil {
-		resources.Disk = int(diskInfo.UsedPercent)
+		resources.DiskTotalGB = int(diskInfo.Total / 1024 / 1024 / 1024)
 	}
 
 	return resources
@@ -499,4 +516,70 @@ func getPublicIP() string {
 	}
 
 	return strings.TrimSpace(string(ip))
+}
+
+func getCaddyRoutes() []api.ProxyRouteInfo {
+	resp, err := http.Get("http://localhost:2019/config/apps/http/servers/srv0/routes")
+	if err != nil {
+		log.Printf("Failed to get Caddy routes: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read Caddy routes response: %v", err)
+		return nil
+	}
+
+	var routes []struct {
+		ID     string `json:"@id"`
+		Match  []struct {
+			Host []string `json:"host"`
+		} `json:"match"`
+		Handle []struct {
+			Handler   string `json:"handler"`
+			Upstreams []struct {
+				Dial string `json:"dial"`
+			} `json:"upstreams"`
+		} `json:"handle"`
+	}
+
+	if err := json.Unmarshal(body, &routes); err != nil {
+		log.Printf("Failed to parse Caddy routes: %v", err)
+		return nil
+	}
+
+	var proxyRoutes []api.ProxyRouteInfo
+	for _, route := range routes {
+		if route.ID == "" {
+			continue
+		}
+
+		var domain string
+		if len(route.Match) > 0 && len(route.Match[0].Host) > 0 {
+			domain = route.Match[0].Host[0]
+		}
+
+		var upstreams []string
+		for _, handle := range route.Handle {
+			if handle.Handler == "reverse_proxy" {
+				for _, upstream := range handle.Upstreams {
+					upstreams = append(upstreams, upstream.Dial)
+				}
+			}
+		}
+
+		proxyRoutes = append(proxyRoutes, api.ProxyRouteInfo{
+			RouteID:   route.ID,
+			Domain:    domain,
+			Upstreams: upstreams,
+		})
+	}
+
+	return proxyRoutes
 }

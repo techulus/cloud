@@ -14,7 +14,7 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
-import { syncServiceRoute } from "@/lib/caddy";
+import { syncServiceRoute, deleteRoute } from "@/lib/caddy";
 import { selectBestServer } from "@/lib/placement";
 
 function slugify(text: string): string {
@@ -156,6 +156,15 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 
 	for (const change of changes) {
 		if (change.action === "remove" && change.portId) {
+			const [portToRemove] = await db
+				.select()
+				.from(servicePorts)
+				.where(eq(servicePorts.id, change.portId));
+
+			if (portToRemove?.isPublic && portToRemove.subdomain) {
+				await deleteRoute(portToRemove.subdomain);
+			}
+
 			await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, change.portId));
 			await db.delete(servicePorts).where(eq(servicePorts.id, change.portId));
 		} else if (change.action === "add" && change.port) {
@@ -287,6 +296,17 @@ export async function deployService(serviceId: string) {
 	}
 
 	for (const dep of existingDeployments) {
+		if (dep.containerId && dep.status === "running") {
+			await db.insert(workQueue).values({
+				id: randomUUID(),
+				serverId: dep.serverId,
+				type: "stop",
+				payload: JSON.stringify({
+					deploymentId: dep.id,
+					containerId: dep.containerId,
+				}),
+			});
+		}
 		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
 		await db.delete(deployments).where(eq(deployments.id, dep.id));
 	}
@@ -305,7 +325,7 @@ export async function deployService(serviceId: string) {
 		throw new Error("No online servers available");
 	}
 
-	const server = selectBestServer(onlineServers);
+	const server = await selectBestServer(onlineServers);
 
 	if (!server) {
 		throw new Error("No suitable server available");

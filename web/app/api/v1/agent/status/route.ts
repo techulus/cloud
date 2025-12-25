@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { servers, workQueue, deployments, serverContainers } from "@/db/schema";
+import { servers, workQueue, deployments, serverContainers, proxyRoutes, servicePorts } from "@/db/schema";
 import { eq, and, lt, ne, notInArray } from "drizzle-orm";
 import { verifyEd25519Signature } from "@/lib/crypto";
 import { getWireGuardPeers } from "@/lib/wireguard";
@@ -12,6 +12,12 @@ type ContainerInfo = {
   image: string;
   state: string;
   created: number;
+};
+
+type ProxyRouteInfo = {
+  routeId: string;
+  domain: string;
+  upstreams: string[];
 };
 
 const WORK_TIMEOUT_MINUTES = 5;
@@ -71,10 +77,11 @@ export async function POST(request: NextRequest) {
     }
 
     const parsedBody = body ? JSON.parse(body) : {};
-    const { resources, publicIp, containers } = parsedBody as {
-      resources?: { cpu?: number; memory?: number; disk?: number };
+    const { resources, publicIp, containers, proxyRoutes: agentProxyRoutes } = parsedBody as {
+      resources?: { cpuCores?: number; memoryTotalMB?: number; diskTotalGB?: number };
       publicIp?: string;
       containers?: ContainerInfo[];
+      proxyRoutes?: ProxyRouteInfo[];
     };
 
     const updateData: Record<string, unknown> = {
@@ -83,11 +90,11 @@ export async function POST(request: NextRequest) {
     };
 
     if (resources) {
-      if (resources.cpu !== undefined) updateData.resourcesCpu = resources.cpu;
-      if (resources.memory !== undefined)
-        updateData.resourcesMemory = resources.memory;
-      if (resources.disk !== undefined)
-        updateData.resourcesDisk = resources.disk;
+      if (resources.cpuCores !== undefined) updateData.resourcesCpu = resources.cpuCores;
+      if (resources.memoryTotalMB !== undefined)
+        updateData.resourcesMemory = resources.memoryTotalMB;
+      if (resources.diskTotalGB !== undefined)
+        updateData.resourcesDisk = resources.diskTotalGB;
     }
 
     const publicIpChanged = publicIp && publicIp !== server.publicIp;
@@ -178,6 +185,70 @@ export async function POST(request: NextRequest) {
       await db
         .delete(serverContainers)
         .where(eq(serverContainers.serverId, serverId));
+    }
+
+    if (agentProxyRoutes && agentProxyRoutes.length > 0) {
+      const allServicePorts = await db
+        .select({ subdomain: servicePorts.subdomain })
+        .from(servicePorts)
+        .where(eq(servicePorts.isPublic, true));
+
+      const managedDomains = new Set(
+        allServicePorts.map((sp) => sp.subdomain).filter(Boolean)
+      );
+
+      const seenRouteIds: string[] = [];
+
+      for (const route of agentProxyRoutes) {
+        seenRouteIds.push(route.routeId);
+        const isManaged = managedDomains.has(route.domain.split(".")[0]);
+
+        const existing = await db
+          .select()
+          .from(proxyRoutes)
+          .where(
+            and(
+              eq(proxyRoutes.serverId, serverId),
+              eq(proxyRoutes.routeId, route.routeId)
+            )
+          );
+
+        if (existing.length > 0) {
+          await db
+            .update(proxyRoutes)
+            .set({
+              domain: route.domain,
+              upstreams: JSON.stringify(route.upstreams),
+              isManaged,
+              lastSeen: new Date(),
+            })
+            .where(eq(proxyRoutes.id, existing[0].id));
+        } else {
+          await db.insert(proxyRoutes).values({
+            id: randomUUID(),
+            serverId,
+            routeId: route.routeId,
+            domain: route.domain,
+            upstreams: JSON.stringify(route.upstreams),
+            isManaged,
+          });
+        }
+      }
+
+      if (seenRouteIds.length > 0) {
+        await db
+          .delete(proxyRoutes)
+          .where(
+            and(
+              eq(proxyRoutes.serverId, serverId),
+              notInArray(proxyRoutes.routeId, seenRouteIds)
+            )
+          );
+      }
+    } else if (agentProxyRoutes && agentProxyRoutes.length === 0) {
+      await db
+        .delete(proxyRoutes)
+        .where(eq(proxyRoutes.serverId, serverId));
     }
 
     await handleStuckJobs();

@@ -92,15 +92,16 @@ func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP 
 }
 
 type StatusRequest struct {
-	Resources  *Resources       `json:"resources,omitempty"`
-	PublicIP   string           `json:"publicIp,omitempty"`
-	Containers []ContainerInfo  `json:"containers,omitempty"`
+	Resources   *Resources       `json:"resources,omitempty"`
+	PublicIP    string           `json:"publicIp,omitempty"`
+	Containers  []ContainerInfo  `json:"containers,omitempty"`
+	ProxyRoutes []ProxyRouteInfo `json:"proxyRoutes,omitempty"`
 }
 
 type Resources struct {
-	CPU    int `json:"cpu,omitempty"`
-	Memory int `json:"memory,omitempty"`
-	Disk   int `json:"disk,omitempty"`
+	CpuCores      int `json:"cpuCores,omitempty"`
+	MemoryTotalMB int `json:"memoryTotalMB,omitempty"`
+	DiskTotalGB   int `json:"diskTotalGB,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -109,6 +110,12 @@ type ContainerInfo struct {
 	Image   string `json:"image"`
 	State   string `json:"state"`
 	Created int64  `json:"created"`
+}
+
+type ProxyRouteInfo struct {
+	RouteID   string   `json:"routeId"`
+	Domain    string   `json:"domain"`
+	Upstreams []string `json:"upstreams"`
 }
 
 type StatusResponse struct {
@@ -121,15 +128,16 @@ type Work struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-func (c *Client) SendStatus(resources *Resources, publicIP string, containers []ContainerInfo) (*StatusResponse, error) {
+func (c *Client) SendStatus(resources *Resources, publicIP string, containers []ContainerInfo, proxyRoutes []ProxyRouteInfo) (*StatusResponse, error) {
 	if c.keyPair == nil || c.serverID == "" {
 		return nil, fmt.Errorf("client not configured with server ID and key pair")
 	}
 
 	req := StatusRequest{
-		Resources:  resources,
-		PublicIP:   publicIP,
-		Containers: containers,
+		Resources:   resources,
+		PublicIP:    publicIP,
+		Containers:  containers,
+		ProxyRoutes: proxyRoutes,
 	}
 
 	body, err := json.Marshal(req)

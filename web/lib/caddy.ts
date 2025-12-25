@@ -100,3 +100,29 @@ export async function syncPublicPorts(serviceId: string): Promise<void> {
 export async function syncServiceRoute(serviceId: string): Promise<void> {
   return syncPublicPorts(serviceId);
 }
+
+export async function deleteRoute(subdomain: string): Promise<void> {
+  const domain = `${subdomain}.techulus.app`;
+
+  const onlineServers = await db
+    .select()
+    .from(servers)
+    .where(eq(servers.status, "online"));
+
+  const payload = {
+    action: "delete",
+    domain,
+    route: null,
+  };
+
+  for (const server of onlineServers) {
+    await db.insert(workQueue).values({
+      id: randomUUID(),
+      serverId: server.id,
+      type: "sync_caddy",
+      payload: JSON.stringify(payload),
+    });
+  }
+
+  console.log(`Broadcast delete route for ${domain} to ${onlineServers.length} servers`);
+}
