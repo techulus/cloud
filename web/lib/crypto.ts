@@ -6,13 +6,13 @@ export function generateToken(): string {
 
 export function verifyEd25519Signature(
   publicKeyBase64: string,
-  message: string,
+  message: Buffer | string,
   signatureBase64: string
 ): boolean {
   try {
     const publicKeyBuffer = Buffer.from(publicKeyBase64, "base64");
     const signatureBuffer = Buffer.from(signatureBase64, "base64");
-    const messageBuffer = Buffer.from(message);
+    const messageBuffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
 
     const publicKeyDer = Buffer.concat([
       Buffer.from("302a300506032b6570032100", "hex"),

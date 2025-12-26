@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,21 +14,22 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
+
+	"techulus/cloud-agent/internal/api"
+	"techulus/cloud-agent/internal/caddy"
+	"techulus/cloud-agent/internal/crypto"
+	"techulus/cloud-agent/internal/dns"
+	agentgrpc "techulus/cloud-agent/internal/grpc"
+	"techulus/cloud-agent/internal/podman"
+	pb "techulus/cloud-agent/internal/proto"
+	"techulus/cloud-agent/internal/wireguard"
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/techulus/cloud-agent/internal/api"
-	"github.com/techulus/cloud-agent/internal/crypto"
-	"github.com/techulus/cloud-agent/internal/dns"
-	"github.com/techulus/cloud-agent/internal/podman"
-	"github.com/techulus/cloud-agent/internal/wireguard"
 )
 
 const (
-	defaultDataDir      = "/var/lib/techulus-agent"
-	defaultPollInterval = 10 * time.Second
-	maxConsecutiveFails = 30
+	defaultDataDir = "/var/lib/techulus-agent"
 )
 
 type Config struct {
@@ -39,20 +38,22 @@ type Config struct {
 }
 
 var isProxy bool
-var lastCaddyConfigHash string
+var httpClient *api.Client
+var dataDir string
 
 func main() {
 	var (
 		controlPlaneURL string
 		token           string
-		dataDir         string
-		pollInterval    time.Duration
+		grpcURL         string
+		grpcTLS         bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
-	flag.DurationVar(&pollInterval, "poll-interval", defaultPollInterval, "Poll interval for status updates")
+	flag.StringVar(&grpcURL, "grpc-url", "", "gRPC server URL (e.g., 100.0.0.1:50051)")
+	flag.BoolVar(&grpcTLS, "grpc-tls", false, "Use TLS for gRPC connection")
 	flag.BoolVar(&isProxy, "proxy", false, "Enable proxy mode (handles Caddy sync)")
 	flag.Parse()
 
@@ -72,10 +73,16 @@ func main() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
+	if (isProxy) {
+		if err := caddy.CheckPrerequisites(); err != nil {
+			log.Fatalf("Caddy prerequisites check failed: %v", err)
+		}
+	}
+
 	keyDir := filepath.Join(dataDir, "keys")
 	configPath := filepath.Join(dataDir, "config.json")
 
-	client := api.NewClient(controlPlaneURL)
+	httpClient = api.NewClient(controlPlaneURL)
 
 	var signingKeyPair *crypto.KeyPair
 	var config *Config
@@ -131,7 +138,7 @@ func main() {
 
 		log.Println("Registering with control plane...")
 		publicIP := getPublicIP()
-		resp, err := client.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP)
+		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP)
 		if err != nil {
 			log.Fatalf("Failed to register: %v", err)
 		}
@@ -184,75 +191,65 @@ func main() {
 		}
 	}
 
-	client.SetServerID(config.ServerID)
-	client.SetKeyPair(signingKeyPair)
+	grpcAddress := grpcURL
+	if grpcAddress == "" {
+		log.Fatal("--grpc-url is required")
+	}
+	log.Printf("Connecting to gRPC server at %s (TLS: %v)...", grpcAddress, grpcTLS)
+
+	grpcClient := agentgrpc.NewClient(grpcAddress, config.ServerID, signingKeyPair, grpcTLS)
+	grpcClient.SetWorkHandler(handleWork)
+	if isProxy {
+		grpcClient.SetCaddyHandler(caddy.HandleCaddyConfig)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	go func() {
+		<-stop
+		log.Println("Shutting down...")
+		cancel()
+	}()
 
 	publicIP := getPublicIP()
-	log.Printf("Agent started. Public IP: %s. Polling every %s...", publicIP, pollInterval)
+	log.Printf("Agent started. Public IP: %s. Using gRPC streaming...", publicIP)
 
-	consecutiveFails := 0
+	grpcClient.RunWithReconnect(ctx, func(includeResources bool) *agentgrpc.StatusData {
+		return getStatusData(publicIP, includeResources)
+	})
 
-	consecutiveFails = poll(client, dataDir, consecutiveFails, publicIP)
+	grpcClient.Close()
+	log.Println("Agent stopped")
+}
 
-	for {
-		select {
-		case <-ticker.C:
-			consecutiveFails = poll(client, dataDir, consecutiveFails, publicIP)
-			if consecutiveFails >= maxConsecutiveFails {
-				log.Fatalf("Too many consecutive failures (%d), shutting down", consecutiveFails)
-			}
-		case <-stop:
-			log.Println("Shutting down...")
-			return
-		}
+func getStatusData(publicIP string, includeResources bool) *agentgrpc.StatusData {
+	var resources *pb.Resources
+	if includeResources {
+		resources = getSystemStats()
+	}
+
+	return &agentgrpc.StatusData{
+		Resources:   resources,
+		PublicIP:    publicIP,
+		Containers:  getContainerList(),
+		ProxyRoutes: caddy.GetCaddyRoutes(isProxy),
 	}
 }
 
-func poll(client *api.Client, dataDir string, consecutiveFails int, publicIP string) int {
-	resources := getSystemStats()
-	containers := getContainerList()
-
-	var proxyRoutes []api.ProxyRouteInfo
-	if isProxy {
-		proxyRoutes = getCaddyRoutes()
-
-		if err := reconcileCaddy(client); err != nil {
-			log.Printf("Caddy reconcile failed: %v", err)
-		}
-	}
-
-	resp, err := client.SendStatus(resources, publicIP, containers, proxyRoutes)
-	if err != nil {
-		consecutiveFails++
-		log.Printf("Status poll failed (%d/%d): %v", consecutiveFails, maxConsecutiveFails, err)
-		return consecutiveFails
-	}
-
-	if resp.Work != nil {
-		log.Printf("Received work: id=%s, type=%s", resp.Work.ID, resp.Work.Type)
-		handleWork(client, resp.Work, dataDir)
-	}
-
-	return 0
-}
-
-func getContainerList() []api.ContainerInfo {
+func getContainerList() []*pb.ContainerInfo {
 	podmanContainers, err := podman.ListContainers()
 	if err != nil {
 		log.Printf("Failed to list containers: %v", err)
 		return nil
 	}
 
-	containers := make([]api.ContainerInfo, len(podmanContainers))
+	containers := make([]*pb.ContainerInfo, len(podmanContainers))
 	for i, c := range podmanContainers {
-		containers[i] = api.ContainerInfo{
-			ID:      c.ID,
+		containers[i] = &pb.ContainerInfo{
+			Id:      c.ID,
 			Name:    c.Name,
 			Image:   c.Image,
 			State:   c.State,
@@ -263,11 +260,10 @@ func getContainerList() []api.ContainerInfo {
 	return containers
 }
 
-func handleWork(client *api.Client, work *api.Work, dataDir string) {
-	log.Printf("Processing work %s (type: %s)", work.ID, work.Type)
+func handleWork(work *pb.WorkItem) (status string, logs string) {
+	log.Printf("Processing work %s (type: %s)", work.Id, work.Type)
 
-	var status string = "completed"
-	var logs string
+	status = "completed"
 
 	switch work.Type {
 	case "deploy":
@@ -286,7 +282,7 @@ func handleWork(client *api.Client, work *api.Work, dataDir string) {
 			logs = err.Error()
 		}
 	case "update_wireguard":
-		if err := handleWireguardUpdate(work, dataDir); err != nil {
+		if err := handleWireguardUpdate(work); err != nil {
 			log.Printf("WireGuard update failed: %v", err)
 			status = "failed"
 		}
@@ -296,14 +292,11 @@ func handleWork(client *api.Client, work *api.Work, dataDir string) {
 		log.Printf("Unknown work type: %s", work.Type)
 	}
 
-	if err := client.CompleteWork(work.ID, status, logs); err != nil {
-		log.Printf("Failed to complete work: %v", err)
-	} else {
-		log.Printf("Work %s completed with status: %s", work.ID, status)
-	}
+	log.Printf("Work %s completed with status: %s", work.Id, status)
+	return status, logs
 }
 
-func handleDeploy(work *api.Work) (*podman.DeployResult, error) {
+func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 	var payload struct {
 		DeploymentID string `json:"deploymentId"`
 		ServiceID    string `json:"serviceId"`
@@ -344,7 +337,7 @@ func handleDeploy(work *api.Work) (*podman.DeployResult, error) {
 	return result, nil
 }
 
-func handleStop(work *api.Work) error {
+func handleStop(work *pb.WorkItem) error {
 	var payload struct {
 		ContainerID string `json:"containerId"`
 	}
@@ -363,7 +356,7 @@ func handleStop(work *api.Work) error {
 	return nil
 }
 
-func handleWireguardUpdate(work *api.Work, dataDir string) error {
+func handleWireguardUpdate(work *pb.WorkItem) error {
 	var payload struct {
 		Peers []api.Peer `json:"peers"`
 	}
@@ -432,19 +425,19 @@ func saveConfig(path string, config *Config) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-func getSystemStats() *api.Resources {
-	resources := &api.Resources{}
+func getSystemStats() *pb.Resources {
+	resources := &pb.Resources{}
 
-	resources.CpuCores = runtime.NumCPU()
+	resources.CpuCores = int32(runtime.NumCPU())
 
 	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		resources.MemoryTotalMB = int(memInfo.Total / 1024 / 1024)
+		resources.MemoryTotalMb = int32(memInfo.Total / 1024 / 1024)
 	}
 
 	diskInfo, err := disk.Usage("/")
 	if err == nil {
-		resources.DiskTotalGB = int(diskInfo.Total / 1024 / 1024 / 1024)
+		resources.DiskTotalGb = int32(diskInfo.Total / 1024 / 1024 / 1024)
 	}
 
 	return resources
@@ -467,131 +460,4 @@ func getPublicIP() string {
 	return strings.TrimSpace(string(ip))
 }
 
-func getCaddyRoutes() []api.ProxyRouteInfo {
-	resp, err := http.Get("http://localhost:2019/config/apps/http/servers/srv0/routes")
-	if err != nil {
-		log.Printf("Failed to get Caddy routes: %v", err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Failed to read Caddy routes response: %v", err)
-		return nil
-	}
-
-	var routes []struct {
-		ID     string `json:"@id"`
-		Match  []struct {
-			Host []string `json:"host"`
-		} `json:"match"`
-		Handle []struct {
-			Handler   string `json:"handler"`
-			Upstreams []struct {
-				Dial string `json:"dial"`
-			} `json:"upstreams"`
-		} `json:"handle"`
-	}
-
-	if err := json.Unmarshal(body, &routes); err != nil {
-		log.Printf("Failed to parse Caddy routes: %v", err)
-		return nil
-	}
-
-	var proxyRoutes []api.ProxyRouteInfo
-	for _, route := range routes {
-		if route.ID == "" {
-			continue
-		}
-
-		var domain string
-		if len(route.Match) > 0 && len(route.Match[0].Host) > 0 {
-			domain = route.Match[0].Host[0]
-		}
-
-		var upstreams []string
-		for _, handle := range route.Handle {
-			if handle.Handler == "reverse_proxy" {
-				for _, upstream := range handle.Upstreams {
-					upstreams = append(upstreams, upstream.Dial)
-				}
-			}
-		}
-
-		proxyRoutes = append(proxyRoutes, api.ProxyRouteInfo{
-			RouteID:   route.ID,
-			Domain:    domain,
-			Upstreams: upstreams,
-		})
-	}
-
-	return proxyRoutes
-}
-
-func reconcileCaddy(client *api.Client) error {
-	desiredConfig, err := client.FetchCaddyConfig()
-	if err != nil {
-		return fmt.Errorf("failed to fetch desired config: %w", err)
-	}
-
-	var routes []any
-	for _, route := range desiredConfig.Routes {
-		routes = append(routes, route.CaddyConfig)
-	}
-
-	routesJSON, err := json.Marshal(routes)
-	if err != nil {
-		return fmt.Errorf("failed to marshal routes: %w", err)
-	}
-
-	hash := sha256.Sum256(routesJSON)
-	hashStr := hex.EncodeToString(hash[:])
-
-	if hashStr == lastCaddyConfigHash {
-		return nil
-	}
-
-	caddyURL := "http://localhost:2019"
-	endpoint := caddyURL + "/config/apps/http/servers/srv0/routes"
-
-	req, err := http.NewRequest("PATCH", endpoint, bytes.NewReader(routesJSON))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to update routes: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		resp.Body.Close()
-		req, err = http.NewRequest("PUT", endpoint, bytes.NewReader(routesJSON))
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err = http.DefaultClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to create routes: %w", err)
-		}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("caddy returned %d: %s", resp.StatusCode, body)
-	}
-
-	lastCaddyConfigHash = hashStr
-	log.Printf("Synced %d routes to Caddy", len(routes))
-	return nil
-}
 

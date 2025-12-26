@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/techulus/cloud-agent/internal/config"
+	"techulus/cloud-agent/internal/config"
 )
 
 const (
@@ -15,24 +15,24 @@ const (
 
 var ProxyWireGuardIP = config.ProxyWireGuardIP
 
-func SetupProxyDNS(wireguardIp string) error {
-	if err := os.MkdirAll("/etc/dnsmasq.d", 0755); err != nil {
+func SetupProxyDNS(wireguardIP string) error {
+	if err := os.MkdirAll("/etc/dnsmasq.d", 0o755); err != nil {
 		return fmt.Errorf("failed to create dnsmasq.d: %w", err)
 	}
 
-	config := fmt.Sprintf("address=/internal/%s\n", wireguardIp)
+	config := fmt.Sprintf("address=/internal/%s\n", wireguardIP)
 
-	if err := os.WriteFile(dnsmasqConfigPath, []byte(config), 0644); err != nil {
+	if err := os.WriteFile(dnsmasqConfigPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
 	mainConfig := `port=53
-listen-address=127.0.0.1,` + wireguardIp + `
+listen-address=127.0.0.1,` + wireguardIP + `
 bind-interfaces
 conf-dir=/etc/dnsmasq.d
 `
 
-	if err := os.WriteFile("/etc/dnsmasq.conf", []byte(mainConfig), 0644); err != nil {
+	if err := os.WriteFile("/etc/dnsmasq.conf", []byte(mainConfig), 0o644); err != nil {
 		return fmt.Errorf("failed to write main dnsmasq config: %w", err)
 	}
 
@@ -54,7 +54,7 @@ conf-dir=/etc/dnsmasq.d
 }
 
 func ConfigureClientDNS(dnsServer string) error {
-	if err := os.MkdirAll("/etc/systemd/resolved.conf.d", 0755); err != nil {
+	if err := os.MkdirAll("/etc/systemd/resolved.conf.d", 0o755); err != nil {
 		return fmt.Errorf("failed to create resolved.conf.d: %w", err)
 	}
 
@@ -63,7 +63,7 @@ DNS=%s
 Domains=~internal
 `, dnsServer)
 
-	if err := os.WriteFile(resolvedDropInPath, []byte(config), 0644); err != nil {
+	if err := os.WriteFile(resolvedDropInPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write resolved config: %w", err)
 	}
 
