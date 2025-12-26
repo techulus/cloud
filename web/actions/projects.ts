@@ -2,7 +2,6 @@
 
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -42,7 +41,6 @@ export async function createProject(name: string) {
 		slug,
 	});
 
-	revalidatePath("/dashboard");
 	return { id, name, slug };
 }
 
@@ -75,16 +73,9 @@ export async function getProjectBySlug(slug: string) {
 	return results[0] || null;
 }
 
-async function revalidateProject(projectId: string) {
-	const project = await getProject(projectId);
-	if (project) {
-		revalidatePath(`/dashboard/projects/${project.slug}`);
-	}
-}
 
 export async function deleteProject(id: string) {
 	await db.delete(projects).where(eq(projects.id, id));
-	revalidatePath("/dashboard");
 }
 
 export async function createService(
@@ -111,7 +102,6 @@ export async function createService(
 		});
 	}
 
-	await revalidateProject(projectId);
 	return { id, name, image, ports };
 }
 
@@ -170,7 +160,6 @@ export async function deleteService(serviceId: string) {
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
-	await revalidateProject(service.projectId);
 	return { success: true };
 }
 
@@ -265,7 +254,6 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 		await deployService(serviceId, placements);
 	}
 
-	await revalidateProject(service.projectId);
 	return { success: true, redeployed: runningDeployments.length > 0 };
 }
 
@@ -447,7 +435,6 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		}
 	}
 
-	await revalidateProject(service.projectId);
 	return { deploymentIds, replicaCount: totalReplicas };
 }
 
@@ -476,11 +463,6 @@ export async function deleteDeployment(deploymentId: string) {
 	}
 
 	await db.delete(deployments).where(eq(deployments.id, deploymentId));
-
-	const service = await getService(dep.serviceId);
-	if (service) {
-		await revalidateProject(service.projectId);
-	}
 
 	return { success: true };
 }
@@ -515,11 +497,6 @@ export async function stopDeployment(deploymentId: string) {
 			containerId: dep.containerId,
 		}),
 	});
-
-	const service = await getService(dep.serviceId);
-	if (service) {
-		await revalidateProject(service.projectId);
-	}
 
 	return { success: true };
 }

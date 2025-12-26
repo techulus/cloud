@@ -5,7 +5,6 @@ import { servers, serverContainers } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { broadcastWireGuardUpdate } from "@/lib/wireguard";
-import { revalidatePath } from "next/cache";
 
 function generateId(): string {
   return randomBytes(12).toString("hex");
@@ -57,7 +56,6 @@ export async function approveServer(id: string) {
 
 export async function syncWireGuard() {
   const count = await broadcastWireGuardUpdate();
-  revalidatePath("/dashboard");
   return count;
 }
 
