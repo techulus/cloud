@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -37,6 +39,7 @@ type Config struct {
 }
 
 var isProxy bool
+var lastCaddyConfigHash string
 
 func main() {
 	var (
@@ -546,6 +549,13 @@ func reconcileCaddy(client *api.Client) error {
 		return fmt.Errorf("failed to marshal routes: %w", err)
 	}
 
+	hash := sha256.Sum256(routesJSON)
+	hashStr := hex.EncodeToString(hash[:])
+
+	if hashStr == lastCaddyConfigHash {
+		return nil
+	}
+
 	caddyURL := "http://localhost:2019"
 	endpoint := caddyURL + "/config/apps/http/servers/srv0/routes"
 
@@ -580,6 +590,7 @@ func reconcileCaddy(client *api.Client) error {
 		return fmt.Errorf("caddy returned %d: %s", resp.StatusCode, body)
 	}
 
+	lastCaddyConfigHash = hashStr
 	log.Printf("Synced %d routes to Caddy", len(routes))
 	return nil
 }

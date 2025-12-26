@@ -14,3 +14,10 @@ A stateless container deployment platform with private-first networking.
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+
+## TODO
+
+- [ ] Replace HTTP polling with gRPC bidirectional streaming
+- [ ] Distributed Caddy
+- [ ] Per-machine subnet allocation
+- [ ] Local DNS on each machine
