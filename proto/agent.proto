@@ -12,6 +12,7 @@ message AgentMessage {
   string server_id = 1;
   string timestamp = 2;
   string signature = 3;
+  uint64 sequence = 4;
 
   oneof payload {
     StatusUpdate status_update = 10;
@@ -21,6 +22,8 @@ message AgentMessage {
 }
 
 message ControlPlaneMessage {
+  uint64 sequence = 1;
+
   oneof payload {
     WorkItem work = 10;
     Acknowledgement ack = 11;

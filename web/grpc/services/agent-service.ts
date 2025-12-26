@@ -20,16 +20,23 @@ import { connectionStore } from "../store/connections";
 
 type AgentStream = grpc.ServerDuplexStream<AgentMessage, ControlPlaneMessage>;
 
-function verifyMessage(
-	msg: AgentMessage,
-	server: { signingPublicKey: string | null },
-): boolean {
-	if (!server.signingPublicKey) return false;
+const TIMESTAMP_TOLERANCE_MS = 60 * 1000;
 
+interface SessionContext {
+	authenticated: boolean;
+	serverId: string | null;
+	serverName: string | null;
+	sessionId: string | null;
+	signingPublicKey: string | null;
+}
+
+function verifyMessage(msg: AgentMessage, publicKey: string): boolean {
 	const timestampMs = Number.parseInt(msg.timestamp, 10);
 	const now = Date.now();
-	if (Math.abs(now - timestampMs) > 5 * 60 * 1000) {
-		console.log(`[grpc:auth] timestamp expired: ${timestampMs} vs ${now}`);
+	if (Math.abs(now - timestampMs) > TIMESTAMP_TOLERANCE_MS) {
+		console.log(
+			`[grpc:auth] timestamp expired: ${timestampMs} vs ${now} (diff=${Math.abs(now - timestampMs)}ms)`
+		);
 		return false;
 	}
 
@@ -44,23 +51,41 @@ function verifyMessage(
 		return false;
 	}
 
-	const timestampBytes = Buffer.from(`${msg.timestamp}:`);
-	const message = Buffer.concat([timestampBytes, payloadBytes]);
+	const messageToVerify = Buffer.concat([
+		Buffer.from(`${msg.timestamp}:`),
+		Buffer.from(payloadBytes),
+	]);
 
-	return verifyEd25519Signature(
-		server.signingPublicKey,
-		message,
-		msg.signature,
-	);
+	return verifyEd25519Signature(publicKey, messageToVerify, msg.signature);
+}
+
+function sendError(
+	call: AgentStream,
+	serverId: string | null,
+	code: number,
+	message: string,
+	fatal: boolean
+): void {
+	if (serverId) {
+		connectionStore.sendMessage(serverId, {
+			error: { code, message, fatal },
+		});
+	} else {
+		call.write({ error: { code, message, fatal }, sequence: 1 });
+	}
 }
 
 export function createAgentService(): AgentServiceServer {
+
 	return {
 		connect(call: AgentStream): void {
-			let authenticated = false;
-			let serverId: string | null = null;
-			let serverName: string | null = null;
-			let sessionId: string | null = null;
+			const ctx: SessionContext = {
+				authenticated: false,
+				serverId: null,
+				serverName: null,
+				sessionId: null,
+				signingPublicKey: null,
+			};
 
 			call.on("data", async (msg: AgentMessage) => {
 				const msgType = msg.status_update
@@ -70,19 +95,20 @@ export function createAgentService(): AgentServiceServer {
 						: msg.heartbeat
 							? "Heartbeat"
 							: "Unknown";
-				console.log(`[grpc:recv] server=${msg.server_id} type=${msgType}`);
+				console.log(
+					`[grpc:recv] server=${msg.server_id} type=${msgType} seq=${msg.sequence}`
+				);
 
 				try {
-					if (!authenticated) {
+					if (!ctx.authenticated) {
 						if (!msg.status_update) {
-							call.write({
-								error: {
-									code: 401,
-									message:
-										"First message must be a status update for authentication",
-									fatal: true,
-								},
-							});
+							sendError(
+								call,
+								null,
+								401,
+								"First message must be a status update for authentication",
+								true
+							);
 							call.end();
 							return;
 						}
@@ -94,59 +120,60 @@ export function createAgentService(): AgentServiceServer {
 
 						const server = serverResults[0];
 						if (!server || !server.signingPublicKey) {
-							call.write({
-								error: {
-									code: 404,
-									message: "Server not found or not registered",
-									fatal: true,
-								},
-							});
+							sendError(
+								call,
+								null,
+								404,
+								"Server not found or not registered",
+								true
+							);
 							call.end();
 							return;
 						}
 
 						if (server.status === "unknown") {
-							call.write({
-								error: {
-									code: 403,
-									message: "Server requires approval",
-									fatal: true,
-								},
-							});
+							sendError(
+								call,
+								null,
+								403,
+								"Server requires approval",
+								true
+							);
 							call.end();
 							return;
 						}
 
-						const isValid = verifyMessage(msg, server);
+						const isValid = verifyMessage(msg, server.signingPublicKey);
 						if (!isValid) {
-							call.write({
-								error: {
-									code: 401,
-									message: "Invalid signature",
-									fatal: true,
-								},
-							});
+							sendError(call, null, 401, "Invalid signature", true);
 							call.end();
 							return;
 						}
 
-						authenticated = true;
-						serverId = msg.server_id;
-						serverName = server.name;
-						sessionId = randomUUID();
+						ctx.authenticated = true;
+						ctx.serverId = msg.server_id;
+						ctx.serverName = server.name;
+						ctx.sessionId = randomUUID();
+						ctx.signingPublicKey = server.signingPublicKey;
 						const isProxy = isProxyServer(server.wireguardIp);
 
-						connectionStore.add(serverId, serverName, call, sessionId, isProxy);
+						connectionStore.add(
+							ctx.serverId,
+							ctx.serverName,
+							call,
+							ctx.sessionId,
+							isProxy
+						);
 
-						call.write({
-							connected: { session_id: sessionId },
+						connectionStore.sendMessage(ctx.serverId, {
+							connected: { session_id: ctx.sessionId },
 						});
 
 						console.log(
-							`[agent:${serverName}] connected via gRPC (proxy=${isProxy})`,
+							`[agent:${ctx.serverName}] connected via gRPC (proxy=${isProxy})`
 						);
 
-						await handleStatusUpdate(serverId, {
+						await handleStatusUpdate(ctx.serverId, {
 							resources: msg.status_update.resources
 								? {
 										cpuCores: msg.status_update.resources.cpu_cores,
@@ -163,29 +190,61 @@ export function createAgentService(): AgentServiceServer {
 							})),
 						});
 
-						if (isProxy) {
-							await pushCaddyConfigToProxies();
-						}
-
 						return;
 					}
 
-					if (msg.server_id !== serverId) {
-						call.write({
-							error: {
-								code: 400,
-								message: "Server ID mismatch",
-								fatal: true,
-							},
-						});
+					if (msg.server_id !== ctx.serverId) {
+						sendError(
+							call,
+							ctx.serverId,
+							400,
+							"Server ID mismatch",
+							true
+						);
 						call.end();
 						return;
 					}
 
-					connectionStore.updateHeartbeat(serverId);
+					const isValid = verifyMessage(msg, ctx.signingPublicKey!);
+					if (!isValid) {
+						console.error(
+							`[agent:${ctx.serverName}] signature verification failed for ${msgType}`
+						);
+						sendError(
+							call,
+							ctx.serverId,
+							401,
+							"Invalid signature",
+							true
+						);
+						call.end();
+						return;
+					}
+
+					if (
+						!connectionStore.validateAndUpdateSequence(
+							ctx.serverId!,
+							msg.sequence
+						)
+					) {
+						console.error(
+							`[agent:${ctx.serverName}] replay attack detected: seq=${msg.sequence}`
+						);
+						sendError(
+							call,
+							ctx.serverId,
+							400,
+							"Invalid sequence number (replay detected)",
+							true
+						);
+						call.end();
+						return;
+					}
+
+					connectionStore.updateHeartbeat(ctx.serverId!);
 
 					if (msg.status_update) {
-						await handleStatusUpdate(serverId, {
+						await handleStatusUpdate(ctx.serverId!, {
 							resources: msg.status_update.resources
 								? {
 										cpuCores: msg.status_update.resources.cpu_cores,
@@ -202,41 +261,46 @@ export function createAgentService(): AgentServiceServer {
 							})),
 						});
 					} else if (msg.work_complete) {
-						await handleWorkComplete(serverId, msg.work_complete);
-						call.write({
+						await handleWorkComplete(ctx.serverId!, msg.work_complete);
+						connectionStore.sendMessage(ctx.serverId!, {
 							ack: {
 								message_id: msg.work_complete.work_id,
 								success: true,
 							},
 						});
 					} else if (msg.heartbeat) {
-						console.log(`[agent:${serverName}] heartbeat`);
+						console.log(`[agent:${ctx.serverName}] heartbeat`);
 					}
 				} catch (error) {
-					console.error(`[agent:${serverName || msg.server_id}] error:`, error);
-					call.write({
-						error: {
-							code: 500,
-							message:
-								error instanceof Error ? error.message : "Internal error",
-							fatal: false,
-						},
-					});
+					console.error(
+						`[agent:${ctx.serverName || msg.server_id}] error:`,
+						error
+					);
+					sendError(
+						call,
+						ctx.serverId,
+						500,
+						error instanceof Error ? error.message : "Internal error",
+						false
+					);
 				}
 			});
 
 			call.on("end", () => {
-				if (serverId) {
-					connectionStore.remove(serverId);
-					console.log(`[agent:${serverName}] disconnected`);
+				if (ctx.serverId) {
+					connectionStore.remove(ctx.serverId);
+					console.log(`[agent:${ctx.serverName}] disconnected`);
 				}
 				call.end();
 			});
 
 			call.on("error", (error) => {
-				if (serverId) {
-					connectionStore.remove(serverId);
-					console.log(`[agent:${serverName}] connection error:`, error.message);
+				if (ctx.serverId) {
+					connectionStore.remove(ctx.serverId);
+					console.log(
+						`[agent:${ctx.serverName}] connection error:`,
+						error.message
+					);
 				}
 			});
 		},

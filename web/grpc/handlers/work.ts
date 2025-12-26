@@ -167,20 +167,18 @@ export async function dispatchPendingWork(): Promise<void> {
       }
     }
 
-    const message = {
+    console.log(`[grpc:send] server=${serverId} type=WorkItem work_id=${work.id} work_type=${work.type}`);
+
+    const success = connectionStore.sendMessage(serverId, {
       work: {
         id: work.id,
         type: work.type,
         payload: Buffer.from(work.payload),
       },
-    };
+    });
 
-    console.log(`[grpc:send] server=${serverId} type=WorkItem work_id=${work.id} work_type=${work.type}`);
-
-    try {
-      connection.stream.write(message);
-    } catch (error) {
-      console.error(`Failed to dispatch work to ${serverName}:`, error);
+    if (!success) {
+      console.error(`Failed to dispatch work to ${serverName}`);
       await db
         .update(workQueue)
         .set({

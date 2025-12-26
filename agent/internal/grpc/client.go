@@ -25,11 +25,11 @@ type (
 )
 
 type Client struct {
-	address   string
-	serverID  string
-	keyPair   *crypto.KeyPair
-	conn      *grpc.ClientConn
-	stream    pb.AgentService_ConnectClient
+	address  string
+	serverID string
+	keyPair  *crypto.KeyPair
+	conn     *grpc.ClientConn
+	stream   pb.AgentService_ConnectClient
 	sessionID string
 	useTLS    bool
 
@@ -45,6 +45,10 @@ type Client struct {
 	reconnectDelay    time.Duration
 	maxReconnectDelay time.Duration
 	reconnectMult     float64
+
+	outgoingSequence uint64
+	lastServerSeq    uint64
+	seqMu            sync.Mutex
 }
 
 func NewClient(address, serverID string, keyPair *crypto.KeyPair, useTLS bool) *Client {
@@ -68,6 +72,30 @@ func (c *Client) SetWorkHandler(handler WorkHandler) {
 
 func (c *Client) SetCaddyHandler(handler CaddyHandler) {
 	c.caddyHandler = handler
+}
+
+func (c *Client) nextSequence() uint64 {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+	c.outgoingSequence++
+	return c.outgoingSequence
+}
+
+func (c *Client) resetSequences() {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+	c.outgoingSequence = 0
+	c.lastServerSeq = 0
+}
+
+func (c *Client) validateServerSequence(seq uint64) bool {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+	if seq <= c.lastServerSeq {
+		return false
+	}
+	c.lastServerSeq = seq
+	return true
 }
 
 func (c *Client) Connect(ctx context.Context) error {
@@ -104,7 +132,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) signProto(msg proto.Message) (timestamp, signature string, err error) {
+func (c *Client) signProtoWithSeq(msg proto.Message, seq uint64) (timestamp, signature string, err error) {
 	payloadBytes, err := proto.Marshal(msg)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal proto: %w", err)
@@ -132,7 +160,8 @@ func (c *Client) SendStatusUpdate(status *StatusData) error {
 		ProxyRoutes: status.ProxyRoutes,
 	}
 
-	timestamp, signature, err := c.signProto(update)
+	seq := c.nextSequence()
+	timestamp, signature, err := c.signProtoWithSeq(update, seq)
 	if err != nil {
 		return err
 	}
@@ -141,10 +170,11 @@ func (c *Client) SendStatusUpdate(status *StatusData) error {
 		ServerId:  c.serverID,
 		Timestamp: timestamp,
 		Signature: signature,
+		Sequence:  seq,
 		Payload:   &pb.AgentMessage_StatusUpdate{StatusUpdate: update},
 	}
 
-	log.Printf("[grpc:send] type=StatusUpdate containers=%d", len(status.Containers))
+	log.Printf("[grpc:send] type=StatusUpdate containers=%d seq=%d", len(status.Containers), seq)
 	return c.stream.Send(msg)
 }
 
@@ -155,7 +185,8 @@ func (c *Client) SendWorkComplete(workID, workStatus, logs string) error {
 		Logs:   logs,
 	}
 
-	timestamp, signature, err := c.signProto(complete)
+	seq := c.nextSequence()
+	timestamp, signature, err := c.signProtoWithSeq(complete, seq)
 	if err != nil {
 		return err
 	}
@@ -164,10 +195,11 @@ func (c *Client) SendWorkComplete(workID, workStatus, logs string) error {
 		ServerId:  c.serverID,
 		Timestamp: timestamp,
 		Signature: signature,
+		Sequence:  seq,
 		Payload:   &pb.AgentMessage_WorkComplete{WorkComplete: complete},
 	}
 
-	log.Printf("[grpc:send] type=WorkComplete work_id=%s status=%s", workID, workStatus)
+	log.Printf("[grpc:send] type=WorkComplete work_id=%s status=%s seq=%d", workID, workStatus, seq)
 	return c.stream.Send(msg)
 }
 
@@ -176,7 +208,8 @@ func (c *Client) SendHeartbeat() error {
 		Timestamp: time.Now().UnixMilli(),
 	}
 
-	timestamp, signature, err := c.signProto(heartbeat)
+	seq := c.nextSequence()
+	timestamp, signature, err := c.signProtoWithSeq(heartbeat, seq)
 	if err != nil {
 		return err
 	}
@@ -185,6 +218,7 @@ func (c *Client) SendHeartbeat() error {
 		ServerId:  c.serverID,
 		Timestamp: timestamp,
 		Signature: signature,
+		Sequence:  seq,
 		Payload:   &pb.AgentMessage_Heartbeat{Heartbeat: heartbeat},
 	}
 
@@ -213,14 +247,28 @@ func (c *Client) RunReceiver(ctx context.Context) {
 	}
 }
 
+func (c *Client) validateServerMessage(msg *pb.ControlPlaneMessage) bool {
+	if !c.validateServerSequence(msg.Sequence) {
+		log.Printf("[grpc:verify] replay detected: seq=%d", msg.Sequence)
+		return false
+	}
+	return true
+}
+
 func (c *Client) handleMessage(msg *pb.ControlPlaneMessage) {
+	if !c.validateServerMessage(msg) {
+		log.Printf("[grpc:recv] REJECTED - replay detected seq=%d", msg.Sequence)
+		c.stopOnce.Do(func() { close(c.stopChan) })
+		return
+	}
+
 	switch payload := msg.Payload.(type) {
 	case *pb.ControlPlaneMessage_Connected:
 		c.sessionID = payload.Connected.SessionId
-		log.Printf("[grpc:recv] type=Connected session=%s", c.sessionID)
+		log.Printf("[grpc:recv] type=Connected session=%s seq=%d", c.sessionID, msg.Sequence)
 
 	case *pb.ControlPlaneMessage_Work:
-		log.Printf("[grpc:recv] type=WorkItem work_id=%s work_type=%s", payload.Work.Id, payload.Work.Type)
+		log.Printf("[grpc:recv] type=WorkItem work_id=%s work_type=%s seq=%d", payload.Work.Id, payload.Work.Type, msg.Sequence)
 		if c.workHandler != nil {
 			go func() {
 				status, logs := c.workHandler(payload.Work)
@@ -231,17 +279,17 @@ func (c *Client) handleMessage(msg *pb.ControlPlaneMessage) {
 		}
 
 	case *pb.ControlPlaneMessage_Ack:
-		log.Printf("[grpc:recv] type=Ack message_id=%s", payload.Ack.MessageId)
+		log.Printf("[grpc:recv] type=Ack message_id=%s seq=%d", payload.Ack.MessageId, msg.Sequence)
 
 	case *pb.ControlPlaneMessage_Error:
-		log.Printf("[grpc:recv] type=Error code=%d message=%s fatal=%v",
-			payload.Error.Code, payload.Error.Message, payload.Error.Fatal)
+		log.Printf("[grpc:recv] type=Error code=%d message=%s fatal=%v seq=%d",
+			payload.Error.Code, payload.Error.Message, payload.Error.Fatal, msg.Sequence)
 		if payload.Error.Fatal {
 			c.stopOnce.Do(func() { close(c.stopChan) })
 		}
 
 	case *pb.ControlPlaneMessage_CaddyConfig:
-		log.Printf("[grpc:recv] type=CaddyConfig routes=%d", len(payload.CaddyConfig.Routes))
+		log.Printf("[grpc:recv] type=CaddyConfig routes=%d seq=%d", len(payload.CaddyConfig.Routes), msg.Sequence)
 		if c.caddyHandler != nil {
 			go c.caddyHandler(payload.CaddyConfig)
 		}
@@ -305,10 +353,15 @@ func (c *Client) RunWithReconnect(ctx context.Context, getStatus func(includeRes
 
 		c.stopChan = make(chan struct{})
 		c.stopOnce = sync.Once{}
+		c.resetSequences()
 
 		if err := c.Connect(ctx); err != nil {
 			log.Printf("Connection failed: %v, retrying in %v", err, delay)
-			time.Sleep(delay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
 			delay = min(time.Duration(float64(delay)*c.reconnectMult), c.maxReconnectDelay)
 			continue
 		}
@@ -330,6 +383,10 @@ func (c *Client) RunWithReconnect(ctx context.Context, getStatus func(includeRes
 		c.conn.Close()
 
 		log.Println("Connection lost, reconnecting...")
-		time.Sleep(delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
 	}
 }

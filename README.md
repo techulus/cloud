@@ -17,7 +17,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 ## TODO
 
-- [ ] Replace HTTP polling with gRPC bidirectional streaming
+- [x] Replace HTTP polling with gRPC bidirectional streaming
 - [ ] Distributed Caddy
 - [ ] Per-machine subnet allocation
 - [ ] Local DNS on each machine

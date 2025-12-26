@@ -12,7 +12,18 @@ export function verifyEd25519Signature(
   try {
     const publicKeyBuffer = Buffer.from(publicKeyBase64, "base64");
     const signatureBuffer = Buffer.from(signatureBase64, "base64");
-    const messageBuffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+    const messageBuffer = Buffer.isBuffer(message)
+      ? message
+      : Buffer.from(message);
+
+    if (publicKeyBuffer.length !== 32) {
+      console.error("Invalid public key length:", publicKeyBuffer.length);
+      return false;
+    }
+    if (signatureBuffer.length !== 64) {
+      console.error("Invalid signature length:", signatureBuffer.length);
+      return false;
+    }
 
     const publicKeyDer = Buffer.concat([
       Buffer.from("302a300506032b6570032100", "hex"),

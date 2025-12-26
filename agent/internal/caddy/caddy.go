@@ -99,7 +99,7 @@ func GetCaddyRoutes(isProxy bool) []*pb.ProxyRouteInfo {
 }
 
 func HandleCaddyConfig(config *pb.CaddyConfig) {
-	var routes []any
+	routes := make([]any, 0, len(config.Routes))
 	for _, route := range config.Routes {
 		upstreams := make([]map[string]string, len(route.Upstreams))
 		for i, u := range route.Upstreams {

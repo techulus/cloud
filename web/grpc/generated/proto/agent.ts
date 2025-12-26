@@ -24,12 +24,14 @@ export interface AgentMessage {
   server_id: string;
   timestamp: string;
   signature: string;
+  sequence: number;
   status_update?: StatusUpdate | undefined;
   work_complete?: WorkComplete | undefined;
   heartbeat?: Heartbeat | undefined;
 }
 
 export interface ControlPlaneMessage {
+  sequence: number;
   work?: WorkItem | undefined;
   ack?: Acknowledgement | undefined;
   error?: Error | undefined;
@@ -111,6 +113,7 @@ function createBaseAgentMessage(): AgentMessage {
     server_id: "",
     timestamp: "",
     signature: "",
+    sequence: 0,
     status_update: undefined,
     work_complete: undefined,
     heartbeat: undefined,
@@ -127,6 +130,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     }
     if (message.signature !== "") {
       writer.uint32(26).string(message.signature);
+    }
+    if (message.sequence !== 0) {
+      writer.uint32(32).uint64(message.sequence);
     }
     if (message.status_update !== undefined) {
       StatusUpdate.encode(message.status_update, writer.uint32(82).fork()).join();
@@ -171,6 +177,14 @@ export const AgentMessage: MessageFns<AgentMessage> = {
           message.signature = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.sequence = longToNumber(reader.uint64());
+          continue;
+        }
         case 10: {
           if (tag !== 82) {
             break;
@@ -209,6 +223,7 @@ export const AgentMessage: MessageFns<AgentMessage> = {
       server_id: isSet(object.server_id) ? globalThis.String(object.server_id) : "",
       timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : "",
       signature: isSet(object.signature) ? globalThis.String(object.signature) : "",
+      sequence: isSet(object.sequence) ? globalThis.Number(object.sequence) : 0,
       status_update: isSet(object.status_update) ? StatusUpdate.fromJSON(object.status_update) : undefined,
       work_complete: isSet(object.work_complete) ? WorkComplete.fromJSON(object.work_complete) : undefined,
       heartbeat: isSet(object.heartbeat) ? Heartbeat.fromJSON(object.heartbeat) : undefined,
@@ -225,6 +240,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     }
     if (message.signature !== "") {
       obj.signature = message.signature;
+    }
+    if (message.sequence !== 0) {
+      obj.sequence = Math.round(message.sequence);
     }
     if (message.status_update !== undefined) {
       obj.status_update = StatusUpdate.toJSON(message.status_update);
@@ -246,6 +264,7 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     message.server_id = object.server_id ?? "";
     message.timestamp = object.timestamp ?? "";
     message.signature = object.signature ?? "";
+    message.sequence = object.sequence ?? 0;
     message.status_update = (object.status_update !== undefined && object.status_update !== null)
       ? StatusUpdate.fromPartial(object.status_update)
       : undefined;
@@ -260,11 +279,21 @@ export const AgentMessage: MessageFns<AgentMessage> = {
 };
 
 function createBaseControlPlaneMessage(): ControlPlaneMessage {
-  return { work: undefined, ack: undefined, error: undefined, connected: undefined, caddy_config: undefined };
+  return {
+    sequence: 0,
+    work: undefined,
+    ack: undefined,
+    error: undefined,
+    connected: undefined,
+    caddy_config: undefined,
+  };
 }
 
 export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
   encode(message: ControlPlaneMessage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sequence !== 0) {
+      writer.uint32(8).uint64(message.sequence);
+    }
     if (message.work !== undefined) {
       WorkItem.encode(message.work, writer.uint32(82).fork()).join();
     }
@@ -290,6 +319,14 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.sequence = longToNumber(reader.uint64());
+          continue;
+        }
         case 10: {
           if (tag !== 82) {
             break;
@@ -341,6 +378,7 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
 
   fromJSON(object: any): ControlPlaneMessage {
     return {
+      sequence: isSet(object.sequence) ? globalThis.Number(object.sequence) : 0,
       work: isSet(object.work) ? WorkItem.fromJSON(object.work) : undefined,
       ack: isSet(object.ack) ? Acknowledgement.fromJSON(object.ack) : undefined,
       error: isSet(object.error) ? Error.fromJSON(object.error) : undefined,
@@ -351,6 +389,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
 
   toJSON(message: ControlPlaneMessage): unknown {
     const obj: any = {};
+    if (message.sequence !== 0) {
+      obj.sequence = Math.round(message.sequence);
+    }
     if (message.work !== undefined) {
       obj.work = WorkItem.toJSON(message.work);
     }
@@ -374,6 +415,7 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
   },
   fromPartial<I extends Exact<DeepPartial<ControlPlaneMessage>, I>>(object: I): ControlPlaneMessage {
     const message = createBaseControlPlaneMessage();
+    message.sequence = object.sequence ?? 0;
     message.work = (object.work !== undefined && object.work !== null) ? WorkItem.fromPartial(object.work) : undefined;
     message.ack = (object.ack !== undefined && object.ack !== null)
       ? Acknowledgement.fromPartial(object.ack)

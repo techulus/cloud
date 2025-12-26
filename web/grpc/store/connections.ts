@@ -9,6 +9,8 @@ interface Connection {
   lastHeartbeat: Date;
   sessionId: string;
   isProxy: boolean;
+  lastAgentSequence: number;
+  outgoingSequence: number;
 }
 
 class ConnectionStore {
@@ -25,8 +27,7 @@ class ConnectionStore {
     if (existing) {
       try {
         existing.stream.end();
-      } catch {
-      }
+      } catch {}
     }
 
     this.connections.set(serverId, {
@@ -37,6 +38,8 @@ class ConnectionStore {
       lastHeartbeat: new Date(),
       sessionId,
       isProxy,
+      lastAgentSequence: 0,
+      outgoingSequence: 0,
     });
   }
 
@@ -55,6 +58,28 @@ class ConnectionStore {
     }
   }
 
+  validateAndUpdateSequence(serverId: string, sequence: number): boolean {
+    const conn = this.connections.get(serverId);
+    if (!conn) return false;
+
+    if (sequence <= conn.lastAgentSequence) {
+      console.error(
+        `[grpc:replay] server=${serverId} expected>${conn.lastAgentSequence} got=${sequence}`
+      );
+      return false;
+    }
+
+    conn.lastAgentSequence = sequence;
+    return true;
+  }
+
+  getNextOutgoingSequence(serverId: string): number {
+    const conn = this.connections.get(serverId);
+    if (!conn) return 1;
+    conn.outgoingSequence += 1;
+    return conn.outgoingSequence;
+  }
+
   getAll(): Connection[] {
     return Array.from(this.connections.values());
   }
@@ -67,16 +92,33 @@ class ConnectionStore {
     return this.connections.size;
   }
 
+  sendMessage(
+    serverId: string,
+    payload: Omit<ControlPlaneMessage, "sequence">
+  ): boolean {
+    const conn = this.connections.get(serverId);
+    if (!conn) return false;
+
+    try {
+      const sequence = this.getNextOutgoingSequence(serverId);
+      conn.stream.write({ ...payload, sequence });
+      return true;
+    } catch (error) {
+      console.error(`Failed to send message to ${conn.serverName}:`, error);
+      return false;
+    }
+  }
+
   pushCaddyConfig(routes: CaddyRoute[]): void {
     const proxyConnections = this.getProxyConnections();
     for (const conn of proxyConnections) {
-      try {
-        conn.stream.write({
-          caddy_config: { routes },
-        });
-        console.log(`[grpc:send] server=${conn.serverId} type=CaddyConfig routes=${routes.length}`);
-      } catch (error) {
-        console.error(`Failed to push CaddyConfig to ${conn.serverName}:`, error);
+      const success = this.sendMessage(conn.serverId, {
+        caddy_config: { routes },
+      });
+      if (success) {
+        console.log(
+          `[grpc:send] server=${conn.serverId} type=CaddyConfig routes=${routes.length}`
+        );
       }
     }
   }
