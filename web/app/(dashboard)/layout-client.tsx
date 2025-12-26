@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { signOut, useSession } from "@/lib/auth-client";
-import Link from "next/link";
 
 export function DashboardLayoutClient({
 	children,
@@ -24,7 +25,7 @@ export function DashboardLayoutClient({
 	if (isPending) {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
-				<p className="text-muted-foreground">Loading...</p>
+				<Spinner />
 			</div>
 		);
 	}
