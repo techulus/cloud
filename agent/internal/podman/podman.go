@@ -35,11 +35,11 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
-	}
-
-	for _, pm := range config.PortMappings {
-		portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
-		args = append(args, "-p", portMapping)
+	} else {
+		for _, pm := range config.PortMappings {
+			portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
+			args = append(args, "-p", portMapping)
+		}
 	}
 
 	args = append(args, image)
