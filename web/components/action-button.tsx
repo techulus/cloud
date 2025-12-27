@@ -9,6 +9,7 @@ interface ActionButtonProps {
   loadingLabel: string;
   variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
   size?: "default" | "sm" | "lg" | "icon";
+  onComplete?: () => void;
 }
 
 export function ActionButton({
@@ -17,6 +18,7 @@ export function ActionButton({
   loadingLabel,
   variant = "default",
   size = "sm",
+  onComplete,
 }: ActionButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -24,6 +26,7 @@ export function ActionButton({
     setIsLoading(true);
     try {
       await action();
+      onComplete?.();
     } catch (error) {
       console.error("Action failed:", error);
     } finally {

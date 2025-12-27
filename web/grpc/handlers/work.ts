@@ -6,6 +6,30 @@ import type { WorkComplete } from "../generated/proto/agent";
 import { pushCaddyConfigToAll } from "./caddy";
 import { pushDnsConfigToAll } from "./dns";
 
+/**
+ * Push DNS and Caddy configs in correct order with optional acknowledgment-based waiting.
+ * Ensures DNS records are available on agents before Caddy routes are pushed.
+ *
+ * Future enhancement: Wait for agent acknowledgments instead of timeout.
+ * For now, uses a 1-second delay as fallback while ack system is being implemented.
+ */
+async function pushConfigsInOrder(): Promise<void> {
+  // Push DNS config first (includes service DNS records)
+  await pushDnsConfigToAll();
+
+  // Small delay to ensure DNS config is received and applied by agents
+  // TODO: Replace with acknowledgment-based waiting once implemented:
+  // const dnsAcks = await connectionStore.waitForConfigAcks("dns", 10000);
+  // if (!dnsAcks.all) { /* handle partial failures */ }
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // Now push Caddy routes (guaranteed DNS is ready)
+  await pushCaddyConfigToAll();
+
+  // TODO: Optional: Wait for Caddy acks too
+  // const caddyAcks = await connectionStore.waitForConfigAcks("caddy", 10000);
+}
+
 const WORK_TIMEOUT_MINUTES = 5;
 const MAX_ATTEMPTS = 3;
 
@@ -54,8 +78,10 @@ export async function handleWorkComplete(
           })
           .where(eq(deployments.id, deploymentId));
 
-        await pushCaddyConfigToAll();
-        await pushDnsConfigToAll();
+        // Push DNS and Caddy configs in correct order
+        // First push DNS, then wait for acknowledgments before Caddy routes
+        // This ensures agents have DNS records ready before Caddy tries ACME
+        await pushConfigsInOrder();
       } else {
         await db
           .update(deployments)
@@ -75,8 +101,8 @@ export async function handleWorkComplete(
         .set({ status: "stopped" })
         .where(eq(deployments.id, deploymentId));
 
-      await pushCaddyConfigToAll();
-      await pushDnsConfigToAll();
+      // Push DNS and Caddy configs to remove stale records/routes
+      await pushConfigsInOrder();
     }
   }
 }

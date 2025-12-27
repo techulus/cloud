@@ -10,6 +10,7 @@ interface Connection {
   sessionId: string;
   lastAgentSequence: number;
   outgoingSequence: number;
+  closed: boolean;
 }
 
 class ConnectionStore {
@@ -22,10 +23,13 @@ class ConnectionStore {
     sessionId: string
   ): void {
     const existing = this.connections.get(serverId);
-    if (existing) {
+    if (existing && !existing.closed) {
       try {
-        existing.stream.end();
-      } catch {}
+        existing.stream.destroy();
+        existing.closed = true;
+      } catch (e) {
+        console.log(`[grpc:cleanup] Error closing previous connection: ${e}`);
+      }
     }
 
     this.connections.set(serverId, {
@@ -37,10 +41,15 @@ class ConnectionStore {
       sessionId,
       lastAgentSequence: 0,
       outgoingSequence: 0,
+      closed: false,
     });
   }
 
   remove(serverId: string): void {
+    const conn = this.connections.get(serverId);
+    if (conn && !conn.closed) {
+      conn.closed = true;
+    }
     this.connections.delete(serverId);
   }
 
@@ -90,7 +99,7 @@ class ConnectionStore {
     payload: Omit<ControlPlaneMessage, "sequence">
   ): boolean {
     const conn = this.connections.get(serverId);
-    if (!conn) return false;
+    if (!conn || conn.closed) return false;
 
     try {
       const sequence = this.getNextOutgoingSequence(serverId);
@@ -98,6 +107,7 @@ class ConnectionStore {
       return true;
     } catch (error) {
       console.error(`Failed to send message to ${conn.serverName}:`, error);
+      conn.closed = true;
       return false;
     }
   }
