@@ -2,7 +2,7 @@ import { getAllRoutes } from "@/lib/caddy";
 import { connectionStore } from "../store/connections";
 import type { CaddyRoute } from "../generated/proto/agent";
 
-export async function pushCaddyConfigToProxies(): Promise<void> {
+export async function pushCaddyConfigToAll(): Promise<void> {
   const routes = await getAllRoutes();
 
   const caddyRoutes: CaddyRoute[] = routes.map((route) => ({

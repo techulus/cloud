@@ -1,93 +1,105 @@
 import { db } from "@/db";
-import { servers, workQueue } from "@/db/schema";
-import { eq, isNotNull, and } from "drizzle-orm";
+import { servers, deployments, workQueue } from "@/db/schema";
+import { eq, isNotNull, and, ne } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import {
-  WIREGUARD_SUBNET_PREFIX,
-  WIREGUARD_SUBNET_CIDR,
-  PROXY_WIREGUARD_IP,
-} from "./constants";
+import { WIREGUARD_SUBNET_PREFIX, CONTAINER_SUBNET_PREFIX } from "./constants";
 
-export function isProxyServer(wireguardIp: string | null): boolean {
-  return wireguardIp === PROXY_WIREGUARD_IP;
-}
-
-export async function assignWireGuardIp(): Promise<string> {
+export async function assignSubnet(): Promise<{ subnetId: number; wireguardIp: string }> {
   const existingServers = await db
-    .select({ wireguardIp: servers.wireguardIp })
+    .select({ subnetId: servers.subnetId })
     .from(servers)
-    .where(isNotNull(servers.wireguardIp));
+    .where(isNotNull(servers.subnetId));
 
-  const usedIps = new Set(existingServers.map((s) => s.wireguardIp));
+  const usedSubnets = new Set(existingServers.map((s) => s.subnetId));
 
-  for (let third = 0; third <= 255; third++) {
-    for (let fourth = 1; fourth <= 254; fourth++) {
-      const ip = `${WIREGUARD_SUBNET_PREFIX}.${third}.${fourth}`;
-      if (!usedIps.has(ip)) {
-        return ip;
-      }
+  for (let subnetId = 1; subnetId <= 255; subnetId++) {
+    if (!usedSubnets.has(subnetId)) {
+      const wireguardIp = `${WIREGUARD_SUBNET_PREFIX}.${subnetId}.1`;
+      return { subnetId, wireguardIp };
     }
   }
 
-  throw new Error("No available WireGuard IPs");
+  throw new Error("No available subnets");
 }
 
-export async function getWireGuardPeers(
-  excludeServerId: string,
-  callerWireguardIp: string
-) {
+export async function assignContainerIp(serverId: string): Promise<string> {
+  const server = await db
+    .select({ subnetId: servers.subnetId })
+    .from(servers)
+    .where(eq(servers.id, serverId))
+    .then((r) => r[0]);
+
+  if (!server?.subnetId) {
+    throw new Error("Server does not have a subnet assigned");
+  }
+
+  const existingDeployments = await db
+    .select({ ipAddress: deployments.ipAddress })
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.serverId, serverId),
+        isNotNull(deployments.ipAddress)
+      )
+    );
+
+  const usedIps = new Set(existingDeployments.map((d) => d.ipAddress));
+
+  for (let hostPart = 2; hostPart <= 254; hostPart++) {
+    const ip = `${CONTAINER_SUBNET_PREFIX}.${server.subnetId}.${hostPart}`;
+    if (!usedIps.has(ip)) {
+      return ip;
+    }
+  }
+
+  throw new Error("No available IPs in server subnet");
+}
+
+export async function getWireGuardPeers(excludeServerId: string) {
   const allServers = await db
     .select({
       id: servers.id,
+      subnetId: servers.subnetId,
       wireguardIp: servers.wireguardIp,
       wireguardPublicKey: servers.wireguardPublicKey,
       publicIp: servers.publicIp,
     })
     .from(servers)
-    .where(isNotNull(servers.wireguardPublicKey));
+    .where(
+      and(
+        isNotNull(servers.wireguardPublicKey),
+        isNotNull(servers.subnetId),
+        ne(servers.id, excludeServerId)
+      )
+    );
 
-  const callerIsProxy = isProxyServer(callerWireguardIp);
-
-  return allServers
-    .filter((s) => {
-      if (s.id === excludeServerId) return false;
-      if (callerIsProxy) {
-        return !isProxyServer(s.wireguardIp);
-      }
-      return isProxyServer(s.wireguardIp);
-    })
-    .map((s) => ({
-      publicKey: s.wireguardPublicKey!,
-      allowedIps: isProxyServer(s.wireguardIp)
-        ? WIREGUARD_SUBNET_CIDR
-        : `${s.wireguardIp}/32`,
-      endpoint: s.publicIp ? `${s.publicIp}:51820` : null,
-    }));
+  return allServers.map((s) => ({
+    publicKey: s.wireguardPublicKey!,
+    allowedIps: `${WIREGUARD_SUBNET_PREFIX}.${s.subnetId}.0/24,${CONTAINER_SUBNET_PREFIX}.${s.subnetId}.0/24`,
+    endpoint: s.publicIp ? `${s.publicIp}:51820` : null,
+  }));
 }
 
 export async function broadcastWireGuardUpdate() {
-  const proxyServer = await db
-    .select({ id: servers.id, wireguardIp: servers.wireguardIp })
+  const onlineServers = await db
+    .select({ id: servers.id })
     .from(servers)
     .where(
       and(
         eq(servers.status, "online"),
-        eq(servers.wireguardIp, PROXY_WIREGUARD_IP)
+        isNotNull(servers.subnetId)
       )
-    )
-    .then((r) => r[0]);
+    );
 
-  if (!proxyServer) {
-    return 0;
+  for (const server of onlineServers) {
+    const peers = await getWireGuardPeers(server.id);
+    await db.insert(workQueue).values({
+      id: randomUUID(),
+      serverId: server.id,
+      type: "update_wireguard",
+      payload: JSON.stringify({ peers }),
+    });
   }
 
-  const peers = await getWireGuardPeers(proxyServer.id, proxyServer.wireguardIp!);
-  await db.insert(workQueue).values({
-    id: randomUUID(),
-    serverId: proxyServer.id,
-    type: "update_wireguard",
-    payload: JSON.stringify({ peers }),
-  });
-
-  return 1;
+  return onlineServers.length;
 }

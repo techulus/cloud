@@ -37,6 +37,7 @@ export interface ControlPlaneMessage {
   error?: Error | undefined;
   connected?: ConnectionAccepted | undefined;
   caddy_config?: CaddyConfig | undefined;
+  dns_config?: DnsConfig | undefined;
 }
 
 export interface CaddyConfig {
@@ -53,28 +54,12 @@ export interface CaddyRoute {
 export interface StatusUpdate {
   resources: Resources | undefined;
   public_ip: string;
-  containers: ContainerInfo[];
-  proxy_routes: ProxyRouteInfo[];
 }
 
 export interface Resources {
   cpu_cores: number;
   memory_total_mb: number;
   disk_total_gb: number;
-}
-
-export interface ContainerInfo {
-  id: string;
-  name: string;
-  image: string;
-  state: string;
-  created: number;
-}
-
-export interface ProxyRouteInfo {
-  route_id: string;
-  domain: string;
-  upstreams: string[];
 }
 
 export interface WorkItem {
@@ -106,6 +91,15 @@ export interface Error {
 
 export interface ConnectionAccepted {
   session_id: string;
+}
+
+export interface DnsConfig {
+  records: DnsRecord[];
+}
+
+export interface DnsRecord {
+  name: string;
+  ips: string[];
 }
 
 function createBaseAgentMessage(): AgentMessage {
@@ -286,6 +280,7 @@ function createBaseControlPlaneMessage(): ControlPlaneMessage {
     error: undefined,
     connected: undefined,
     caddy_config: undefined,
+    dns_config: undefined,
   };
 }
 
@@ -308,6 +303,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
     }
     if (message.caddy_config !== undefined) {
       CaddyConfig.encode(message.caddy_config, writer.uint32(114).fork()).join();
+    }
+    if (message.dns_config !== undefined) {
+      DnsConfig.encode(message.dns_config, writer.uint32(122).fork()).join();
     }
     return writer;
   },
@@ -367,6 +365,14 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
           message.caddy_config = CaddyConfig.decode(reader, reader.uint32());
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.dns_config = DnsConfig.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -384,6 +390,7 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
       error: isSet(object.error) ? Error.fromJSON(object.error) : undefined,
       connected: isSet(object.connected) ? ConnectionAccepted.fromJSON(object.connected) : undefined,
       caddy_config: isSet(object.caddy_config) ? CaddyConfig.fromJSON(object.caddy_config) : undefined,
+      dns_config: isSet(object.dns_config) ? DnsConfig.fromJSON(object.dns_config) : undefined,
     };
   },
 
@@ -407,6 +414,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
     if (message.caddy_config !== undefined) {
       obj.caddy_config = CaddyConfig.toJSON(message.caddy_config);
     }
+    if (message.dns_config !== undefined) {
+      obj.dns_config = DnsConfig.toJSON(message.dns_config);
+    }
     return obj;
   },
 
@@ -426,6 +436,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
       : undefined;
     message.caddy_config = (object.caddy_config !== undefined && object.caddy_config !== null)
       ? CaddyConfig.fromPartial(object.caddy_config)
+      : undefined;
+    message.dns_config = (object.dns_config !== undefined && object.dns_config !== null)
+      ? DnsConfig.fromPartial(object.dns_config)
       : undefined;
     return message;
   },
@@ -602,7 +615,7 @@ export const CaddyRoute: MessageFns<CaddyRoute> = {
 };
 
 function createBaseStatusUpdate(): StatusUpdate {
-  return { resources: undefined, public_ip: "", containers: [], proxy_routes: [] };
+  return { resources: undefined, public_ip: "" };
 }
 
 export const StatusUpdate: MessageFns<StatusUpdate> = {
@@ -612,12 +625,6 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     }
     if (message.public_ip !== "") {
       writer.uint32(18).string(message.public_ip);
-    }
-    for (const v of message.containers) {
-      ContainerInfo.encode(v!, writer.uint32(26).fork()).join();
-    }
-    for (const v of message.proxy_routes) {
-      ProxyRouteInfo.encode(v!, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -645,22 +652,6 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
           message.public_ip = reader.string();
           continue;
         }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.containers.push(ContainerInfo.decode(reader, reader.uint32()));
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.proxy_routes.push(ProxyRouteInfo.decode(reader, reader.uint32()));
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -674,12 +665,6 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     return {
       resources: isSet(object.resources) ? Resources.fromJSON(object.resources) : undefined,
       public_ip: isSet(object.public_ip) ? globalThis.String(object.public_ip) : "",
-      containers: globalThis.Array.isArray(object?.containers)
-        ? object.containers.map((e: any) => ContainerInfo.fromJSON(e))
-        : [],
-      proxy_routes: globalThis.Array.isArray(object?.proxy_routes)
-        ? object.proxy_routes.map((e: any) => ProxyRouteInfo.fromJSON(e))
-        : [],
     };
   },
 
@@ -690,12 +675,6 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     }
     if (message.public_ip !== "") {
       obj.public_ip = message.public_ip;
-    }
-    if (message.containers?.length) {
-      obj.containers = message.containers.map((e) => ContainerInfo.toJSON(e));
-    }
-    if (message.proxy_routes?.length) {
-      obj.proxy_routes = message.proxy_routes.map((e) => ProxyRouteInfo.toJSON(e));
     }
     return obj;
   },
@@ -709,8 +688,6 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
       ? Resources.fromPartial(object.resources)
       : undefined;
     message.public_ip = object.public_ip ?? "";
-    message.containers = object.containers?.map((e) => ContainerInfo.fromPartial(e)) || [];
-    message.proxy_routes = object.proxy_routes?.map((e) => ProxyRouteInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -803,224 +780,6 @@ export const Resources: MessageFns<Resources> = {
     message.cpu_cores = object.cpu_cores ?? 0;
     message.memory_total_mb = object.memory_total_mb ?? 0;
     message.disk_total_gb = object.disk_total_gb ?? 0;
-    return message;
-  },
-};
-
-function createBaseContainerInfo(): ContainerInfo {
-  return { id: "", name: "", image: "", state: "", created: 0 };
-}
-
-export const ContainerInfo: MessageFns<ContainerInfo> = {
-  encode(message: ContainerInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.id !== "") {
-      writer.uint32(10).string(message.id);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.image !== "") {
-      writer.uint32(26).string(message.image);
-    }
-    if (message.state !== "") {
-      writer.uint32(34).string(message.state);
-    }
-    if (message.created !== 0) {
-      writer.uint32(40).int64(message.created);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ContainerInfo {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseContainerInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.id = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.name = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.image = reader.string();
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.state = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.created = longToNumber(reader.int64());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): ContainerInfo {
-    return {
-      id: isSet(object.id) ? globalThis.String(object.id) : "",
-      name: isSet(object.name) ? globalThis.String(object.name) : "",
-      image: isSet(object.image) ? globalThis.String(object.image) : "",
-      state: isSet(object.state) ? globalThis.String(object.state) : "",
-      created: isSet(object.created) ? globalThis.Number(object.created) : 0,
-    };
-  },
-
-  toJSON(message: ContainerInfo): unknown {
-    const obj: any = {};
-    if (message.id !== "") {
-      obj.id = message.id;
-    }
-    if (message.name !== "") {
-      obj.name = message.name;
-    }
-    if (message.image !== "") {
-      obj.image = message.image;
-    }
-    if (message.state !== "") {
-      obj.state = message.state;
-    }
-    if (message.created !== 0) {
-      obj.created = Math.round(message.created);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ContainerInfo>, I>>(base?: I): ContainerInfo {
-    return ContainerInfo.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ContainerInfo>, I>>(object: I): ContainerInfo {
-    const message = createBaseContainerInfo();
-    message.id = object.id ?? "";
-    message.name = object.name ?? "";
-    message.image = object.image ?? "";
-    message.state = object.state ?? "";
-    message.created = object.created ?? 0;
-    return message;
-  },
-};
-
-function createBaseProxyRouteInfo(): ProxyRouteInfo {
-  return { route_id: "", domain: "", upstreams: [] };
-}
-
-export const ProxyRouteInfo: MessageFns<ProxyRouteInfo> = {
-  encode(message: ProxyRouteInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.route_id !== "") {
-      writer.uint32(10).string(message.route_id);
-    }
-    if (message.domain !== "") {
-      writer.uint32(18).string(message.domain);
-    }
-    for (const v of message.upstreams) {
-      writer.uint32(26).string(v!);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ProxyRouteInfo {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseProxyRouteInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.route_id = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.domain = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.upstreams.push(reader.string());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): ProxyRouteInfo {
-    return {
-      route_id: isSet(object.route_id) ? globalThis.String(object.route_id) : "",
-      domain: isSet(object.domain) ? globalThis.String(object.domain) : "",
-      upstreams: globalThis.Array.isArray(object?.upstreams)
-        ? object.upstreams.map((e: any) => globalThis.String(e))
-        : [],
-    };
-  },
-
-  toJSON(message: ProxyRouteInfo): unknown {
-    const obj: any = {};
-    if (message.route_id !== "") {
-      obj.route_id = message.route_id;
-    }
-    if (message.domain !== "") {
-      obj.domain = message.domain;
-    }
-    if (message.upstreams?.length) {
-      obj.upstreams = message.upstreams;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ProxyRouteInfo>, I>>(base?: I): ProxyRouteInfo {
-    return ProxyRouteInfo.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ProxyRouteInfo>, I>>(object: I): ProxyRouteInfo {
-    const message = createBaseProxyRouteInfo();
-    message.route_id = object.route_id ?? "";
-    message.domain = object.domain ?? "";
-    message.upstreams = object.upstreams?.map((e) => e) || [];
     return message;
   },
 };
@@ -1489,6 +1248,142 @@ export const ConnectionAccepted: MessageFns<ConnectionAccepted> = {
   fromPartial<I extends Exact<DeepPartial<ConnectionAccepted>, I>>(object: I): ConnectionAccepted {
     const message = createBaseConnectionAccepted();
     message.session_id = object.session_id ?? "";
+    return message;
+  },
+};
+
+function createBaseDnsConfig(): DnsConfig {
+  return { records: [] };
+}
+
+export const DnsConfig: MessageFns<DnsConfig> = {
+  encode(message: DnsConfig, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.records) {
+      DnsRecord.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DnsConfig {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDnsConfig();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.records.push(DnsRecord.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DnsConfig {
+    return {
+      records: globalThis.Array.isArray(object?.records) ? object.records.map((e: any) => DnsRecord.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: DnsConfig): unknown {
+    const obj: any = {};
+    if (message.records?.length) {
+      obj.records = message.records.map((e) => DnsRecord.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DnsConfig>, I>>(base?: I): DnsConfig {
+    return DnsConfig.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DnsConfig>, I>>(object: I): DnsConfig {
+    const message = createBaseDnsConfig();
+    message.records = object.records?.map((e) => DnsRecord.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseDnsRecord(): DnsRecord {
+  return { name: "", ips: [] };
+}
+
+export const DnsRecord: MessageFns<DnsRecord> = {
+  encode(message: DnsRecord, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    for (const v of message.ips) {
+      writer.uint32(18).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DnsRecord {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDnsRecord();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.ips.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DnsRecord {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      ips: globalThis.Array.isArray(object?.ips) ? object.ips.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: DnsRecord): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.ips?.length) {
+      obj.ips = message.ips;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DnsRecord>, I>>(base?: I): DnsRecord {
+    return DnsRecord.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DnsRecord>, I>>(object: I): DnsRecord {
+    const message = createBaseDnsRecord();
+    message.name = object.name ?? "";
+    message.ips = object.ips?.map((e) => e) || [];
     return message;
   },
 };

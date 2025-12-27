@@ -110,6 +110,7 @@ export const servers = sqliteTable("servers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   publicIp: text("public_ip"),
+  subnetId: integer("subnet_id"),
   wireguardIp: text("wireguard_ip"),
   wireguardPublicKey: text("wireguard_public_key"),
   signingPublicKey: text("signing_public_key"),
@@ -141,7 +142,7 @@ export const services = sqliteTable("services", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
     .notNull()
-    .references(() => projects.id),
+    .references(() => projects.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   image: text("image").notNull(),
   replicas: integer("replicas").notNull().default(1),
@@ -167,7 +168,7 @@ export const secrets = sqliteTable("secrets", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
-    .references(() => services.id),
+    .references(() => services.id, { onDelete: "cascade" }),
   key: text("key").notNull(),
   encryptedValue: text("encrypted_value").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -179,11 +180,12 @@ export const deployments = sqliteTable("deployments", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
-    .references(() => services.id),
+    .references(() => services.id, { onDelete: "cascade" }),
   serverId: text("server_id")
     .notNull()
-    .references(() => servers.id),
+    .references(() => servers.id, { onDelete: "cascade" }),
   containerId: text("container_id"),
+  ipAddress: text("ip_address"),
   status: text("status", {
     enum: ["pending", "pulling", "running", "stopping", "stopped", "failed"],
   })
@@ -201,7 +203,7 @@ export const deploymentPorts = sqliteTable("deployment_ports", {
     .references(() => deployments.id, { onDelete: "cascade" }),
   servicePortId: text("service_port_id")
     .notNull()
-    .references(() => servicePorts.id),
+    .references(() => servicePorts.id, { onDelete: "cascade" }),
   hostPort: integer("host_port").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -212,7 +214,7 @@ export const workQueue = sqliteTable("work_queue", {
   id: text("id").primaryKey(),
   serverId: text("server_id")
     .notNull()
-    .references(() => servers.id),
+    .references(() => servers.id, { onDelete: "cascade" }),
   type: text("type", { enum: ["deploy", "stop", "update_wireguard", "sync_caddy"] }).notNull(),
   payload: text("payload").notNull(),
   status: text("status", {
@@ -227,37 +229,3 @@ export const workQueue = sqliteTable("work_queue", {
   attempts: integer("attempts").notNull().default(0),
 });
 
-export const serverContainers = sqliteTable("server_containers", {
-  id: text("id").primaryKey(),
-  serverId: text("server_id")
-    .notNull()
-    .references(() => servers.id, { onDelete: "cascade" }),
-  containerId: text("container_id").notNull(),
-  name: text("name").notNull(),
-  image: text("image").notNull(),
-  state: text("state").notNull(),
-  isManaged: integer("is_managed", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-  lastSeen: integer("last_seen", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-});
-
-export const proxyRoutes = sqliteTable("proxy_routes", {
-  id: text("id").primaryKey(),
-  serverId: text("server_id")
-    .notNull()
-    .references(() => servers.id, { onDelete: "cascade" }),
-  routeId: text("route_id").notNull(),
-  domain: text("domain").notNull(),
-  upstreams: text("upstreams").notNull(),
-  isManaged: integer("is_managed", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-  lastSeen: integer("last_seen", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-});

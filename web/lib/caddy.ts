@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { deployments, deploymentPorts, servers, servicePorts, services } from "@/db/schema";
+import { deployments, servicePorts, services } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { WIREGUARD_SUBNET_CIDR } from "./constants";
 
@@ -12,12 +12,11 @@ export type CaddyRoute = {
 
 async function getPortUpstreams(
   serviceId: string,
-  servicePortId: string,
+  containerPort: number,
 ): Promise<string[]> {
   const runningDeployments = await db
     .select({
-      deploymentId: deployments.id,
-      serverId: deployments.serverId,
+      ipAddress: deployments.ipAddress,
     })
     .from(deployments)
     .where(
@@ -27,25 +26,8 @@ async function getPortUpstreams(
   const upstreams: string[] = [];
 
   for (const dep of runningDeployments) {
-    const [server] = await db
-      .select({ wireguardIp: servers.wireguardIp })
-      .from(servers)
-      .where(eq(servers.id, dep.serverId));
-
-    if (!server?.wireguardIp) continue;
-
-    const [portMapping] = await db
-      .select({ hostPort: deploymentPorts.hostPort })
-      .from(deploymentPorts)
-      .where(
-        and(
-          eq(deploymentPorts.deploymentId, dep.deploymentId),
-          eq(deploymentPorts.servicePortId, servicePortId)
-        )
-      );
-
-    if (portMapping) {
-      upstreams.push(`${server.wireguardIp}:${portMapping.hostPort}`);
+    if (dep.ipAddress) {
+      upstreams.push(`${dep.ipAddress}:${containerPort}`);
     }
   }
 
@@ -66,7 +48,7 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
     if (ports.length === 0) continue;
 
     const firstPort = ports[0];
-    const upstreams = await getPortUpstreams(service.id, firstPort.id);
+    const upstreams = await getPortUpstreams(service.id, firstPort.port);
 
     if (upstreams.length === 0) continue;
 
@@ -79,7 +61,7 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
 
     for (const port of ports) {
       if (port.isPublic && port.subdomain) {
-        const portUpstreams = await getPortUpstreams(service.id, port.id);
+        const portUpstreams = await getPortUpstreams(service.id, port.port);
         if (portUpstreams.length > 0) {
           routes.push({
             id: `${port.subdomain}.techulus.app`,

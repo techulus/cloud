@@ -1,6 +1,6 @@
 {
   on_demand_tls {
-    ask {env.CONTROL_PLANE_URL}/api/v1/caddy/check
+    ask {CONTROL_PLANE_URL}/api/v1/caddy/check
   }
 }
 

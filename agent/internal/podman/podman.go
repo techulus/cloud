@@ -16,6 +16,7 @@ type DeployConfig struct {
 	Name         string
 	Image        string
 	WireGuardIP  string
+	IPAddress    string
 	PortMappings []PortMapping
 }
 
@@ -31,6 +32,10 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	}
 
 	args := []string{"run", "-d", "--name", config.Name, "--replace", "--restart", "unless-stopped"}
+
+	if config.IPAddress != "" {
+		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
+	}
 
 	for _, pm := range config.PortMappings {
 		portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)

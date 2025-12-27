@@ -22,6 +22,7 @@ import (
 type (
 	WorkHandler  func(work *pb.WorkItem) (status string, logs string)
 	CaddyHandler func(config *pb.CaddyConfig)
+	DnsHandler   func(config *pb.DnsConfig)
 )
 
 type Client struct {
@@ -35,6 +36,7 @@ type Client struct {
 
 	workHandler  WorkHandler
 	caddyHandler CaddyHandler
+	dnsHandler   DnsHandler
 	stopChan     chan struct{}
 	stopOnce     sync.Once
 	wg           sync.WaitGroup
@@ -72,6 +74,10 @@ func (c *Client) SetWorkHandler(handler WorkHandler) {
 
 func (c *Client) SetCaddyHandler(handler CaddyHandler) {
 	c.caddyHandler = handler
+}
+
+func (c *Client) SetDnsHandler(handler DnsHandler) {
+	c.dnsHandler = handler
 }
 
 func (c *Client) nextSequence() uint64 {
@@ -146,18 +152,14 @@ func (c *Client) signProtoWithSeq(msg proto.Message, seq uint64) (timestamp, sig
 }
 
 type StatusData struct {
-	Resources   *pb.Resources
-	PublicIP    string
-	Containers  []*pb.ContainerInfo
-	ProxyRoutes []*pb.ProxyRouteInfo
+	Resources *pb.Resources
+	PublicIP  string
 }
 
 func (c *Client) SendStatusUpdate(status *StatusData) error {
 	update := &pb.StatusUpdate{
-		Resources:   status.Resources,
-		PublicIp:    status.PublicIP,
-		Containers:  status.Containers,
-		ProxyRoutes: status.ProxyRoutes,
+		Resources: status.Resources,
+		PublicIp:  status.PublicIP,
 	}
 
 	seq := c.nextSequence()
@@ -174,7 +176,7 @@ func (c *Client) SendStatusUpdate(status *StatusData) error {
 		Payload:   &pb.AgentMessage_StatusUpdate{StatusUpdate: update},
 	}
 
-	log.Printf("[grpc:send] type=StatusUpdate containers=%d seq=%d", len(status.Containers), seq)
+	log.Printf("[grpc:send] type=StatusUpdate seq=%d", seq)
 	return c.stream.Send(msg)
 }
 
@@ -292,6 +294,12 @@ func (c *Client) handleMessage(msg *pb.ControlPlaneMessage) {
 		log.Printf("[grpc:recv] type=CaddyConfig routes=%d seq=%d", len(payload.CaddyConfig.Routes), msg.Sequence)
 		if c.caddyHandler != nil {
 			go c.caddyHandler(payload.CaddyConfig)
+		}
+
+	case *pb.ControlPlaneMessage_DnsConfig:
+		log.Printf("[grpc:recv] type=DnsConfig records=%d seq=%d", len(payload.DnsConfig.Records), msg.Sequence)
+		if c.dnsHandler != nil {
+			go c.dnsHandler(payload.DnsConfig)
 		}
 	}
 }

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
-import { eq, and, isNull, gt } from "drizzle-orm";
-import { assignWireGuardIp, getWireGuardPeers, isProxyServer } from "@/lib/wireguard";
-import { PROXY_WIREGUARD_IP } from "@/lib/constants";
+import { eq, and, isNull, gt, isNotNull, ne } from "drizzle-orm";
+import { assignSubnet, getWireGuardPeers } from "@/lib/wireguard";
 import { randomUUID } from "crypto";
 
 const TOKEN_EXPIRY_HOURS = 24;
@@ -45,13 +44,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const wireguardIp = await assignWireGuardIp();
+    const { subnetId, wireguardIp } = await assignSubnet();
 
     await db
       .update(servers)
       .set({
         wireguardPublicKey,
         signingPublicKey,
+        subnetId,
         wireguardIp,
         publicIp: publicIp || null,
         tokenUsedAt: now,
@@ -60,36 +60,32 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(servers.id, server.id));
 
-    const peers = await getWireGuardPeers(server.id, wireguardIp);
+    const peers = await getWireGuardPeers(server.id);
 
-    if (!isProxyServer(wireguardIp)) {
-      const proxyServer = await db
-        .select({ id: servers.id, wireguardIp: servers.wireguardIp })
-        .from(servers)
-        .where(
-          and(
-            eq(servers.status, "online"),
-            eq(servers.wireguardIp, PROXY_WIREGUARD_IP)
-          )
+    const existingServers = await db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(
+        and(
+          eq(servers.status, "online"),
+          isNotNull(servers.subnetId),
+          ne(servers.id, server.id)
         )
-        .then((r) => r[0]);
+      );
 
-      if (proxyServer) {
-        const proxyPeers = await getWireGuardPeers(
-          proxyServer.id,
-          proxyServer.wireguardIp!
-        );
-        await db.insert(workQueue).values({
-          id: randomUUID(),
-          serverId: proxyServer.id,
-          type: "update_wireguard",
-          payload: JSON.stringify({ peers: proxyPeers }),
-        });
-      }
+    for (const existingServer of existingServers) {
+      const existingPeers = await getWireGuardPeers(existingServer.id);
+      await db.insert(workQueue).values({
+        id: randomUUID(),
+        serverId: existingServer.id,
+        type: "update_wireguard",
+        payload: JSON.stringify({ peers: existingPeers }),
+      });
     }
 
     return NextResponse.json({
       serverId: server.id,
+      subnetId,
       wireguardIp,
       peers,
     });

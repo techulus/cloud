@@ -13,6 +13,7 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
+import { assignContainerIp } from "@/lib/wireguard";
 
 function slugify(text: string): string {
 	return text
@@ -393,6 +394,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		for (let i = 0; i < placement.replicas; i++) {
 			replicaIndex++;
 			const hostPorts = await allocateHostPorts(server.id, servicePortsList.length);
+			const ipAddress = await assignContainerIp(server.id);
 
 			const deploymentId = randomUUID();
 			deploymentIds.push(deploymentId);
@@ -401,6 +403,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 				id: deploymentId,
 				serviceId,
 				serverId: server.id,
+				ipAddress,
 				status: "pending",
 			});
 
@@ -429,6 +432,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					image: normalizeImage(service.image),
 					portMappings,
 					wireguardIp: server.wireguardIp,
+					ipAddress,
 					name: `${service.name}-${replicaIndex}`,
 				}),
 			});

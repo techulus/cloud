@@ -2,18 +2,15 @@
 
 import useSWR from "swr";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
-	CardDescription,
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CreateServerDialog } from "@/components/create-server-dialog";
 import { PageHeader } from "@/components/page-header";
-import { Settings } from "lucide-react";
 
 type Server = {
 	id: string;
@@ -51,17 +48,7 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 			<PageHeader
 				title="Servers"
 				description="Manage your server fleet"
-				actions={
-					<div className="flex gap-2">
-						<Link href="/dashboard/proxy">
-							<Button variant="outline">
-								<Settings className="h-4 w-4 mr-1" />
-								Proxy
-							</Button>
-						</Link>
-						<CreateServerDialog />
-					</div>
-				}
+				actions={<CreateServerDialog />}
 			/>
 
 			{!servers || servers.length === 0 ? (

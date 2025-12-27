@@ -161,6 +161,7 @@ type ControlPlaneMessage struct {
 	//	*ControlPlaneMessage_Error
 	//	*ControlPlaneMessage_Connected
 	//	*ControlPlaneMessage_CaddyConfig
+	//	*ControlPlaneMessage_DnsConfig
 	Payload       isControlPlaneMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -255,6 +256,15 @@ func (x *ControlPlaneMessage) GetCaddyConfig() *CaddyConfig {
 	return nil
 }
 
+func (x *ControlPlaneMessage) GetDnsConfig() *DnsConfig {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlPlaneMessage_DnsConfig); ok {
+			return x.DnsConfig
+		}
+	}
+	return nil
+}
+
 type isControlPlaneMessage_Payload interface {
 	isControlPlaneMessage_Payload()
 }
@@ -279,6 +289,10 @@ type ControlPlaneMessage_CaddyConfig struct {
 	CaddyConfig *CaddyConfig `protobuf:"bytes,14,opt,name=caddy_config,json=caddyConfig,proto3,oneof"`
 }
 
+type ControlPlaneMessage_DnsConfig struct {
+	DnsConfig *DnsConfig `protobuf:"bytes,15,opt,name=dns_config,json=dnsConfig,proto3,oneof"`
+}
+
 func (*ControlPlaneMessage_Work) isControlPlaneMessage_Payload() {}
 
 func (*ControlPlaneMessage_Ack) isControlPlaneMessage_Payload() {}
@@ -288,6 +302,8 @@ func (*ControlPlaneMessage_Error) isControlPlaneMessage_Payload() {}
 func (*ControlPlaneMessage_Connected) isControlPlaneMessage_Payload() {}
 
 func (*ControlPlaneMessage_CaddyConfig) isControlPlaneMessage_Payload() {}
+
+func (*ControlPlaneMessage_DnsConfig) isControlPlaneMessage_Payload() {}
 
 type CaddyConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -405,8 +421,6 @@ type StatusUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Resources     *Resources             `protobuf:"bytes,1,opt,name=resources,proto3" json:"resources,omitempty"`
 	PublicIp      string                 `protobuf:"bytes,2,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`
-	Containers    []*ContainerInfo       `protobuf:"bytes,3,rep,name=containers,proto3" json:"containers,omitempty"`
-	ProxyRoutes   []*ProxyRouteInfo      `protobuf:"bytes,4,rep,name=proxy_routes,json=proxyRoutes,proto3" json:"proxy_routes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -453,20 +467,6 @@ func (x *StatusUpdate) GetPublicIp() string {
 		return x.PublicIp
 	}
 	return ""
-}
-
-func (x *StatusUpdate) GetContainers() []*ContainerInfo {
-	if x != nil {
-		return x.Containers
-	}
-	return nil
-}
-
-func (x *StatusUpdate) GetProxyRoutes() []*ProxyRouteInfo {
-	if x != nil {
-		return x.ProxyRoutes
-	}
-	return nil
 }
 
 type Resources struct {
@@ -529,142 +529,6 @@ func (x *Resources) GetDiskTotalGb() int32 {
 	return 0
 }
 
-type ContainerInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Image         string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
-	State         string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Created       int64                  `protobuf:"varint,5,opt,name=created,proto3" json:"created,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ContainerInfo) Reset() {
-	*x = ContainerInfo{}
-	mi := &file_agent_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ContainerInfo) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ContainerInfo) ProtoMessage() {}
-
-func (x *ContainerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ContainerInfo.ProtoReflect.Descriptor instead.
-func (*ContainerInfo) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *ContainerInfo) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *ContainerInfo) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *ContainerInfo) GetImage() string {
-	if x != nil {
-		return x.Image
-	}
-	return ""
-}
-
-func (x *ContainerInfo) GetState() string {
-	if x != nil {
-		return x.State
-	}
-	return ""
-}
-
-func (x *ContainerInfo) GetCreated() int64 {
-	if x != nil {
-		return x.Created
-	}
-	return 0
-}
-
-type ProxyRouteInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RouteId       string                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
-	Domain        string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
-	Upstreams     []string               `protobuf:"bytes,3,rep,name=upstreams,proto3" json:"upstreams,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ProxyRouteInfo) Reset() {
-	*x = ProxyRouteInfo{}
-	mi := &file_agent_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ProxyRouteInfo) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProxyRouteInfo) ProtoMessage() {}
-
-func (x *ProxyRouteInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProxyRouteInfo.ProtoReflect.Descriptor instead.
-func (*ProxyRouteInfo) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ProxyRouteInfo) GetRouteId() string {
-	if x != nil {
-		return x.RouteId
-	}
-	return ""
-}
-
-func (x *ProxyRouteInfo) GetDomain() string {
-	if x != nil {
-		return x.Domain
-	}
-	return ""
-}
-
-func (x *ProxyRouteInfo) GetUpstreams() []string {
-	if x != nil {
-		return x.Upstreams
-	}
-	return nil
-}
-
 type WorkItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -676,7 +540,7 @@ type WorkItem struct {
 
 func (x *WorkItem) Reset() {
 	*x = WorkItem{}
-	mi := &file_agent_proto_msgTypes[8]
+	mi := &file_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +552,7 @@ func (x *WorkItem) String() string {
 func (*WorkItem) ProtoMessage() {}
 
 func (x *WorkItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[8]
+	mi := &file_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +565,7 @@ func (x *WorkItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkItem.ProtoReflect.Descriptor instead.
 func (*WorkItem) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{8}
+	return file_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *WorkItem) GetId() string {
@@ -736,7 +600,7 @@ type WorkComplete struct {
 
 func (x *WorkComplete) Reset() {
 	*x = WorkComplete{}
-	mi := &file_agent_proto_msgTypes[9]
+	mi := &file_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +612,7 @@ func (x *WorkComplete) String() string {
 func (*WorkComplete) ProtoMessage() {}
 
 func (x *WorkComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[9]
+	mi := &file_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +625,7 @@ func (x *WorkComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkComplete.ProtoReflect.Descriptor instead.
 func (*WorkComplete) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{9}
+	return file_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *WorkComplete) GetWorkId() string {
@@ -794,7 +658,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_agent_proto_msgTypes[10]
+	mi := &file_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +670,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[10]
+	mi := &file_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +683,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{10}
+	return file_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Heartbeat) GetTimestamp() int64 {
@@ -839,7 +703,7 @@ type Acknowledgement struct {
 
 func (x *Acknowledgement) Reset() {
 	*x = Acknowledgement{}
-	mi := &file_agent_proto_msgTypes[11]
+	mi := &file_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +715,7 @@ func (x *Acknowledgement) String() string {
 func (*Acknowledgement) ProtoMessage() {}
 
 func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[11]
+	mi := &file_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +728,7 @@ func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Acknowledgement.ProtoReflect.Descriptor instead.
 func (*Acknowledgement) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{11}
+	return file_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Acknowledgement) GetMessageId() string {
@@ -892,7 +756,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_agent_proto_msgTypes[12]
+	mi := &file_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +768,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[12]
+	mi := &file_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +781,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{12}
+	return file_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Error) GetCode() int32 {
@@ -950,7 +814,7 @@ type ConnectionAccepted struct {
 
 func (x *ConnectionAccepted) Reset() {
 	*x = ConnectionAccepted{}
-	mi := &file_agent_proto_msgTypes[13]
+	mi := &file_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +826,7 @@ func (x *ConnectionAccepted) String() string {
 func (*ConnectionAccepted) ProtoMessage() {}
 
 func (x *ConnectionAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[13]
+	mi := &file_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +839,7 @@ func (x *ConnectionAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionAccepted.ProtoReflect.Descriptor instead.
 func (*ConnectionAccepted) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{13}
+	return file_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ConnectionAccepted) GetSessionId() string {
@@ -983,6 +847,102 @@ func (x *ConnectionAccepted) GetSessionId() string {
 		return x.SessionId
 	}
 	return ""
+}
+
+type DnsConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Records       []*DnsRecord           `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DnsConfig) Reset() {
+	*x = DnsConfig{}
+	mi := &file_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DnsConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DnsConfig) ProtoMessage() {}
+
+func (x *DnsConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DnsConfig.ProtoReflect.Descriptor instead.
+func (*DnsConfig) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *DnsConfig) GetRecords() []*DnsRecord {
+	if x != nil {
+		return x.Records
+	}
+	return nil
+}
+
+type DnsRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Ips           []string               `protobuf:"bytes,2,rep,name=ips,proto3" json:"ips,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DnsRecord) Reset() {
+	*x = DnsRecord{}
+	mi := &file_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DnsRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DnsRecord) ProtoMessage() {}
+
+func (x *DnsRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DnsRecord.ProtoReflect.Descriptor instead.
+func (*DnsRecord) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DnsRecord) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DnsRecord) GetIps() []string {
+	if x != nil {
+		return x.Ips
+	}
+	return nil
 }
 
 var File_agent_proto protoreflect.FileDescriptor
@@ -999,7 +959,7 @@ const file_agent_proto_rawDesc = "" +
 	" \x01(\v2\x13.agent.StatusUpdateH\x00R\fstatusUpdate\x12:\n" +
 	"\rwork_complete\x18\v \x01(\v2\x13.agent.WorkCompleteH\x00R\fworkComplete\x120\n" +
 	"\theartbeat\x18\f \x01(\v2\x10.agent.HeartbeatH\x00R\theartbeatB\t\n" +
-	"\apayload\"\xa9\x02\n" +
+	"\apayload\"\xdc\x02\n" +
 	"\x13ControlPlaneMessage\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12%\n" +
 	"\x04work\x18\n" +
@@ -1007,7 +967,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x03ack\x18\v \x01(\v2\x16.agent.AcknowledgementH\x00R\x03ack\x12$\n" +
 	"\x05error\x18\f \x01(\v2\f.agent.ErrorH\x00R\x05error\x129\n" +
 	"\tconnected\x18\r \x01(\v2\x19.agent.ConnectionAcceptedH\x00R\tconnected\x127\n" +
-	"\fcaddy_config\x18\x0e \x01(\v2\x12.agent.CaddyConfigH\x00R\vcaddyConfigB\t\n" +
+	"\fcaddy_config\x18\x0e \x01(\v2\x12.agent.CaddyConfigH\x00R\vcaddyConfig\x121\n" +
+	"\n" +
+	"dns_config\x18\x0f \x01(\v2\x10.agent.DnsConfigH\x00R\tdnsConfigB\t\n" +
 	"\apayload\"8\n" +
 	"\vCaddyConfig\x12)\n" +
 	"\x06routes\x18\x01 \x03(\v2\x11.agent.CaddyRouteR\x06routes\"n\n" +
@@ -1016,28 +978,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06domain\x18\x02 \x01(\tR\x06domain\x12\x1c\n" +
 	"\tupstreams\x18\x03 \x03(\tR\tupstreams\x12\x1a\n" +
-	"\binternal\x18\x04 \x01(\bR\binternal\"\xcb\x01\n" +
+	"\binternal\x18\x04 \x01(\bR\binternal\"[\n" +
 	"\fStatusUpdate\x12.\n" +
 	"\tresources\x18\x01 \x01(\v2\x10.agent.ResourcesR\tresources\x12\x1b\n" +
-	"\tpublic_ip\x18\x02 \x01(\tR\bpublicIp\x124\n" +
-	"\n" +
-	"containers\x18\x03 \x03(\v2\x14.agent.ContainerInfoR\n" +
-	"containers\x128\n" +
-	"\fproxy_routes\x18\x04 \x03(\v2\x15.agent.ProxyRouteInfoR\vproxyRoutes\"t\n" +
+	"\tpublic_ip\x18\x02 \x01(\tR\bpublicIp\"t\n" +
 	"\tResources\x12\x1b\n" +
 	"\tcpu_cores\x18\x01 \x01(\x05R\bcpuCores\x12&\n" +
 	"\x0fmemory_total_mb\x18\x02 \x01(\x05R\rmemoryTotalMb\x12\"\n" +
-	"\rdisk_total_gb\x18\x03 \x01(\x05R\vdiskTotalGb\"y\n" +
-	"\rContainerInfo\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05image\x18\x03 \x01(\tR\x05image\x12\x14\n" +
-	"\x05state\x18\x04 \x01(\tR\x05state\x12\x18\n" +
-	"\acreated\x18\x05 \x01(\x03R\acreated\"a\n" +
-	"\x0eProxyRouteInfo\x12\x19\n" +
-	"\broute_id\x18\x01 \x01(\tR\arouteId\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\x12\x1c\n" +
-	"\tupstreams\x18\x03 \x03(\tR\tupstreams\"H\n" +
+	"\rdisk_total_gb\x18\x03 \x01(\x05R\vdiskTotalGb\"H\n" +
 	"\bWorkItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
@@ -1058,7 +1006,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x05fatal\x18\x03 \x01(\bR\x05fatal\"3\n" +
 	"\x12ConnectionAccepted\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId2N\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"7\n" +
+	"\tDnsConfig\x12*\n" +
+	"\arecords\x18\x01 \x03(\v2\x10.agent.DnsRecordR\arecords\"1\n" +
+	"\tDnsRecord\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
+	"\x03ips\x18\x02 \x03(\tR\x03ips2N\n" +
 	"\fAgentService\x12>\n" +
 	"\aConnect\x12\x13.agent.AgentMessage\x1a\x1a.agent.ControlPlaneMessage(\x010\x01B%Z#techulus/cloud-agent/internal/protob\x06proto3"
 
@@ -1082,28 +1035,28 @@ var file_agent_proto_goTypes = []any{
 	(*CaddyRoute)(nil),          // 3: agent.CaddyRoute
 	(*StatusUpdate)(nil),        // 4: agent.StatusUpdate
 	(*Resources)(nil),           // 5: agent.Resources
-	(*ContainerInfo)(nil),       // 6: agent.ContainerInfo
-	(*ProxyRouteInfo)(nil),      // 7: agent.ProxyRouteInfo
-	(*WorkItem)(nil),            // 8: agent.WorkItem
-	(*WorkComplete)(nil),        // 9: agent.WorkComplete
-	(*Heartbeat)(nil),           // 10: agent.Heartbeat
-	(*Acknowledgement)(nil),     // 11: agent.Acknowledgement
-	(*Error)(nil),               // 12: agent.Error
-	(*ConnectionAccepted)(nil),  // 13: agent.ConnectionAccepted
+	(*WorkItem)(nil),            // 6: agent.WorkItem
+	(*WorkComplete)(nil),        // 7: agent.WorkComplete
+	(*Heartbeat)(nil),           // 8: agent.Heartbeat
+	(*Acknowledgement)(nil),     // 9: agent.Acknowledgement
+	(*Error)(nil),               // 10: agent.Error
+	(*ConnectionAccepted)(nil),  // 11: agent.ConnectionAccepted
+	(*DnsConfig)(nil),           // 12: agent.DnsConfig
+	(*DnsRecord)(nil),           // 13: agent.DnsRecord
 }
 var file_agent_proto_depIdxs = []int32{
 	4,  // 0: agent.AgentMessage.status_update:type_name -> agent.StatusUpdate
-	9,  // 1: agent.AgentMessage.work_complete:type_name -> agent.WorkComplete
-	10, // 2: agent.AgentMessage.heartbeat:type_name -> agent.Heartbeat
-	8,  // 3: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
-	11, // 4: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
-	12, // 5: agent.ControlPlaneMessage.error:type_name -> agent.Error
-	13, // 6: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
+	7,  // 1: agent.AgentMessage.work_complete:type_name -> agent.WorkComplete
+	8,  // 2: agent.AgentMessage.heartbeat:type_name -> agent.Heartbeat
+	6,  // 3: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
+	9,  // 4: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
+	10, // 5: agent.ControlPlaneMessage.error:type_name -> agent.Error
+	11, // 6: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
 	2,  // 7: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
-	3,  // 8: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
-	5,  // 9: agent.StatusUpdate.resources:type_name -> agent.Resources
-	6,  // 10: agent.StatusUpdate.containers:type_name -> agent.ContainerInfo
-	7,  // 11: agent.StatusUpdate.proxy_routes:type_name -> agent.ProxyRouteInfo
+	12, // 8: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
+	3,  // 9: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
+	5,  // 10: agent.StatusUpdate.resources:type_name -> agent.Resources
+	13, // 11: agent.DnsConfig.records:type_name -> agent.DnsRecord
 	0,  // 12: agent.AgentService.Connect:input_type -> agent.AgentMessage
 	1,  // 13: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
 	13, // [13:14] is the sub-list for method output_type
@@ -1129,6 +1082,7 @@ func file_agent_proto_init() {
 		(*ControlPlaneMessage_Error)(nil),
 		(*ControlPlaneMessage_Connected)(nil),
 		(*ControlPlaneMessage_CaddyConfig)(nil),
+		(*ControlPlaneMessage_DnsConfig)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

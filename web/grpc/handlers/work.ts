@@ -3,7 +3,8 @@ import { workQueue, deployments, servers } from "@/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 import { connectionStore } from "../store/connections";
 import type { WorkComplete } from "../generated/proto/agent";
-import { pushCaddyConfigToProxies } from "./caddy";
+import { pushCaddyConfigToAll } from "./caddy";
+import { pushDnsConfigToAll } from "./dns";
 
 const WORK_TIMEOUT_MINUTES = 5;
 const MAX_ATTEMPTS = 3;
@@ -53,7 +54,8 @@ export async function handleWorkComplete(
           })
           .where(eq(deployments.id, deploymentId));
 
-        await pushCaddyConfigToProxies();
+        await pushCaddyConfigToAll();
+        await pushDnsConfigToAll();
       } else {
         await db
           .update(deployments)
@@ -73,7 +75,8 @@ export async function handleWorkComplete(
         .set({ status: "stopped" })
         .where(eq(deployments.id, deploymentId));
 
-      await pushCaddyConfigToProxies();
+      await pushCaddyConfigToAll();
+      await pushDnsConfigToAll();
     }
   }
 }

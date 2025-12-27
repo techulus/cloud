@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { verifyEd25519Signature } from "@/lib/crypto";
-import { isProxyServer } from "@/lib/wireguard";
 import {
 	StatusUpdate,
 	WorkComplete,
@@ -13,7 +12,6 @@ import {
 	type AgentServiceServer,
 	type ControlPlaneMessage,
 } from "../generated/proto/agent";
-import { pushCaddyConfigToProxies } from "../handlers/caddy";
 import { handleStatusUpdate } from "../handlers/status";
 import { handleWorkComplete } from "../handlers/work";
 import { connectionStore } from "../store/connections";
@@ -155,14 +153,12 @@ export function createAgentService(): AgentServiceServer {
 						ctx.serverName = server.name;
 						ctx.sessionId = randomUUID();
 						ctx.signingPublicKey = server.signingPublicKey;
-						const isProxy = isProxyServer(server.wireguardIp);
 
 						connectionStore.add(
 							ctx.serverId,
 							ctx.serverName,
 							call,
-							ctx.sessionId,
-							isProxy
+							ctx.sessionId
 						);
 
 						connectionStore.sendMessage(ctx.serverId, {
@@ -170,24 +166,18 @@ export function createAgentService(): AgentServiceServer {
 						});
 
 						console.log(
-							`[agent:${ctx.serverName}] connected via gRPC (proxy=${isProxy})`
+							`[agent:${ctx.serverName}] connected via gRPC`
 						);
 
 						await handleStatusUpdate(ctx.serverId, {
 							resources: msg.status_update.resources
 								? {
-										cpuCores: msg.status_update.resources.cpu_cores,
-										memoryTotalMb: msg.status_update.resources.memory_total_mb,
-										diskTotalGb: msg.status_update.resources.disk_total_gb,
+										cpu_cores: msg.status_update.resources.cpu_cores,
+										memory_total_mb: msg.status_update.resources.memory_total_mb,
+										disk_total_gb: msg.status_update.resources.disk_total_gb,
 									}
 								: undefined,
-							publicIp: msg.status_update.public_ip,
-							containers: msg.status_update.containers,
-							proxyRoutes: msg.status_update.proxy_routes?.map((r) => ({
-								routeId: r.route_id,
-								domain: r.domain,
-								upstreams: r.upstreams,
-							})),
+							public_ip: msg.status_update.public_ip,
 						});
 
 						return;
@@ -247,18 +237,12 @@ export function createAgentService(): AgentServiceServer {
 						await handleStatusUpdate(ctx.serverId!, {
 							resources: msg.status_update.resources
 								? {
-										cpuCores: msg.status_update.resources.cpu_cores,
-										memoryTotalMb: msg.status_update.resources.memory_total_mb,
-										diskTotalGb: msg.status_update.resources.disk_total_gb,
+										cpu_cores: msg.status_update.resources.cpu_cores,
+										memory_total_mb: msg.status_update.resources.memory_total_mb,
+										disk_total_gb: msg.status_update.resources.disk_total_gb,
 									}
 								: undefined,
-							publicIp: msg.status_update.public_ip,
-							containers: msg.status_update.containers,
-							proxyRoutes: msg.status_update.proxy_routes?.map((r) => ({
-								routeId: r.route_id,
-								domain: r.domain,
-								upstreams: r.upstreams,
-							})),
+							public_ip: msg.status_update.public_ip,
 						});
 					} else if (msg.work_complete) {
 						await handleWorkComplete(ctx.serverId!, msg.work_complete);

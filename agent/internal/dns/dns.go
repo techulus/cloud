@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
-	"techulus/cloud-agent/internal/config"
+	pb "techulus/cloud-agent/internal/proto"
 )
 
 const (
@@ -13,9 +14,7 @@ const (
 	resolvedDropInPath = "/etc/systemd/resolved.conf.d/internal.conf"
 )
 
-var ProxyWireGuardIP = config.ProxyWireGuardIP
-
-func SetupProxyDNS(wireguardIP string) error {
+func SetupLocalDNS(wireguardIP string) error {
 	if err := os.MkdirAll("/etc/dnsmasq.d", 0o755); err != nil {
 		return fmt.Errorf("failed to create dnsmasq.d: %w", err)
 	}
@@ -70,6 +69,32 @@ Domains=~internal
 	cmd := exec.Command("systemctl", "restart", "systemd-resolved")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
+	}
+
+	return nil
+}
+
+func UpdateRecords(config *pb.DnsConfig) error {
+	var configLines []string
+
+	for _, record := range config.Records {
+		for _, ip := range record.Ips {
+			configLines = append(configLines, fmt.Sprintf("address=/%s/%s", record.Name, ip))
+		}
+	}
+
+	configContent := strings.Join(configLines, "\n")
+	if len(configLines) > 0 {
+		configContent += "\n"
+	}
+
+	if err := os.WriteFile(dnsmasqConfigPath, []byte(configContent), 0o644); err != nil {
+		return fmt.Errorf("failed to write dnsmasq config: %w", err)
+	}
+
+	cmd := exec.Command("systemctl", "restart", "dnsmasq")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
 
 	return nil

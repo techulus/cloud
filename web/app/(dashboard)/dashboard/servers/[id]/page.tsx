@@ -1,15 +1,13 @@
 import { notFound } from "next/navigation";
-import { getServerWithContainers } from "@/actions/servers";
+import { getServerDetails } from "@/actions/servers";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
-import { Box } from "lucide-react";
 
 function getStatusVariant(status: string) {
   switch (status) {
@@ -18,21 +16,6 @@ function getStatusVariant(status: string) {
     case "pending":
       return "secondary";
     case "offline":
-      return "destructive";
-    default:
-      return "outline";
-  }
-}
-
-function getContainerStateVariant(state: string) {
-  switch (state.toLowerCase()) {
-    case "running":
-      return "default";
-    case "exited":
-    case "stopped":
-      return "secondary";
-    case "dead":
-    case "removing":
       return "destructive";
     default:
       return "outline";
@@ -60,14 +43,11 @@ export default async function ServerDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const server = await getServerWithContainers(id);
+  const server = await getServerDetails(id);
 
   if (!server) {
     notFound();
   }
-
-  const managedContainers = server.containers.filter((c) => c.isManaged);
-  const unmanagedContainers = server.containers.filter((c) => !c.isManaged);
 
   return (
     <div className="space-y-6">
@@ -112,88 +92,6 @@ export default async function ServerDetailPage({
               <p>{server.resourcesDisk !== null ? `${server.resourcesDisk} GB` : "—"}</p>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Box className="h-5 w-5" />
-            Managed Containers ({managedContainers.length})
-          </CardTitle>
-          <CardDescription>
-            Containers deployed through Techulus
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {managedContainers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No managed containers</p>
-          ) : (
-            <div className="space-y-2">
-              {managedContainers.map((container) => (
-                <div
-                  key={container.id}
-                  className="flex items-center justify-between p-3 border rounded-md"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge variant={getContainerStateVariant(container.state)}>
-                      {container.state}
-                    </Badge>
-                    <div>
-                      <p className="font-medium">{container.name}</p>
-                      <p className="text-sm text-muted-foreground font-mono">
-                        {container.image}
-                      </p>
-                    </div>
-                  </div>
-                  <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                    {container.containerId.slice(0, 12)}
-                  </code>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Box className="h-5 w-5 text-muted-foreground" />
-            Unmanaged Containers ({unmanagedContainers.length})
-          </CardTitle>
-          <CardDescription>
-            Other containers running on this server
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {unmanagedContainers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No unmanaged containers</p>
-          ) : (
-            <div className="space-y-2">
-              {unmanagedContainers.map((container) => (
-                <div
-                  key={container.id}
-                  className="flex items-center justify-between p-3 border rounded-md"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge variant={getContainerStateVariant(container.state)}>
-                      {container.state}
-                    </Badge>
-                    <div>
-                      <p className="font-medium">{container.name}</p>
-                      <p className="text-sm text-muted-foreground font-mono">
-                        {container.image}
-                      </p>
-                    </div>
-                  </div>
-                  <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                    {container.containerId.slice(0, 12)}
-                  </code>
-                </div>
-              ))}
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>

@@ -34,10 +34,10 @@ const (
 
 type Config struct {
 	ServerID    string `json:"serverId"`
+	SubnetID    int    `json:"subnetId"`
 	WireGuardIP string `json:"wireguardIp"`
 }
 
-var isProxy bool
 var httpClient *api.Client
 var dataDir string
 
@@ -54,7 +54,6 @@ func main() {
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
 	flag.StringVar(&grpcURL, "grpc-url", "", "gRPC server URL (e.g., 100.0.0.1:50051)")
 	flag.BoolVar(&grpcTLS, "grpc-tls", false, "Use TLS for gRPC connection")
-	flag.BoolVar(&isProxy, "proxy", false, "Enable proxy mode (handles Caddy sync)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -69,14 +68,12 @@ func main() {
 		log.Fatalf("Podman prerequisites check failed: %v", err)
 	}
 
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		log.Fatalf("Failed to create data directory: %v", err)
+	if err := caddy.CheckPrerequisites(); err != nil {
+		log.Fatalf("Caddy prerequisites check failed: %v", err)
 	}
 
-	if (isProxy) {
-		if err := caddy.CheckPrerequisites(); err != nil {
-			log.Fatalf("Caddy prerequisites check failed: %v", err)
-		}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
 	keyDir := filepath.Join(dataDir, "keys")
@@ -100,16 +97,14 @@ func main() {
 			log.Fatalf("Failed to load config: %v", err)
 		}
 
-		log.Printf("Loaded config: serverID=%s, wireguardIP=%s", config.ServerID, config.WireGuardIP)
+		log.Printf("Loaded config: serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 
-		if isProxy {
-			if err := dns.SetupProxyDNS(config.WireGuardIP); err != nil {
-				log.Printf("Warning: Failed to setup dnsmasq: %v", err)
-			}
-		} else {
-			if err := dns.ConfigureClientDNS(dns.ProxyWireGuardIP); err != nil {
-				log.Printf("Warning: Failed to configure DNS: %v", err)
-			}
+		if err := dns.SetupLocalDNS(config.WireGuardIP); err != nil {
+			log.Printf("Warning: Failed to setup local DNS: %v", err)
+		}
+
+		if err := podman.EnsureNetwork(config.SubnetID); err != nil {
+			log.Printf("Warning: Failed to ensure container network: %v", err)
 		}
 	} else {
 		if token == "" {
@@ -145,6 +140,7 @@ func main() {
 
 		config = &Config{
 			ServerID:    resp.ServerID,
+			SubnetID:    resp.SubnetID,
 			WireGuardIP: resp.WireGuardIP,
 		}
 
@@ -152,7 +148,7 @@ func main() {
 			log.Fatalf("Failed to save config: %v", err)
 		}
 
-		log.Printf("Registration successful! serverID=%s, wireguardIP=%s", config.ServerID, config.WireGuardIP)
+		log.Printf("Registration successful! serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 		log.Printf("Received %d peers", len(resp.Peers))
 
 		wgConfig := &wireguard.Config{
@@ -174,20 +170,18 @@ func main() {
 
 		log.Println("WireGuard interface is up!")
 
-		if isProxy {
-			log.Println("Setting up proxy DNS (dnsmasq)...")
-			if err := dns.SetupProxyDNS(config.WireGuardIP); err != nil {
-				log.Printf("Warning: Failed to setup dnsmasq: %v", err)
-			} else {
-				log.Println("dnsmasq configured successfully")
-			}
+		log.Println("Setting up local DNS (dnsmasq)...")
+		if err := dns.SetupLocalDNS(config.WireGuardIP); err != nil {
+			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		} else {
-			log.Println("Configuring DNS for .internal resolution...")
-			if err := dns.ConfigureClientDNS(dns.ProxyWireGuardIP); err != nil {
-				log.Printf("Warning: Failed to configure DNS: %v", err)
-			} else {
-				log.Println("DNS configured to use proxy for .internal")
-			}
+			log.Println("Local DNS configured successfully")
+		}
+
+		log.Println("Ensuring container network exists...")
+		if err := podman.EnsureNetwork(config.SubnetID); err != nil {
+			log.Printf("Warning: Failed to create container network: %v", err)
+		} else {
+			log.Println("Container network ready")
 		}
 	}
 
@@ -199,9 +193,8 @@ func main() {
 
 	grpcClient := agentgrpc.NewClient(grpcAddress, config.ServerID, signingKeyPair, grpcTLS)
 	grpcClient.SetWorkHandler(handleWork)
-	if isProxy {
-		grpcClient.SetCaddyHandler(caddy.HandleCaddyConfig)
-	}
+	grpcClient.SetCaddyHandler(caddy.HandleCaddyConfig)
+	grpcClient.SetDnsHandler(handleDnsConfig)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -232,32 +225,9 @@ func getStatusData(publicIP string, includeResources bool) *agentgrpc.StatusData
 	}
 
 	return &agentgrpc.StatusData{
-		Resources:   resources,
-		PublicIP:    publicIP,
-		Containers:  getContainerList(),
-		ProxyRoutes: caddy.GetCaddyRoutes(isProxy),
+		Resources: resources,
+		PublicIP:  publicIP,
 	}
-}
-
-func getContainerList() []*pb.ContainerInfo {
-	podmanContainers, err := podman.ListContainers()
-	if err != nil {
-		log.Printf("Failed to list containers: %v", err)
-		return nil
-	}
-
-	containers := make([]*pb.ContainerInfo, len(podmanContainers))
-	for i, c := range podmanContainers {
-		containers[i] = &pb.ContainerInfo{
-			Id:      c.ID,
-			Name:    c.Name,
-			Image:   c.Image,
-			State:   c.State,
-			Created: c.Created,
-		}
-	}
-
-	return containers
 }
 
 func handleWork(work *pb.WorkItem) (status string, logs string) {
@@ -306,6 +276,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 			HostPort      int `json:"hostPort"`
 		} `json:"portMappings"`
 		WireGuardIP string `json:"wireguardIp"`
+		IPAddress   string `json:"ipAddress"`
 		Name        string `json:"name"`
 	}
 
@@ -321,12 +292,13 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		}
 	}
 
-	log.Printf("Deploying %s (image: %s, ports: %d mappings)", payload.Name, payload.Image, len(portMappings))
+	log.Printf("Deploying %s (image: %s, ip: %s, ports: %d mappings)", payload.Name, payload.Image, payload.IPAddress, len(portMappings))
 
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
 		WireGuardIP:  payload.WireGuardIP,
+		IPAddress:    payload.IPAddress,
 		PortMappings: portMappings,
 	})
 	if err != nil {
@@ -388,6 +360,15 @@ func handleWireguardUpdate(work *pb.WorkItem) error {
 	}
 
 	return wireguard.Reload(wireguard.DefaultInterface)
+}
+
+func handleDnsConfig(config *pb.DnsConfig) {
+	log.Printf("Updating DNS records (%d records)", len(config.Records))
+	if err := dns.UpdateRecords(config); err != nil {
+		log.Printf("Failed to update DNS records: %v", err)
+	} else {
+		log.Printf("DNS records updated successfully")
+	}
 }
 
 func convertPeers(apiPeers []api.Peer) []wireguard.Peer {
@@ -459,5 +440,3 @@ func getPublicIP() string {
 
 	return strings.TrimSpace(string(ip))
 }
-
-

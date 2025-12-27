@@ -30,6 +30,7 @@ message ControlPlaneMessage {
     Error error = 12;
     ConnectionAccepted connected = 13;
     CaddyConfig caddy_config = 14;
+    DnsConfig dns_config = 15;
   }
 }
 
@@ -47,28 +48,12 @@ message CaddyRoute {
 message StatusUpdate {
   Resources resources = 1;
   string public_ip = 2;
-  repeated ContainerInfo containers = 3;
-  repeated ProxyRouteInfo proxy_routes = 4;
 }
 
 message Resources {
   int32 cpu_cores = 1;
   int32 memory_total_mb = 2;
   int32 disk_total_gb = 3;
-}
-
-message ContainerInfo {
-  string id = 1;
-  string name = 2;
-  string image = 3;
-  string state = 4;
-  int64 created = 5;
-}
-
-message ProxyRouteInfo {
-  string route_id = 1;
-  string domain = 2;
-  repeated string upstreams = 3;
 }
 
 message WorkItem {
@@ -100,4 +85,13 @@ message Error {
 
 message ConnectionAccepted {
   string session_id = 1;
+}
+
+message DnsConfig {
+  repeated DnsRecord records = 1;
+}
+
+message DnsRecord {
+  string name = 1;
+  repeated string ips = 2;
 }

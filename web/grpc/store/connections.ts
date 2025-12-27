@@ -1,5 +1,5 @@
 import type * as grpc from "@grpc/grpc-js";
-import type { ControlPlaneMessage, CaddyRoute } from "../generated/proto/agent";
+import type { ControlPlaneMessage, CaddyRoute, DnsRecord } from "../generated/proto/agent";
 
 interface Connection {
   serverId: string;
@@ -8,7 +8,6 @@ interface Connection {
   connectedAt: Date;
   lastHeartbeat: Date;
   sessionId: string;
-  isProxy: boolean;
   lastAgentSequence: number;
   outgoingSequence: number;
 }
@@ -20,8 +19,7 @@ class ConnectionStore {
     serverId: string,
     serverName: string,
     stream: grpc.ServerDuplexStream<unknown, ControlPlaneMessage>,
-    sessionId: string,
-    isProxy: boolean
+    sessionId: string
   ): void {
     const existing = this.connections.get(serverId);
     if (existing) {
@@ -37,7 +35,6 @@ class ConnectionStore {
       connectedAt: new Date(),
       lastHeartbeat: new Date(),
       sessionId,
-      isProxy,
       lastAgentSequence: 0,
       outgoingSequence: 0,
     });
@@ -84,10 +81,6 @@ class ConnectionStore {
     return Array.from(this.connections.values());
   }
 
-  getProxyConnections(): Connection[] {
-    return Array.from(this.connections.values()).filter((c) => c.isProxy);
-  }
-
   size(): number {
     return this.connections.size;
   }
@@ -110,14 +103,28 @@ class ConnectionStore {
   }
 
   pushCaddyConfig(routes: CaddyRoute[]): void {
-    const proxyConnections = this.getProxyConnections();
-    for (const conn of proxyConnections) {
+    const allConnections = this.getAll();
+    for (const conn of allConnections) {
       const success = this.sendMessage(conn.serverId, {
         caddy_config: { routes },
       });
       if (success) {
         console.log(
           `[grpc:send] server=${conn.serverId} type=CaddyConfig routes=${routes.length}`
+        );
+      }
+    }
+  }
+
+  pushDnsConfig(records: DnsRecord[]): void {
+    const allConnections = this.getAll();
+    for (const conn of allConnections) {
+      const success = this.sendMessage(conn.serverId, {
+        dns_config: { records },
+      });
+      if (success) {
+        console.log(
+          `[grpc:send] server=${conn.serverId} type=DnsConfig records=${records.length}`
         );
       }
     }

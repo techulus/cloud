@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { servers, serverContainers } from "@/db/schema";
+import { servers } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { broadcastWireGuardUpdate } from "@/lib/wireguard";
@@ -59,7 +59,7 @@ export async function syncWireGuard() {
   return count;
 }
 
-export async function getServerWithContainers(id: string) {
+export async function getServerDetails(id: string) {
   const serverResults = await db
     .select({
       id: servers.id,
@@ -76,18 +76,5 @@ export async function getServerWithContainers(id: string) {
     .from(servers)
     .where(eq(servers.id, id));
 
-  const server = serverResults[0];
-  if (!server) {
-    return null;
-  }
-
-  const containers = await db
-    .select()
-    .from(serverContainers)
-    .where(eq(serverContainers.serverId, id));
-
-  return {
-    ...server,
-    containers,
-  };
+  return serverResults[0] || null;
 }
