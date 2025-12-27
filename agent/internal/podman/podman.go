@@ -12,12 +12,21 @@ type PortMapping struct {
 	HostPort      int
 }
 
+type HealthCheck struct {
+	Cmd         string
+	Interval    int
+	Timeout     int
+	Retries     int
+	StartPeriod int
+}
+
 type DeployConfig struct {
 	Name         string
 	Image        string
 	WireGuardIP  string
 	IPAddress    string
 	PortMappings []PortMapping
+	HealthCheck  *HealthCheck
 }
 
 type DeployResult struct {
@@ -40,6 +49,14 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 			portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
 			args = append(args, "-p", portMapping)
 		}
+	}
+
+	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {
+		args = append(args, "--health-cmd", config.HealthCheck.Cmd)
+		args = append(args, "--health-interval", fmt.Sprintf("%ds", config.HealthCheck.Interval))
+		args = append(args, "--health-timeout", fmt.Sprintf("%ds", config.HealthCheck.Timeout))
+		args = append(args, "--health-retries", fmt.Sprintf("%d", config.HealthCheck.Retries))
+		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
 	}
 
 	args = append(args, image)
@@ -79,6 +96,19 @@ func IsRunning(containerID string) (bool, error) {
 	}
 
 	return strings.TrimSpace(string(output)) == "true", nil
+}
+
+func GetHealthStatus(containerID string) string {
+	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	status := strings.TrimSpace(string(output))
+	if status == "<no value>" || status == "" {
+		return "none"
+	}
+	return status
 }
 
 func CheckPrerequisites() error {

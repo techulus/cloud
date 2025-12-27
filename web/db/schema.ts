@@ -146,6 +146,11 @@ export const services = sqliteTable("services", {
   name: text("name").notNull(),
   image: text("image").notNull(),
   replicas: integer("replicas").notNull().default(1),
+  healthCheckCmd: text("health_check_cmd"),
+  healthCheckInterval: integer("health_check_interval").default(10),
+  healthCheckTimeout: integer("health_check_timeout").default(5),
+  healthCheckRetries: integer("health_check_retries").default(3),
+  healthCheckStartPeriod: integer("health_check_start_period").default(30),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
@@ -191,6 +196,9 @@ export const deployments = sqliteTable("deployments", {
   })
     .notNull()
     .default("pending"),
+  healthStatus: text("health_status", {
+    enum: ["none", "starting", "healthy", "unhealthy"],
+  }),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),

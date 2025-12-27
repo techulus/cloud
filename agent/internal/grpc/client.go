@@ -26,11 +26,11 @@ type (
 )
 
 type Client struct {
-	address  string
-	serverID string
-	keyPair  *crypto.KeyPair
-	conn     *grpc.ClientConn
-	stream   pb.AgentService_ConnectClient
+	address   string
+	serverID  string
+	keyPair   *crypto.KeyPair
+	conn      *grpc.ClientConn
+	stream    pb.AgentService_ConnectClient
 	sessionID string
 	useTLS    bool
 
@@ -60,7 +60,7 @@ func NewClient(address, serverID string, keyPair *crypto.KeyPair, useTLS bool) *
 		keyPair:           keyPair,
 		useTLS:            useTLS,
 		stopChan:          make(chan struct{}),
-		statusInterval:    10 * time.Second,
+		statusInterval:    30 * time.Second,
 		heartbeatInterval: 30 * time.Second,
 		reconnectDelay:    1 * time.Second,
 		maxReconnectDelay: 5 * time.Minute,
@@ -151,15 +151,30 @@ func (c *Client) signProtoWithSeq(msg proto.Message, seq uint64) (timestamp, sig
 	return timestamp, signature, nil
 }
 
+type ContainerHealthData struct {
+	ContainerID  string
+	HealthStatus string
+}
+
 type StatusData struct {
-	Resources *pb.Resources
-	PublicIP  string
+	Resources       *pb.Resources
+	PublicIP        string
+	ContainerHealth []ContainerHealthData
 }
 
 func (c *Client) SendStatusUpdate(status *StatusData) error {
+	containerHealth := make([]*pb.ContainerHealth, len(status.ContainerHealth))
+	for i, ch := range status.ContainerHealth {
+		containerHealth[i] = &pb.ContainerHealth{
+			ContainerId:  ch.ContainerID,
+			HealthStatus: ch.HealthStatus,
+		}
+	}
+
 	update := &pb.StatusUpdate{
-		Resources: status.Resources,
-		PublicIp:  status.PublicIP,
+		Resources:       status.Resources,
+		PublicIp:        status.PublicIP,
+		ContainerHealth: containerHealth,
 	}
 
 	seq := c.nextSequence()

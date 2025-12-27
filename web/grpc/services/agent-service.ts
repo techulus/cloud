@@ -178,6 +178,7 @@ export function createAgentService(): AgentServiceServer {
 									}
 								: undefined,
 							public_ip: msg.status_update.public_ip,
+							container_health: msg.status_update.container_health,
 						});
 
 						return;
@@ -243,6 +244,7 @@ export function createAgentService(): AgentServiceServer {
 									}
 								: undefined,
 							public_ip: msg.status_update.public_ip,
+							container_health: msg.status_update.container_health,
 						});
 					} else if (msg.work_complete) {
 						await handleWorkComplete(ctx.serverId!, msg.work_complete);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSWRConfig } from "swr";
 import { createService } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +16,15 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-export function CreateServiceDialog({ projectId }: { projectId: string }) {
+export function CreateServiceDialog({
+	projectId,
+	onSuccess,
+}: {
+	projectId: string;
+	onSuccess?: () => void;
+}) {
 	const router = useRouter();
+	const { mutate } = useSWRConfig();
 	const [isOpen, setIsOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [image, setImage] = useState("");
@@ -32,6 +40,8 @@ export function CreateServiceDialog({ projectId }: { projectId: string }) {
 			setIsOpen(false);
 			setName("");
 			setImage("");
+			mutate(`/api/projects/${projectId}/services`);
+			onSuccess?.();
 			router.refresh();
 		} catch (error) {
 			console.error("Failed to create service:", error);

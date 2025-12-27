@@ -48,6 +48,12 @@ message CaddyRoute {
 message StatusUpdate {
   Resources resources = 1;
   string public_ip = 2;
+  repeated ContainerHealth container_health = 3;
+}
+
+message ContainerHealth {
+  string container_id = 1;
+  string health_status = 2;
 }
 
 message Resources {

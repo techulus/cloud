@@ -422,6 +422,16 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 				portMappings.push({ containerPort: sp.port, hostPort });
 			}
 
+			const healthCheck = service.healthCheckCmd
+				? {
+						cmd: service.healthCheckCmd,
+						interval: service.healthCheckInterval ?? 10,
+						timeout: service.healthCheckTimeout ?? 5,
+						retries: service.healthCheckRetries ?? 3,
+						startPeriod: service.healthCheckStartPeriod ?? 30,
+					}
+				: null;
+
 			await db.insert(workQueue).values({
 				id: randomUUID(),
 				serverId: server.id,
@@ -434,6 +444,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					wireguardIp: server.wireguardIp,
 					ipAddress,
 					name: `${service.name}-${replicaIndex}`,
+					healthCheck,
 				}),
 			});
 		}
@@ -467,6 +478,37 @@ export async function deleteDeployment(deploymentId: string) {
 	}
 
 	await db.delete(deployments).where(eq(deployments.id, deploymentId));
+
+	return { success: true };
+}
+
+export type HealthCheckConfig = {
+	cmd: string | null;
+	interval: number;
+	timeout: number;
+	retries: number;
+	startPeriod: number;
+};
+
+export async function updateServiceHealthCheck(
+	serviceId: string,
+	config: HealthCheckConfig
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	await db
+		.update(services)
+		.set({
+			healthCheckCmd: config.cmd,
+			healthCheckInterval: config.interval,
+			healthCheckTimeout: config.timeout,
+			healthCheckRetries: config.retries,
+			healthCheckStartPeriod: config.startPeriod,
+		})
+		.where(eq(services.id, serviceId));
 
 	return { success: true };
 }

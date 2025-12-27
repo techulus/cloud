@@ -19,15 +19,17 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Globe, Lock, Settings, X } from "lucide-react";
+import { Globe, HeartPulse, Lock, Settings, X } from "lucide-react";
 import {
 	deployService,
 	deleteService,
 	stopDeployment,
 	deleteDeployment,
 	updateServicePorts,
+	updateServiceHealthCheck,
 	getOnlineServers,
 	type ServerPlacement,
+	type HealthCheckConfig,
 } from "@/actions/projects";
 import { Spinner } from "./ui/spinner";
 import { CreateServiceDialog } from "./create-service-dialog";
@@ -44,6 +46,7 @@ type Deployment = {
 	serverId: string;
 	containerId: string | null;
 	status: string;
+	healthStatus: "none" | "starting" | "healthy" | "unhealthy" | null;
 	ports: DeploymentPort[];
 	server: { name: string; wireguardIp: string | null } | null;
 };
@@ -62,6 +65,11 @@ type Service = {
 	name: string;
 	image: string;
 	replicas: number;
+	healthCheckCmd: string | null;
+	healthCheckInterval: number | null;
+	healthCheckTimeout: number | null;
+	healthCheckRetries: number | null;
+	healthCheckStartPeriod: number | null;
 	ports: ServicePort[];
 	deployments: Deployment[];
 };
@@ -168,7 +176,10 @@ function DeployDialog({
 	const [isDeploying, setIsDeploying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const totalReplicas = Object.values(placements).reduce((sum, n) => sum + n, 0);
+	const totalReplicas = Object.values(placements).reduce(
+		(sum, n) => sum + n,
+		0,
+	);
 	const isValid = totalReplicas >= 1 && totalReplicas <= 10;
 
 	const loadServers = async () => {
@@ -181,7 +192,11 @@ function DeployDialog({
 			const currentPlacements: Record<string, number> = {};
 			for (const s of onlineServers) {
 				const count = service.deployments.filter(
-					(d) => d.serverId === s.id && (d.status === "running" || d.status === "pending" || d.status === "pulling")
+					(d) =>
+						d.serverId === s.id &&
+						(d.status === "running" ||
+							d.status === "pending" ||
+							d.status === "pulling"),
 				).length;
 				currentPlacements[s.id] = count;
 			}
@@ -205,7 +220,7 @@ function DeployDialog({
 		setError(null);
 		try {
 			const placementList: ServerPlacement[] = Object.entries(placements).map(
-				([serverId, replicas]) => ({ serverId, replicas })
+				([serverId, replicas]) => ({ serverId, replicas }),
 			);
 			await deployService(service.id, placementList);
 			onUpdate();
@@ -263,7 +278,10 @@ function DeployDialog({
 											size="icon"
 											className="h-8 w-8"
 											onClick={() =>
-												updateReplicas(server.id, (placements[server.id] || 0) - 1)
+												updateReplicas(
+													server.id,
+													(placements[server.id] || 0) - 1,
+												)
 											}
 											disabled={(placements[server.id] || 0) <= 0}
 										>
@@ -284,7 +302,10 @@ function DeployDialog({
 											size="icon"
 											className="h-8 w-8"
 											onClick={() =>
-												updateReplicas(server.id, (placements[server.id] || 0) + 1)
+												updateReplicas(
+													server.id,
+													(placements[server.id] || 0) + 1,
+												)
 											}
 											disabled={(placements[server.id] || 0) >= 10}
 										>
@@ -309,9 +330,7 @@ function DeployDialog({
 								</span>
 							)}
 						</div>
-						{error && (
-							<p className="text-sm text-destructive">{error}</p>
-						)}
+						{error && <p className="text-sm text-destructive">{error}</p>}
 						<Button
 							onClick={handleDeploy}
 							disabled={!isValid || isDeploying}
@@ -593,6 +612,168 @@ function PortManagerDialog({
 	);
 }
 
+function HealthCheckDialog({
+	service,
+	onUpdate,
+}: {
+	service: Service;
+	onUpdate: () => void;
+}) {
+	const [isOpen, setIsOpen] = useState(false);
+	const [isSaving, setIsSaving] = useState(false);
+	const [cmd, setCmd] = useState(service.healthCheckCmd || "");
+	const [interval, setInterval] = useState(service.healthCheckInterval ?? 10);
+	const [timeout, setTimeout] = useState(service.healthCheckTimeout ?? 5);
+	const [retries, setRetries] = useState(service.healthCheckRetries ?? 3);
+	const [startPeriod, setStartPeriod] = useState(
+		service.healthCheckStartPeriod ?? 30
+	);
+
+	const hasHealthCheck = !!service.healthCheckCmd;
+
+	const handleOpenChange = (open: boolean) => {
+		setIsOpen(open);
+		if (open) {
+			setCmd(service.healthCheckCmd || "");
+			setInterval(service.healthCheckInterval ?? 10);
+			setTimeout(service.healthCheckTimeout ?? 5);
+			setRetries(service.healthCheckRetries ?? 3);
+			setStartPeriod(service.healthCheckStartPeriod ?? 30);
+		}
+	};
+
+	const handleSave = async () => {
+		setIsSaving(true);
+		try {
+			await updateServiceHealthCheck(service.id, {
+				cmd: cmd.trim() || null,
+				interval,
+				timeout,
+				retries,
+				startPeriod,
+			});
+			onUpdate();
+			setIsOpen(false);
+		} catch (error) {
+			console.error("Failed to update health check:", error);
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
+	const handleRemove = async () => {
+		setIsSaving(true);
+		try {
+			await updateServiceHealthCheck(service.id, {
+				cmd: null,
+				interval: 10,
+				timeout: 5,
+				retries: 3,
+				startPeriod: 30,
+			});
+			onUpdate();
+			setIsOpen(false);
+		} catch (error) {
+			console.error("Failed to remove health check:", error);
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
+	return (
+		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
+			<DialogTrigger render={<Button variant="outline" size="sm" />}>
+				<HeartPulse
+					className={`h-4 w-4 mr-1 ${hasHealthCheck ? "text-green-500" : ""}`}
+				/>
+				Health
+			</DialogTrigger>
+			<DialogContent className="sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>Health Check</DialogTitle>
+				</DialogHeader>
+
+				<div className="space-y-4">
+					<div className="space-y-2">
+						<label className="text-sm font-medium">Command</label>
+						<Input
+							placeholder="curl -f http://localhost:8080/health || exit 1"
+							value={cmd}
+							onChange={(e) => setCmd(e.target.value)}
+						/>
+						<p className="text-xs text-muted-foreground">
+							Command to run inside the container. Exit 0 = healthy, non-zero =
+							unhealthy.
+						</p>
+					</div>
+
+					<div className="grid grid-cols-2 gap-4">
+						<div className="space-y-2">
+							<label className="text-sm font-medium">Interval (s)</label>
+							<Input
+								type="number"
+								value={interval}
+								onChange={(e) => setInterval(parseInt(e.target.value) || 10)}
+								min={1}
+							/>
+						</div>
+						<div className="space-y-2">
+							<label className="text-sm font-medium">Timeout (s)</label>
+							<Input
+								type="number"
+								value={timeout}
+								onChange={(e) => setTimeout(parseInt(e.target.value) || 5)}
+								min={1}
+							/>
+						</div>
+						<div className="space-y-2">
+							<label className="text-sm font-medium">Retries</label>
+							<Input
+								type="number"
+								value={retries}
+								onChange={(e) => setRetries(parseInt(e.target.value) || 3)}
+								min={1}
+							/>
+						</div>
+						<div className="space-y-2">
+							<label className="text-sm font-medium">Start Period (s)</label>
+							<Input
+								type="number"
+								value={startPeriod}
+								onChange={(e) => setStartPeriod(parseInt(e.target.value) || 30)}
+								min={0}
+							/>
+						</div>
+					</div>
+
+					<p className="text-xs text-muted-foreground">
+						Changes apply on next deployment.
+					</p>
+
+					<div className="flex gap-2">
+						<Button
+							onClick={handleSave}
+							disabled={isSaving}
+							className="flex-1"
+						>
+							{isSaving ? "Saving..." : "Save"}
+						</Button>
+						{hasHealthCheck && (
+							<Button
+								variant="outline"
+								onClick={handleRemove}
+								disabled={isSaving}
+							>
+								Remove
+							</Button>
+						)}
+					</div>
+				</div>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 export function ServiceList({
 	projectId,
 	initialServices,
@@ -621,7 +802,10 @@ export function ServiceList({
 					<p className="text-muted-foreground mb-4">
 						No services yet. Add your first service to deploy.
 					</p>
-					<CreateServiceDialog projectId={projectId} />
+					<CreateServiceDialog
+						projectId={projectId}
+						onSuccess={handleActionComplete}
+					/>
 				</CardContent>
 			</Card>
 		);
@@ -636,10 +820,13 @@ export function ServiceList({
 							<div>
 								<CardTitle>{service.name}</CardTitle>
 								<CardDescription>{service.image}</CardDescription>
-								{(service.ports.filter((p) => p.isPublic && p.subdomain).length > 0 ||
+								{(service.ports.filter((p) => p.isPublic && p.subdomain)
+									.length > 0 ||
 									service.deployments.some((d) => d.status === "running")) && (
 									<div className="flex flex-wrap gap-3 mt-2">
-										{service.deployments.some((d) => d.status === "running") && (
+										{service.deployments.some(
+											(d) => d.status === "running",
+										) && (
 											<span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
 												<Lock className="h-4 w-4" />
 												{service.name}.internal
@@ -664,6 +851,10 @@ export function ServiceList({
 							</div>
 							<div className="flex items-center gap-2">
 								<PortManagerDialog
+									service={service}
+									onUpdate={handleActionComplete}
+								/>
+								<HealthCheckDialog
 									service={service}
 									onUpdate={handleActionComplete}
 								/>
@@ -700,6 +891,23 @@ export function ServiceList({
 													<Badge variant={getStatusVariant(deployment.status)}>
 														{deployment.status}
 													</Badge>
+													{deployment.status === "running" &&
+														deployment.healthStatus &&
+														deployment.healthStatus !== "none" && (
+															<Badge
+																variant={
+																	deployment.healthStatus === "healthy"
+																		? "default"
+																		: deployment.healthStatus === "starting"
+																			? "secondary"
+																			: "destructive"
+																}
+																className="gap-1"
+															>
+																<HeartPulse className="h-3 w-3" />
+																{deployment.healthStatus}
+															</Badge>
+														)}
 													{isTransitioning && <Spinner />}
 												</div>
 												<div className="flex items-center gap-2">

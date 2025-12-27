@@ -1,8 +1,13 @@
 import { db } from "@/db";
-import { servers, workQueue } from "@/db/schema";
+import { servers, workQueue, deployments } from "@/db/schema";
 import { eq, and, ne, isNotNull } from "drizzle-orm";
 import { getWireGuardPeers } from "@/lib/wireguard";
 import { randomUUID } from "node:crypto";
+
+interface ContainerHealth {
+  container_id: string;
+  health_status: string;
+}
 
 interface StatusUpdate {
   resources?: {
@@ -11,6 +16,7 @@ interface StatusUpdate {
     disk_total_gb?: number;
   };
   public_ip?: string;
+  container_health?: ContainerHealth[];
 }
 
 export async function handleStatusUpdate(
@@ -54,6 +60,26 @@ export async function handleStatusUpdate(
 
   if (publicIpChanged) {
     await handlePublicIpChange(serverId);
+  }
+
+  if (status.container_health && status.container_health.length > 0) {
+    await updateContainerHealth(status.container_health);
+  }
+}
+
+async function updateContainerHealth(
+  containerHealthList: ContainerHealth[]
+): Promise<void> {
+  for (const ch of containerHealthList) {
+    const healthStatus = ch.health_status as
+      | "none"
+      | "starting"
+      | "healthy"
+      | "unhealthy";
+    await db
+      .update(deployments)
+      .set({ healthStatus })
+      .where(eq(deployments.containerId, ch.container_id));
   }
 }
 

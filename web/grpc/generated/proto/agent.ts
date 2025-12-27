@@ -54,6 +54,12 @@ export interface CaddyRoute {
 export interface StatusUpdate {
   resources: Resources | undefined;
   public_ip: string;
+  container_health: ContainerHealth[];
+}
+
+export interface ContainerHealth {
+  container_id: string;
+  health_status: string;
 }
 
 export interface Resources {
@@ -615,7 +621,7 @@ export const CaddyRoute: MessageFns<CaddyRoute> = {
 };
 
 function createBaseStatusUpdate(): StatusUpdate {
-  return { resources: undefined, public_ip: "" };
+  return { resources: undefined, public_ip: "", container_health: [] };
 }
 
 export const StatusUpdate: MessageFns<StatusUpdate> = {
@@ -625,6 +631,9 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     }
     if (message.public_ip !== "") {
       writer.uint32(18).string(message.public_ip);
+    }
+    for (const v of message.container_health) {
+      ContainerHealth.encode(v!, writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -652,6 +661,14 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
           message.public_ip = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.container_health.push(ContainerHealth.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -665,6 +682,9 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     return {
       resources: isSet(object.resources) ? Resources.fromJSON(object.resources) : undefined,
       public_ip: isSet(object.public_ip) ? globalThis.String(object.public_ip) : "",
+      container_health: globalThis.Array.isArray(object?.container_health)
+        ? object.container_health.map((e: any) => ContainerHealth.fromJSON(e))
+        : [],
     };
   },
 
@@ -675,6 +695,9 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
     }
     if (message.public_ip !== "") {
       obj.public_ip = message.public_ip;
+    }
+    if (message.container_health?.length) {
+      obj.container_health = message.container_health.map((e) => ContainerHealth.toJSON(e));
     }
     return obj;
   },
@@ -688,6 +711,83 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
       ? Resources.fromPartial(object.resources)
       : undefined;
     message.public_ip = object.public_ip ?? "";
+    message.container_health = object.container_health?.map((e) => ContainerHealth.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseContainerHealth(): ContainerHealth {
+  return { container_id: "", health_status: "" };
+}
+
+export const ContainerHealth: MessageFns<ContainerHealth> = {
+  encode(message: ContainerHealth, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.container_id !== "") {
+      writer.uint32(10).string(message.container_id);
+    }
+    if (message.health_status !== "") {
+      writer.uint32(18).string(message.health_status);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ContainerHealth {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseContainerHealth();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.container_id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.health_status = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ContainerHealth {
+    return {
+      container_id: isSet(object.container_id) ? globalThis.String(object.container_id) : "",
+      health_status: isSet(object.health_status) ? globalThis.String(object.health_status) : "",
+    };
+  },
+
+  toJSON(message: ContainerHealth): unknown {
+    const obj: any = {};
+    if (message.container_id !== "") {
+      obj.container_id = message.container_id;
+    }
+    if (message.health_status !== "") {
+      obj.health_status = message.health_status;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ContainerHealth>, I>>(base?: I): ContainerHealth {
+    return ContainerHealth.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ContainerHealth>, I>>(object: I): ContainerHealth {
+    const message = createBaseContainerHealth();
+    message.container_id = object.container_id ?? "";
+    message.health_status = object.health_status ?? "";
     return message;
   },
 };

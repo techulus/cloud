@@ -224,9 +224,24 @@ func getStatusData(publicIP string, includeResources bool) *agentgrpc.StatusData
 		resources = getSystemStats()
 	}
 
+	var containerHealth []agentgrpc.ContainerHealthData
+	containers, err := podman.ListContainers()
+	if err == nil {
+		for _, c := range containers {
+			if c.State == "running" {
+				healthStatus := podman.GetHealthStatus(c.ID)
+				containerHealth = append(containerHealth, agentgrpc.ContainerHealthData{
+					ContainerID:  c.ID,
+					HealthStatus: healthStatus,
+				})
+			}
+		}
+	}
+
 	return &agentgrpc.StatusData{
-		Resources: resources,
-		PublicIP:  publicIP,
+		Resources:       resources,
+		PublicIP:        publicIP,
+		ContainerHealth: containerHealth,
 	}
 }
 
@@ -278,6 +293,13 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		WireGuardIP string `json:"wireguardIp"`
 		IPAddress   string `json:"ipAddress"`
 		Name        string `json:"name"`
+		HealthCheck *struct {
+			Cmd         string `json:"cmd"`
+			Interval    int    `json:"interval"`
+			Timeout     int    `json:"timeout"`
+			Retries     int    `json:"retries"`
+			StartPeriod int    `json:"startPeriod"`
+		} `json:"healthCheck"`
 	}
 
 	if err := json.Unmarshal(work.Payload, &payload); err != nil {
@@ -294,12 +316,25 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 
 	log.Printf("Deploying %s (image: %s, ip: %s, ports: %d mappings)", payload.Name, payload.Image, payload.IPAddress, len(portMappings))
 
+	var healthCheck *podman.HealthCheck
+	if payload.HealthCheck != nil && payload.HealthCheck.Cmd != "" {
+		healthCheck = &podman.HealthCheck{
+			Cmd:         payload.HealthCheck.Cmd,
+			Interval:    payload.HealthCheck.Interval,
+			Timeout:     payload.HealthCheck.Timeout,
+			Retries:     payload.HealthCheck.Retries,
+			StartPeriod: payload.HealthCheck.StartPeriod,
+		}
+		log.Printf("Health check configured: %s", healthCheck.Cmd)
+	}
+
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
 		WireGuardIP:  payload.WireGuardIP,
 		IPAddress:    payload.IPAddress,
 		PortMappings: portMappings,
+		HealthCheck:  healthCheck,
 	})
 	if err != nil {
 		return nil, err
