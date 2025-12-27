@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Globe, HeartPulse, Lock, Settings, X, Trash2 } from "lucide-react";
+import { Globe, HeartPulse, Lock, Settings, X, Trash2, ChevronDown } from "lucide-react";
 import {
   deployService,
   deleteService,
@@ -344,7 +344,55 @@ function DeployDialog({
   );
 }
 
-function PortManagerDialog({
+type HealthCheckState = {
+  cmd: string;
+  interval: number;
+  timeout: number;
+  retries: number;
+  startPeriod: number;
+};
+
+type HealthCheckAction =
+  | { type: "SET_CMD"; payload: string }
+  | { type: "SET_INTERVAL"; payload: number }
+  | { type: "SET_TIMEOUT"; payload: number }
+  | { type: "SET_RETRIES"; payload: number }
+  | { type: "SET_START_PERIOD"; payload: number }
+  | { type: "RESET"; payload: HealthCheckState };
+
+function healthCheckReducer(
+  state: HealthCheckState,
+  action: HealthCheckAction
+): HealthCheckState {
+  switch (action.type) {
+    case "SET_CMD":
+      return { ...state, cmd: action.payload };
+    case "SET_INTERVAL":
+      return { ...state, interval: action.payload };
+    case "SET_TIMEOUT":
+      return { ...state, timeout: action.payload };
+    case "SET_RETRIES":
+      return { ...state, retries: action.payload };
+    case "SET_START_PERIOD":
+      return { ...state, startPeriod: action.payload };
+    case "RESET":
+      return action.payload;
+    default:
+      return state;
+  }
+}
+
+function getInitialHealthCheckState(service: Service): HealthCheckState {
+  return {
+    cmd: service.healthCheckCmd || "",
+    interval: service.healthCheckInterval ?? 10,
+    timeout: service.healthCheckTimeout ?? 5,
+    retries: service.healthCheckRetries ?? 3,
+    startPeriod: service.healthCheckStartPeriod ?? 30,
+  };
+}
+
+function PortsSection({
   service,
   onUpdate,
 }: {
@@ -363,7 +411,6 @@ function PortManagerDialog({
   const [isPublic, setIsPublic] = useState(false);
   const [subdomain, setSubdomain] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
 
   const hasRunningDeployments = service.deployments.some(
     (d) =>
@@ -432,25 +479,10 @@ function PortManagerDialog({
     try {
       await updateServicePorts(service.id, changes);
       onUpdate();
-      setIsOpen(false);
     } catch (error) {
       console.error("Failed to update ports:", error);
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleOpenChange = (open: boolean) => {
-    setIsOpen(open);
-    if (open) {
-      setStagedPorts(
-        service.ports.map((p) => ({
-          id: p.id,
-          port: p.port,
-          isPublic: p.isPublic,
-          subdomain: p.subdomain,
-        }))
-      );
     }
   };
 
@@ -468,16 +500,14 @@ function PortManagerDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        <Settings className="h-4 w-4 mr-1" />
-        Ports {service.ports.length > 0 && `(${service.ports.length})`}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Manage Ports</DialogTitle>
-        </DialogHeader>
-
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Settings className="h-4 w-4" />
+          Ports
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
         {stagedPorts.length > 0 && (
           <div className="space-y-2">
             {stagedPorts.map((port) => {
@@ -528,8 +558,7 @@ function PortManagerDialog({
         )}
 
         {hasAnyDeployment ? (
-          <div className="space-y-3 pt-2 border-t">
-            <p className="text-sm font-medium">Add Port</p>
+          <div className="space-y-3">
             <div className="flex gap-2">
               <Input
                 type="number"
@@ -556,6 +585,18 @@ function PortManagerDialog({
                 )}
                 {isPublic ? "Public" : "Private"}
               </button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleAddPort}
+                disabled={
+                  !newPort ||
+                  (isPublic && !subdomain.trim()) ||
+                  stagedPorts.some((p) => p.port === parseInt(newPort))
+                }
+              >
+                Add
+              </Button>
             </div>
             {isPublic && (
               <div className="flex items-center gap-1">
@@ -571,33 +612,21 @@ function PortManagerDialog({
                 </span>
               </div>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleAddPort}
-              disabled={
-                !newPort ||
-                (isPublic && !subdomain.trim()) ||
-                stagedPorts.some((p) => p.port === parseInt(newPort))
-              }
-            >
-              Add Port
-            </Button>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground pt-2 border-t">
+          <p className="text-sm text-muted-foreground">
             Deploy the service first to add ports
           </p>
         )}
 
         {hasChanges && (
-          <div className="pt-2 border-t">
+          <div className="pt-3 border-t">
             {hasRunningDeployments && (
               <p className="text-xs text-muted-foreground mb-2">
                 This will trigger a redeployment
               </p>
             )}
-            <Button onClick={handleSave} disabled={isSaving} className="w-full">
+            <Button onClick={handleSave} disabled={isSaving} size="sm">
               {isSaving
                 ? "Saving..."
                 : hasRunningDeployments
@@ -606,53 +635,39 @@ function PortManagerDialog({
             </Button>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </CardContent>
+    </Card>
   );
 }
 
-function HealthCheckDialog({
+function HealthCheckSection({
   service,
   onUpdate,
 }: {
   service: Service;
   onUpdate: () => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [cmd, setCmd] = useState(service.healthCheckCmd || "");
-  const [interval, setInterval] = useState(service.healthCheckInterval ?? 10);
-  const [timeout, setTimeout] = useState(service.healthCheckTimeout ?? 5);
-  const [retries, setRetries] = useState(service.healthCheckRetries ?? 3);
-  const [startPeriod, setStartPeriod] = useState(
-    service.healthCheckStartPeriod ?? 30
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [state, dispatch] = useReducer(
+    healthCheckReducer,
+    service,
+    getInitialHealthCheckState
   );
 
   const hasHealthCheck = !!service.healthCheckCmd;
-
-  const handleOpenChange = (open: boolean) => {
-    setIsOpen(open);
-    if (open) {
-      setCmd(service.healthCheckCmd || "");
-      setInterval(service.healthCheckInterval ?? 10);
-      setTimeout(service.healthCheckTimeout ?? 5);
-      setRetries(service.healthCheckRetries ?? 3);
-      setStartPeriod(service.healthCheckStartPeriod ?? 30);
-    }
-  };
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
       await updateServiceHealthCheck(service.id, {
-        cmd: cmd.trim() || null,
-        interval,
-        timeout,
-        retries,
-        startPeriod,
+        cmd: state.cmd.trim() || null,
+        interval: state.interval,
+        timeout: state.timeout,
+        retries: state.retries,
+        startPeriod: state.startPeriod,
       });
       onUpdate();
-      setIsOpen(false);
     } catch (error) {
       console.error("Failed to update health check:", error);
     } finally {
@@ -671,7 +686,6 @@ function HealthCheckDialog({
         startPeriod: 30,
       });
       onUpdate();
-      setIsOpen(false);
     } catch (error) {
       console.error("Failed to remove health check:", error);
     } finally {
@@ -680,92 +694,121 @@ function HealthCheckDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        <HeartPulse
-          className={`h-4 w-4 mr-1 ${hasHealthCheck ? "text-green-500" : ""}`}
-        />
-        Health
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Health Check</DialogTitle>
-        </DialogHeader>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <HeartPulse className={`h-4 w-4 ${hasHealthCheck ? "text-green-500" : ""}`} />
+          Health Check
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Command</label>
+          <Input
+            placeholder="curl -f http://localhost:8080/health || exit 1"
+            value={state.cmd}
+            onChange={(e) =>
+              dispatch({ type: "SET_CMD", payload: e.target.value })
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Exit 0 = healthy, non-zero = unhealthy
+          </p>
+        </div>
 
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Command</label>
-            <Input
-              placeholder="curl -f http://localhost:8080/health || exit 1"
-              value={cmd}
-              onChange={(e) => setCmd(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Command to run inside the container. Exit 0 = healthy, non-zero =
-              unhealthy.
-            </p>
-          </div>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
+          />
+          Advanced settings
+        </button>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Interval (s)</label>
+        {showAdvanced && (
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Interval (s)</label>
               <Input
                 type="number"
-                value={interval}
-                onChange={(e) => setInterval(parseInt(e.target.value) || 10)}
+                value={state.interval}
+                onChange={(e) =>
+                  dispatch({
+                    type: "SET_INTERVAL",
+                    payload: parseInt(e.target.value) || 10,
+                  })
+                }
                 min={1}
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Timeout (s)</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Timeout (s)</label>
               <Input
                 type="number"
-                value={timeout}
-                onChange={(e) => setTimeout(parseInt(e.target.value) || 5)}
+                value={state.timeout}
+                onChange={(e) =>
+                  dispatch({
+                    type: "SET_TIMEOUT",
+                    payload: parseInt(e.target.value) || 5,
+                  })
+                }
                 min={1}
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Retries</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Retries</label>
               <Input
                 type="number"
-                value={retries}
-                onChange={(e) => setRetries(parseInt(e.target.value) || 3)}
+                value={state.retries}
+                onChange={(e) =>
+                  dispatch({
+                    type: "SET_RETRIES",
+                    payload: parseInt(e.target.value) || 3,
+                  })
+                }
                 min={1}
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Start Period (s)</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Start Period (s)</label>
               <Input
                 type="number"
-                value={startPeriod}
-                onChange={(e) => setStartPeriod(parseInt(e.target.value) || 30)}
+                value={state.startPeriod}
+                onChange={(e) =>
+                  dispatch({
+                    type: "SET_START_PERIOD",
+                    payload: parseInt(e.target.value) || 30,
+                  })
+                }
                 min={0}
               />
             </div>
           </div>
+        )}
 
-          <p className="text-xs text-muted-foreground">
-            Changes apply on next deployment.
-          </p>
+        <p className="text-xs text-muted-foreground">
+          Changes apply on next deployment.
+        </p>
 
-          <div className="flex gap-2">
-            <Button onClick={handleSave} disabled={isSaving} className="flex-1">
-              {isSaving ? "Saving..." : "Save"}
+        <div className="flex gap-2">
+          <Button onClick={handleSave} disabled={isSaving} size="sm">
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+          {hasHealthCheck && (
+            <Button
+              variant="outline"
+              onClick={handleRemove}
+              disabled={isSaving}
+              size="sm"
+            >
+              Remove
             </Button>
-            {hasHealthCheck && (
-              <Button
-                variant="outline"
-                onClick={handleRemove}
-                disabled={isSaving}
-              >
-                Remove
-              </Button>
-            )}
-          </div>
+          )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -833,8 +876,6 @@ export function ServiceDetails({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <PortManagerDialog service={service} onUpdate={handleActionComplete} />
-              <HealthCheckDialog service={service} onUpdate={handleActionComplete} />
               <DeployDialog service={service} onUpdate={handleActionComplete} />
               <ActionButton
                 action={handleDelete}
@@ -858,8 +899,46 @@ export function ServiceDetails({
                 deployment.status === "stopping";
               return (
                 <Card key={deployment.id}>
-                  <CardContent className="pt-4">
-                    <div className="flex items-center justify-between mb-3">
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground block mb-1">Server</span>
+                        <span className="font-medium">
+                          {deployment.server?.name || "—"}
+                        </span>
+                        {deployment.server?.wireguardIp && (
+                          <span className="text-muted-foreground font-mono ml-2 text-xs">
+                            {deployment.server.wireguardIp}
+                          </span>
+                        )}
+                      </div>
+                      {deployment.containerId && (
+                        <div>
+                          <span className="text-muted-foreground block mb-1">
+                            Container
+                          </span>
+                          <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+                            {deployment.containerId.slice(0, 12)}
+                          </code>
+                        </div>
+                      )}
+                      {deployment.ports.length > 0 && (
+                        <div>
+                          <span className="text-muted-foreground block mb-1">Ports</span>
+                          <div className="flex flex-wrap gap-1">
+                            {deployment.ports.map((p) => (
+                              <code
+                                key={p.id}
+                                className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded"
+                              >
+                                {p.containerPort}→{p.hostPort}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t">
                       <div className="flex items-center gap-2">
                         <Badge variant={getStatusVariant(deployment.status)}>
                           {deployment.status}
@@ -905,44 +984,6 @@ export function ServiceDetails({
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground block mb-1">Server</span>
-                        <span className="font-medium">
-                          {deployment.server?.name || "—"}
-                        </span>
-                        {deployment.server?.wireguardIp && (
-                          <span className="text-muted-foreground font-mono ml-2 text-xs">
-                            {deployment.server.wireguardIp}
-                          </span>
-                        )}
-                      </div>
-                      {deployment.containerId && (
-                        <div>
-                          <span className="text-muted-foreground block mb-1">
-                            Container
-                          </span>
-                          <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                            {deployment.containerId.slice(0, 12)}
-                          </code>
-                        </div>
-                      )}
-                      {deployment.ports.length > 0 && (
-                        <div>
-                          <span className="text-muted-foreground block mb-1">Ports</span>
-                          <div className="flex flex-wrap gap-1">
-                            {deployment.ports.map((p) => (
-                              <code
-                                key={p.id}
-                                className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded"
-                              >
-                                {p.containerPort}→{p.hostPort}
-                              </code>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
                   </CardContent>
                 </Card>
               );
@@ -960,6 +1001,11 @@ export function ServiceDetails({
           </CardContent>
         </Card>
       )}
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <PortsSection service={service} onUpdate={handleActionComplete} />
+        <HealthCheckSection service={service} onUpdate={handleActionComplete} />
+      </div>
     </div>
   );
 }

@@ -98,7 +98,10 @@ export default async function ServicePage({
     <div className="space-y-6">
       <PageHeader
         title={data.service.name}
-        backHref={`/dashboard/projects/${slug}`}
+        breadcrumbs={[
+          { label: "Projects", href: "/dashboard" },
+          { label: data.project.name, href: `/dashboard/projects/${slug}` },
+        ]}
       />
       <ServiceDetails
         projectSlug={slug}

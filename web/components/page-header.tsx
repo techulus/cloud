@@ -1,32 +1,46 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+type Breadcrumb = {
+	label: string;
+	href?: string;
+};
 
 type PageHeaderProps = {
 	title: string;
 	description?: string;
-	backHref?: string;
+	breadcrumbs?: Breadcrumb[];
 	actions?: React.ReactNode;
-	compact?: boolean;
 };
 
 export function PageHeader({
 	title,
 	description,
-	backHref,
+	breadcrumbs,
 	actions,
-	compact = false,
 }: PageHeaderProps) {
 	return (
-		<div className={cn("flex items-center justify-between h-10", compact && "h-2.5")}>
+		<div className="flex items-center justify-between h-10">
 			<div className="flex items-center gap-2">
-				{backHref && (
-					<Link href={backHref}>
-						<Button variant="ghost" size="icon" className="h-8 w-8">
-							<ArrowLeft className="h-4 w-4" />
-						</Button>
-					</Link>
+				{breadcrumbs && breadcrumbs.length > 0 && (
+					<nav className="flex items-center gap-1 text-sm">
+						{breadcrumbs.map((crumb, i) => (
+							<span key={i} className="flex items-center gap-1">
+								{crumb.href ? (
+									<Link
+										href={crumb.href}
+										className="text-muted-foreground hover:text-foreground transition-colors"
+									>
+										{crumb.label}
+									</Link>
+								) : (
+									<span className="text-muted-foreground">{crumb.label}</span>
+								)}
+								<ChevronRight className="h-4 w-4 text-muted-foreground" />
+							</span>
+						))}
+					</nav>
 				)}
 				<div>
 					<h1 className="text-xl font-bold">{title}</h1>

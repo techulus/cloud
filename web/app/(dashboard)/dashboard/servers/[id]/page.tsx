@@ -53,7 +53,7 @@ export default async function ServerDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={server.name}
-        backHref="/dashboard"
+        breadcrumbs={[{ label: "Servers", href: "/dashboard" }]}
         actions={
           <Badge variant={getStatusVariant(server.status)}>
             {server.status}

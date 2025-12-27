@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -612,6 +612,54 @@ function PortManagerDialog({
 	);
 }
 
+type HealthCheckState = {
+	cmd: string;
+	interval: number;
+	timeout: number;
+	retries: number;
+	startPeriod: number;
+};
+
+type HealthCheckAction =
+	| { type: "SET_CMD"; payload: string }
+	| { type: "SET_INTERVAL"; payload: number }
+	| { type: "SET_TIMEOUT"; payload: number }
+	| { type: "SET_RETRIES"; payload: number }
+	| { type: "SET_START_PERIOD"; payload: number }
+	| { type: "RESET"; payload: HealthCheckState };
+
+function healthCheckReducer(
+	state: HealthCheckState,
+	action: HealthCheckAction,
+): HealthCheckState {
+	switch (action.type) {
+		case "SET_CMD":
+			return { ...state, cmd: action.payload };
+		case "SET_INTERVAL":
+			return { ...state, interval: action.payload };
+		case "SET_TIMEOUT":
+			return { ...state, timeout: action.payload };
+		case "SET_RETRIES":
+			return { ...state, retries: action.payload };
+		case "SET_START_PERIOD":
+			return { ...state, startPeriod: action.payload };
+		case "RESET":
+			return action.payload;
+		default:
+			return state;
+	}
+}
+
+function getInitialHealthCheckState(service: Service): HealthCheckState {
+	return {
+		cmd: service.healthCheckCmd || "",
+		interval: service.healthCheckInterval ?? 10,
+		timeout: service.healthCheckTimeout ?? 5,
+		retries: service.healthCheckRetries ?? 3,
+		startPeriod: service.healthCheckStartPeriod ?? 30,
+	};
+}
+
 function HealthCheckDialog({
 	service,
 	onUpdate,
@@ -621,12 +669,10 @@ function HealthCheckDialog({
 }) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
-	const [cmd, setCmd] = useState(service.healthCheckCmd || "");
-	const [interval, setInterval] = useState(service.healthCheckInterval ?? 10);
-	const [timeout, setTimeout] = useState(service.healthCheckTimeout ?? 5);
-	const [retries, setRetries] = useState(service.healthCheckRetries ?? 3);
-	const [startPeriod, setStartPeriod] = useState(
-		service.healthCheckStartPeriod ?? 30
+	const [state, dispatch] = useReducer(
+		healthCheckReducer,
+		service,
+		getInitialHealthCheckState,
 	);
 
 	const hasHealthCheck = !!service.healthCheckCmd;
@@ -634,11 +680,7 @@ function HealthCheckDialog({
 	const handleOpenChange = (open: boolean) => {
 		setIsOpen(open);
 		if (open) {
-			setCmd(service.healthCheckCmd || "");
-			setInterval(service.healthCheckInterval ?? 10);
-			setTimeout(service.healthCheckTimeout ?? 5);
-			setRetries(service.healthCheckRetries ?? 3);
-			setStartPeriod(service.healthCheckStartPeriod ?? 30);
+			dispatch({ type: "RESET", payload: getInitialHealthCheckState(service) });
 		}
 	};
 
@@ -646,11 +688,11 @@ function HealthCheckDialog({
 		setIsSaving(true);
 		try {
 			await updateServiceHealthCheck(service.id, {
-				cmd: cmd.trim() || null,
-				interval,
-				timeout,
-				retries,
-				startPeriod,
+				cmd: state.cmd.trim() || null,
+				interval: state.interval,
+				timeout: state.timeout,
+				retries: state.retries,
+				startPeriod: state.startPeriod,
 			});
 			onUpdate();
 			setIsOpen(false);
@@ -698,8 +740,10 @@ function HealthCheckDialog({
 						<label className="text-sm font-medium">Command</label>
 						<Input
 							placeholder="curl -f http://localhost:8080/health || exit 1"
-							value={cmd}
-							onChange={(e) => setCmd(e.target.value)}
+							value={state.cmd}
+							onChange={(e) =>
+								dispatch({ type: "SET_CMD", payload: e.target.value })
+							}
 						/>
 						<p className="text-xs text-muted-foreground">
 							Command to run inside the container. Exit 0 = healthy, non-zero =
@@ -712,8 +756,13 @@ function HealthCheckDialog({
 							<label className="text-sm font-medium">Interval (s)</label>
 							<Input
 								type="number"
-								value={interval}
-								onChange={(e) => setInterval(parseInt(e.target.value) || 10)}
+								value={state.interval}
+								onChange={(e) =>
+									dispatch({
+										type: "SET_INTERVAL",
+										payload: parseInt(e.target.value) || 10,
+									})
+								}
 								min={1}
 							/>
 						</div>
@@ -721,8 +770,13 @@ function HealthCheckDialog({
 							<label className="text-sm font-medium">Timeout (s)</label>
 							<Input
 								type="number"
-								value={timeout}
-								onChange={(e) => setTimeout(parseInt(e.target.value) || 5)}
+								value={state.timeout}
+								onChange={(e) =>
+									dispatch({
+										type: "SET_TIMEOUT",
+										payload: parseInt(e.target.value) || 5,
+									})
+								}
 								min={1}
 							/>
 						</div>
@@ -730,8 +784,13 @@ function HealthCheckDialog({
 							<label className="text-sm font-medium">Retries</label>
 							<Input
 								type="number"
-								value={retries}
-								onChange={(e) => setRetries(parseInt(e.target.value) || 3)}
+								value={state.retries}
+								onChange={(e) =>
+									dispatch({
+										type: "SET_RETRIES",
+										payload: parseInt(e.target.value) || 3,
+									})
+								}
 								min={1}
 							/>
 						</div>
@@ -739,8 +798,13 @@ function HealthCheckDialog({
 							<label className="text-sm font-medium">Start Period (s)</label>
 							<Input
 								type="number"
-								value={startPeriod}
-								onChange={(e) => setStartPeriod(parseInt(e.target.value) || 30)}
+								value={state.startPeriod}
+								onChange={(e) =>
+									dispatch({
+										type: "SET_START_PERIOD",
+										payload: parseInt(e.target.value) || 30,
+									})
+								}
 								min={0}
 							/>
 						</div>
