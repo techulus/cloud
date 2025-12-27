@@ -10,9 +10,15 @@ import {
 	secrets,
 	servers,
 	servicePorts,
+	serviceReplicas,
 	services,
 	workQueue,
 } from "@/db/schema";
+import {
+	buildCurrentConfig,
+	type HealthCheckConfig as ServiceHealthCheckConfig,
+	type PortConfig,
+} from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 
 function slugify(text: string): string {
@@ -450,6 +456,39 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		}
 	}
 
+	const servicePortsList2 = await db
+		.select()
+		.from(servicePorts)
+		.where(eq(servicePorts.serviceId, serviceId));
+
+	const replicaConfigs = placements
+		.filter((p) => p.replicas > 0)
+		.map((p) => ({
+			serverId: p.serverId,
+			serverName: serverMap.get(p.serverId)?.name ?? "Unknown",
+			count: p.replicas,
+		}));
+
+	const portConfigs = servicePortsList2.map((p) => ({
+		port: p.port,
+		isPublic: p.isPublic,
+		subdomain: p.subdomain,
+	}));
+
+	const updatedService = await getService(serviceId);
+	if (updatedService) {
+		const deployedConfig = buildCurrentConfig(
+			updatedService,
+			replicaConfigs,
+			portConfigs,
+		);
+
+		await db
+			.update(services)
+			.set({ deployedConfig: JSON.stringify(deployedConfig) })
+			.where(eq(services.id, serviceId));
+	}
+
 	return { deploymentIds, replicaCount: totalReplicas };
 }
 
@@ -509,6 +548,145 @@ export async function updateServiceHealthCheck(
 			healthCheckStartPeriod: config.startPeriod,
 		})
 		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
+export async function getServiceReplicas(serviceId: string) {
+	const replicas = await db
+		.select({
+			id: serviceReplicas.id,
+			serverId: serviceReplicas.serverId,
+			serverName: servers.name,
+			count: serviceReplicas.count,
+		})
+		.from(serviceReplicas)
+		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+		.where(eq(serviceReplicas.serviceId, serviceId));
+
+	return replicas;
+}
+
+export type ServiceConfigUpdate = {
+	source?: { type: "image"; image: string };
+	healthCheck?: ServiceHealthCheckConfig | null;
+	ports?: { add?: PortConfig[]; remove?: string[] };
+	replicas?: { serverId: string; count: number }[];
+};
+
+export async function updateServiceConfig(
+	serviceId: string,
+	config: ServiceConfigUpdate,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (config.source) {
+		await db
+			.update(services)
+			.set({ image: config.source.image })
+			.where(eq(services.id, serviceId));
+	}
+
+	if (config.healthCheck !== undefined) {
+		if (config.healthCheck === null) {
+			await db
+				.update(services)
+				.set({
+					healthCheckCmd: null,
+					healthCheckInterval: null,
+					healthCheckTimeout: null,
+					healthCheckRetries: null,
+					healthCheckStartPeriod: null,
+				})
+				.where(eq(services.id, serviceId));
+		} else {
+			await db
+				.update(services)
+				.set({
+					healthCheckCmd: config.healthCheck.cmd,
+					healthCheckInterval: config.healthCheck.interval,
+					healthCheckTimeout: config.healthCheck.timeout,
+					healthCheckRetries: config.healthCheck.retries,
+					healthCheckStartPeriod: config.healthCheck.startPeriod,
+				})
+				.where(eq(services.id, serviceId));
+		}
+	}
+
+	if (config.ports) {
+		if (config.ports.remove && config.ports.remove.length > 0) {
+			for (const portId of config.ports.remove) {
+				await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, portId));
+				await db.delete(servicePorts).where(eq(servicePorts.id, portId));
+			}
+		}
+
+		if (config.ports.add && config.ports.add.length > 0) {
+			const existing = await db
+				.select()
+				.from(servicePorts)
+				.where(eq(servicePorts.serviceId, serviceId));
+
+			for (const port of config.ports.add) {
+				if (existing.some((p) => p.port === port.port)) {
+					throw new Error(`Port ${port.port} already exists`);
+				}
+
+				if (port.isPublic) {
+					if (!port.subdomain) {
+						throw new Error("Subdomain is required for public ports");
+					}
+
+					const slug = slugify(port.subdomain);
+					if (!slug) {
+						throw new Error("Invalid subdomain");
+					}
+
+					const existingSubdomain = await db
+						.select()
+						.from(servicePorts)
+						.where(eq(servicePorts.subdomain, slug));
+
+					if (existingSubdomain.length > 0) {
+						throw new Error("Subdomain already in use");
+					}
+
+					await db.insert(servicePorts).values({
+						id: randomUUID(),
+						serviceId,
+						port: port.port,
+						isPublic: true,
+						subdomain: slug,
+					});
+				} else {
+					await db.insert(servicePorts).values({
+						id: randomUUID(),
+						serviceId,
+						port: port.port,
+						isPublic: false,
+					});
+				}
+			}
+		}
+	}
+
+	if (config.replicas) {
+		await db.delete(serviceReplicas).where(eq(serviceReplicas.serviceId, serviceId));
+
+		for (const replica of config.replicas) {
+			if (replica.count > 0) {
+				await db.insert(serviceReplicas).values({
+					id: randomUUID(),
+					serviceId,
+					serverId: replica.serverId,
+					count: replica.count,
+				});
+			}
+		}
+	}
 
 	return { success: true };
 }

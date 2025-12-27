@@ -4,6 +4,7 @@ import {
   projects,
   services,
   servicePorts,
+  serviceReplicas,
   deployments,
   deploymentPorts,
   servers,
@@ -29,7 +30,7 @@ async function getService(projectSlug: string, serviceId: string) {
 
   if (!service) return null;
 
-  const [ports, serviceDeployments] = await Promise.all([
+  const [ports, serviceDeployments, configuredReplicas] = await Promise.all([
     db
       .select()
       .from(servicePorts)
@@ -40,6 +41,16 @@ async function getService(projectSlug: string, serviceId: string) {
       .from(deployments)
       .where(eq(deployments.serviceId, service.id))
       .orderBy(deployments.createdAt),
+    db
+      .select({
+        id: serviceReplicas.id,
+        serverId: serviceReplicas.serverId,
+        serverName: servers.name,
+        count: serviceReplicas.count,
+      })
+      .from(serviceReplicas)
+      .innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+      .where(eq(serviceReplicas.serviceId, service.id)),
   ]);
 
   const deploymentsWithDetails = await Promise.all(
@@ -77,6 +88,7 @@ async function getService(projectSlug: string, serviceId: string) {
     service: {
       ...service,
       ports,
+      configuredReplicas,
       deployments: deploymentsWithDetails,
     },
   };

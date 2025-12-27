@@ -5,6 +5,7 @@ import {
 	listDeployments,
 	getServicePorts,
 	getDeploymentPorts,
+	getServiceReplicas,
 } from "@/actions/projects";
 import { ServiceCanvas } from "@/components/service-canvas";
 import { PageHeader } from "@/components/page-header";
@@ -29,9 +30,10 @@ export default async function ProjectPage({
 
 	const initialServices = await Promise.all(
 		servicesList.map(async (service) => {
-			const [ports, serviceDeployments] = await Promise.all([
+			const [ports, serviceDeployments, configuredReplicas] = await Promise.all([
 				getServicePorts(service.id),
 				listDeployments(service.id),
+				getServiceReplicas(service.id),
 			]);
 
 			const deploymentsWithDetails = await Promise.all(
@@ -56,6 +58,7 @@ export default async function ProjectPage({
 			return {
 				...service,
 				ports,
+				configuredReplicas,
 				deployments: deploymentsWithDetails,
 			};
 		}),

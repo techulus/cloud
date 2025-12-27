@@ -151,9 +151,21 @@ export const services = sqliteTable("services", {
   healthCheckTimeout: integer("health_check_timeout").default(5),
   healthCheckRetries: integer("health_check_retries").default(3),
   healthCheckStartPeriod: integer("health_check_start_period").default(30),
+  deployedConfig: text("deployed_config"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
+});
+
+export const serviceReplicas = sqliteTable("service_replicas", {
+  id: text("id").primaryKey(),
+  serviceId: text("service_id")
+    .notNull()
+    .references(() => services.id, { onDelete: "cascade" }),
+  serverId: text("server_id")
+    .notNull()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  count: integer("count").notNull().default(1),
 });
 
 export const servicePorts = sqliteTable("service_ports", {

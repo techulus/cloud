@@ -6,6 +6,7 @@ import { db } from "@/db";
 import {
   services,
   servicePorts,
+  serviceReplicas,
   deployments,
   deploymentPorts,
   servers,
@@ -34,7 +35,7 @@ export async function GET(
 
   const result = await Promise.all(
     servicesList.map(async (service) => {
-      const [ports, serviceDeployments] = await Promise.all([
+      const [ports, serviceDeployments, replicas] = await Promise.all([
         db
           .select()
           .from(servicePorts)
@@ -45,6 +46,16 @@ export async function GET(
           .from(deployments)
           .where(eq(deployments.serviceId, service.id))
           .orderBy(deployments.createdAt),
+        db
+          .select({
+            id: serviceReplicas.id,
+            serverId: serviceReplicas.serverId,
+            serverName: servers.name,
+            count: serviceReplicas.count,
+          })
+          .from(serviceReplicas)
+          .innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+          .where(eq(serviceReplicas.serviceId, service.id)),
       ]);
 
       const deploymentsWithDetails = await Promise.all(
@@ -80,6 +91,7 @@ export async function GET(
       return {
         ...service,
         ports,
+        configuredReplicas: replicas,
         deployments: deploymentsWithDetails,
       };
     })

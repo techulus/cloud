@@ -1,0 +1,265 @@
+export type ReplicaConfig = {
+	serverId: string;
+	serverName: string;
+	count: number;
+};
+
+export type PortConfig = {
+	port: number;
+	isPublic: boolean;
+	subdomain: string | null;
+};
+
+export type HealthCheckConfig = {
+	cmd: string;
+	interval: number;
+	timeout: number;
+	retries: number;
+	startPeriod: number;
+};
+
+export type SourceConfig = {
+	type: "image";
+	image: string;
+};
+
+export type DeployedConfig = {
+	source: SourceConfig;
+	replicas: ReplicaConfig[];
+	healthCheck: HealthCheckConfig | null;
+	ports: PortConfig[];
+};
+
+export type ConfigChange = {
+	field: string;
+	from: string;
+	to: string;
+};
+
+export function buildCurrentConfig(
+	service: {
+		image: string;
+		healthCheckCmd: string | null;
+		healthCheckInterval: number | null;
+		healthCheckTimeout: number | null;
+		healthCheckRetries: number | null;
+		healthCheckStartPeriod: number | null;
+	},
+	replicas: { serverId: string; serverName: string; count: number }[],
+	ports: { port: number; isPublic: boolean; subdomain: string | null }[],
+): DeployedConfig {
+	return {
+		source: {
+			type: "image",
+			image: service.image,
+		},
+		replicas: replicas.map((r) => ({
+			serverId: r.serverId,
+			serverName: r.serverName,
+			count: r.count,
+		})),
+		healthCheck: service.healthCheckCmd
+			? {
+					cmd: service.healthCheckCmd,
+					interval: service.healthCheckInterval ?? 10,
+					timeout: service.healthCheckTimeout ?? 5,
+					retries: service.healthCheckRetries ?? 3,
+					startPeriod: service.healthCheckStartPeriod ?? 30,
+				}
+			: null,
+		ports: ports.map((p) => ({
+			port: p.port,
+			isPublic: p.isPublic,
+			subdomain: p.subdomain,
+		})),
+	};
+}
+
+export function diffConfigs(
+	deployed: DeployedConfig | null,
+	current: DeployedConfig,
+): ConfigChange[] {
+	const changes: ConfigChange[] = [];
+
+	if (!deployed) {
+		if (current.source.image) {
+			changes.push({
+				field: "Image",
+				from: "(not deployed)",
+				to: current.source.image,
+			});
+		}
+		for (const replica of current.replicas) {
+			changes.push({
+				field: `${replica.serverName} replicas`,
+				from: "0",
+				to: String(replica.count),
+			});
+		}
+		if (current.healthCheck) {
+			changes.push({
+				field: "Health check",
+				from: "(none)",
+				to: current.healthCheck.cmd,
+			});
+		}
+		for (const port of current.ports) {
+			const portType = port.isPublic ? "public" : "internal";
+			changes.push({
+				field: `Port ${port.port}`,
+				from: "(none)",
+				to: port.subdomain ? `${portType}, ${port.subdomain}` : portType,
+			});
+		}
+		return changes;
+	}
+
+	if (deployed.source.image !== current.source.image) {
+		changes.push({
+			field: "Image",
+			from: deployed.source.image,
+			to: current.source.image,
+		});
+	}
+
+	const deployedReplicasMap = new Map(
+		(deployed.replicas || []).map((r) => [r.serverId, r]),
+	);
+	const currentReplicasMap = new Map(
+		(current.replicas || []).map((r) => [r.serverId, r]),
+	);
+
+	for (const [serverId, currentReplica] of currentReplicasMap) {
+		const deployedReplica = deployedReplicasMap.get(serverId);
+		if (!deployedReplica) {
+			changes.push({
+				field: `${currentReplica.serverName} replicas`,
+				from: "0",
+				to: String(currentReplica.count),
+			});
+		} else if (deployedReplica.count !== currentReplica.count) {
+			changes.push({
+				field: `${currentReplica.serverName} replicas`,
+				from: String(deployedReplica.count),
+				to: String(currentReplica.count),
+			});
+		}
+	}
+
+	for (const [serverId, deployedReplica] of deployedReplicasMap) {
+		if (!currentReplicasMap.has(serverId)) {
+			changes.push({
+				field: `${deployedReplica.serverName} replicas`,
+				from: String(deployedReplica.count),
+				to: "0 (removed)",
+			});
+		}
+	}
+
+	const deployedHc = deployed.healthCheck;
+	const currentHc = current.healthCheck;
+
+	if (!deployedHc && currentHc) {
+		changes.push({
+			field: "Health check",
+			from: "(none)",
+			to: currentHc.cmd,
+		});
+	} else if (deployedHc && !currentHc) {
+		changes.push({
+			field: "Health check",
+			from: deployedHc.cmd,
+			to: "(removed)",
+		});
+	} else if (deployedHc && currentHc) {
+		if (deployedHc.cmd !== currentHc.cmd) {
+			changes.push({
+				field: "Health check command",
+				from: deployedHc.cmd,
+				to: currentHc.cmd,
+			});
+		}
+		if (deployedHc.interval !== currentHc.interval) {
+			changes.push({
+				field: "Health check interval",
+				from: `${deployedHc.interval}s`,
+				to: `${currentHc.interval}s`,
+			});
+		}
+		if (deployedHc.timeout !== currentHc.timeout) {
+			changes.push({
+				field: "Health check timeout",
+				from: `${deployedHc.timeout}s`,
+				to: `${currentHc.timeout}s`,
+			});
+		}
+		if (deployedHc.retries !== currentHc.retries) {
+			changes.push({
+				field: "Health check retries",
+				from: String(deployedHc.retries),
+				to: String(currentHc.retries),
+			});
+		}
+		if (deployedHc.startPeriod !== currentHc.startPeriod) {
+			changes.push({
+				field: "Health check start period",
+				from: `${deployedHc.startPeriod}s`,
+				to: `${currentHc.startPeriod}s`,
+			});
+		}
+	}
+
+	const deployedPortsMap = new Map((deployed.ports || []).map((p) => [p.port, p]));
+	const currentPortsMap = new Map((current.ports || []).map((p) => [p.port, p]));
+
+	for (const [port, currentPort] of currentPortsMap) {
+		const deployedPort = deployedPortsMap.get(port);
+		const portType = currentPort.isPublic ? "public" : "internal";
+		const portDesc = currentPort.subdomain
+			? `${portType}, ${currentPort.subdomain}`
+			: portType;
+
+		if (!deployedPort) {
+			changes.push({
+				field: `Port ${port}`,
+				from: "(none)",
+				to: portDesc,
+			});
+		} else {
+			const deployedType = deployedPort.isPublic ? "public" : "internal";
+			const deployedDesc = deployedPort.subdomain
+				? `${deployedType}, ${deployedPort.subdomain}`
+				: deployedType;
+
+			if (deployedDesc !== portDesc) {
+				changes.push({
+					field: `Port ${port}`,
+					from: deployedDesc,
+					to: portDesc,
+				});
+			}
+		}
+	}
+
+	for (const [port, deployedPort] of deployedPortsMap) {
+		if (!currentPortsMap.has(port)) {
+			const deployedType = deployedPort.isPublic ? "public" : "internal";
+			changes.push({
+				field: `Port ${port}`,
+				from: deployedType,
+				to: "(removed)",
+			});
+		}
+	}
+
+	return changes;
+}
+
+export function parseDeployedConfig(json: string | null): DeployedConfig | null {
+	if (!json) return null;
+	try {
+		return JSON.parse(json) as DeployedConfig;
+	} catch {
+		return null;
+	}
+}

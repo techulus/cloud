@@ -30,18 +30,27 @@ type ServicePort = {
 	subdomain: string | null;
 };
 
+type ServiceReplica = {
+	id: string;
+	serverId: string;
+	serverName: string;
+	count: number;
+};
+
 type Service = {
 	id: string;
 	projectId: string;
 	name: string;
 	image: string;
 	replicas: number;
+	deployedConfig: string | null;
 	healthCheckCmd: string | null;
 	healthCheckInterval: number | null;
 	healthCheckTimeout: number | null;
 	healthCheckRetries: number | null;
 	healthCheckStartPeriod: number | null;
 	ports: ServicePort[];
+	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
 };
 
