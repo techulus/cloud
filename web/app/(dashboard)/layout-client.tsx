@@ -37,7 +37,7 @@ export function DashboardLayoutClient({
 	return (
 		<div className="min-h-screen">
 			<header className="border-b">
-				<div className="container mx-auto px-4 h-14 flex items-center justify-between">
+				<div className="container max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
 					<Link href="/dashboard" className="flex items-center gap-2 text-sm">
 						<Image
 							src="/logo.png"
@@ -65,7 +65,7 @@ export function DashboardLayoutClient({
 					</div>
 				</div>
 			</header>
-			<main className="container max-w-5xl mx-auto px-4 py-6">{children}</main>
+			<main className="container max-w-7xl mx-auto px-4 py-6">{children}</main>
 		</div>
 	);
 }

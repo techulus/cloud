@@ -1,6 +1,12 @@
 import { notFound } from "next/navigation";
-import { getProjectBySlug, listServices, listDeployments, getServicePorts, getDeploymentPorts } from "@/actions/projects";
-import { ServiceList } from "@/components/service-list";
+import {
+  getProjectBySlug,
+  listServices,
+  listDeployments,
+  getServicePorts,
+  getDeploymentPorts,
+} from "@/actions/projects";
+import { ServiceCanvas } from "@/components/service-canvas";
 import { PageHeader } from "@/components/page-header";
 import { CreateServiceDialog } from "@/components/create-service-dialog";
 import { db } from "@/db";
@@ -56,14 +62,18 @@ export default async function ProjectPage({
   );
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title={project.name}
         backHref="/dashboard"
         actions={<CreateServiceDialog projectId={project.id} />}
+        compact
       />
-
-      <ServiceList projectId={project.id} initialServices={initialServices} />
+      <ServiceCanvas
+        projectId={project.id}
+        projectSlug={slug}
+        initialServices={initialServices}
+      />
     </div>
   );
 }
