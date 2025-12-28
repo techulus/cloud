@@ -21,8 +21,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Distributed Caddy
 - [x] Per-machine subnet allocation
 - [x] Local DNS on each machine
-- [ ] Health checks
-- [ ] Secrets
+- [x] Health checks
 - [ ] Rolling updates
+- [ ] Secrets
+- [ ] Logs
 - [ ] GitHub deployments
 - [ ] Volumes

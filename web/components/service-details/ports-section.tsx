@@ -1,15 +1,83 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Globe, Lock, Settings, X } from "lucide-react";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@/components/ui/dialog";
+import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
 import { updateServiceConfig } from "@/actions/projects";
 import type { Service, StagedPort } from "./types";
 
-export function PortsSection({
+type Server = {
+	id: string;
+	name: string;
+	publicIp: string | null;
+};
+
+function DnsInstructionsModal({ servers }: { servers: Server[] }) {
+	const serversWithIp = servers.filter((s) => s.publicIp);
+
+	return (
+		<Dialog>
+			<DialogTrigger
+				render={
+					<Button variant="ghost" size="sm">
+						<HelpCircle className="h-4 w-4" />
+					</Button>
+				}
+			/>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>DNS Configuration</DialogTitle>
+				</DialogHeader>
+				<div className="space-y-4">
+					<p className="text-sm text-muted-foreground">
+						Configure DNS A records pointing to your servers.
+					</p>
+					{serversWithIp.length > 0 ? (
+						<>
+							<div className="space-y-2">
+								{serversWithIp.map((server) => (
+									<div
+										key={server.id}
+										className="flex items-center justify-between bg-muted px-3 py-2 rounded-md text-sm"
+									>
+										<span>{server.name}</span>
+										<code className="font-mono">{server.publicIp}</code>
+									</div>
+								))}
+							</div>
+							<div className="text-xs text-muted-foreground space-y-1">
+								<p>Type: A | TTL: 300</p>
+							</div>
+						</>
+					) : (
+						<p className="text-sm text-muted-foreground">
+							No servers with public IPs available.
+						</p>
+					)}
+				</div>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+export const PortsSection = memo(function PortsSection({
 	service,
 	onUpdate,
 }: {
@@ -21,30 +89,37 @@ export function PortsSection({
 			id: p.id,
 			port: p.port,
 			isPublic: p.isPublic,
-			subdomain: p.subdomain,
+			domain: p.domain,
 		})),
 	);
 	const [newPort, setNewPort] = useState("");
-	const [isPublic, setIsPublic] = useState(false);
-	const [subdomain, setSubdomain] = useState("");
+	const [visibility, setVisibility] = useState<"private" | "public">("private");
+	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
+	const [servers, setServers] = useState<Server[]>([]);
+
+	useEffect(() => {
+		fetch("/api/servers")
+			.then((res) => res.json())
+			.then(setServers)
+			.catch(() => {});
+	}, []);
 
 	const originalPortIds = new Set(service.ports.map((p) => p.id));
-	const stagedPortIds = new Set(
-		stagedPorts.filter((p) => !p.isNew).map((p) => p.id),
-	);
+	const stagedPortIds = new Set(stagedPorts.filter((p) => !p.isNew).map((p) => p.id));
 	const addedPorts = stagedPorts.filter((p) => p.isNew);
-	const removedPortIds = [...originalPortIds].filter(
-		(id) => !stagedPortIds.has(id),
-	);
-
+	const removedPortIds = [...originalPortIds].filter((id) => !stagedPortIds.has(id));
 	const hasChanges = addedPorts.length > 0 || removedPortIds.length > 0;
 
-	const handleAddPort = () => {
+	const isPublic = visibility === "public";
+	const canAdd =
+		newPort &&
+		!stagedPorts.some((p) => p.port === parseInt(newPort)) &&
+		(!isPublic || domain.trim());
+
+	const handleAdd = () => {
 		const port = parseInt(newPort);
 		if (isNaN(port) || port <= 0 || port > 65535) return;
-		if (isPublic && !subdomain.trim()) return;
-		if (stagedPorts.some((p) => p.port === port)) return;
 
 		setStagedPorts([
 			...stagedPorts,
@@ -52,22 +127,21 @@ export function PortsSection({
 				id: `new-${Date.now()}`,
 				port,
 				isPublic,
-				subdomain: isPublic ? subdomain.trim() : null,
+				domain: isPublic ? domain.trim().toLowerCase() : null,
 				isNew: true,
 			},
 		]);
 		setNewPort("");
-		setSubdomain("");
-		setIsPublic(false);
+		setDomain("");
+		setVisibility("private");
 	};
 
-	const handleRemovePort = (portId: string) => {
+	const handleRemove = (portId: string) => {
 		setStagedPorts(stagedPorts.filter((p) => p.id !== portId));
 	};
 
 	const handleSave = async () => {
 		if (!hasChanges) return;
-
 		setIsSaving(true);
 		try {
 			await updateServiceConfig(service.id, {
@@ -76,7 +150,7 @@ export function PortsSection({
 					add: addedPorts.map((p) => ({
 						port: p.port,
 						isPublic: p.isPublic,
-						subdomain: p.subdomain,
+						domain: p.domain,
 					})),
 				},
 			});
@@ -90,15 +164,10 @@ export function PortsSection({
 
 	const getPrivateUrl = (port: StagedPort) => {
 		if (port.isNew) return null;
-		const runningDeployment = service.deployments.find(
-			(d) => d.status === "running",
-		);
-		if (!runningDeployment?.server?.wireguardIp) return null;
-		const deploymentPort = runningDeployment.ports.find(
-			(p) => p.containerPort === port.port,
-		);
-		if (!deploymentPort) return null;
-		return `${runningDeployment.server.wireguardIp}:${deploymentPort.hostPort}`;
+		const deployment = service.deployments.find((d) => d.status === "running");
+		if (!deployment?.server?.wireguardIp) return null;
+		const depPort = deployment.ports.find((p) => p.containerPort === port.port);
+		return depPort ? `${deployment.server.wireguardIp}:${depPort.hostPort}` : null;
 	};
 
 	return (
@@ -118,9 +187,7 @@ export function PortsSection({
 								<div
 									key={port.id}
 									className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
-										port.isNew
-											? "bg-primary/10 border border-primary/20"
-											: "bg-muted"
+										port.isNew ? "bg-primary/10 border border-primary/20" : "bg-muted"
 									}`}
 								>
 									<div className="flex items-center gap-2">
@@ -135,20 +202,16 @@ export function PortsSection({
 												new
 											</Badge>
 										)}
-										{port.isPublic && port.subdomain && (
-											<span className="text-xs text-muted-foreground">
-												{port.subdomain}.techulus.app
-											</span>
+										{port.isPublic && port.domain && (
+											<span className="text-xs text-muted-foreground">{port.domain}</span>
 										)}
 										{!port.isPublic && privateUrl && (
-											<span className="text-xs text-muted-foreground">
-												{privateUrl}
-											</span>
+											<span className="text-xs text-muted-foreground">{privateUrl}</span>
 										)}
 									</div>
 									<button
 										type="button"
-										onClick={() => handleRemovePort(port.id)}
+										onClick={() => handleRemove(port.id)}
 										className="text-muted-foreground hover:text-foreground"
 									>
 										<X className="h-4 w-4" />
@@ -159,60 +222,49 @@ export function PortsSection({
 					</div>
 				)}
 
-				<div className="space-y-3">
-					<div className="flex gap-2">
-						<Input
-							type="number"
-							placeholder="Port"
-							value={newPort}
-							onChange={(e) => setNewPort(e.target.value)}
-							className="w-24"
-							min={1}
-							max={65535}
-						/>
-						<button
-							type="button"
-							onClick={() => setIsPublic(!isPublic)}
-							className={`flex items-center gap-1 px-3 py-1 rounded-md text-sm border transition-colors ${
-								isPublic
-									? "bg-primary text-primary-foreground border-primary"
-									: "bg-muted text-muted-foreground border-transparent hover:text-foreground"
-							}`}
-						>
-							{isPublic ? (
-								<Globe className="h-4 w-4" />
-							) : (
-								<Lock className="h-4 w-4" />
-							)}
-							{isPublic ? "Public" : "Private"}
-						</button>
-						<Button
-							size="sm"
-							variant="outline"
-							onClick={handleAddPort}
-							disabled={
-								!newPort ||
-								(isPublic && !subdomain.trim()) ||
-								stagedPorts.some((p) => p.port === parseInt(newPort))
-							}
-						>
-							Add
-						</Button>
-					</div>
+				<div className="flex flex-wrap items-center gap-2">
+					<Input
+						type="number"
+						placeholder="Port"
+						value={newPort}
+						onChange={(e) => setNewPort(e.target.value)}
+						className="w-20"
+						min={1}
+						max={65535}
+					/>
+					<Select
+						value={visibility}
+						onValueChange={(v) => setVisibility(v as "private" | "public")}
+					>
+						<SelectTrigger className="w-24">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="private">
+								<Lock className="h-3 w-3" />
+								Private
+							</SelectItem>
+							<SelectItem value="public">
+								<Globe className="h-3 w-3" />
+								Public
+							</SelectItem>
+						</SelectContent>
+					</Select>
 					{isPublic && (
-						<div className="flex items-center gap-1">
+						<>
 							<Input
 								type="text"
-								placeholder="subdomain"
-								value={subdomain}
-								onChange={(e) => setSubdomain(e.target.value)}
-								className="w-40"
+								placeholder="api.example.com"
+								value={domain}
+								onChange={(e) => setDomain(e.target.value)}
+								className="flex-1 min-w-32"
 							/>
-							<span className="text-sm text-muted-foreground">
-								.techulus.app
-							</span>
-						</div>
+							<DnsInstructionsModal servers={servers} />
+						</>
 					)}
+					<Button size="sm" variant="outline" onClick={handleAdd} disabled={!canAdd}>
+						<Plus className="h-4 w-4" />
+					</Button>
 				</div>
 
 				{hasChanges && (
@@ -225,4 +277,4 @@ export function PortsSection({
 			</CardContent>
 		</Card>
 	);
-}
+});

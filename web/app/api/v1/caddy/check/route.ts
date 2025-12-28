@@ -10,20 +10,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing domain" }, { status: 400 });
   }
 
-  // Only allow techulus.app domains (public routes)
-  if (!domain.endsWith(".techulus.app")) {
-    return NextResponse.json({ error: "Domain not allowed" }, { status: 404 });
-  }
-
-  const subdomain = domain.replace(".techulus.app", "");
-
-  // Verify port exists and is public
   const [port] = await db
     .select()
     .from(servicePorts)
     .where(
       and(
-        eq(servicePorts.subdomain, subdomain),
+        eq(servicePorts.domain, domain),
         eq(servicePorts.isPublic, true)
       )
     );

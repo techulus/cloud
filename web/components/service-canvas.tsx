@@ -27,7 +27,7 @@ type ServicePort = {
 	serviceId: string;
 	port: number;
 	isPublic: boolean;
-	subdomain: string | null;
+	domain: string | null;
 };
 
 type ServiceReplica = {
@@ -117,7 +117,7 @@ function ServiceCard({
 	projectSlug: string;
 }) {
 	const colors = getStatusColor(service);
-	const publicPorts = service.ports.filter((p) => p.isPublic && p.subdomain);
+	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
 	const hasInternalDns = service.deployments.some(
 		(d) => d.status === "running",
 	);
@@ -125,25 +125,17 @@ function ServiceCard({
 		(d) => d.status === "running",
 	).length;
 
-	const hasIngress = hasInternalDns || publicPorts.length > 0;
+	const hasPublicIngress = publicPorts.length > 0;
 
 	return (
 		<div className="flex flex-col items-center gap-2 w-full max-w-[280px]">
-			{hasIngress && (
+			{hasPublicIngress && (
 				<div className="flex flex-col items-center gap-1.5">
 					<div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
-						{hasInternalDns && (
-							<div className="flex items-center gap-1.5 text-xs">
-								<Lock className="h-3 w-3 text-zinc-500" />
-								<span className="text-zinc-600 dark:text-zinc-400">
-									{service.name}.internal
-								</span>
-							</div>
-						)}
 						{publicPorts.map((port) => (
 							<a
 								key={port.id}
-								href={`https://${port.subdomain}.techulus.app`}
+								href={`https://${port.domain}`}
 								target="_blank"
 								rel="noopener noreferrer"
 								onClick={(e) => e.stopPropagation()}
@@ -151,7 +143,7 @@ function ServiceCard({
 							>
 								<Globe className="h-3 w-3 text-sky-500" />
 								<span className="text-sky-600 dark:text-sky-400">
-									{port.subdomain}.techulus.app
+									{port.domain}
 								</span>
 							</a>
 						))}
@@ -164,48 +156,59 @@ function ServiceCard({
 				href={`/dashboard/projects/${projectSlug}/services/${service.id}`}
 				className={`
           group relative w-full
-          p-4 rounded-xl border-2 ${colors.border} ${colors.bg}
+          p-3 rounded-xl border-2 ${colors.border} ${colors.bg}
           hover:shadow-lg hover:scale-[1.02]
           transition-all duration-200 ease-out
           cursor-pointer
         `}
 			>
-				<div className="flex items-start gap-3">
+				<div className="flex items-start gap-2.5">
 					<div
 						className={`
             flex items-center justify-center
-            w-10 h-10 rounded-lg
+            w-9 h-9 rounded-lg
             bg-zinc-100 dark:bg-zinc-800
             border border-zinc-200 dark:border-zinc-700
             group-hover:border-zinc-300 dark:group-hover:border-zinc-600
             transition-colors
           `}
 					>
-						<Box className="h-5 w-5 text-zinc-500" />
+						<Box className="h-4 w-4 text-zinc-500" />
 					</div>
 
 					<div className="flex-1 min-w-0">
-						<div className="flex items-center gap-2">
-							<h3 className="font-semibold text-foreground truncate">
+						<div className="flex items-center gap-1.5">
+							<h3 className="font-semibold text-sm text-foreground truncate">
 								{service.name}
 							</h3>
-							<span className={`relative flex h-2.5 w-2.5`}>
+							<span className={`relative flex h-2 w-2`}>
 								<span
 									className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.dot} opacity-75`}
 								/>
 								<span
-									className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors.dot}`}
+									className={`relative inline-flex rounded-full h-2 w-2 ${colors.dot}`}
 								/>
 							</span>
 						</div>
-						<p className="text-xs text-muted-foreground font-mono truncate mt-0.5">
+						<p className="text-xs text-muted-foreground font-mono truncate">
 							{service.image}
 						</p>
 					</div>
 				</div>
 
+				{hasInternalDns && (
+					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
+						<div className="flex items-center gap-1.5 text-xs">
+							<Lock className="h-3 w-3 text-zinc-500" />
+							<span className="text-zinc-600 dark:text-zinc-400">
+								{service.name}.internal
+							</span>
+						</div>
+					</div>
+				)}
+
 				{service.deployments.length > 0 && (
-					<div className="mt-3 pt-3 border-t border-zinc-200/50 dark:border-zinc-700/50">
+					<div className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasInternalDns ? "mt-2 pt-2" : "mt-2 pt-2"}`}>
 						<div className="flex items-center justify-between">
 							<span className="text-xs text-muted-foreground">Replicas</span>
 							<div className="flex items-center gap-1">
@@ -240,7 +243,7 @@ function ServiceCard({
 				)}
 
 				{service.deployments.length === 0 && (
-					<div className="mt-3 pt-3 border-t border-zinc-200/50 dark:border-zinc-700/50">
+					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
 						<span className="text-xs text-muted-foreground">Not deployed</span>
 					</div>
 				)}

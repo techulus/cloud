@@ -7,7 +7,7 @@ export type ReplicaConfig = {
 export type PortConfig = {
 	port: number;
 	isPublic: boolean;
-	subdomain: string | null;
+	domain: string | null;
 };
 
 export type HealthCheckConfig = {
@@ -46,7 +46,7 @@ export function buildCurrentConfig(
 		healthCheckStartPeriod: number | null;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
-	ports: { port: number; isPublic: boolean; subdomain: string | null }[],
+	ports: { port: number; isPublic: boolean; domain: string | null }[],
 ): DeployedConfig {
 	return {
 		source: {
@@ -70,7 +70,7 @@ export function buildCurrentConfig(
 		ports: ports.map((p) => ({
 			port: p.port,
 			isPublic: p.isPublic,
-			subdomain: p.subdomain,
+			domain: p.domain,
 		})),
 	};
 }
@@ -108,7 +108,7 @@ export function diffConfigs(
 			changes.push({
 				field: `Port ${port.port}`,
 				from: "(none)",
-				to: port.subdomain ? `${portType}, ${port.subdomain}` : portType,
+				to: port.domain ? `${portType}, ${port.domain}` : portType,
 			});
 		}
 		return changes;
@@ -215,8 +215,8 @@ export function diffConfigs(
 	for (const [port, currentPort] of currentPortsMap) {
 		const deployedPort = deployedPortsMap.get(port);
 		const portType = currentPort.isPublic ? "public" : "internal";
-		const portDesc = currentPort.subdomain
-			? `${portType}, ${currentPort.subdomain}`
+		const portDesc = currentPort.domain
+			? `${portType}, ${currentPort.domain}`
 			: portType;
 
 		if (!deployedPort) {
@@ -227,8 +227,8 @@ export function diffConfigs(
 			});
 		} else {
 			const deployedType = deployedPort.isPublic ? "public" : "internal";
-			const deployedDesc = deployedPort.subdomain
-				? `${deployedType}, ${deployedPort.subdomain}`
+			const deployedDesc = deployedPort.domain
+				? `${deployedType}, ${deployedPort.domain}`
 				: deployedType;
 
 			if (deployedDesc !== portDesc) {

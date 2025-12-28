@@ -77,7 +77,7 @@ export function ServiceDetails({
 		const ports = (service.ports || []).map((p) => ({
 			port: p.port,
 			isPublic: p.isPublic,
-			subdomain: p.subdomain,
+			domain: p.domain,
 		}));
 		const current = buildCurrentConfig(service, replicas, ports);
 		return diffConfigs(deployed, current);
@@ -100,7 +100,7 @@ export function ServiceDetails({
 					<p className="text-sm text-muted-foreground font-mono">
 						{service.image}
 					</p>
-					{(service.ports.filter((p) => p.isPublic && p.subdomain).length > 0 ||
+					{(service.ports.filter((p) => p.isPublic && p.domain).length > 0 ||
 						service.deployments.some((d) => d.status === "running")) && (
 						<div className="flex flex-wrap gap-3 mt-2">
 							{service.deployments.some((d) => d.status === "running") && (
@@ -110,17 +110,17 @@ export function ServiceDetails({
 								</span>
 							)}
 							{service.ports
-								.filter((p) => p.isPublic && p.subdomain)
+								.filter((p) => p.isPublic && p.domain)
 								.map((port) => (
 									<a
 										key={port.id}
-										href={`https://${port.subdomain}.techulus.app`}
+										href={`https://${port.domain}`}
 										target="_blank"
 										rel="noopener noreferrer"
 										className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
 									>
 										<Globe className="h-4 w-4" />
-										{port.subdomain}.techulus.app
+										{port.domain}
 									</a>
 								))}
 						</div>

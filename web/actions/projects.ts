@@ -183,7 +183,7 @@ type PortChange = {
 	portId?: string;
 	port?: number;
 	isPublic?: boolean;
-	subdomain?: string;
+	domain?: string;
 };
 
 export async function updateServicePorts(serviceId: string, changes: PortChange[]) {
@@ -207,22 +207,22 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 			}
 
 			if (change.isPublic) {
-				if (!change.subdomain) {
-					throw new Error("Subdomain is required for public ports");
+				if (!change.domain) {
+					throw new Error("Domain is required for public ports");
 				}
 
-				const slug = slugify(change.subdomain);
-				if (!slug) {
-					throw new Error("Invalid subdomain");
+				const domain = change.domain.trim().toLowerCase();
+				if (!domain) {
+					throw new Error("Invalid domain");
 				}
 
-				const existingSubdomain = await db
+				const existingDomain = await db
 					.select()
 					.from(servicePorts)
-					.where(eq(servicePorts.subdomain, slug));
+					.where(eq(servicePorts.domain, domain));
 
-				if (existingSubdomain.length > 0) {
-					throw new Error("Subdomain already in use");
+				if (existingDomain.length > 0) {
+					throw new Error("Domain already in use");
 				}
 
 				await db.insert(servicePorts).values({
@@ -230,7 +230,7 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 					serviceId,
 					port: change.port,
 					isPublic: true,
-					subdomain: slug,
+					domain,
 				});
 			} else {
 				await db.insert(servicePorts).values({
@@ -472,7 +472,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 	const portConfigs = servicePortsList2.map((p) => ({
 		port: p.port,
 		isPublic: p.isPublic,
-		subdomain: p.subdomain,
+		domain: p.domain,
 	}));
 
 	const updatedService = await getService(serviceId);
@@ -636,22 +636,22 @@ export async function updateServiceConfig(
 				}
 
 				if (port.isPublic) {
-					if (!port.subdomain) {
-						throw new Error("Subdomain is required for public ports");
+					if (!port.domain) {
+						throw new Error("Domain is required for public ports");
 					}
 
-					const slug = slugify(port.subdomain);
-					if (!slug) {
-						throw new Error("Invalid subdomain");
+					const domain = port.domain.trim().toLowerCase();
+					if (!domain) {
+						throw new Error("Invalid domain");
 					}
 
-					const existingSubdomain = await db
+					const existingDomain = await db
 						.select()
 						.from(servicePorts)
-						.where(eq(servicePorts.subdomain, slug));
+						.where(eq(servicePorts.domain, domain));
 
-					if (existingSubdomain.length > 0) {
-						throw new Error("Subdomain already in use");
+					if (existingDomain.length > 0) {
+						throw new Error("Domain already in use");
 					}
 
 					await db.insert(servicePorts).values({
@@ -659,7 +659,7 @@ export async function updateServiceConfig(
 						serviceId,
 						port: port.port,
 						isPublic: true,
-						subdomain: slug,
+						domain,
 					});
 				} else {
 					await db.insert(servicePorts).values({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { getOnlineServers, updateServiceConfig } from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
 import type { Service, ServerInfo } from "./types";
 
-export function ReplicasSection({
+export const ReplicasSection = memo(function ReplicasSection({
 	service,
 	onUpdate,
 }: {
@@ -22,12 +22,15 @@ export function ReplicasSection({
 	);
 	const [isLoading, setIsLoading] = useState(true);
 	const [isSaving, setIsSaving] = useState(false);
+	const hasLoadedRef = useRef(false);
 
 	const configuredReplicas = service.configuredReplicas || [];
 
 	useEffect(() => {
 		const loadServers = async () => {
-			setIsLoading(true);
+			if (!hasLoadedRef.current) {
+				setIsLoading(true);
+			}
 			try {
 				const onlineServers = await getOnlineServers();
 				setServers(onlineServers);
@@ -44,6 +47,7 @@ export function ReplicasSection({
 				setLocalReplicas(replicaMap);
 			} finally {
 				setIsLoading(false);
+				hasLoadedRef.current = true;
 			}
 		};
 		loadServers();
@@ -177,4 +181,4 @@ export function ReplicasSection({
 			</CardContent>
 		</Card>
 	);
-}
+});

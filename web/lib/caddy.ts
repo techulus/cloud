@@ -60,12 +60,12 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
     });
 
     for (const port of ports) {
-      if (port.isPublic && port.subdomain) {
+      if (port.isPublic && port.domain) {
         const portUpstreams = await getPortUpstreams(service.id, port.port);
         if (portUpstreams.length > 0) {
           routes.push({
-            id: `${port.subdomain}.techulus.app`,
-            domain: `${port.subdomain}.techulus.app`,
+            id: port.domain,
+            domain: port.domain,
             upstreams: portUpstreams,
             internal: false,
           });

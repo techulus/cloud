@@ -20,7 +20,7 @@ export type ServicePort = {
 	serviceId: string;
 	port: number;
 	isPublic: boolean;
-	subdomain: string | null;
+	domain: string | null;
 };
 
 export type ServiceReplica = {
@@ -51,7 +51,7 @@ export type StagedPort = {
 	id: string;
 	port: number;
 	isPublic: boolean;
-	subdomain: string | null;
+	domain: string | null;
 	isNew?: boolean;
 };
 

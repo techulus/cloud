@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -66,7 +66,7 @@ function PendingChangesModal({
 	);
 }
 
-export function PendingChangesBar({
+export const PendingChangesBar = memo(function PendingChangesBar({
 	changes,
 	service,
 	onUpdate,
@@ -78,7 +78,7 @@ export function PendingChangesBar({
 	const [showModal, setShowModal] = useState(false);
 	const [isDeploying, setIsDeploying] = useState(false);
 
-	if (changes.length === 0) return null;
+	const hasChanges = changes.length > 0;
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -90,6 +90,7 @@ export function PendingChangesBar({
 				}),
 			);
 			await deployService(service.id, placements);
+			await new Promise((resolve) => setTimeout(resolve, 800));
 			onUpdate();
 			setShowModal(false);
 		} finally {
@@ -99,7 +100,13 @@ export function PendingChangesBar({
 
 	return (
 		<>
-			<div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+			<div
+				className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out ${
+					hasChanges
+						? "bottom-6 opacity-100"
+						: "-bottom-20 opacity-0 pointer-events-none"
+				}`}
+			>
 				<div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-emerald-500 dark:border-emerald-600 rounded-lg shadow-lg">
 					<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 px-2">
 						{changes.length} pending change{changes.length !== 1 ? "s" : ""}
@@ -129,4 +136,4 @@ export function PendingChangesBar({
 			/>
 		</>
 	);
-}
+});

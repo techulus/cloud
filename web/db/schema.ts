@@ -175,7 +175,7 @@ export const servicePorts = sqliteTable("service_ports", {
     .references(() => services.id, { onDelete: "cascade" }),
   port: integer("port").notNull(),
   isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
-  subdomain: text("subdomain").unique(),
+  domain: text("domain").unique(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),

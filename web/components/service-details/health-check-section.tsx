@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useReducer, useMemo } from "react";
+import { useState, useReducer, useMemo, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -56,7 +56,7 @@ function getInitialHealthCheckState(service: Service): HealthCheckState {
 	};
 }
 
-export function HealthCheckSection({
+export const HealthCheckSection = memo(function HealthCheckSection({
 	service,
 	onUpdate,
 }: {
@@ -248,4 +248,4 @@ export function HealthCheckSection({
 			</CardContent>
 		</Card>
 	);
-}
+});
