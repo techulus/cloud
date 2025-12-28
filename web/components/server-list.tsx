@@ -11,6 +11,7 @@ import {
 
 import { CreateServerDialog } from "@/components/create-server-dialog";
 import { PageHeader } from "@/components/page-header";
+import { fetcher } from "@/lib/fetcher";
 
 type Server = {
 	id: string;
@@ -19,8 +20,6 @@ type Server = {
 	wireguardIp: string | null;
 	status: string;
 };
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 function StatusIndicator({ status }: { status: string }) {
 	const colors: Record<string, { dot: string; text: string }> = {

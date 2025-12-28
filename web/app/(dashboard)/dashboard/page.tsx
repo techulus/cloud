@@ -1,7 +1,6 @@
 import { Box } from "lucide-react";
 import Link from "next/link";
-import { listProjects } from "@/actions/projects";
-import { listServers } from "@/actions/servers";
+import { listProjects, listServers } from "@/db/queries";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { PageHeader } from "@/components/page-header";
 import { ServerList } from "@/components/server-list";

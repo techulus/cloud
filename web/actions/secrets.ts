@@ -6,20 +6,6 @@ import { db } from "@/db";
 import { secrets, services } from "@/db/schema";
 import { encryptSecret } from "@/lib/crypto";
 
-export async function listSecrets(serviceId: string) {
-  const secretsList = await db
-    .select({
-      id: secrets.id,
-      key: secrets.key,
-      createdAt: secrets.createdAt,
-    })
-    .from(secrets)
-    .where(eq(secrets.serviceId, serviceId))
-    .orderBy(secrets.createdAt);
-
-  return secretsList;
-}
-
 export async function createSecret(
   serviceId: string,
   key: string,

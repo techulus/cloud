@@ -1,13 +1,24 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, memo } from "react";
+import { useState, useMemo, useEffect, memo } from "react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Server } from "lucide-react";
-import { getOnlineServers, updateServiceConfig } from "@/actions/projects";
+import { updateServiceConfig } from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
 import type { Service, ServerInfo } from "./types";
+
+type ServerWithStatus = ServerInfo & { status: string };
+
+const fetcher = async (url: string): Promise<ServerInfo[]> => {
+  const res = await fetch(url);
+  const servers: ServerWithStatus[] = await res.json();
+  return servers
+    .filter((s) => s.status === "online")
+    .map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
+};
 
 export const ReplicasSection = memo(function ReplicasSection({
 	service,
@@ -16,42 +27,25 @@ export const ReplicasSection = memo(function ReplicasSection({
 	service: Service;
 	onUpdate: () => void;
 }) {
-	const [servers, setServers] = useState<ServerInfo[]>([]);
-	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>(
-		{},
-	);
-	const [isLoading, setIsLoading] = useState(true);
+	const { data: servers, isLoading } = useSWR("/api/servers", fetcher);
+	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>({});
 	const [isSaving, setIsSaving] = useState(false);
-	const hasLoadedRef = useRef(false);
 
 	const configuredReplicas = service.configuredReplicas || [];
 
 	useEffect(() => {
-		const loadServers = async () => {
-			if (!hasLoadedRef.current) {
-				setIsLoading(true);
+		if (!servers) return;
+		const replicaMap: Record<string, number> = {};
+		for (const r of configuredReplicas) {
+			replicaMap[r.serverId] = r.count;
+		}
+		for (const s of servers) {
+			if (!(s.id in replicaMap)) {
+				replicaMap[s.id] = 0;
 			}
-			try {
-				const onlineServers = await getOnlineServers();
-				setServers(onlineServers);
-
-				const replicaMap: Record<string, number> = {};
-				for (const r of configuredReplicas) {
-					replicaMap[r.serverId] = r.count;
-				}
-				for (const s of onlineServers) {
-					if (!(s.id in replicaMap)) {
-						replicaMap[s.id] = 0;
-					}
-				}
-				setLocalReplicas(replicaMap);
-			} finally {
-				setIsLoading(false);
-				hasLoadedRef.current = true;
-			}
-		};
-		loadServers();
-	}, [configuredReplicas]);
+		}
+		setLocalReplicas(replicaMap);
+	}, [servers, configuredReplicas]);
 
 	const hasChanges = useMemo(() => {
 		const configuredMap = new Map(
@@ -102,7 +96,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 					<div className="flex justify-center py-4">
 						<Spinner />
 					</div>
-				) : servers.length === 0 ? (
+				) : !servers || servers.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						No online servers available
 					</p>

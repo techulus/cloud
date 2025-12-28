@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getServerDetails } from "@/actions/servers";
+import { getServerDetails } from "@/db/queries";
 import {
   Card,
   CardContent,

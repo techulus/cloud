@@ -35,10 +35,9 @@ import { HealthCheckSection } from "./health-check-section";
 import { SecretsSection } from "./secrets-section";
 import { PendingChangesBar } from "./pending-changes";
 import { DeploymentCanvas } from "./deployment-canvas";
+import { fetcher } from "@/lib/fetcher";
 
 export type { Service } from "./types";
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function ServiceDetails({
 	projectSlug,

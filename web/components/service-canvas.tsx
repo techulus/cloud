@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Globe, Lock, Box, ArrowDown } from "lucide-react";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
+import { fetcher } from "@/lib/fetcher";
 
 type DeploymentPort = {
 	id: string;
@@ -54,8 +55,6 @@ type Service = {
 	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
 };
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 function ServiceCard({
 	service,

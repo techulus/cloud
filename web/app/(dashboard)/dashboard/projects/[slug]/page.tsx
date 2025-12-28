@@ -6,7 +6,7 @@ import {
 	getServicePorts,
 	getDeploymentPorts,
 	getServiceReplicas,
-} from "@/actions/projects";
+} from "@/db/queries";
 import { ServiceCanvas } from "@/components/service-canvas";
 import { PageHeader } from "@/components/page-header";
 import { CreateServiceDialog } from "@/components/create-service-dialog";

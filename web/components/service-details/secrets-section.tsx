@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, memo } from "react";
+import { useState, memo } from "react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Key, Plus, X, Eye, EyeOff } from "lucide-react";
-import { listSecrets, createSecret, deleteSecret } from "@/actions/secrets";
+import { createSecret, deleteSecret } from "@/actions/secrets";
+import { fetcher } from "@/lib/fetcher";
 import type { Service } from "./types";
 
 type Secret = {
@@ -21,18 +23,14 @@ export const SecretsSection = memo(function SecretsSection({
   service: Service;
   onUpdate: () => void;
 }) {
-  const [secrets, setSecrets] = useState<Secret[]>([]);
+  const { data: secrets, isLoading, mutate } = useSWR<Secret[]>(
+    `/api/services/${service.id}/secrets`,
+    fetcher
+  );
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [showValue, setShowValue] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    listSecrets(service.id)
-      .then(setSecrets)
-      .finally(() => setIsLoading(false));
-  }, [service.id]);
 
   const keyRegex = /^[A-Z_][A-Z0-9_]*$/;
   const isValidKey = newKey.trim() && keyRegex.test(newKey.trim());
@@ -43,8 +41,7 @@ export const SecretsSection = memo(function SecretsSection({
     setIsSaving(true);
     try {
       await createSecret(service.id, newKey.trim(), newValue);
-      const updated = await listSecrets(service.id);
-      setSecrets(updated);
+      await mutate();
       setNewKey("");
       setNewValue("");
       onUpdate();
@@ -55,7 +52,7 @@ export const SecretsSection = memo(function SecretsSection({
 
   const handleDelete = async (secretId: string) => {
     await deleteSecret(secretId);
-    setSecrets(secrets.filter((s) => s.id !== secretId));
+    await mutate();
     onUpdate();
   };
 
@@ -70,7 +67,7 @@ export const SecretsSection = memo(function SecretsSection({
       <CardContent className="space-y-4">
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading...</div>
-        ) : secrets.length > 0 ? (
+        ) : secrets && secrets.length > 0 ? (
           <div className="space-y-2">
             {secrets.map((secret) => (
               <div
@@ -132,7 +129,7 @@ export const SecretsSection = memo(function SecretsSection({
           )}
         </div>
 
-        {secrets.length > 0 && (
+        {secrets && secrets.length > 0 && (
           <p className="text-xs text-muted-foreground">
             Changes take effect on next deployment
           </p>

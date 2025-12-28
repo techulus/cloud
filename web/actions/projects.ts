@@ -20,6 +20,7 @@ import {
 	type PortConfig,
 } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
+import { getService } from "@/db/queries";
 
 function slugify(text: string): string {
 	return text
@@ -29,73 +30,9 @@ function slugify(text: string): string {
 }
 
 export async function validateDockerImage(
-	image: string,
+	_image: string,
 ): Promise<{ valid: boolean; error?: string }> {
-	const parts = image.split("/");
-	let registry = "registry-1.docker.io";
-	let imagePath = image;
-
-	if (parts.length >= 2 && parts[0].includes(".")) {
-		registry = parts[0];
-		imagePath = parts.slice(1).join("/");
-	} else if (parts.length === 1) {
-		imagePath = `library/${parts[0]}`;
-	}
-
-	const [repo, tag = "latest"] = imagePath.split(":");
-
-	try {
-		if (registry === "registry-1.docker.io") {
-			const tokenRes = await fetch(
-				`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`,
-			);
-			if (!tokenRes.ok) {
-				return { valid: false, error: "Failed to authenticate with Docker Hub" };
-			}
-			const { token } = await tokenRes.json();
-
-			const manifestRes = await fetch(
-				`https://registry-1.docker.io/v2/${repo}/manifests/${tag}`,
-				{
-					headers: {
-						Authorization: `Bearer ${token}`,
-						Accept: "application/vnd.docker.distribution.manifest.v2+json",
-					},
-				},
-			);
-
-			if (manifestRes.status === 404) {
-				return { valid: false, error: "Image or tag not found" };
-			}
-			if (!manifestRes.ok) {
-				return { valid: false, error: "Failed to verify image" };
-			}
-			return { valid: true };
-		}
-
-		if (registry === "ghcr.io") {
-			const manifestRes = await fetch(
-				`https://ghcr.io/v2/${repo}/manifests/${tag}`,
-				{
-					headers: {
-						Accept: "application/vnd.docker.distribution.manifest.v2+json",
-					},
-				},
-			);
-
-			if (manifestRes.status === 401 || manifestRes.status === 403) {
-				return { valid: true };
-			}
-			if (manifestRes.status === 404) {
-				return { valid: false, error: "Image or tag not found" };
-			}
-			return { valid: true };
-		}
-
-		return { valid: true };
-	} catch {
-		return { valid: false, error: "Failed to connect to registry" };
-	}
+	return { valid: true };
 }
 
 function normalizeImage(image: string): string {
@@ -120,36 +57,6 @@ export async function createProject(name: string) {
 
 	return { id, name, slug };
 }
-
-export async function listProjects() {
-	const projectList = await db.select().from(projects).orderBy(projects.createdAt);
-
-	const projectsWithCounts = await Promise.all(
-		projectList.map(async (project) => {
-			const serviceCount = await db
-				.select({ count: services.id })
-				.from(services)
-				.where(eq(services.projectId, project.id));
-			return {
-				...project,
-				serviceCount: serviceCount.length,
-			};
-		})
-	);
-
-	return projectsWithCounts;
-}
-
-export async function getProject(id: string) {
-	const results = await db.select().from(projects).where(eq(projects.id, id));
-	return results[0] || null;
-}
-
-export async function getProjectBySlug(slug: string) {
-	const results = await db.select().from(projects).where(eq(projects.slug, slug));
-	return results[0] || null;
-}
-
 
 export async function deleteProject(id: string) {
 	await db.delete(projects).where(eq(projects.id, id));
@@ -182,34 +89,10 @@ export async function createService(
 	return { id, name, image, ports };
 }
 
-export async function listServices(projectId: string) {
-	return db
-		.select()
-		.from(services)
-		.where(eq(services.projectId, projectId))
-		.orderBy(services.createdAt);
-}
-
-export async function getService(id: string) {
-	const results = await db.select().from(services).where(eq(services.id, id));
-	return results[0] || null;
-}
-
 export type ServerPlacement = {
 	serverId: string;
 	replicas: number;
 };
-
-export async function getOnlineServers() {
-	return db
-		.select({
-			id: servers.id,
-			name: servers.name,
-			wireguardIp: servers.wireguardIp,
-		})
-		.from(servers)
-		.where(eq(servers.status, "online"));
-}
 
 export async function deleteService(serviceId: string) {
 	const service = await getService(serviceId);
@@ -238,14 +121,6 @@ export async function deleteService(serviceId: string) {
 	await db.delete(services).where(eq(services.id, serviceId));
 
 	return { success: true };
-}
-
-export async function getServicePorts(serviceId: string) {
-	return db
-		.select()
-		.from(servicePorts)
-		.where(eq(servicePorts.serviceId, serviceId))
-		.orderBy(servicePorts.port);
 }
 
 type PortChange = {
@@ -332,18 +207,6 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 	}
 
 	return { success: true, redeployed: runningDeployments.length > 0 };
-}
-
-export async function getDeploymentPorts(deploymentId: string) {
-	return db
-		.select({
-			id: deploymentPorts.id,
-			hostPort: deploymentPorts.hostPort,
-			containerPort: servicePorts.port,
-		})
-		.from(deploymentPorts)
-		.innerJoin(servicePorts, eq(deploymentPorts.servicePortId, servicePorts.id))
-		.where(eq(deploymentPorts.deploymentId, deploymentId));
 }
 
 const PORT_RANGE_START = 30000;
@@ -575,14 +438,6 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 	return { deploymentIds, replicaCount: totalReplicas };
 }
 
-export async function listDeployments(serviceId: string) {
-	return db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId))
-		.orderBy(deployments.createdAt);
-}
-
 export async function deleteDeployment(deploymentId: string) {
 	const deployment = await db
 		.select()
@@ -633,21 +488,6 @@ export async function updateServiceHealthCheck(
 		.where(eq(services.id, serviceId));
 
 	return { success: true };
-}
-
-export async function getServiceReplicas(serviceId: string) {
-	const replicas = await db
-		.select({
-			id: serviceReplicas.id,
-			serverId: serviceReplicas.serverId,
-			serverName: servers.name,
-			count: serviceReplicas.count,
-		})
-		.from(serviceReplicas)
-		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-		.where(eq(serviceReplicas.serviceId, serviceId));
-
-	return replicas;
 }
 
 export type ServiceConfigUpdate = {
