@@ -12,7 +12,8 @@
 		"db:migrate": "drizzle-kit migrate",
 		"db:push": "drizzle-kit push",
 		"db:studio": "drizzle-kit studio",
-		"grpc:server": "tsx grpc/server.ts",
+		"grpc:build": "tsup grpc/server.ts --format esm --target node22 --outDir dist/grpc",
+		"grpc:server": "node dist/grpc/server.mjs",
 		"proto:generate": "cd .. && protoc --plugin=./web/node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./web/grpc/generated --ts_proto_opt=snakeToCamel=false --ts_proto_opt=outputServices=grpc-js --ts_proto_opt=esModuleInterop=true proto/agent.proto"
 	},
 	"dependencies": {
@@ -48,6 +49,7 @@
 		"eslint-config-next": "16.1.1",
 		"tailwindcss": "^4",
 		"ts-proto": "^2.10.1",
+		"tsup": "^8.5.1",
 		"tsx": "^4.19.2",
 		"typescript": "^5"
 	},
