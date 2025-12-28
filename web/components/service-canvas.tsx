@@ -128,7 +128,7 @@ function ServiceCard({
 	const hasPublicIngress = publicPorts.length > 0;
 
 	return (
-		<div className="flex flex-col items-center gap-2 w-full max-w-[280px]">
+		<div className="flex flex-col items-center gap-2 w-[280px]">
 			{hasPublicIngress && (
 				<div className="flex flex-col items-center gap-1.5">
 					<div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">

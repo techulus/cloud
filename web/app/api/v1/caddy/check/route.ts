@@ -5,8 +5,12 @@ import { eq, and } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   const domain = request.nextUrl.searchParams.get("domain");
+  const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+
+  console.log(`[caddy-check] domain=${domain} ip=${clientIp}`);
 
   if (!domain) {
+    console.log(`[caddy-check] REJECT: missing domain`);
     return NextResponse.json({ error: "Missing domain" }, { status: 400 });
   }
 
@@ -21,11 +25,10 @@ export async function GET(request: NextRequest) {
     );
 
   if (!port) {
+    console.log(`[caddy-check] REJECT: domain=${domain} not found`);
     return NextResponse.json({ error: "Domain not allowed" }, { status: 404 });
   }
 
-  // Verify service has at least one running deployment
-  // This ensures DNS records will be present for ACME to validate
   const runningDeployments = await db
     .select()
     .from(deployments)
@@ -37,14 +40,13 @@ export async function GET(request: NextRequest) {
     );
 
   if (runningDeployments.length === 0) {
-    // Service exists but has no running deployments yet
-    // Return 503 (Service Unavailable) instead of 404 to tell Caddy to retry
-    // This handles the case where deployment just started but isn't fully ready yet
+    console.log(`[caddy-check] RETRY: domain=${domain} no running deployments`);
     return NextResponse.json(
       { error: "Service not currently available" },
       { status: 503 }
     );
   }
 
+  console.log(`[caddy-check] ALLOW: domain=${domain} deployments=${runningDeployments.length}`);
   return NextResponse.json({ allowed: true }, { status: 200 });
 }
