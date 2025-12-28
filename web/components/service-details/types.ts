@@ -30,6 +30,11 @@ export type ServiceReplica = {
 	count: number;
 };
 
+export type ServiceSecret = {
+	key: string;
+	updatedAt: Date | string;
+};
+
 export type Service = {
 	id: string;
 	projectId: string;
@@ -45,7 +50,7 @@ export type Service = {
 	ports: ServicePort[];
 	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
-	secretKeys?: string[];
+	secrets?: ServiceSecret[];
 };
 
 export type StagedPort = {

@@ -82,8 +82,10 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 	const [showModal, setShowModal] = useState(false);
 	const [isDeploying, setIsDeploying] = useState(false);
 
-	const hasChanges = changes.length > 0;
 	const totalReplicas = service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
+	const hasNoDeployments = service.deployments.length === 0;
+	const hasChanges = changes.length > 0;
+	const showBar = hasChanges || (hasNoDeployments && totalReplicas > 0);
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -106,32 +108,38 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 		<>
 			<div
 				className={`fixed left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50 transition-all duration-300 ease-out ${
-					hasChanges
+					showBar
 						? "bottom-4 sm:bottom-6 opacity-100"
 						: "-bottom-20 opacity-0 pointer-events-none"
 				}`}
 			>
 				<div className="flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:px-2 sm:py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-emerald-500 dark:border-emerald-600 rounded-lg shadow-lg">
 					<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:px-2">
-						{changes.length} change{changes.length !== 1 ? "s" : ""}
+						{hasChanges
+							? `${changes.length} change${changes.length !== 1 ? "s" : ""}`
+							: "Ready to deploy"}
 					</span>
 					<div className="flex items-center gap-2">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setShowModal(true)}
-							className="hidden sm:inline-flex"
-						>
-							View Details
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setShowModal(true)}
-							className="sm:hidden"
-						>
-							View
-						</Button>
+						{hasChanges && (
+							<>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setShowModal(true)}
+									className="hidden sm:inline-flex"
+								>
+									View Details
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setShowModal(true)}
+									className="sm:hidden"
+								>
+									View
+								</Button>
+							</>
+						)}
 						<Button
 							onClick={handleDeploy}
 							disabled={isDeploying || totalReplicas === 0}

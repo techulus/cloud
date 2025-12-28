@@ -23,12 +23,18 @@ export type SourceConfig = {
 	image: string;
 };
 
+export type SecretConfig = {
+	key: string;
+	updatedAt: string;
+};
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	ports: PortConfig[];
 	secretKeys?: string[];
+	secrets?: SecretConfig[];
 };
 
 export type ConfigChange = {
@@ -48,7 +54,7 @@ export function buildCurrentConfig(
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
-	secretKeys?: string[],
+	secrets?: { key: string; updatedAt: Date | string }[],
 ): DeployedConfig {
 	return {
 		source: {
@@ -74,7 +80,11 @@ export function buildCurrentConfig(
 			isPublic: p.isPublic,
 			domain: p.domain,
 		})),
-		secretKeys: secretKeys ?? [],
+		secrets: (secrets ?? []).map((s) => ({
+			key: s.key,
+			updatedAt:
+				s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
+		})),
 	};
 }
 
@@ -114,11 +124,11 @@ export function diffConfigs(
 				to: port.domain ? `${portType}, ${port.domain}` : portType,
 			});
 		}
-		for (const key of current.secretKeys || []) {
+		for (const secret of current.secrets || []) {
 			changes.push({
 				field: "Secret",
 				from: "(none)",
-				to: key,
+				to: secret.key,
 			});
 		}
 		return changes;
@@ -262,21 +272,32 @@ export function diffConfigs(
 		}
 	}
 
-	const deployedSecrets = new Set(deployed.secretKeys || []);
-	const currentSecrets = new Set(current.secretKeys || []);
+	const deployedSecretsMap = new Map(
+		(deployed.secrets || []).map((s) => [s.key, s]),
+	);
+	const currentSecretsMap = new Map(
+		(current.secrets || []).map((s) => [s.key, s]),
+	);
 
-	for (const key of currentSecrets) {
-		if (!deployedSecrets.has(key)) {
+	for (const [key, currentSecret] of currentSecretsMap) {
+		const deployedSecret = deployedSecretsMap.get(key);
+		if (!deployedSecret) {
 			changes.push({
 				field: "Secret",
 				from: "(none)",
 				to: key,
 			});
+		} else if (deployedSecret.updatedAt !== currentSecret.updatedAt) {
+			changes.push({
+				field: "Secret",
+				from: key,
+				to: `${key} (updated)`,
+			});
 		}
 	}
 
-	for (const key of deployedSecrets) {
-		if (!currentSecrets.has(key)) {
+	for (const key of deployedSecretsMap.keys()) {
+		if (!currentSecretsMap.has(key)) {
 			changes.push({
 				field: "Secret",
 				from: key,

@@ -78,7 +78,7 @@ export function ServiceDetails({
 			service,
 			replicas,
 			ports,
-			service.secretKeys,
+			service.secrets,
 		);
 		return diffConfigs(deployed, current);
 	}, [service]);

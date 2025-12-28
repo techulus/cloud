@@ -32,7 +32,7 @@ export async function createSecret(
   if (existing.length > 0) {
     await db
       .update(secrets)
-      .set({ encryptedValue: encryptSecret(value) })
+      .set({ encryptedValue: encryptSecret(value), updatedAt: new Date() })
       .where(eq(secrets.id, existing[0].id));
 
     return { id: existing[0].id, key };

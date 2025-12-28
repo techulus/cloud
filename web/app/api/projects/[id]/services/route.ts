@@ -58,7 +58,7 @@ export async function GET(
           .innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
           .where(eq(serviceReplicas.serviceId, service.id)),
         db
-          .select({ key: secrets.key })
+          .select({ key: secrets.key, updatedAt: secrets.updatedAt })
           .from(secrets)
           .where(eq(secrets.serviceId, service.id)),
       ]);
@@ -98,7 +98,7 @@ export async function GET(
         ports,
         configuredReplicas: replicas,
         deployments: deploymentsWithDetails,
-        secretKeys: serviceSecrets.map((s) => s.key),
+        secrets: serviceSecrets,
       };
     })
   );
