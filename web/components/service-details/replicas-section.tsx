@@ -169,6 +169,11 @@ export const ReplicasSection = memo(function ReplicasSection({
 								{totalReplicas !== 1 ? "s" : ""}
 							</span>
 						</div>
+						{totalReplicas === 0 && (
+							<p className="text-sm text-amber-600 dark:text-amber-400">
+								Add at least 1 replica to deploy
+							</p>
+						)}
 						{hasChanges && (
 							<div className="pt-3 border-t">
 								<Button onClick={handleSave} disabled={isSaving} size="sm">

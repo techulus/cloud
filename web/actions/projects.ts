@@ -28,6 +28,76 @@ function slugify(text: string): string {
 		.replace(/^-|-$/g, "");
 }
 
+export async function validateDockerImage(
+	image: string,
+): Promise<{ valid: boolean; error?: string }> {
+	const parts = image.split("/");
+	let registry = "registry-1.docker.io";
+	let imagePath = image;
+
+	if (parts.length >= 2 && parts[0].includes(".")) {
+		registry = parts[0];
+		imagePath = parts.slice(1).join("/");
+	} else if (parts.length === 1) {
+		imagePath = `library/${parts[0]}`;
+	}
+
+	const [repo, tag = "latest"] = imagePath.split(":");
+
+	try {
+		if (registry === "registry-1.docker.io") {
+			const tokenRes = await fetch(
+				`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`,
+			);
+			if (!tokenRes.ok) {
+				return { valid: false, error: "Failed to authenticate with Docker Hub" };
+			}
+			const { token } = await tokenRes.json();
+
+			const manifestRes = await fetch(
+				`https://registry-1.docker.io/v2/${repo}/manifests/${tag}`,
+				{
+					headers: {
+						Authorization: `Bearer ${token}`,
+						Accept: "application/vnd.docker.distribution.manifest.v2+json",
+					},
+				},
+			);
+
+			if (manifestRes.status === 404) {
+				return { valid: false, error: "Image or tag not found" };
+			}
+			if (!manifestRes.ok) {
+				return { valid: false, error: "Failed to verify image" };
+			}
+			return { valid: true };
+		}
+
+		if (registry === "ghcr.io") {
+			const manifestRes = await fetch(
+				`https://ghcr.io/v2/${repo}/manifests/${tag}`,
+				{
+					headers: {
+						Accept: "application/vnd.docker.distribution.manifest.v2+json",
+					},
+				},
+			);
+
+			if (manifestRes.status === 401 || manifestRes.status === 403) {
+				return { valid: true };
+			}
+			if (manifestRes.status === 404) {
+				return { valid: false, error: "Image or tag not found" };
+			}
+			return { valid: true };
+		}
+
+		return { valid: true };
+	} catch {
+		return { valid: false, error: "Failed to connect to registry" };
+	}
+}
+
 function normalizeImage(image: string): string {
 	if (!image.includes("/")) {
 		return `docker.io/library/${image}`;

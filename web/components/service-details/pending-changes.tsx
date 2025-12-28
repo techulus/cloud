@@ -19,12 +19,14 @@ function PendingChangesModal({
 	onClose,
 	onDeploy,
 	isDeploying,
+	canDeploy,
 }: {
 	changes: ConfigChange[];
 	isOpen: boolean;
 	onClose: () => void;
 	onDeploy: () => void;
 	isDeploying: boolean;
+	canDeploy: boolean;
 }) {
 	if (!isOpen) return null;
 
@@ -57,7 +59,7 @@ function PendingChangesModal({
 					</Button>
 					<Button
 						onClick={onDeploy}
-						disabled={isDeploying}
+						disabled={isDeploying || !canDeploy}
 						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white"
 					>
 						{isDeploying ? "Deploying..." : "Deploy Now"}
@@ -81,6 +83,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 	const [isDeploying, setIsDeploying] = useState(false);
 
 	const hasChanges = changes.length > 0;
+	const totalReplicas = service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -132,7 +135,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 						</Button>
 						<Button
 							onClick={handleDeploy}
-							disabled={isDeploying}
+							disabled={isDeploying || totalReplicas === 0}
 							size="sm"
 							className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white px-4 sm:px-6"
 						>
@@ -147,6 +150,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				onClose={() => setShowModal(false)}
 				onDeploy={handleDeploy}
 				isDeploying={isDeploying}
+				canDeploy={totalReplicas > 0}
 			/>
 		</>
 	);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FolderKanban, Box } from "lucide-react";
 import { listServers } from "@/actions/servers";
 import { listProjects } from "@/actions/projects";
 import {
@@ -45,8 +46,14 @@ export default async function DashboardPage() {
 							>
 								<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
 									<CardHeader className="min-h-24">
-										<CardTitle>{project.name}</CardTitle>
-										<CardDescription>
+										<div className="flex items-center gap-2">
+											<div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+												<FolderKanban className="h-4 w-4 text-primary" />
+											</div>
+											<CardTitle>{project.name}</CardTitle>
+										</div>
+										<CardDescription className="flex items-center gap-1.5">
+											<Box className="h-3 w-3" />
 											{project.serviceCount === 0
 												? "No services"
 												: project.serviceCount === 1

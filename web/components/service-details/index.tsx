@@ -1,10 +1,21 @@
 "use client";
 
-import useSWR from "swr";
-import { useMemo } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Globe, HeartPulse, Lock } from "lucide-react";
 import {
 	deployService,
@@ -30,21 +41,82 @@ export type { Service } from "./types";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-function getStatusVariant(status: string) {
-	switch (status) {
-		case "running":
-			return "default";
-		case "pending":
-		case "pulling":
-		case "stopping":
-			return "secondary";
-		case "stopped":
-			return "outline";
-		case "failed":
-			return "destructive";
-		default:
-			return "secondary";
-	}
+function DeploymentStatusIndicator({ status }: { status: string }) {
+	const colors: Record<string, { dot: string; text: string }> = {
+		running: {
+			dot: "bg-emerald-500",
+			text: "text-emerald-600 dark:text-emerald-400",
+		},
+		pending: {
+			dot: "bg-amber-500",
+			text: "text-amber-600 dark:text-amber-400",
+		},
+		pulling: {
+			dot: "bg-amber-500",
+			text: "text-amber-600 dark:text-amber-400",
+		},
+		stopping: {
+			dot: "bg-amber-500",
+			text: "text-amber-600 dark:text-amber-400",
+		},
+		stopped: {
+			dot: "bg-zinc-400",
+			text: "text-zinc-500",
+		},
+		failed: {
+			dot: "bg-rose-500",
+			text: "text-rose-600 dark:text-rose-400",
+		},
+	};
+
+	const color = colors[status] || { dot: "bg-zinc-400", text: "text-zinc-500" };
+	const showPing = status === "running";
+
+	return (
+		<div className="flex items-center gap-1.5">
+			<span className="relative flex h-2 w-2">
+				{showPing && (
+					<span
+						className={`animate-ping absolute inline-flex h-full w-full rounded-full ${color.dot} opacity-75`}
+					/>
+				)}
+				<span
+					className={`relative inline-flex rounded-full h-2 w-2 ${color.dot}`}
+				/>
+			</span>
+			<span className={`text-xs font-medium capitalize ${color.text}`}>
+				{status}
+			</span>
+		</div>
+	);
+}
+
+function HealthStatusIndicator({ healthStatus }: { healthStatus: string }) {
+	const colors: Record<string, { dot: string; text: string }> = {
+		healthy: {
+			dot: "bg-emerald-500",
+			text: "text-emerald-600 dark:text-emerald-400",
+		},
+		starting: {
+			dot: "bg-amber-500",
+			text: "text-amber-600 dark:text-amber-400",
+		},
+		unhealthy: {
+			dot: "bg-rose-500",
+			text: "text-rose-600 dark:text-rose-400",
+		},
+	};
+
+	const color = colors[healthStatus] || { dot: "bg-zinc-400", text: "text-zinc-500" };
+
+	return (
+		<div className="flex items-center gap-1">
+			<HeartPulse className={`h-3 w-3 ${color.text}`} />
+			<span className={`text-xs font-medium capitalize ${color.text}`}>
+				{healthStatus}
+			</span>
+		</div>
+	);
 }
 
 export function ServiceDetails({
@@ -55,6 +127,7 @@ export function ServiceDetails({
 	service: Service;
 }) {
 	const router = useRouter();
+	const { mutate: globalMutate } = useSWRConfig();
 	const { data: services, mutate } = useSWR<Service[]>(
 		`/api/projects/${initialService.projectId}/services`,
 		fetcher,
@@ -84,13 +157,21 @@ export function ServiceDetails({
 		return diffConfigs(deployed, current);
 	}, [service]);
 
+	const [isDeleting, setIsDeleting] = useState(false);
+
 	const handleActionComplete = () => {
 		mutate();
 	};
 
 	const handleDelete = async () => {
-		await deleteService(service.id);
-		router.push(`/dashboard/projects/${projectSlug}`);
+		setIsDeleting(true);
+		try {
+			await deleteService(service.id);
+			await globalMutate(`/api/projects/${initialService.projectId}/services`);
+			router.push(`/dashboard/projects/${projectSlug}`);
+		} finally {
+			setIsDeleting(false);
+		}
 	};
 
 	return (
@@ -209,29 +290,12 @@ export function ServiceDetails({
 										<span className="font-medium truncate">
 											{deployment.server?.name || "—"}
 										</span>
-										<div className="flex items-center gap-1.5">
-											<Badge
-												variant={getStatusVariant(deployment.status)}
-												className="text-xs"
-											>
-												{deployment.status}
-											</Badge>
+										<div className="flex items-center gap-2">
+											<DeploymentStatusIndicator status={deployment.status} />
 											{deployment.status === "running" &&
 												deployment.healthStatus &&
 												deployment.healthStatus !== "none" && (
-													<Badge
-														variant={
-															deployment.healthStatus === "healthy"
-																? "default"
-																: deployment.healthStatus === "starting"
-																	? "secondary"
-																	: "destructive"
-														}
-														className="text-xs gap-0.5"
-													>
-														<HeartPulse className="h-2.5 w-2.5" />
-														{deployment.healthStatus}
-													</Badge>
+													<HealthStatusIndicator healthStatus={deployment.healthStatus} />
 												)}
 											{isTransitioning && <Spinner />}
 										</div>
@@ -308,12 +372,31 @@ export function ServiceDetails({
 									permanently removed.
 								</p>
 							</div>
-							<ActionButton
-								action={handleDelete}
-								label="Delete Service"
-								loadingLabel="Deleting..."
-								variant="destructive"
-							/>
+							<AlertDialog>
+								<AlertDialogTrigger
+									render={<Button variant="destructive" />}
+								>
+									Delete Service
+								</AlertDialogTrigger>
+								<AlertDialogContent>
+									<AlertDialogHeader>
+										<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
+										<AlertDialogDescription>
+											This action cannot be undone. This will permanently delete the service and all its deployments.
+										</AlertDialogDescription>
+									</AlertDialogHeader>
+									<AlertDialogFooter>
+										<AlertDialogCancel>Cancel</AlertDialogCancel>
+										<AlertDialogAction
+											variant="destructive"
+											onClick={handleDelete}
+											disabled={isDeleting}
+										>
+											{isDeleting ? "Deleting..." : "Delete"}
+										</AlertDialogAction>
+									</AlertDialogFooter>
+								</AlertDialogContent>
+							</AlertDialog>
 						</div>
 					</CardContent>
 				</Card>

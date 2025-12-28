@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
-import { createService } from "@/actions/projects";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { createService, validateDockerImage } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,10 +30,37 @@ export function CreateServiceDialog({
 	const [name, setName] = useState("");
 	const [image, setImage] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
+	const [isValidating, setIsValidating] = useState(false);
+	const [validationResult, setValidationResult] = useState<{
+		valid: boolean;
+		error?: string;
+	} | null>(null);
+
+	const handleImageBlur = async () => {
+		if (!image.trim()) {
+			setValidationResult(null);
+			return;
+		}
+		setIsValidating(true);
+		setValidationResult(null);
+		const result = await validateDockerImage(image.trim());
+		setValidationResult(result);
+		setIsValidating(false);
+	};
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!name.trim() || !image.trim()) return;
+
+		if (!validationResult) {
+			setIsValidating(true);
+			const result = await validateDockerImage(image.trim());
+			setValidationResult(result);
+			setIsValidating(false);
+			if (!result.valid) return;
+		} else if (!validationResult.valid) {
+			return;
+		}
 
 		setIsLoading(true);
 		try {
@@ -40,9 +68,9 @@ export function CreateServiceDialog({
 			setIsOpen(false);
 			setName("");
 			setImage("");
-			mutate(`/api/projects/${projectId}/services`);
+			setValidationResult(null);
+			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
-			router.refresh();
 		} catch (error) {
 			console.error("Failed to create service:", error);
 		} finally {
@@ -55,6 +83,7 @@ export function CreateServiceDialog({
 		if (!open) {
 			setName("");
 			setImage("");
+			setValidationResult(null);
 		}
 	};
 
@@ -84,12 +113,44 @@ export function CreateServiceDialog({
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="service-image">Docker Image</Label>
-								<Input
-									id="service-image"
-									value={image}
-									onChange={(e) => setImage(e.target.value)}
-									placeholder="nginx:latest"
-								/>
+								<div className="relative">
+									<Input
+										id="service-image"
+										value={image}
+										onChange={(e) => {
+											setImage(e.target.value);
+											setValidationResult(null);
+										}}
+										onBlur={handleImageBlur}
+										placeholder="nginx:latest"
+										className={
+											validationResult && !validationResult.valid
+												? "border-red-500 focus:border-red-500"
+												: ""
+										}
+									/>
+									{isValidating && (
+										<div className="absolute right-3 top-1/2 -translate-y-1/2">
+											<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+										</div>
+									)}
+									{!isValidating && validationResult?.valid && (
+										<div className="absolute right-3 top-1/2 -translate-y-1/2">
+											<CheckCircle2 className="h-4 w-4 text-green-500" />
+										</div>
+									)}
+									{!isValidating && validationResult && !validationResult.valid && (
+										<div className="absolute right-3 top-1/2 -translate-y-1/2">
+											<AlertCircle className="h-4 w-4 text-red-500" />
+										</div>
+									)}
+								</div>
+								{validationResult && !validationResult.valid && (
+									<p className="text-sm text-red-500">{validationResult.error}</p>
+								)}
+								<p className="text-xs text-muted-foreground">
+									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or any public registry
+								</p>
 							</div>
 							<div className="flex justify-end gap-2">
 								<Button
@@ -101,7 +162,13 @@ export function CreateServiceDialog({
 								</Button>
 								<Button
 									type="submit"
-									disabled={isLoading || !name.trim() || !image.trim()}
+									disabled={
+										isLoading ||
+										isValidating ||
+										!name.trim() ||
+										!image.trim() ||
+										(validationResult !== null && !validationResult.valid)
+									}
 								>
 									{isLoading ? "Creating..." : "Create"}
 								</Button>

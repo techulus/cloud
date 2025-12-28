@@ -8,7 +8,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+
 import { CreateServerDialog } from "@/components/create-server-dialog";
 import { PageHeader } from "@/components/page-header";
 
@@ -22,18 +22,45 @@ type Server = {
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-function StatusBadge({ status }: { status: string }) {
-	const variants: Record<
-		string,
-		"default" | "secondary" | "destructive" | "outline"
-	> = {
-		online: "default",
-		pending: "secondary",
-		offline: "destructive",
-		unknown: "outline",
+function StatusIndicator({ status }: { status: string }) {
+	const colors: Record<string, { dot: string; text: string }> = {
+		online: {
+			dot: "bg-emerald-500",
+			text: "text-emerald-600 dark:text-emerald-400",
+		},
+		pending: {
+			dot: "bg-amber-500",
+			text: "text-amber-600 dark:text-amber-400",
+		},
+		offline: {
+			dot: "bg-rose-500",
+			text: "text-rose-600 dark:text-rose-400",
+		},
+		unknown: {
+			dot: "bg-zinc-400",
+			text: "text-zinc-500",
+		},
 	};
 
-	return <Badge variant={variants[status] || "outline"}>{status}</Badge>;
+	const color = colors[status] || colors.unknown;
+
+	return (
+		<div className="flex items-center gap-1.5">
+			<span className="relative flex h-2 w-2">
+				{status === "online" && (
+					<span
+						className={`animate-ping absolute inline-flex h-full w-full rounded-full ${color.dot} opacity-75`}
+					/>
+				)}
+				<span
+					className={`relative inline-flex rounded-full h-2 w-2 ${color.dot}`}
+				/>
+			</span>
+			<span className={`text-xs font-medium capitalize ${color.text}`}>
+				{status}
+			</span>
+		</div>
+	);
 }
 
 export function ServerList({ initialServers }: { initialServers: Server[] }) {
@@ -68,7 +95,7 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 								<CardHeader className="min-h-24">
 									<div className="flex items-center justify-between">
 										<CardTitle>{server.name}</CardTitle>
-										<StatusBadge status={server.status} />
+										<StatusIndicator status={server.status} />
 									</div>
 									<div className="text-sm text-muted-foreground space-y-1 pt-1">
 									<div>

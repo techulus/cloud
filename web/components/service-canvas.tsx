@@ -275,7 +275,7 @@ export function ServiceCanvas({
 		return (
 			<div
 				className="
-          h-[80vh] mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800
+          h-[75vh] mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800
           bg-zinc-50 dark:bg-zinc-900/50
           flex items-center justify-center
         "
@@ -305,7 +305,7 @@ export function ServiceCanvas({
 	return (
 		<div
 			className="
-        h-[80vh] mt-4 p-10 rounded-xl border border-zinc-200 dark:border-zinc-800
+        h-[75vh] mt-4 p-10 rounded-xl border border-zinc-200 dark:border-zinc-800
         bg-zinc-50/50 dark:bg-zinc-900/30
         flex items-center justify-center overflow-auto
       "

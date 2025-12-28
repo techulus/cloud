@@ -43,7 +43,7 @@ export function PageHeader({
 					</nav>
 				)}
 				<div>
-					<h1 className="text-xl font-bold">{title}</h1>
+					<h1 className="text-base font-bold">{title}</h1>
 					{description && (
 						<p className="text-sm text-muted-foreground">{description}</p>
 					)}
