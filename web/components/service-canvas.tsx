@@ -76,7 +76,7 @@ function ServiceCard({
 	const hasPublicIngress = publicPorts.length > 0;
 
 	return (
-		<div className="flex flex-col items-center gap-2 w-[280px]">
+		<div className="flex flex-col items-center gap-2 w-70">
 			{hasPublicIngress && (
 				<div className="flex flex-col items-center gap-1.5">
 					<div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
@@ -156,7 +156,9 @@ function ServiceCard({
 				)}
 
 				{service.deployments.length > 0 && (
-					<div className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasInternalDns ? "mt-2 pt-2" : "mt-2 pt-2"}`}>
+					<div
+						className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasInternalDns ? "mt-2 pt-2" : "mt-2 pt-2"}`}
+					>
 						<div className="flex items-center justify-between">
 							<span className="text-xs text-muted-foreground">Replicas</span>
 							<div className="flex items-center gap-1">
@@ -223,11 +225,13 @@ export function ServiceCanvas({
 		return (
 			<div
 				className="
-          h-[75vh] mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800
+          relative -mt-6 -mb-6
+          left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
           bg-zinc-50 dark:bg-zinc-900/50
           flex items-center justify-center
         "
 				style={{
+					height: "calc(100vh - 5rem)",
 					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
 					backgroundSize: "20px 20px",
 				}}
@@ -253,11 +257,13 @@ export function ServiceCanvas({
 	return (
 		<div
 			className="
-        h-[75vh] mt-4 p-10 rounded-xl border border-zinc-200 dark:border-zinc-800
+        relative -mt-6 -mb-6 p-10
+        left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
         bg-zinc-50/50 dark:bg-zinc-900/30
         flex items-center justify-center overflow-auto
       "
 			style={{
+				height: "calc(100vh - 3.5rem)",
 				backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
 				backgroundSize: "24px 24px",
 			}}

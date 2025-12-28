@@ -1,7 +1,10 @@
+import { Box } from "lucide-react";
 import Link from "next/link";
-import { FolderKanban, Box } from "lucide-react";
-import { listServers } from "@/actions/servers";
 import { listProjects } from "@/actions/projects";
+import { listServers } from "@/actions/servers";
+import { CreateProjectDialog } from "@/components/create-project-dialog";
+import { PageHeader } from "@/components/page-header";
+import { ServerList } from "@/components/server-list";
 import {
 	Card,
 	CardContent,
@@ -9,9 +12,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { ServerList } from "@/components/server-list";
-import { PageHeader } from "@/components/page-header";
-import { CreateProjectDialog } from "@/components/create-project-dialog";
 
 export default async function DashboardPage() {
 	const [servers, projects] = await Promise.all([
@@ -20,7 +20,7 @@ export default async function DashboardPage() {
 	]);
 
 	return (
-		<div className="space-y-8">
+		<div className="pt-4 space-y-12">
 			<div className="space-y-6">
 				<PageHeader
 					title="Projects"
@@ -47,9 +47,6 @@ export default async function DashboardPage() {
 								<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
 									<CardHeader className="min-h-24">
 										<div className="flex items-center gap-2">
-											<div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-												<FolderKanban className="h-4 w-4 text-primary" />
-											</div>
 											<CardTitle>{project.name}</CardTitle>
 										</div>
 										<CardDescription className="flex items-center gap-1.5">

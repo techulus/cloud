@@ -7,6 +7,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
+import { db } from "@/db";
+import { workQueue } from "@/db/schema";
+import { eq, desc } from "drizzle-orm";
+import { Badge } from "@/components/ui/badge";
 
 function StatusIndicator({ status }: { status: string }) {
   const colors: Record<string, { dot: string; text: string }> = {
@@ -70,7 +74,15 @@ export default async function ServerDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const server = await getServerDetails(id);
+  const [server, recentActions] = await Promise.all([
+    getServerDetails(id),
+    db
+      .select()
+      .from(workQueue)
+      .where(eq(workQueue.serverId, id))
+      .orderBy(desc(workQueue.createdAt))
+      .limit(50),
+  ]);
 
   if (!server) {
     notFound();
@@ -115,6 +127,51 @@ export default async function ServerDetailPage({
               <p>{server.resourcesDisk !== null ? `${server.resourcesDisk} GB` : "—"}</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentActions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No actions yet</p>
+          ) : (
+            <div className="space-y-3">
+              {recentActions.map((action) => (
+                <div
+                  key={action.id}
+                  className="py-3 border-b last:border-0"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        variant={
+                          action.status === "completed"
+                            ? "default"
+                            : action.status === "failed"
+                              ? "destructive"
+                              : action.status === "processing"
+                                ? "secondary"
+                                : "outline"
+                        }
+                      >
+                        {action.status}
+                      </Badge>
+                      <span className="font-medium">{action.type}</span>
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {formatRelativeTime(action.createdAt)}
+                    </span>
+                  </div>
+                  <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">
+                    {JSON.stringify(JSON.parse(action.payload), null, 2)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

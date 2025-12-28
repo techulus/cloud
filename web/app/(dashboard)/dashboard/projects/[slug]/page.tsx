@@ -30,11 +30,13 @@ export default async function ProjectPage({
 
 	const initialServices = await Promise.all(
 		servicesList.map(async (service) => {
-			const [ports, serviceDeployments, configuredReplicas] = await Promise.all([
-				getServicePorts(service.id),
-				listDeployments(service.id),
-				getServiceReplicas(service.id),
-			]);
+			const [ports, serviceDeployments, configuredReplicas] = await Promise.all(
+				[
+					getServicePorts(service.id),
+					listDeployments(service.id),
+					getServiceReplicas(service.id),
+				],
+			);
 
 			const deploymentsWithDetails = await Promise.all(
 				serviceDeployments.map(async (deployment) => {
@@ -65,12 +67,14 @@ export default async function ProjectPage({
 	);
 
 	return (
-		<div>
-			<PageHeader
-				title={project.name}
-				breadcrumbs={[{ label: "Projects", href: "/dashboard" }]}
-				actions={<CreateServiceDialog projectId={project.id} />}
-			/>
+		<div className="relative">
+			<div className="absolute top-0 left-0 right-0 z-10 py-2 -mx-4 px-4">
+				<PageHeader
+					title={project.name}
+					breadcrumbs={[{ label: "Projects", href: "/dashboard" }]}
+					actions={<CreateServiceDialog projectId={project.id} />}
+				/>
+			</div>
 			<ServiceCanvas
 				projectId={project.id}
 				projectSlug={slug}
