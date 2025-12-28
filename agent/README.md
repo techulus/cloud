@@ -6,13 +6,51 @@ Agent that runs on worker servers and communicates with the control plane.
 
 - WireGuard (`wg` and `wg-quick` commands)
 - Podman
+- Caddy (custom build with Cloudflare DNS module)
+- dnsmasq
 
-### Ubuntu Setup
+### Quick Install (Ubuntu)
+
+```bash
+curl -fsSL https://your-control-plane.com/install.sh | sudo bash
+```
+
+### Manual Ubuntu Setup
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install wireguard wireguard-tools -y
-sudo apt install podman -y
+sudo apt install wireguard wireguard-tools podman dnsmasq golang-go -y
+
+go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+xcaddy build --with github.com/caddy-dns/cloudflare --output /usr/bin/caddy
+```
+
+## Caddy Configuration
+
+Caddy uses DNS-01 challenge via Cloudflare for automatic TLS certificates. This allows multiple servers behind DNS round-robin to independently obtain certificates.
+
+### Create Cloudflare API Token
+
+1. Go to https://dash.cloudflare.com/profile/api-tokens
+2. Create token with permissions: `Zone → DNS → Edit`
+3. Select zone resources: your domain(s)
+
+### Configure Environment
+
+```bash
+sudo nano /etc/caddy/environment
+```
+
+```
+CF_API_TOKEN=your-cloudflare-api-token
+CONTROL_PLANE_URL=https://your-control-plane.com
+```
+
+### Start Caddy
+
+```bash
+sudo systemctl start caddy
+sudo journalctl -u caddy -f
 ```
 
 ## Generating Proto Files

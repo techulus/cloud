@@ -1,13 +1,11 @@
 import { db } from "@/db";
 import { deployments, servicePorts, services } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { WIREGUARD_SUBNET_CIDR } from "./constants";
 
 export type CaddyRoute = {
   id: string;
   domain: string;
   upstreams: string[];
-  internal: boolean;
 };
 
 async function getPortUpstreams(
@@ -45,20 +43,6 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
       .from(servicePorts)
       .where(eq(servicePorts.serviceId, service.id));
 
-    if (ports.length === 0) continue;
-
-    const firstPort = ports[0];
-    const upstreams = await getPortUpstreams(service.id, firstPort.port);
-
-    if (upstreams.length === 0) continue;
-
-    routes.push({
-      id: `${service.name}.internal`,
-      domain: `${service.name}.internal`,
-      upstreams,
-      internal: true,
-    });
-
     for (const port of ports) {
       if (port.isPublic && port.domain) {
         const portUpstreams = await getPortUpstreams(service.id, port.port);
@@ -67,7 +51,6 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
             id: port.domain,
             domain: port.domain,
             upstreams: portUpstreams,
-            internal: false,
           });
         }
       }
@@ -78,22 +61,6 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
 }
 
 export function buildCaddyRoute(route: CaddyRoute): object {
-  if (route.internal) {
-    return {
-      "@id": route.id,
-      match: [
-        { host: [route.domain] },
-        { remote_ip: { ranges: [WIREGUARD_SUBNET_CIDR] } }
-      ],
-      handle: [
-        {
-          handler: "reverse_proxy",
-          upstreams: route.upstreams.map((u) => ({ dial: u })),
-        },
-      ],
-    };
-  }
-
   return {
     "@id": route.id,
     match: [{ host: [route.domain] }],

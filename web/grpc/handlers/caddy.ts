@@ -9,7 +9,7 @@ export async function pushCaddyConfigToAll(): Promise<void> {
     id: route.id,
     domain: route.domain,
     upstreams: route.upstreams,
-    internal: route.internal,
+    internal: false,
   }));
 
   connectionStore.pushCaddyConfig(caddyRoutes);

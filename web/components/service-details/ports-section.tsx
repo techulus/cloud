@@ -84,14 +84,8 @@ export const PortsSection = memo(function PortsSection({
 	service: Service;
 	onUpdate: () => void;
 }) {
-	const [stagedPorts, setStagedPorts] = useState<StagedPort[]>(() =>
-		service.ports.map((p) => ({
-			id: p.id,
-			port: p.port,
-			isPublic: p.isPublic,
-			domain: p.domain,
-		})),
-	);
+	const [pendingAdds, setPendingAdds] = useState<StagedPort[]>([]);
+	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
 	const [newPort, setNewPort] = useState("");
 	const [visibility, setVisibility] = useState<"private" | "public">("private");
 	const [domain, setDomain] = useState("");
@@ -105,24 +99,31 @@ export const PortsSection = memo(function PortsSection({
 			.catch(() => {});
 	}, []);
 
-	const originalPortIds = new Set(service.ports.map((p) => p.id));
-	const stagedPortIds = new Set(stagedPorts.filter((p) => !p.isNew).map((p) => p.id));
-	const addedPorts = stagedPorts.filter((p) => p.isNew);
-	const removedPortIds = [...originalPortIds].filter((id) => !stagedPortIds.has(id));
-	const hasChanges = addedPorts.length > 0 || removedPortIds.length > 0;
+	const existingPorts: StagedPort[] = service.ports
+		.filter((p) => !pendingRemoveIds.has(p.id))
+		.map((p) => ({
+			id: p.id,
+			port: p.port,
+			isPublic: p.isPublic,
+			domain: p.domain,
+		}));
+	const stagedPorts = [...existingPorts, ...pendingAdds];
+	const hasChanges = pendingAdds.length > 0 || pendingRemoveIds.size > 0;
 
 	const isPublic = visibility === "public";
+	const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+	const isValidDomain = domain.trim() && domainRegex.test(domain.trim());
 	const canAdd =
 		newPort &&
 		!stagedPorts.some((p) => p.port === parseInt(newPort)) &&
-		(!isPublic || domain.trim());
+		(!isPublic || isValidDomain);
 
 	const handleAdd = () => {
 		const port = parseInt(newPort);
 		if (isNaN(port) || port <= 0 || port > 65535) return;
 
-		setStagedPorts([
-			...stagedPorts,
+		setPendingAdds([
+			...pendingAdds,
 			{
 				id: `new-${Date.now()}`,
 				port,
@@ -137,7 +138,12 @@ export const PortsSection = memo(function PortsSection({
 	};
 
 	const handleRemove = (portId: string) => {
-		setStagedPorts(stagedPorts.filter((p) => p.id !== portId));
+		const isPending = pendingAdds.some((p) => p.id === portId);
+		if (isPending) {
+			setPendingAdds(pendingAdds.filter((p) => p.id !== portId));
+		} else {
+			setPendingRemoveIds(new Set([...pendingRemoveIds, portId]));
+		}
 	};
 
 	const handleSave = async () => {
@@ -146,14 +152,16 @@ export const PortsSection = memo(function PortsSection({
 		try {
 			await updateServiceConfig(service.id, {
 				ports: {
-					remove: removedPortIds,
-					add: addedPorts.map((p) => ({
+					remove: [...pendingRemoveIds],
+					add: pendingAdds.map((p) => ({
 						port: p.port,
 						isPublic: p.isPublic,
 						domain: p.domain,
 					})),
 				},
 			});
+			setPendingAdds([]);
+			setPendingRemoveIds(new Set());
 			onUpdate();
 		} catch (error) {
 			console.error("Failed to update ports:", error);
