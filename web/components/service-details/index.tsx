@@ -80,7 +80,7 @@ export function ServiceDetails({
 			isPublic: p.isPublic,
 			domain: p.domain,
 		}));
-		const current = buildCurrentConfig(service, replicas, ports);
+		const current = buildCurrentConfig(service, replicas, ports, service.secretKeys);
 		return diffConfigs(deployed, current);
 	}, [service]);
 

@@ -488,10 +488,12 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 
 	const updatedService = await getService(serviceId);
 	if (updatedService) {
+		const secretKeys = serviceSecrets.map((s) => s.key);
 		const deployedConfig = buildCurrentConfig(
 			updatedService,
 			replicaConfigs,
 			portConfigs,
+			secretKeys,
 		);
 
 		await db

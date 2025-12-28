@@ -10,6 +10,7 @@ import {
   deployments,
   deploymentPorts,
   servers,
+  secrets,
 } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -35,7 +36,7 @@ export async function GET(
 
   const result = await Promise.all(
     servicesList.map(async (service) => {
-      const [ports, serviceDeployments, replicas] = await Promise.all([
+      const [ports, serviceDeployments, replicas, serviceSecrets] = await Promise.all([
         db
           .select()
           .from(servicePorts)
@@ -56,6 +57,10 @@ export async function GET(
           .from(serviceReplicas)
           .innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
           .where(eq(serviceReplicas.serviceId, service.id)),
+        db
+          .select({ key: secrets.key })
+          .from(secrets)
+          .where(eq(secrets.serviceId, service.id)),
       ]);
 
       const deploymentsWithDetails = await Promise.all(
@@ -93,6 +98,7 @@ export async function GET(
         ports,
         configuredReplicas: replicas,
         deployments: deploymentsWithDetails,
+        secretKeys: serviceSecrets.map((s) => s.key),
       };
     })
   );

@@ -28,6 +28,7 @@ export type DeployedConfig = {
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	ports: PortConfig[];
+	secretKeys?: string[];
 };
 
 export type ConfigChange = {
@@ -47,6 +48,7 @@ export function buildCurrentConfig(
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
+	secretKeys?: string[],
 ): DeployedConfig {
 	return {
 		source: {
@@ -72,6 +74,7 @@ export function buildCurrentConfig(
 			isPublic: p.isPublic,
 			domain: p.domain,
 		})),
+		secretKeys: secretKeys ?? [],
 	};
 }
 
@@ -109,6 +112,13 @@ export function diffConfigs(
 				field: `Port ${port.port}`,
 				from: "(none)",
 				to: port.domain ? `${portType}, ${port.domain}` : portType,
+			});
+		}
+		for (const key of current.secretKeys || []) {
+			changes.push({
+				field: "Secret",
+				from: "(none)",
+				to: key,
 			});
 		}
 		return changes;
@@ -247,6 +257,29 @@ export function diffConfigs(
 			changes.push({
 				field: `Port ${port}`,
 				from: deployedType,
+				to: "(removed)",
+			});
+		}
+	}
+
+	const deployedSecrets = new Set(deployed.secretKeys || []);
+	const currentSecrets = new Set(current.secretKeys || []);
+
+	for (const key of currentSecrets) {
+		if (!deployedSecrets.has(key)) {
+			changes.push({
+				field: "Secret",
+				from: "(none)",
+				to: key,
+			});
+		}
+	}
+
+	for (const key of deployedSecrets) {
+		if (!currentSecrets.has(key)) {
+			changes.push({
+				field: "Secret",
+				from: key,
 				to: "(removed)",
 			});
 		}

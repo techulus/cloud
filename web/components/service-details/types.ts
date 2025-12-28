@@ -45,6 +45,7 @@ export type Service = {
 	ports: ServicePort[];
 	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
+	secretKeys?: string[];
 };
 
 export type StagedPort = {
