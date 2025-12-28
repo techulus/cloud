@@ -23,6 +23,7 @@ import type { Service } from "./types";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
 import { HealthCheckSection } from "./health-check-section";
+import { SecretsSection } from "./secrets-section";
 import { PendingChangesBar } from "./pending-changes";
 
 export type { Service } from "./types";
@@ -285,6 +286,8 @@ export function ServiceDetails({
 						onUpdate={handleActionComplete}
 					/>
 				</div>
+
+				<SecretsSection service={service} onUpdate={handleActionComplete} />
 			</div>
 
 			<PendingChangesBar

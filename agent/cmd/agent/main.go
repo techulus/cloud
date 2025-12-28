@@ -33,13 +33,15 @@ const (
 )
 
 type Config struct {
-	ServerID    string `json:"serverId"`
-	SubnetID    int    `json:"subnetId"`
-	WireGuardIP string `json:"wireguardIp"`
+	ServerID      string `json:"serverId"`
+	SubnetID      int    `json:"subnetId"`
+	WireGuardIP   string `json:"wireguardIp"`
+	EncryptionKey string `json:"encryptionKey"`
 }
 
 var httpClient *api.Client
 var dataDir string
+var agentConfig *Config
 
 func main() {
 	var (
@@ -139,9 +141,10 @@ func main() {
 		}
 
 		config = &Config{
-			ServerID:    resp.ServerID,
-			SubnetID:    resp.SubnetID,
-			WireGuardIP: resp.WireGuardIP,
+			ServerID:      resp.ServerID,
+			SubnetID:      resp.SubnetID,
+			WireGuardIP:   resp.WireGuardIP,
+			EncryptionKey: resp.EncryptionKey,
 		}
 
 		if err := saveConfig(configPath, config); err != nil {
@@ -184,6 +187,8 @@ func main() {
 			log.Println("Container network ready")
 		}
 	}
+
+	agentConfig = config
 
 	grpcAddress := grpcURL
 	if grpcAddress == "" {
@@ -300,6 +305,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 			Retries     int    `json:"retries"`
 			StartPeriod int    `json:"startPeriod"`
 		} `json:"healthCheck"`
+		Env map[string]string `json:"env"`
 	}
 
 	if err := json.Unmarshal(work.Payload, &payload); err != nil {
@@ -328,6 +334,18 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		log.Printf("Health check configured: %s", healthCheck.Cmd)
 	}
 
+	decryptedEnv := make(map[string]string)
+	for key, encryptedValue := range payload.Env {
+		if agentConfig.EncryptionKey == "" {
+			return nil, fmt.Errorf("encryption key not configured, cannot decrypt secret %s", key)
+		}
+		decrypted, err := crypto.DecryptSecret(encryptedValue, agentConfig.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt secret %s: %w", key, err)
+		}
+		decryptedEnv[key] = decrypted
+	}
+
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
@@ -335,6 +353,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		IPAddress:    payload.IPAddress,
 		PortMappings: portMappings,
 		HealthCheck:  healthCheck,
+		Env:          decryptedEnv,
 	})
 	if err != nil {
 		return nil, err

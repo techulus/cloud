@@ -31,10 +31,11 @@ type RegisterRequest struct {
 }
 
 type RegisterResponse struct {
-	ServerID    string `json:"serverId"`
-	SubnetID    int    `json:"subnetId"`
-	WireGuardIP string `json:"wireguardIp"`
-	Peers       []Peer `json:"peers"`
+	ServerID      string `json:"serverId"`
+	SubnetID      int    `json:"subnetId"`
+	WireGuardIP   string `json:"wireguardIp"`
+	Peers         []Peer `json:"peers"`
+	EncryptionKey string `json:"encryptionKey"`
 }
 
 type Peer struct {

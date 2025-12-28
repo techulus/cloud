@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
       subnetId,
       wireguardIp,
       peers,
+      encryptionKey: process.env.ENCRYPTION_KEY,
     });
   } catch (error) {
     console.error("Agent registration error:", error);

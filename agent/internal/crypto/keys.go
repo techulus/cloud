@@ -1,12 +1,20 @@
 package crypto
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+)
+
+const (
+	ivLength      = 12
+	authTagLength = 16
 )
 
 type KeyPair struct {
@@ -77,4 +85,45 @@ func KeyPairExists(dir string) bool {
 	privPath := filepath.Join(dir, "private.key")
 	_, err := os.Stat(privPath)
 	return err == nil
+}
+
+func DecryptSecret(encryptedBase64 string, keyHex string) (string, error) {
+	key, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return "", fmt.Errorf("invalid encryption key: %w", err)
+	}
+	if len(key) != 32 {
+		return "", fmt.Errorf("encryption key must be 32 bytes")
+	}
+
+	data, err := base64.StdEncoding.DecodeString(encryptedBase64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	if len(data) < ivLength+authTagLength {
+		return "", fmt.Errorf("encrypted data too short")
+	}
+
+	iv := data[:ivLength]
+	authTag := data[ivLength : ivLength+authTagLength]
+	ciphertext := data[ivLength+authTagLength:]
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	ciphertextWithTag := append(ciphertext, authTag...)
+	plaintext, err := gcm.Open(nil, iv, ciphertextWithTag, nil)
+	if err != nil {
+		return "", fmt.Errorf("decryption failed: %w", err)
+	}
+
+	return string(plaintext), nil
 }

@@ -384,6 +384,16 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, serviceId));
 
+	const serviceSecrets = await db
+		.select()
+		.from(secrets)
+		.where(eq(secrets.serviceId, serviceId));
+
+	const env: Record<string, string> = {};
+	for (const secret of serviceSecrets) {
+		env[secret.key] = secret.encryptedValue;
+	}
+
 	await db
 		.update(services)
 		.set({ replicas: totalReplicas })
@@ -451,6 +461,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					ipAddress,
 					name: `${service.name}-${replicaIndex}`,
 					healthCheck,
+					env,
 				}),
 			});
 		}

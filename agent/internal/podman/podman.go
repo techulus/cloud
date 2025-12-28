@@ -27,6 +27,7 @@ type DeployConfig struct {
 	IPAddress    string
 	PortMappings []PortMapping
 	HealthCheck  *HealthCheck
+	Env          map[string]string
 }
 
 type DeployResult struct {
@@ -57,6 +58,10 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		args = append(args, "--health-timeout", fmt.Sprintf("%ds", config.HealthCheck.Timeout))
 		args = append(args, "--health-retries", fmt.Sprintf("%d", config.HealthCheck.Retries))
 		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
+	}
+
+	for key, value := range config.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
 	}
 
 	args = append(args, image)

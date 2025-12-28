@@ -30,22 +30,24 @@ function PendingChangesModal({
 
 	return (
 		<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
 				<DialogHeader>
 					<DialogTitle>Pending Changes</DialogTitle>
 				</DialogHeader>
-				<div className="space-y-3">
+				<div className="space-y-3 max-h-[60vh] overflow-y-auto">
 					{changes.map((change, i) => (
 						<div
 							key={i}
-							className="flex items-center gap-2 p-3 bg-muted rounded-md text-sm"
+							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-sm"
 						>
 							<span className="font-medium flex-shrink-0">{change.field}:</span>
-							<span className="text-muted-foreground truncate">
-								{change.from}
-							</span>
-							<ArrowRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-							<span className="text-foreground truncate">{change.to}</span>
+							<div className="flex items-center gap-2 min-w-0">
+								<span className="text-muted-foreground truncate">
+									{change.from}
+								</span>
+								<ArrowRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+								<span className="text-foreground truncate">{change.to}</span>
+							</div>
 						</div>
 					))}
 				</div>
@@ -101,30 +103,42 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 	return (
 		<>
 			<div
-				className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out ${
+				className={`fixed left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50 transition-all duration-300 ease-out ${
 					hasChanges
-						? "bottom-6 opacity-100"
+						? "bottom-4 sm:bottom-6 opacity-100"
 						: "-bottom-20 opacity-0 pointer-events-none"
 				}`}
 			>
-				<div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-emerald-500 dark:border-emerald-600 rounded-lg shadow-lg">
-					<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 px-2">
-						{changes.length} pending change{changes.length !== 1 ? "s" : ""}
+				<div className="flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:px-2 sm:py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-emerald-500 dark:border-emerald-600 rounded-lg shadow-lg">
+					<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:px-2">
+						{changes.length} change{changes.length !== 1 ? "s" : ""}
 					</span>
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => setShowModal(true)}
-					>
-						View Details
-					</Button>
-					<Button
-						onClick={handleDeploy}
-						disabled={isDeploying}
-						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white px-6"
-					>
-						{isDeploying ? "Deploying..." : "Deploy"}
-					</Button>
+					<div className="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setShowModal(true)}
+							className="hidden sm:inline-flex"
+						>
+							View Details
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setShowModal(true)}
+							className="sm:hidden"
+						>
+							View
+						</Button>
+						<Button
+							onClick={handleDeploy}
+							disabled={isDeploying}
+							size="sm"
+							className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white px-4 sm:px-6"
+						>
+							{isDeploying ? "..." : "Deploy"}
+						</Button>
+					</div>
 				</div>
 			</div>
 			<PendingChangesModal
