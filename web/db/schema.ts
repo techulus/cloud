@@ -1,33 +1,28 @@
-import { relations, sql } from "drizzle-orm";
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
+import { pgTable, text, integer, boolean, timestamp, index } from "drizzle-orm/pg-core";
 
-export const user = sqliteTable("user", {
+export const user = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" })
-    .default(false)
-    .notNull(),
+  emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
     .$onUpdate(() => new Date())
     .notNull(),
 });
 
-export const session = sqliteTable(
+export const session = pgTable(
   "session",
   {
     id: text("id").primaryKey(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     token: text("token").notNull().unique(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
     ipAddress: text("ip_address"),
@@ -39,7 +34,7 @@ export const session = sqliteTable(
   (table) => [index("session_userId_idx").on(table.userId)]
 );
 
-export const account = sqliteTable(
+export const account = pgTable(
   "account",
   {
     id: text("id").primaryKey(),
@@ -51,36 +46,29 @@ export const account = sqliteTable(
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     idToken: text("id_token"),
-    accessTokenExpiresAt: integer("access_token_expires_at", {
-      mode: "timestamp_ms",
-    }),
-    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
-      mode: "timestamp_ms",
-    }),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
     scope: text("scope"),
     password: text("password"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
   },
   (table) => [index("account_userId_idx").on(table.userId)]
 );
 
-export const verification = sqliteTable(
+export const verification = pgTable(
   "verification",
   {
     id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
   },
@@ -106,7 +94,7 @@ export const accountRelations = relations(account, ({ one }) => ({
   }),
 }));
 
-export const servers = sqliteTable("servers", {
+export const servers = pgTable("servers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   publicIp: text("public_ip"),
@@ -117,28 +105,24 @@ export const servers = sqliteTable("servers", {
   status: text("status", { enum: ["pending", "online", "offline", "unknown"] })
     .notNull()
     .default("pending"),
-  lastHeartbeat: integer("last_heartbeat", { mode: "timestamp_ms" }),
+  lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
   resourcesCpu: integer("resources_cpu"),
   resourcesMemory: integer("resources_memory"),
   resourcesDisk: integer("resources_disk"),
   agentToken: text("agent_token"),
-  tokenCreatedAt: integer("token_created_at", { mode: "timestamp_ms" }),
-  tokenUsedAt: integer("token_used_at", { mode: "timestamp_ms" }),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  tokenCreatedAt: timestamp("token_created_at", { withTimezone: true }),
+  tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const projects = sqliteTable("projects", {
+export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   slug: text("slug").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const services = sqliteTable("services", {
+export const services = pgTable("services", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
     .notNull()
@@ -152,12 +136,10 @@ export const services = sqliteTable("services", {
   healthCheckRetries: integer("health_check_retries").default(3),
   healthCheckStartPeriod: integer("health_check_start_period").default(30),
   deployedConfig: text("deployed_config"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const serviceReplicas = sqliteTable("service_replicas", {
+export const serviceReplicas = pgTable("service_replicas", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
@@ -168,32 +150,28 @@ export const serviceReplicas = sqliteTable("service_replicas", {
   count: integer("count").notNull().default(1),
 });
 
-export const servicePorts = sqliteTable("service_ports", {
+export const servicePorts = pgTable("service_ports", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
     .references(() => services.id, { onDelete: "cascade" }),
   port: integer("port").notNull(),
-  isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
+  isPublic: boolean("is_public").notNull().default(false),
   domain: text("domain").unique(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const secrets = sqliteTable("secrets", {
+export const secrets = pgTable("secrets", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
     .references(() => services.id, { onDelete: "cascade" }),
   key: text("key").notNull(),
   encryptedValue: text("encrypted_value").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const deployments = sqliteTable("deployments", {
+export const deployments = pgTable("deployments", {
   id: text("id").primaryKey(),
   serviceId: text("service_id")
     .notNull()
@@ -211,12 +189,10 @@ export const deployments = sqliteTable("deployments", {
   healthStatus: text("health_status", {
     enum: ["none", "starting", "healthy", "unhealthy"],
   }),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const deploymentPorts = sqliteTable("deployment_ports", {
+export const deploymentPorts = pgTable("deployment_ports", {
   id: text("id").primaryKey(),
   deploymentId: text("deployment_id")
     .notNull()
@@ -225,12 +201,10 @@ export const deploymentPorts = sqliteTable("deployment_ports", {
     .notNull()
     .references(() => servicePorts.id, { onDelete: "cascade" }),
   hostPort: integer("host_port").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const workQueue = sqliteTable("work_queue", {
+export const workQueue = pgTable("work_queue", {
   id: text("id").primaryKey(),
   serverId: text("server_id")
     .notNull()
@@ -242,10 +216,7 @@ export const workQueue = sqliteTable("work_queue", {
   })
     .notNull()
     .default("pending"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-  startedAt: integer("started_at", { mode: "timestamp_ms" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
   attempts: integer("attempts").notNull().default(0),
 });
-
