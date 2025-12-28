@@ -4,6 +4,7 @@ import useSWR from "swr";
 import Link from "next/link";
 import { Globe, Lock, Box, ArrowDown } from "lucide-react";
 import { CreateServiceDialog } from "./create-service-dialog";
+import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 
 type DeploymentPort = {
 	id: string;
@@ -56,59 +57,6 @@ type Service = {
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-function getStatusColor(service: Service): {
-	bg: string;
-	border: string;
-	dot: string;
-	text: string;
-} {
-	const hasRunning = service.deployments.some((d) => d.status === "running");
-	const hasPending = service.deployments.some(
-		(d) => d.status === "pending" || d.status === "pulling",
-	);
-	const hasFailed = service.deployments.some((d) => d.status === "failed");
-	const hasStopped = service.deployments.some((d) => d.status === "stopped");
-
-	if (hasRunning) {
-		return {
-			bg: "bg-emerald-500/5",
-			border: "border-emerald-500/30",
-			dot: "bg-emerald-500",
-			text: "text-emerald-600 dark:text-emerald-400",
-		};
-	}
-	if (hasPending) {
-		return {
-			bg: "bg-amber-500/5",
-			border: "border-amber-500/30",
-			dot: "bg-amber-500",
-			text: "text-amber-600 dark:text-amber-400",
-		};
-	}
-	if (hasFailed) {
-		return {
-			bg: "bg-rose-500/5",
-			border: "border-rose-500/30",
-			dot: "bg-rose-500",
-			text: "text-rose-600 dark:text-rose-400",
-		};
-	}
-	if (hasStopped) {
-		return {
-			bg: "bg-zinc-500/5",
-			border: "border-zinc-400/30",
-			dot: "bg-zinc-400",
-			text: "text-zinc-500",
-		};
-	}
-	return {
-		bg: "bg-zinc-500/5",
-		border: "border-zinc-300/50 dark:border-zinc-700/50",
-		dot: "bg-zinc-300 dark:bg-zinc-600",
-		text: "text-zinc-400",
-	};
-}
-
 function ServiceCard({
 	service,
 	projectSlug,
@@ -116,7 +64,7 @@ function ServiceCard({
 	service: Service;
 	projectSlug: string;
 }) {
-	const colors = getStatusColor(service);
+	const colors = getStatusColorFromDeployments(service.deployments);
 	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
 	const hasInternalDns = service.deployments.some(
 		(d) => d.status === "running",

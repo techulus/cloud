@@ -95,7 +95,6 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				}),
 			);
 			await deployService(service.id, placements);
-			await new Promise((resolve) => setTimeout(resolve, 800));
 			onUpdate();
 			setShowModal(false);
 		} finally {
