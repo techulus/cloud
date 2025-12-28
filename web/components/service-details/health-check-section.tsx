@@ -222,10 +222,6 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 					</div>
 				)}
 
-				<p className="text-xs text-muted-foreground">
-					Changes apply on next deployment.
-				</p>
-
 				{(hasChanges || hasHealthCheck) && (
 					<div className="flex gap-2">
 						{hasChanges && (

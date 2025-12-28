@@ -91,7 +91,7 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 					{servers.map((server) => (
 						<Link key={server.id} href={`/dashboard/servers/${server.id}`}>
 							<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-								<CardHeader className="min-h-24">
+								<CardHeader>
 									<div className="flex items-center justify-between">
 										<CardTitle>{server.name}</CardTitle>
 										<StatusIndicator status={server.status} />

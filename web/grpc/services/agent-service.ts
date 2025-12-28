@@ -8,12 +8,14 @@ import {
 	StatusUpdate,
 	WorkComplete,
 	Heartbeat,
+	LogEntry,
 	type AgentMessage,
 	type AgentServiceServer,
 	type ControlPlaneMessage,
 } from "../generated/proto/agent";
-import { handleStatusUpdate } from "../handlers/status";
+import { handleStatusUpdate, markServerOffline } from "../handlers/status";
 import { handleWorkComplete } from "../handlers/work";
+import { handleLogEntry } from "../handlers/logs";
 import { connectionStore } from "../store/connections";
 
 type AgentStream = grpc.ServerDuplexStream<AgentMessage, ControlPlaneMessage>;
@@ -45,6 +47,8 @@ function verifyMessage(msg: AgentMessage, publicKey: string): boolean {
 		payloadBytes = WorkComplete.encode(msg.work_complete).finish();
 	} else if (msg.heartbeat) {
 		payloadBytes = Heartbeat.encode(msg.heartbeat).finish();
+	} else if (msg.log_entry) {
+		payloadBytes = LogEntry.encode(msg.log_entry).finish();
 	} else {
 		return false;
 	}
@@ -92,10 +96,14 @@ export function createAgentService(): AgentServiceServer {
 						? "WorkComplete"
 						: msg.heartbeat
 							? "Heartbeat"
-							: "Unknown";
-				console.log(
-					`[grpc:recv] server=${msg.server_id} type=${msgType} seq=${msg.sequence}`
-				);
+							: msg.log_entry
+								? "LogEntry"
+								: "Unknown";
+				if (msgType !== "LogEntry" && msgType !== "Heartbeat") {
+					console.log(
+						`[grpc:recv] server=${msg.server_id} type=${msgType} seq=${msg.sequence}`
+					);
+				}
 
 				try {
 					if (!ctx.authenticated) {
@@ -255,7 +263,8 @@ export function createAgentService(): AgentServiceServer {
 							},
 						});
 					} else if (msg.heartbeat) {
-						console.log(`[agent:${ctx.serverName}] heartbeat`);
+					} else if (msg.log_entry) {
+						await handleLogEntry(msg.log_entry);
 					}
 				} catch (error) {
 					console.error(
@@ -272,17 +281,19 @@ export function createAgentService(): AgentServiceServer {
 				}
 			});
 
-			call.on("end", () => {
+			call.on("end", async () => {
 				if (ctx.serverId) {
 					connectionStore.remove(ctx.serverId);
+					await markServerOffline(ctx.serverId);
 					console.log(`[agent:${ctx.serverName}] disconnected`);
 				}
 				call.end();
 			});
 
-			call.on("error", (error) => {
+			call.on("error", async (error) => {
 				if (ctx.serverId) {
 					connectionStore.remove(ctx.serverId);
+					await markServerOffline(ctx.serverId);
 					console.log(
 						`[agent:${ctx.serverName}] connection error:`,
 						error.message

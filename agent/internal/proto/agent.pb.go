@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type LogStreamType int32
+
+const (
+	LogStreamType_LOG_STREAM_TYPE_UNKNOWN   LogStreamType = 0
+	LogStreamType_LOG_STREAM_TYPE_STDOUT    LogStreamType = 1
+	LogStreamType_LOG_STREAM_TYPE_STDERR    LogStreamType = 2
+	LogStreamType_LOG_STREAM_TYPE_HEARTBEAT LogStreamType = 3
+)
+
+// Enum value maps for LogStreamType.
+var (
+	LogStreamType_name = map[int32]string{
+		0: "LOG_STREAM_TYPE_UNKNOWN",
+		1: "LOG_STREAM_TYPE_STDOUT",
+		2: "LOG_STREAM_TYPE_STDERR",
+		3: "LOG_STREAM_TYPE_HEARTBEAT",
+	}
+	LogStreamType_value = map[string]int32{
+		"LOG_STREAM_TYPE_UNKNOWN":   0,
+		"LOG_STREAM_TYPE_STDOUT":    1,
+		"LOG_STREAM_TYPE_STDERR":    2,
+		"LOG_STREAM_TYPE_HEARTBEAT": 3,
+	}
+)
+
+func (x LogStreamType) Enum() *LogStreamType {
+	p := new(LogStreamType)
+	*p = x
+	return p
+}
+
+func (x LogStreamType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LogStreamType) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (LogStreamType) Type() protoreflect.EnumType {
+	return &file_proto_agent_proto_enumTypes[0]
+}
+
+func (x LogStreamType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LogStreamType.Descriptor instead.
+func (LogStreamType) EnumDescriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{0}
+}
+
 type AgentMessage struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ServerId  string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -32,6 +84,7 @@ type AgentMessage struct {
 	//	*AgentMessage_StatusUpdate
 	//	*AgentMessage_WorkComplete
 	//	*AgentMessage_Heartbeat
+	//	*AgentMessage_LogEntry
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -129,6 +182,15 @@ func (x *AgentMessage) GetHeartbeat() *Heartbeat {
 	return nil
 }
 
+func (x *AgentMessage) GetLogEntry() *LogEntry {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_LogEntry); ok {
+			return x.LogEntry
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -145,11 +207,17 @@ type AgentMessage_Heartbeat struct {
 	Heartbeat *Heartbeat `protobuf:"bytes,12,opt,name=heartbeat,proto3,oneof"`
 }
 
+type AgentMessage_LogEntry struct {
+	LogEntry *LogEntry `protobuf:"bytes,13,opt,name=log_entry,json=logEntry,proto3,oneof"`
+}
+
 func (*AgentMessage_StatusUpdate) isAgentMessage_Payload() {}
 
 func (*AgentMessage_WorkComplete) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
+
+func (*AgentMessage_LogEntry) isAgentMessage_Payload() {}
 
 type ControlPlaneMessage struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
@@ -1005,11 +1073,95 @@ func (x *DnsRecord) GetIps() []string {
 	return nil
 }
 
+type LogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StreamId      string                 `protobuf:"bytes,1,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
+	StreamType    LogStreamType          `protobuf:"varint,2,opt,name=stream_type,json=streamType,proto3,enum=agent.LogStreamType" json:"stream_type,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Message       []byte                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	ContainerId   string                 `protobuf:"bytes,5,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	DeploymentId  string                 `protobuf:"bytes,6,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogEntry) Reset() {
+	*x = LogEntry{}
+	mi := &file_proto_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogEntry) ProtoMessage() {}
+
+func (x *LogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
+func (*LogEntry) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *LogEntry) GetStreamId() string {
+	if x != nil {
+		return x.StreamId
+	}
+	return ""
+}
+
+func (x *LogEntry) GetStreamType() LogStreamType {
+	if x != nil {
+		return x.StreamType
+	}
+	return LogStreamType_LOG_STREAM_TYPE_UNKNOWN
+}
+
+func (x *LogEntry) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *LogEntry) GetMessage() []byte {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *LogEntry) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *LogEntry) GetDeploymentId() string {
+	if x != nil {
+		return x.DeploymentId
+	}
+	return ""
+}
+
 var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/agent.proto\x12\x05agent\"\xb8\x02\n" +
+	"\x11proto/agent.proto\x12\x05agent\"\xe8\x02\n" +
 	"\fAgentMessage\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\tR\ttimestamp\x12\x1c\n" +
@@ -1018,7 +1170,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\rstatus_update\x18\n" +
 	" \x01(\v2\x13.agent.StatusUpdateH\x00R\fstatusUpdate\x12:\n" +
 	"\rwork_complete\x18\v \x01(\v2\x13.agent.WorkCompleteH\x00R\fworkComplete\x120\n" +
-	"\theartbeat\x18\f \x01(\v2\x10.agent.HeartbeatH\x00R\theartbeatB\t\n" +
+	"\theartbeat\x18\f \x01(\v2\x10.agent.HeartbeatH\x00R\theartbeat\x12.\n" +
+	"\tlog_entry\x18\r \x01(\v2\x0f.agent.LogEntryH\x00R\blogEntryB\t\n" +
 	"\apayload\"\xdc\x02\n" +
 	"\x13ControlPlaneMessage\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12%\n" +
@@ -1075,7 +1228,20 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\arecords\x18\x01 \x03(\v2\x10.agent.DnsRecordR\arecords\"1\n" +
 	"\tDnsRecord\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
-	"\x03ips\x18\x02 \x03(\tR\x03ips2N\n" +
+	"\x03ips\x18\x02 \x03(\tR\x03ips\"\xde\x01\n" +
+	"\bLogEntry\x12\x1b\n" +
+	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x125\n" +
+	"\vstream_type\x18\x02 \x01(\x0e2\x14.agent.LogStreamTypeR\n" +
+	"streamType\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\fR\amessage\x12!\n" +
+	"\fcontainer_id\x18\x05 \x01(\tR\vcontainerId\x12#\n" +
+	"\rdeployment_id\x18\x06 \x01(\tR\fdeploymentId*\x83\x01\n" +
+	"\rLogStreamType\x12\x1b\n" +
+	"\x17LOG_STREAM_TYPE_UNKNOWN\x10\x00\x12\x1a\n" +
+	"\x16LOG_STREAM_TYPE_STDOUT\x10\x01\x12\x1a\n" +
+	"\x16LOG_STREAM_TYPE_STDERR\x10\x02\x12\x1d\n" +
+	"\x19LOG_STREAM_TYPE_HEARTBEAT\x10\x032N\n" +
 	"\fAgentService\x12>\n" +
 	"\aConnect\x12\x13.agent.AgentMessage\x1a\x1a.agent.ControlPlaneMessage(\x010\x01B%Z#techulus/cloud-agent/internal/protob\x06proto3"
 
@@ -1091,45 +1257,50 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 	return file_proto_agent_proto_rawDescData
 }
 
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_proto_agent_proto_goTypes = []any{
-	(*AgentMessage)(nil),        // 0: agent.AgentMessage
-	(*ControlPlaneMessage)(nil), // 1: agent.ControlPlaneMessage
-	(*CaddyConfig)(nil),         // 2: agent.CaddyConfig
-	(*CaddyRoute)(nil),          // 3: agent.CaddyRoute
-	(*StatusUpdate)(nil),        // 4: agent.StatusUpdate
-	(*ContainerHealth)(nil),     // 5: agent.ContainerHealth
-	(*Resources)(nil),           // 6: agent.Resources
-	(*WorkItem)(nil),            // 7: agent.WorkItem
-	(*WorkComplete)(nil),        // 8: agent.WorkComplete
-	(*Heartbeat)(nil),           // 9: agent.Heartbeat
-	(*Acknowledgement)(nil),     // 10: agent.Acknowledgement
-	(*Error)(nil),               // 11: agent.Error
-	(*ConnectionAccepted)(nil),  // 12: agent.ConnectionAccepted
-	(*DnsConfig)(nil),           // 13: agent.DnsConfig
-	(*DnsRecord)(nil),           // 14: agent.DnsRecord
+	(LogStreamType)(0),          // 0: agent.LogStreamType
+	(*AgentMessage)(nil),        // 1: agent.AgentMessage
+	(*ControlPlaneMessage)(nil), // 2: agent.ControlPlaneMessage
+	(*CaddyConfig)(nil),         // 3: agent.CaddyConfig
+	(*CaddyRoute)(nil),          // 4: agent.CaddyRoute
+	(*StatusUpdate)(nil),        // 5: agent.StatusUpdate
+	(*ContainerHealth)(nil),     // 6: agent.ContainerHealth
+	(*Resources)(nil),           // 7: agent.Resources
+	(*WorkItem)(nil),            // 8: agent.WorkItem
+	(*WorkComplete)(nil),        // 9: agent.WorkComplete
+	(*Heartbeat)(nil),           // 10: agent.Heartbeat
+	(*Acknowledgement)(nil),     // 11: agent.Acknowledgement
+	(*Error)(nil),               // 12: agent.Error
+	(*ConnectionAccepted)(nil),  // 13: agent.ConnectionAccepted
+	(*DnsConfig)(nil),           // 14: agent.DnsConfig
+	(*DnsRecord)(nil),           // 15: agent.DnsRecord
+	(*LogEntry)(nil),            // 16: agent.LogEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
-	4,  // 0: agent.AgentMessage.status_update:type_name -> agent.StatusUpdate
-	8,  // 1: agent.AgentMessage.work_complete:type_name -> agent.WorkComplete
-	9,  // 2: agent.AgentMessage.heartbeat:type_name -> agent.Heartbeat
-	7,  // 3: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
-	10, // 4: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
-	11, // 5: agent.ControlPlaneMessage.error:type_name -> agent.Error
-	12, // 6: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
-	2,  // 7: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
-	13, // 8: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
-	3,  // 9: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
-	6,  // 10: agent.StatusUpdate.resources:type_name -> agent.Resources
-	5,  // 11: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
-	14, // 12: agent.DnsConfig.records:type_name -> agent.DnsRecord
-	0,  // 13: agent.AgentService.Connect:input_type -> agent.AgentMessage
-	1,  // 14: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
-	14, // [14:15] is the sub-list for method output_type
-	13, // [13:14] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	5,  // 0: agent.AgentMessage.status_update:type_name -> agent.StatusUpdate
+	9,  // 1: agent.AgentMessage.work_complete:type_name -> agent.WorkComplete
+	10, // 2: agent.AgentMessage.heartbeat:type_name -> agent.Heartbeat
+	16, // 3: agent.AgentMessage.log_entry:type_name -> agent.LogEntry
+	8,  // 4: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
+	11, // 5: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
+	12, // 6: agent.ControlPlaneMessage.error:type_name -> agent.Error
+	13, // 7: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
+	3,  // 8: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
+	14, // 9: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
+	4,  // 10: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
+	7,  // 11: agent.StatusUpdate.resources:type_name -> agent.Resources
+	6,  // 12: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
+	15, // 13: agent.DnsConfig.records:type_name -> agent.DnsRecord
+	0,  // 14: agent.LogEntry.stream_type:type_name -> agent.LogStreamType
+	1,  // 15: agent.AgentService.Connect:input_type -> agent.AgentMessage
+	2,  // 16: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
+	16, // [16:17] is the sub-list for method output_type
+	15, // [15:16] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_proto_agent_proto_init() }
@@ -1141,6 +1312,7 @@ func file_proto_agent_proto_init() {
 		(*AgentMessage_StatusUpdate)(nil),
 		(*AgentMessage_WorkComplete)(nil),
 		(*AgentMessage_Heartbeat)(nil),
+		(*AgentMessage_LogEntry)(nil),
 	}
 	file_proto_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*ControlPlaneMessage_Work)(nil),
@@ -1155,13 +1327,14 @@ func file_proto_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   15,
+			NumEnums:      1,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_proto_agent_proto_goTypes,
 		DependencyIndexes: file_proto_agent_proto_depIdxs,
+		EnumInfos:         file_proto_agent_proto_enumTypes,
 		MessageInfos:      file_proto_agent_proto_msgTypes,
 	}.Build()
 	File_proto_agent_proto = out.File

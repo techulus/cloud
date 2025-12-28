@@ -42,6 +42,7 @@ type Config struct {
 var httpClient *api.Client
 var dataDir string
 var agentConfig *Config
+var grpcClient *agentgrpc.Client
 
 func main() {
 	var (
@@ -196,7 +197,7 @@ func main() {
 	}
 	log.Printf("Connecting to gRPC server at %s (TLS: %v)...", grpcAddress, grpcTLS)
 
-	grpcClient := agentgrpc.NewClient(grpcAddress, config.ServerID, signingKeyPair, grpcTLS)
+	grpcClient = agentgrpc.NewClient(grpcAddress, config.ServerID, signingKeyPair, grpcTLS)
 	grpcClient.SetWorkHandler(handleWork)
 	grpcClient.SetCaddyHandler(caddy.HandleCaddyConfig)
 	grpcClient.SetDnsHandler(handleDnsConfig)
@@ -346,6 +347,12 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		decryptedEnv[key] = decrypted
 	}
 
+	buildLogFunc := func(stream string, message string) {
+		if grpcClient != nil {
+			grpcClient.SendBuildLog(payload.DeploymentID, stream, message)
+		}
+	}
+
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
@@ -354,6 +361,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		PortMappings: portMappings,
 		HealthCheck:  healthCheck,
 		Env:          decryptedEnv,
+		LogFunc:      buildLogFunc,
 	})
 	if err != nil {
 		return nil, err

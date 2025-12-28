@@ -20,6 +20,8 @@ type HealthCheck struct {
 	StartPeriod int
 }
 
+type BuildLogFunc func(stream string, message string)
+
 type DeployConfig struct {
 	Name         string
 	Image        string
@@ -28,6 +30,7 @@ type DeployConfig struct {
 	PortMappings []PortMapping
 	HealthCheck  *HealthCheck
 	Env          map[string]string
+	LogFunc      BuildLogFunc
 }
 
 type DeployResult struct {
@@ -35,11 +38,24 @@ type DeployResult struct {
 }
 
 func Deploy(config *DeployConfig) (*DeployResult, error) {
-	image := config.Image
-	pullCmd := exec.Command("podman", "pull", image)
-	if output, err := pullCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to pull image: %s: %w", string(output), err)
+	logFunc := config.LogFunc
+	if logFunc == nil {
+		logFunc = func(stream string, message string) {}
 	}
+
+	image := config.Image
+
+	exec.Command("podman", "rm", "-f", config.Name).Run()
+
+	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
+
+	pullCmd := exec.Command("podman", "pull", image)
+	pullOutput, err := pullCmd.CombinedOutput()
+	if err != nil {
+		logFunc("stderr", fmt.Sprintf("Pull failed: %s", string(pullOutput)))
+		return nil, fmt.Errorf("failed to pull image: %s: %w", string(pullOutput), err)
+	}
+	logFunc("stdout", string(pullOutput))
 
 	args := []string{"run", "-d", "--name", config.Name, "--replace", "--restart", "unless-stopped"}
 
@@ -66,13 +82,17 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	args = append(args, image)
 
+	logFunc("stdout", fmt.Sprintf("Starting container: %s", config.Name))
+
 	runCmd := exec.Command("podman", args...)
 	output, err := runCmd.CombinedOutput()
 	if err != nil {
+		logFunc("stderr", fmt.Sprintf("Start failed: %s", string(output)))
 		return nil, fmt.Errorf("failed to run container: %s: %w", string(output), err)
 	}
 
 	containerID := strings.TrimSpace(string(output))
+	logFunc("stdout", fmt.Sprintf("Container started: %s", containerID))
 
 	return &DeployResult{
 		ContainerID: containerID,

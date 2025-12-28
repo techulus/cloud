@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { servers, workQueue, deployments } from "@/db/schema";
-import { eq, and, ne, isNotNull } from "drizzle-orm";
+import { eq, and, ne, isNotNull, lt, inArray } from "drizzle-orm";
 import { getWireGuardPeers } from "@/lib/wireguard";
 import { randomUUID } from "node:crypto";
 
@@ -62,8 +62,39 @@ export async function handleStatusUpdate(
     await handlePublicIpChange(serverId);
   }
 
+  const reportedContainerIds = (status.container_health || []).map(
+    (ch) => ch.container_id
+  );
+  await reconcileDeployments(serverId, reportedContainerIds);
+
   if (status.container_health && status.container_health.length > 0) {
     await updateContainerHealth(status.container_health);
+  }
+}
+
+async function reconcileDeployments(
+  serverId: string,
+  reportedContainerIds: string[]
+): Promise<void> {
+  const activeDeployments = await db
+    .select({ id: deployments.id, containerId: deployments.containerId })
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.serverId, serverId),
+        isNotNull(deployments.containerId),
+        inArray(deployments.status, ["running", "stopping"])
+      )
+    );
+
+  for (const dep of activeDeployments) {
+    if (dep.containerId && !reportedContainerIds.includes(dep.containerId)) {
+      await db
+        .update(deployments)
+        .set({ status: "stopped", healthStatus: null })
+        .where(eq(deployments.id, dep.id));
+      console.log(`[reconcile] deployment ${dep.id} marked stopped (container gone)`);
+    }
   }
 }
 
@@ -81,6 +112,25 @@ async function updateContainerHealth(
       .set({ healthStatus })
       .where(eq(deployments.containerId, ch.container_id));
   }
+}
+
+export async function markServerOffline(serverId: string): Promise<void> {
+  await db
+    .update(servers)
+    .set({ status: "offline" })
+    .where(eq(servers.id, serverId));
+
+  const result = await db
+    .update(deployments)
+    .set({ status: "stopped", healthStatus: null })
+    .where(
+      and(
+        eq(deployments.serverId, serverId),
+        inArray(deployments.status, ["running", "stopping", "pulling", "pending"])
+      )
+    );
+
+  console.log(`[server:${serverId}] marked offline`);
 }
 
 async function handlePublicIpChange(serverId: string): Promise<void> {
@@ -103,5 +153,48 @@ async function handlePublicIpChange(serverId: string): Promise<void> {
       type: "update_wireguard",
       payload: JSON.stringify({ peers }),
     });
+  }
+}
+
+const HEARTBEAT_STALE_THRESHOLD_MS = 30 * 1000;
+const HEARTBEAT_CHECK_INTERVAL_MS = 10 * 1000;
+let heartbeatCheckInterval: NodeJS.Timeout | null = null;
+
+async function checkStaleHeartbeats(): Promise<void> {
+  const staleThreshold = new Date(Date.now() - HEARTBEAT_STALE_THRESHOLD_MS);
+
+  const staleServers = await db
+    .select({ id: servers.id, name: servers.name })
+    .from(servers)
+    .where(
+      and(
+        eq(servers.status, "online"),
+        lt(servers.lastHeartbeat, staleThreshold)
+      )
+    );
+
+  for (const server of staleServers) {
+    await markServerOffline(server.id);
+    console.log(`[heartbeat] server ${server.name} marked offline (stale heartbeat)`);
+  }
+}
+
+export function startHeartbeatChecker(): void {
+  if (heartbeatCheckInterval) return;
+
+  heartbeatCheckInterval = setInterval(() => {
+    checkStaleHeartbeats().catch((err) => {
+      console.error("[heartbeat] check failed:", err);
+    });
+  }, HEARTBEAT_CHECK_INTERVAL_MS);
+
+  console.log("[heartbeat] checker started");
+}
+
+export function stopHeartbeatChecker(): void {
+  if (heartbeatCheckInterval) {
+    clearInterval(heartbeatCheckInterval);
+    heartbeatCheckInterval = null;
+    console.log("[heartbeat] checker stopped");
   }
 }

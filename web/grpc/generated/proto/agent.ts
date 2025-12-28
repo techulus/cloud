@@ -20,6 +20,51 @@ import {
 
 export const protobufPackage = "agent";
 
+export enum LogStreamType {
+  LOG_STREAM_TYPE_UNKNOWN = 0,
+  LOG_STREAM_TYPE_STDOUT = 1,
+  LOG_STREAM_TYPE_STDERR = 2,
+  LOG_STREAM_TYPE_HEARTBEAT = 3,
+  UNRECOGNIZED = -1,
+}
+
+export function logStreamTypeFromJSON(object: any): LogStreamType {
+  switch (object) {
+    case 0:
+    case "LOG_STREAM_TYPE_UNKNOWN":
+      return LogStreamType.LOG_STREAM_TYPE_UNKNOWN;
+    case 1:
+    case "LOG_STREAM_TYPE_STDOUT":
+      return LogStreamType.LOG_STREAM_TYPE_STDOUT;
+    case 2:
+    case "LOG_STREAM_TYPE_STDERR":
+      return LogStreamType.LOG_STREAM_TYPE_STDERR;
+    case 3:
+    case "LOG_STREAM_TYPE_HEARTBEAT":
+      return LogStreamType.LOG_STREAM_TYPE_HEARTBEAT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return LogStreamType.UNRECOGNIZED;
+  }
+}
+
+export function logStreamTypeToJSON(object: LogStreamType): string {
+  switch (object) {
+    case LogStreamType.LOG_STREAM_TYPE_UNKNOWN:
+      return "LOG_STREAM_TYPE_UNKNOWN";
+    case LogStreamType.LOG_STREAM_TYPE_STDOUT:
+      return "LOG_STREAM_TYPE_STDOUT";
+    case LogStreamType.LOG_STREAM_TYPE_STDERR:
+      return "LOG_STREAM_TYPE_STDERR";
+    case LogStreamType.LOG_STREAM_TYPE_HEARTBEAT:
+      return "LOG_STREAM_TYPE_HEARTBEAT";
+    case LogStreamType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface AgentMessage {
   server_id: string;
   timestamp: string;
@@ -28,6 +73,7 @@ export interface AgentMessage {
   status_update?: StatusUpdate | undefined;
   work_complete?: WorkComplete | undefined;
   heartbeat?: Heartbeat | undefined;
+  log_entry?: LogEntry | undefined;
 }
 
 export interface ControlPlaneMessage {
@@ -108,6 +154,15 @@ export interface DnsRecord {
   ips: string[];
 }
 
+export interface LogEntry {
+  stream_id: string;
+  stream_type: LogStreamType;
+  timestamp: number;
+  message: Uint8Array;
+  container_id: string;
+  deployment_id: string;
+}
+
 function createBaseAgentMessage(): AgentMessage {
   return {
     server_id: "",
@@ -117,6 +172,7 @@ function createBaseAgentMessage(): AgentMessage {
     status_update: undefined,
     work_complete: undefined,
     heartbeat: undefined,
+    log_entry: undefined,
   };
 }
 
@@ -142,6 +198,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     }
     if (message.heartbeat !== undefined) {
       Heartbeat.encode(message.heartbeat, writer.uint32(98).fork()).join();
+    }
+    if (message.log_entry !== undefined) {
+      LogEntry.encode(message.log_entry, writer.uint32(106).fork()).join();
     }
     return writer;
   },
@@ -209,6 +268,14 @@ export const AgentMessage: MessageFns<AgentMessage> = {
           message.heartbeat = Heartbeat.decode(reader, reader.uint32());
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.log_entry = LogEntry.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -227,6 +294,7 @@ export const AgentMessage: MessageFns<AgentMessage> = {
       status_update: isSet(object.status_update) ? StatusUpdate.fromJSON(object.status_update) : undefined,
       work_complete: isSet(object.work_complete) ? WorkComplete.fromJSON(object.work_complete) : undefined,
       heartbeat: isSet(object.heartbeat) ? Heartbeat.fromJSON(object.heartbeat) : undefined,
+      log_entry: isSet(object.log_entry) ? LogEntry.fromJSON(object.log_entry) : undefined,
     };
   },
 
@@ -253,6 +321,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     if (message.heartbeat !== undefined) {
       obj.heartbeat = Heartbeat.toJSON(message.heartbeat);
     }
+    if (message.log_entry !== undefined) {
+      obj.log_entry = LogEntry.toJSON(message.log_entry);
+    }
     return obj;
   },
 
@@ -273,6 +344,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
       : undefined;
     message.heartbeat = (object.heartbeat !== undefined && object.heartbeat !== null)
       ? Heartbeat.fromPartial(object.heartbeat)
+      : undefined;
+    message.log_entry = (object.log_entry !== undefined && object.log_entry !== null)
+      ? LogEntry.fromPartial(object.log_entry)
       : undefined;
     return message;
   },
@@ -1484,6 +1558,153 @@ export const DnsRecord: MessageFns<DnsRecord> = {
     const message = createBaseDnsRecord();
     message.name = object.name ?? "";
     message.ips = object.ips?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseLogEntry(): LogEntry {
+  return {
+    stream_id: "",
+    stream_type: 0,
+    timestamp: 0,
+    message: new Uint8Array(0),
+    container_id: "",
+    deployment_id: "",
+  };
+}
+
+export const LogEntry: MessageFns<LogEntry> = {
+  encode(message: LogEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.stream_id !== "") {
+      writer.uint32(10).string(message.stream_id);
+    }
+    if (message.stream_type !== 0) {
+      writer.uint32(16).int32(message.stream_type);
+    }
+    if (message.timestamp !== 0) {
+      writer.uint32(24).int64(message.timestamp);
+    }
+    if (message.message.length !== 0) {
+      writer.uint32(34).bytes(message.message);
+    }
+    if (message.container_id !== "") {
+      writer.uint32(42).string(message.container_id);
+    }
+    if (message.deployment_id !== "") {
+      writer.uint32(50).string(message.deployment_id);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): LogEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseLogEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.stream_id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.stream_type = reader.int32() as any;
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.timestamp = longToNumber(reader.int64());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.message = reader.bytes();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.container_id = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.deployment_id = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): LogEntry {
+    return {
+      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
+      stream_type: isSet(object.stream_type) ? logStreamTypeFromJSON(object.stream_type) : 0,
+      timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
+      message: isSet(object.message) ? bytesFromBase64(object.message) : new Uint8Array(0),
+      container_id: isSet(object.container_id) ? globalThis.String(object.container_id) : "",
+      deployment_id: isSet(object.deployment_id) ? globalThis.String(object.deployment_id) : "",
+    };
+  },
+
+  toJSON(message: LogEntry): unknown {
+    const obj: any = {};
+    if (message.stream_id !== "") {
+      obj.stream_id = message.stream_id;
+    }
+    if (message.stream_type !== 0) {
+      obj.stream_type = logStreamTypeToJSON(message.stream_type);
+    }
+    if (message.timestamp !== 0) {
+      obj.timestamp = Math.round(message.timestamp);
+    }
+    if (message.message.length !== 0) {
+      obj.message = base64FromBytes(message.message);
+    }
+    if (message.container_id !== "") {
+      obj.container_id = message.container_id;
+    }
+    if (message.deployment_id !== "") {
+      obj.deployment_id = message.deployment_id;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<LogEntry>, I>>(base?: I): LogEntry {
+    return LogEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<LogEntry>, I>>(object: I): LogEntry {
+    const message = createBaseLogEntry();
+    message.stream_id = object.stream_id ?? "";
+    message.stream_type = object.stream_type ?? 0;
+    message.timestamp = object.timestamp ?? 0;
+    message.message = object.message ?? new Uint8Array(0);
+    message.container_id = object.container_id ?? "";
+    message.deployment_id = object.deployment_id ?? "";
     return message;
   },
 };

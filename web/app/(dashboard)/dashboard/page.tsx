@@ -44,7 +44,7 @@ export default async function DashboardPage() {
 								href={`/dashboard/projects/${project.slug}`}
 							>
 								<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-									<CardHeader className="min-h-24">
+									<CardHeader>
 										<div className="flex items-center gap-2">
 											<CardTitle>{project.name}</CardTitle>
 										</div>

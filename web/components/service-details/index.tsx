@@ -35,6 +35,7 @@ import { HealthCheckSection } from "./health-check-section";
 import { SecretsSection } from "./secrets-section";
 import { PendingChangesBar } from "./pending-changes";
 import { DeploymentCanvas } from "./deployment-canvas";
+import { LogsViewer } from "./logs-viewer";
 import { fetcher } from "@/lib/fetcher";
 
 export type { Service } from "./types";
@@ -73,7 +74,12 @@ export function ServiceDetails({
 			isPublic: p.isPublic,
 			domain: p.domain,
 		}));
-		const current = buildCurrentConfig(service, replicas, ports, service.secretKeys);
+		const current = buildCurrentConfig(
+			service,
+			replicas,
+			ports,
+			service.secretKeys,
+		);
 		return diffConfigs(deployed, current);
 	}, [service]);
 
@@ -174,11 +180,13 @@ export function ServiceDetails({
 				<DeploymentCanvas service={service} />
 			</div>
 
+			<LogsViewer serviceId={service.id} />
+
 			<div className="space-y-3">
 				<h2 className="text-xl font-semibold">Configuration</h2>
 				<ReplicasSection service={service} onUpdate={handleActionComplete} />
 
-				<div className="grid gap-6 md:grid-cols-2">
+				<div className="grid gap-3 md:grid-cols-2">
 					<PortsSection service={service} onUpdate={handleActionComplete} />
 					<HealthCheckSection
 						service={service}
@@ -208,16 +216,15 @@ export function ServiceDetails({
 								</p>
 							</div>
 							<AlertDialog>
-								<AlertDialogTrigger
-									render={<Button variant="destructive" />}
-								>
+								<AlertDialogTrigger render={<Button variant="destructive" />}>
 									Delete Service
 								</AlertDialogTrigger>
 								<AlertDialogContent>
 									<AlertDialogHeader>
 										<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
 										<AlertDialogDescription>
-											This action cannot be undone. This will permanently delete the service and all its deployments.
+											This action cannot be undone. This will permanently delete
+											the service and all its deployments.
 										</AlertDialogDescription>
 									</AlertDialogHeader>
 									<AlertDialogFooter>

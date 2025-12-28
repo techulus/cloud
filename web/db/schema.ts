@@ -186,28 +186,32 @@ export const secrets = pgTable("secrets", {
 		.notNull(),
 });
 
-export const deployments = pgTable("deployments", {
-	id: text("id").primaryKey(),
-	serviceId: text("service_id")
-		.notNull()
-		.references(() => services.id, { onDelete: "cascade" }),
-	serverId: text("server_id")
-		.notNull()
-		.references(() => servers.id, { onDelete: "cascade" }),
-	containerId: text("container_id"),
-	ipAddress: text("ip_address"),
-	status: text("status", {
-		enum: ["pending", "pulling", "running", "stopping", "stopped", "failed"],
-	})
-		.notNull()
-		.default("pending"),
-	healthStatus: text("health_status", {
-		enum: ["none", "starting", "healthy", "unhealthy"],
-	}),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const deployments = pgTable(
+	"deployments",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		containerId: text("container_id"),
+		ipAddress: text("ip_address"),
+		status: text("status", {
+			enum: ["pending", "pulling", "running", "stopping", "stopped", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		healthStatus: text("health_status", {
+			enum: ["none", "starting", "healthy", "unhealthy"],
+		}),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [index("deployments_container_id_idx").on(table.containerId)],
+);
 
 export const deploymentPorts = pgTable("deployment_ports", {
 	id: text("id").primaryKey(),
@@ -243,3 +247,23 @@ export const workQueue = pgTable("work_queue", {
 	startedAt: timestamp("started_at", { withTimezone: true }),
 	attempts: integer("attempts").notNull().default(0),
 });
+
+export const containerLogs = pgTable(
+	"container_logs",
+	{
+		id: text("id").primaryKey(),
+		deploymentId: text("deployment_id")
+			.notNull()
+			.references(() => deployments.id, { onDelete: "cascade" }),
+		stream: text("stream", { enum: ["stdout", "stderr"] }).notNull(),
+		message: text("message").notNull(),
+		timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("container_logs_deployment_idx").on(table.deploymentId),
+		index("container_logs_timestamp_idx").on(table.timestamp),
+	],
+);

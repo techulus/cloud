@@ -18,6 +18,7 @@ message AgentMessage {
     StatusUpdate status_update = 10;
     WorkComplete work_complete = 11;
     Heartbeat heartbeat = 12;
+    LogEntry log_entry = 13;
   }
 }
 
@@ -100,4 +101,20 @@ message DnsConfig {
 message DnsRecord {
   string name = 1;
   repeated string ips = 2;
+}
+
+enum LogStreamType {
+  LOG_STREAM_TYPE_UNKNOWN = 0;
+  LOG_STREAM_TYPE_STDOUT = 1;
+  LOG_STREAM_TYPE_STDERR = 2;
+  LOG_STREAM_TYPE_HEARTBEAT = 3;
+}
+
+message LogEntry {
+  string stream_id = 1;
+  LogStreamType stream_type = 2;
+  int64 timestamp = 3;
+  bytes message = 4;
+  string container_id = 5;
+  string deployment_id = 6;
 }

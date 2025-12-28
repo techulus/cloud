@@ -2,7 +2,7 @@
 
 import useSWR from "swr";
 import Link from "next/link";
-import { Globe, Lock, Box, ArrowDown } from "lucide-react";
+import { Globe, Lock, Box } from "lucide-react";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 import { fetcher } from "@/lib/fetcher";
@@ -72,33 +72,10 @@ function ServiceCard({
 		(d) => d.status === "running",
 	).length;
 
-	const hasPublicIngress = publicPorts.length > 0;
+	const hasEndpoints = publicPorts.length > 0 || hasInternalDns;
 
 	return (
 		<div className="flex flex-col items-center gap-2 w-70">
-			{hasPublicIngress && (
-				<div className="flex flex-col items-center gap-1.5">
-					<div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
-						{publicPorts.map((port) => (
-							<a
-								key={port.id}
-								href={`https://${port.domain}`}
-								target="_blank"
-								rel="noopener noreferrer"
-								onClick={(e) => e.stopPropagation()}
-								className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
-							>
-								<Globe className="h-3 w-3 text-sky-500" />
-								<span className="text-sky-600 dark:text-sky-400">
-									{port.domain}
-								</span>
-							</a>
-						))}
-					</div>
-					<ArrowDown className="h-4 w-4 text-zinc-400" />
-				</div>
-			)}
-
 			<Link
 				href={`/dashboard/projects/${projectSlug}/services/${service.id}`}
 				className={`
@@ -143,20 +120,33 @@ function ServiceCard({
 					</div>
 				</div>
 
-				{hasInternalDns && (
-					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
-						<div className="flex items-center gap-1.5 text-xs">
-							<Lock className="h-3 w-3 text-zinc-500" />
-							<span className="text-zinc-600 dark:text-zinc-400">
-								{service.name}.internal
-							</span>
-						</div>
+				{hasEndpoints && (
+					<div className="hidden md:block mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50 space-y-1.5">
+						{publicPorts.map((port) => (
+							<div
+								key={port.id}
+								className="flex items-center gap-1.5 text-xs"
+							>
+								<Globe className="h-3 w-3 text-sky-500" />
+								<span className="text-sky-600 dark:text-sky-400">
+									{port.domain}
+								</span>
+							</div>
+						))}
+						{hasInternalDns && (
+							<div className="flex items-center gap-1.5 text-xs">
+								<Lock className="h-3 w-3 text-zinc-500" />
+								<span className="text-zinc-600 dark:text-zinc-400">
+									{service.name}.internal
+								</span>
+							</div>
+						)}
 					</div>
 				)}
 
 				{service.deployments.length > 0 && (
 					<div
-						className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasInternalDns ? "mt-2 pt-2" : "mt-2 pt-2"}`}
+						className={`hidden md:block border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasEndpoints ? "mt-2 pt-2" : "mt-2 pt-2"}`}
 					>
 						<div className="flex items-center justify-between">
 							<span className="text-xs text-muted-foreground">Replicas</span>
@@ -192,7 +182,7 @@ function ServiceCard({
 				)}
 
 				{service.deployments.length === 0 && (
-					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
+					<div className="hidden md:block mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
 						<span className="text-xs text-muted-foreground">Not deployed</span>
 					</div>
 				)}
@@ -267,7 +257,7 @@ export function ServiceCanvas({
 				backgroundSize: "24px 24px",
 			}}
 		>
-			<div className="flex flex-wrap gap-10 justify-center items-start">
+			<div className="flex flex-wrap gap-10 justify-center items-center">
 				{services.map((service) => (
 					<ServiceCard
 						key={service.id}

@@ -37,9 +37,11 @@ type Client struct {
 	workHandler  WorkHandler
 	caddyHandler CaddyHandler
 	dnsHandler   DnsHandler
-	stopChan     chan struct{}
-	stopOnce     sync.Once
-	wg           sync.WaitGroup
+	logMonitor   *ContainerLogMonitor
+	logMonitorCancel context.CancelFunc
+	stopChan         chan struct{}
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
 
 	statusInterval    time.Duration
 	heartbeatInterval time.Duration
@@ -54,7 +56,7 @@ type Client struct {
 }
 
 func NewClient(address, serverID string, keyPair *crypto.KeyPair, useTLS bool) *Client {
-	return &Client{
+	c := &Client{
 		address:           address,
 		serverID:          serverID,
 		keyPair:           keyPair,
@@ -66,6 +68,8 @@ func NewClient(address, serverID string, keyPair *crypto.KeyPair, useTLS bool) *
 		maxReconnectDelay: 5 * time.Minute,
 		reconnectMult:     2.0,
 	}
+	c.logMonitor = NewContainerLogMonitor(c.SendLogEntry)
+	return c
 }
 
 func (c *Client) SetWorkHandler(handler WorkHandler) {
@@ -242,6 +246,38 @@ func (c *Client) SendHeartbeat() error {
 	return c.stream.Send(msg)
 }
 
+func (c *Client) SendLogEntry(entry *pb.LogEntry) error {
+	seq := c.nextSequence()
+	timestamp, signature, err := c.signProtoWithSeq(entry, seq)
+	if err != nil {
+		return err
+	}
+
+	msg := &pb.AgentMessage{
+		ServerId:  c.serverID,
+		Timestamp: timestamp,
+		Signature: signature,
+		Sequence:  seq,
+		Payload:   &pb.AgentMessage_LogEntry{LogEntry: entry},
+	}
+
+	return c.stream.Send(msg)
+}
+
+func (c *Client) SendBuildLog(deploymentID string, stream string, message string) error {
+	streamType := pb.LogStreamType_LOG_STREAM_TYPE_STDOUT
+	if stream == "stderr" {
+		streamType = pb.LogStreamType_LOG_STREAM_TYPE_STDERR
+	}
+
+	return c.SendLogEntry(&pb.LogEntry{
+		StreamType:   streamType,
+		Timestamp:    time.Now().UnixMilli(),
+		Message:      []byte(message),
+		DeploymentId: deploymentID,
+	})
+}
+
 func (c *Client) RunReceiver(ctx context.Context) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -398,10 +434,15 @@ func (c *Client) RunWithReconnect(ctx context.Context, getStatus func(includeRes
 
 		delay = c.reconnectDelay
 
+		logMonitorCtx, logMonitorCancel := context.WithCancel(ctx)
+		c.logMonitorCancel = logMonitorCancel
+		go c.logMonitor.Run(logMonitorCtx)
+
 		receiverCtx, cancelReceiver := context.WithCancel(ctx)
 		go c.RunReceiver(receiverCtx)
 		c.RunSender(ctx, func() *StatusData { return getStatus(false) })
 
+		logMonitorCancel()
 		cancelReceiver()
 		c.conn.Close()
 

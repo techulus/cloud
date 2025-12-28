@@ -144,7 +144,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	if (service.deployments.length === 0) {
 		return (
 			<CanvasWrapper
-				height="60vh"
+				height="200px"
 				isEmpty
 				emptyContent={
 					<div className="text-center space-y-4">
@@ -163,7 +163,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	const hasEndpoints = hasPublicIngress || hasRunningDeployments;
 
 	return (
-		<CanvasWrapper height="60vh" className="flex items-center justify-center">
+		<CanvasWrapper height="auto" className="flex items-center justify-center">
 			<div className="flex flex-col items-center gap-4">
 				{hasEndpoints && (
 					<>
