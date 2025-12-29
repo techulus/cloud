@@ -277,8 +277,6 @@ func handleWork(work *pb.WorkItem) (status string, logs string) {
 			log.Printf("WireGuard update failed: %v", err)
 			status = "failed"
 		}
-	case "sync_caddy":
-		logs = "Deprecated - using reconciliation"
 	default:
 		log.Printf("Unknown work type: %s", work.Type)
 	}

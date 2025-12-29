@@ -30,7 +30,6 @@ func CheckPrerequisites() error {
 
 func HandleCaddyConfig(config *pb.CaddyConfig) {
 	routes := make([]any, 0, len(config.Routes))
-	var externalDomains []string
 
 	for _, route := range config.Routes {
 		upstreams := make([]map[string]string, len(route.Upstreams))
@@ -53,8 +52,6 @@ func HandleCaddyConfig(config *pb.CaddyConfig) {
 
 		if route.Internal {
 			caddyRoute["terminal"] = true
-		} else {
-			externalDomains = append(externalDomains, route.Domain)
 		}
 
 		routes = append(routes, caddyRoute)
@@ -113,46 +110,4 @@ func HandleCaddyConfig(config *pb.CaddyConfig) {
 
 	lastCaddyConfigHash = hashStr
 	log.Printf("Synced %d routes to Caddy via gRPC push", len(routes))
-
-	if len(externalDomains) > 0 {
-		go provisionCertificates(externalDomains)
-	}
 }
-
-func provisionCertificates(domains []string) {
-	policy := map[string]any{
-		"subjects": domains,
-	}
-	policies := []any{policy}
-
-	policiesJSON, err := json.Marshal(policies)
-	if err != nil {
-		log.Printf("Failed to marshal TLS policies: %v", err)
-		return
-	}
-
-	endpoint := caddyAdminURL + "/config/apps/tls/automation/policies"
-
-	req, err := http.NewRequest("PATCH", endpoint, bytes.NewReader(policiesJSON))
-	if err != nil {
-		log.Printf("Failed to create TLS policy request: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Failed to update TLS policies: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("TLS policy update returned %d: %s", resp.StatusCode, body)
-		return
-	}
-
-	log.Printf("Triggered certificate provisioning for %d domains", len(domains))
-}
-
