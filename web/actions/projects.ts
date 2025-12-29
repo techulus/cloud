@@ -393,7 +393,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					portMappings,
 					wireguardIp: server.wireguardIp,
 					ipAddress,
-					name: `${service.name}-${replicaIndex}`,
+					name: `${serviceId}-${replicaIndex}`,
 					healthCheck,
 					env,
 				}),

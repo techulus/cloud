@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo } from "react";
+import { useState, memo, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -8,7 +8,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { deployService, type ServerPlacement } from "@/actions/projects";
 import type { ConfigChange } from "@/lib/service-config";
 import type { Service } from "./types";
@@ -70,6 +70,46 @@ function PendingChangesModal({
 	);
 }
 
+type DeploymentProgress = {
+	isInProgress: boolean;
+	pending: number;
+	pulling: number;
+	stopping: number;
+	total: number;
+};
+
+function getDeploymentProgress(service: Service): DeploymentProgress {
+	const deployments = service.deployments || [];
+	const pending = deployments.filter((d) => d.status === "pending").length;
+	const pulling = deployments.filter((d) => d.status === "pulling").length;
+	const stopping = deployments.filter((d) => d.status === "stopping").length;
+	const total = pending + pulling + stopping;
+
+	return {
+		isInProgress: total > 0,
+		pending,
+		pulling,
+		stopping,
+		total,
+	};
+}
+
+function getProgressMessage(progress: DeploymentProgress): string {
+	const parts: string[] = [];
+
+	if (progress.pulling > 0) {
+		parts.push(`Pulling ${progress.pulling}`);
+	}
+	if (progress.pending > 0) {
+		parts.push(`Starting ${progress.pending}`);
+	}
+	if (progress.stopping > 0) {
+		parts.push(`Stopping ${progress.stopping}`);
+	}
+
+	return parts.join(", ");
+}
+
 export const PendingChangesBar = memo(function PendingChangesBar({
 	changes,
 	service,
@@ -85,7 +125,10 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 	const totalReplicas = service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
-	const showBar = hasChanges || (hasNoDeployments && totalReplicas > 0);
+
+	const progress = useMemo(() => getDeploymentProgress(service), [service]);
+
+	const showBar = hasChanges || (hasNoDeployments && totalReplicas > 0) || progress.isInProgress;
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -104,6 +147,61 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 		}
 	};
 
+	const renderBarContent = () => {
+		if (progress.isInProgress) {
+			return (
+				<>
+					<div className="flex items-center gap-2">
+						<Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+						<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+							{getProgressMessage(progress)}
+						</span>
+					</div>
+				</>
+			);
+		}
+
+		return (
+			<>
+				<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:px-2">
+					{hasChanges
+						? `${changes.length} change${changes.length !== 1 ? "s" : ""}`
+						: "Ready to deploy"}
+				</span>
+				<div className="flex items-center gap-2">
+					{hasChanges && (
+						<>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setShowModal(true)}
+								className="hidden sm:inline-flex"
+							>
+								View Details
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setShowModal(true)}
+								className="sm:hidden"
+							>
+								View
+							</Button>
+						</>
+					)}
+					<Button
+						onClick={handleDeploy}
+						disabled={isDeploying || totalReplicas === 0}
+						size="sm"
+						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white px-4 sm:px-6"
+					>
+						{isDeploying ? "..." : "Deploy"}
+					</Button>
+				</div>
+			</>
+		);
+	};
+
 	return (
 		<>
 			<div
@@ -113,42 +211,12 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 						: "-bottom-20 opacity-0 pointer-events-none"
 				}`}
 			>
-				<div className="flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:px-2 sm:py-1.5 bg-zinc-100 dark:bg-zinc-800 border border-emerald-500 dark:border-emerald-600 rounded-lg shadow-lg">
-					<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:px-2">
-						{hasChanges
-							? `${changes.length} change${changes.length !== 1 ? "s" : ""}`
-							: "Ready to deploy"}
-					</span>
-					<div className="flex items-center gap-2">
-						{hasChanges && (
-							<>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setShowModal(true)}
-									className="hidden sm:inline-flex"
-								>
-									View Details
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setShowModal(true)}
-									className="sm:hidden"
-								>
-									View
-								</Button>
-							</>
-						)}
-						<Button
-							onClick={handleDeploy}
-							disabled={isDeploying || totalReplicas === 0}
-							size="sm"
-							className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white px-4 sm:px-6"
-						>
-							{isDeploying ? "..." : "Deploy"}
-						</Button>
-					</div>
+				<div className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:px-2 sm:py-1.5 bg-zinc-100 dark:bg-zinc-800 border rounded-lg shadow-lg ${
+					progress.isInProgress
+						? "border-blue-500 dark:border-blue-600"
+						: "border-emerald-500 dark:border-emerald-600"
+				}`}>
+					{renderBarContent()}
 				</div>
 			</div>
 			<PendingChangesModal
