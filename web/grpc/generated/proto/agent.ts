@@ -74,6 +74,7 @@ export interface AgentMessage {
   work_complete?: WorkComplete | undefined;
   heartbeat?: Heartbeat | undefined;
   log_entry?: LogEntry | undefined;
+  config_ack?: ConfigAck | undefined;
 }
 
 export interface ControlPlaneMessage {
@@ -135,6 +136,12 @@ export interface Acknowledgement {
   success: boolean;
 }
 
+export interface ConfigAck {
+  config_type: string;
+  success: boolean;
+  error: string;
+}
+
 export interface Error {
   code: number;
   message: string;
@@ -173,6 +180,7 @@ function createBaseAgentMessage(): AgentMessage {
     work_complete: undefined,
     heartbeat: undefined,
     log_entry: undefined,
+    config_ack: undefined,
   };
 }
 
@@ -201,6 +209,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     }
     if (message.log_entry !== undefined) {
       LogEntry.encode(message.log_entry, writer.uint32(106).fork()).join();
+    }
+    if (message.config_ack !== undefined) {
+      ConfigAck.encode(message.config_ack, writer.uint32(114).fork()).join();
     }
     return writer;
   },
@@ -276,6 +287,14 @@ export const AgentMessage: MessageFns<AgentMessage> = {
           message.log_entry = LogEntry.decode(reader, reader.uint32());
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.config_ack = ConfigAck.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -295,6 +314,7 @@ export const AgentMessage: MessageFns<AgentMessage> = {
       work_complete: isSet(object.work_complete) ? WorkComplete.fromJSON(object.work_complete) : undefined,
       heartbeat: isSet(object.heartbeat) ? Heartbeat.fromJSON(object.heartbeat) : undefined,
       log_entry: isSet(object.log_entry) ? LogEntry.fromJSON(object.log_entry) : undefined,
+      config_ack: isSet(object.config_ack) ? ConfigAck.fromJSON(object.config_ack) : undefined,
     };
   },
 
@@ -324,6 +344,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
     if (message.log_entry !== undefined) {
       obj.log_entry = LogEntry.toJSON(message.log_entry);
     }
+    if (message.config_ack !== undefined) {
+      obj.config_ack = ConfigAck.toJSON(message.config_ack);
+    }
     return obj;
   },
 
@@ -347,6 +370,9 @@ export const AgentMessage: MessageFns<AgentMessage> = {
       : undefined;
     message.log_entry = (object.log_entry !== undefined && object.log_entry !== null)
       ? LogEntry.fromPartial(object.log_entry)
+      : undefined;
+    message.config_ack = (object.config_ack !== undefined && object.config_ack !== null)
+      ? ConfigAck.fromPartial(object.config_ack)
       : undefined;
     return message;
   },
@@ -1272,6 +1298,98 @@ export const Acknowledgement: MessageFns<Acknowledgement> = {
     const message = createBaseAcknowledgement();
     message.message_id = object.message_id ?? "";
     message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseConfigAck(): ConfigAck {
+  return { config_type: "", success: false, error: "" };
+}
+
+export const ConfigAck: MessageFns<ConfigAck> = {
+  encode(message: ConfigAck, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.config_type !== "") {
+      writer.uint32(10).string(message.config_type);
+    }
+    if (message.success !== false) {
+      writer.uint32(16).bool(message.success);
+    }
+    if (message.error !== "") {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ConfigAck {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseConfigAck();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.config_type = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ConfigAck {
+    return {
+      config_type: isSet(object.config_type) ? globalThis.String(object.config_type) : "",
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : "",
+    };
+  },
+
+  toJSON(message: ConfigAck): unknown {
+    const obj: any = {};
+    if (message.config_type !== "") {
+      obj.config_type = message.config_type;
+    }
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== "") {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ConfigAck>, I>>(base?: I): ConfigAck {
+    return ConfigAck.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ConfigAck>, I>>(object: I): ConfigAck {
+    const message = createBaseConfigAck();
+    message.config_type = object.config_type ?? "";
+    message.success = object.success ?? false;
+    message.error = object.error ?? "";
     return message;
   },
 };

@@ -9,12 +9,13 @@ import {
 	WorkComplete,
 	Heartbeat,
 	LogEntry,
+	ConfigAck,
 	type AgentMessage,
 	type AgentServiceServer,
 	type ControlPlaneMessage,
 } from "../generated/proto/agent";
 import { handleStatusUpdate, markServerOffline } from "../handlers/status";
-import { handleWorkComplete } from "../handlers/work";
+import { handleWorkComplete, handleConfigAck } from "../handlers/work";
 import { handleLogEntry } from "../handlers/logs";
 import { connectionStore } from "../store/connections";
 
@@ -49,6 +50,8 @@ function verifyMessage(msg: AgentMessage, publicKey: string): boolean {
 		payloadBytes = Heartbeat.encode(msg.heartbeat).finish();
 	} else if (msg.log_entry) {
 		payloadBytes = LogEntry.encode(msg.log_entry).finish();
+	} else if (msg.config_ack) {
+		payloadBytes = ConfigAck.encode(msg.config_ack).finish();
 	} else {
 		return false;
 	}
@@ -98,7 +101,9 @@ export function createAgentService(): AgentServiceServer {
 							? "Heartbeat"
 							: msg.log_entry
 								? "LogEntry"
-								: "Unknown";
+								: msg.config_ack
+									? "ConfigAck"
+									: "Unknown";
 				if (msgType !== "LogEntry" && msgType !== "Heartbeat") {
 					console.log(
 						`[grpc:recv] server=${msg.server_id} type=${msgType} seq=${msg.sequence}`
@@ -265,6 +270,8 @@ export function createAgentService(): AgentServiceServer {
 					} else if (msg.heartbeat) {
 					} else if (msg.log_entry) {
 						await handleLogEntry(msg.log_entry);
+					} else if (msg.config_ack) {
+						await handleConfigAck(ctx.serverId!, msg.config_ack);
 					}
 				} catch (error) {
 					console.error(

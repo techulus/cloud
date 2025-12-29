@@ -202,18 +202,58 @@ export const deployments = pgTable(
 		containerId: text("container_id"),
 		ipAddress: text("ip_address"),
 		status: text("status", {
-			enum: ["pending", "pulling", "running", "stopping", "stopped", "failed"],
+			enum: [
+				"pending",
+				"pulling",
+				"starting",
+				"healthy",
+				"dns_updating",
+				"caddy_updating",
+				"stopping_old",
+				"running",
+				"stopping",
+				"stopped",
+				"failed",
+				"rolled_back",
+			],
 		})
 			.notNull()
 			.default("pending"),
 		healthStatus: text("health_status", {
 			enum: ["none", "starting", "healthy", "unhealthy"],
 		}),
+		rolloutId: text("rollout_id"),
+		previousDeploymentId: text("previous_deployment_id"),
+		failedAt: text("failed_at"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
 	},
-	(table) => [index("deployments_container_id_idx").on(table.containerId)],
+	(table) => [
+		index("deployments_container_id_idx").on(table.containerId),
+		index("deployments_rollout_id_idx").on(table.rolloutId),
+	],
+);
+
+export const rollouts = pgTable(
+	"rollouts",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		status: text("status", {
+			enum: ["in_progress", "completed", "failed", "rolled_back"],
+		})
+			.notNull()
+			.default("in_progress"),
+		currentStage: text("current_stage"),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+	},
+	(table) => [index("rollouts_service_id_idx").on(table.serviceId)],
 );
 
 export const deploymentPorts = pgTable("deployment_ports", {
@@ -236,7 +276,7 @@ export const workQueue = pgTable("work_queue", {
 		.notNull()
 		.references(() => servers.id, { onDelete: "cascade" }),
 	type: text("type", {
-		enum: ["deploy", "stop", "update_wireguard", "sync_caddy"],
+		enum: ["deploy", "stop", "update_wireguard", "sync_caddy", "force_cleanup"],
 	}).notNull(),
 	payload: text("payload").notNull(),
 	status: text("status", {

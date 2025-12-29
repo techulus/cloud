@@ -86,18 +86,18 @@ function ServiceCard({
           cursor-pointer
         `}
 			>
-				<div className="flex items-start gap-2.5">
+				<div className="flex items-center gap-2">
 					<div
 						className={`
             flex items-center justify-center
-            w-9 h-9 rounded-lg
+            w-5 h-5 rounded
             bg-zinc-100 dark:bg-zinc-800
             border border-zinc-200 dark:border-zinc-700
             group-hover:border-zinc-300 dark:group-hover:border-zinc-600
             transition-colors
           `}
 					>
-						<Box className="h-4 w-4 text-zinc-500" />
+						<Box className="h-3 w-3 text-zinc-500" />
 					</div>
 
 					<div className="flex-1 min-w-0">
@@ -114,9 +114,6 @@ function ServiceCard({
 								/>
 							</span>
 						</div>
-						<p className="text-xs text-muted-foreground font-mono truncate">
-							{service.image}
-						</p>
 					</div>
 				</div>
 

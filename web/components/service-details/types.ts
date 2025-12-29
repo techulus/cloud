@@ -4,15 +4,42 @@ export type DeploymentPort = {
 	containerPort: number;
 };
 
+export type DeploymentStatus =
+	| "pending"
+	| "pulling"
+	| "starting"
+	| "healthy"
+	| "dns_updating"
+	| "caddy_updating"
+	| "stopping_old"
+	| "running"
+	| "stopping"
+	| "stopped"
+	| "failed"
+	| "rolled_back";
+
 export type Deployment = {
 	id: string;
 	serviceId: string;
 	serverId: string;
 	containerId: string | null;
-	status: string;
+	status: DeploymentStatus;
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy" | null;
 	ports: DeploymentPort[];
 	server: { name: string; wireguardIp: string | null } | null;
+	rolloutId: string | null;
+	failedAt: string | null;
+};
+
+export type RolloutStatus = "in_progress" | "completed" | "failed" | "rolled_back";
+
+export type Rollout = {
+	id: string;
+	serviceId: string;
+	status: RolloutStatus;
+	currentStage: string | null;
+	createdAt: string;
+	completedAt: string | null;
 };
 
 export type ServicePort = {
@@ -51,6 +78,7 @@ export type Service = {
 	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
 	secrets?: ServiceSecret[];
+	rollouts?: Rollout[];
 };
 
 export type StagedPort = {

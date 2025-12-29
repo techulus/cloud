@@ -21,8 +21,8 @@ import (
 
 type (
 	WorkHandler  func(work *pb.WorkItem) (status string, logs string)
-	CaddyHandler func(config *pb.CaddyConfig)
-	DnsHandler   func(config *pb.DnsConfig)
+	CaddyHandler func(config *pb.CaddyConfig) (bool, error)
+	DnsHandler   func(config *pb.DnsConfig) (bool, error)
 )
 
 type Client struct {
@@ -278,6 +278,31 @@ func (c *Client) SendBuildLog(deploymentID string, stream string, message string
 	})
 }
 
+func (c *Client) SendConfigAck(configType string, success bool, errMsg string) error {
+	ack := &pb.ConfigAck{
+		ConfigType: configType,
+		Success:    success,
+		Error:      errMsg,
+	}
+
+	seq := c.nextSequence()
+	timestamp, signature, err := c.signProtoWithSeq(ack, seq)
+	if err != nil {
+		return err
+	}
+
+	msg := &pb.AgentMessage{
+		ServerId:  c.serverID,
+		Timestamp: timestamp,
+		Signature: signature,
+		Sequence:  seq,
+		Payload:   &pb.AgentMessage_ConfigAck{ConfigAck: ack},
+	}
+
+	log.Printf("[grpc:send] type=ConfigAck config_type=%s success=%v seq=%d", configType, success, seq)
+	return c.stream.Send(msg)
+}
+
 func (c *Client) RunReceiver(ctx context.Context) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -344,13 +369,33 @@ func (c *Client) handleMessage(msg *pb.ControlPlaneMessage) {
 	case *pb.ControlPlaneMessage_CaddyConfig:
 		log.Printf("[grpc:recv] type=CaddyConfig routes=%d seq=%d", len(payload.CaddyConfig.Routes), msg.Sequence)
 		if c.caddyHandler != nil {
-			go c.caddyHandler(payload.CaddyConfig)
+			go func() {
+				success, err := c.caddyHandler(payload.CaddyConfig)
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+					log.Printf("[caddy:error] config update failed: %v", err)
+				}
+				if sendErr := c.SendConfigAck("caddy", success, errMsg); sendErr != nil {
+					log.Printf("Failed to send caddy config ack: %v", sendErr)
+				}
+			}()
 		}
 
 	case *pb.ControlPlaneMessage_DnsConfig:
 		log.Printf("[grpc:recv] type=DnsConfig records=%d seq=%d", len(payload.DnsConfig.Records), msg.Sequence)
 		if c.dnsHandler != nil {
-			go c.dnsHandler(payload.DnsConfig)
+			go func() {
+				success, err := c.dnsHandler(payload.DnsConfig)
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+					log.Printf("[dns:error] config update failed: %v", err)
+				}
+				if sendErr := c.SendConfigAck("dns", success, errMsg); sendErr != nil {
+					log.Printf("Failed to send dns config ack: %v", sendErr)
+				}
+			}()
 		}
 	}
 }

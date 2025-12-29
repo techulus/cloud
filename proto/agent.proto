@@ -19,6 +19,7 @@ message AgentMessage {
     WorkComplete work_complete = 11;
     Heartbeat heartbeat = 12;
     LogEntry log_entry = 13;
+    ConfigAck config_ack = 14;
   }
 }
 
@@ -82,6 +83,12 @@ message Heartbeat {
 message Acknowledgement {
   string message_id = 1;
   bool success = 2;
+}
+
+message ConfigAck {
+  string config_type = 1;
+  bool success = 2;
+  string error = 3;
 }
 
 message Error {

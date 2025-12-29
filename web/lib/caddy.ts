@@ -1,12 +1,14 @@
 import { db } from "@/db";
 import { deployments, servicePorts, services } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 
 export type CaddyRoute = {
   id: string;
   domain: string;
   upstreams: string[];
 };
+
+const ROUTABLE_STATUSES = ["caddy_updating", "running"] as const;
 
 async function getPortUpstreams(
   serviceId: string,
@@ -18,7 +20,10 @@ async function getPortUpstreams(
     })
     .from(deployments)
     .where(
-      and(eq(deployments.serviceId, serviceId), eq(deployments.status, "running"))
+      and(
+        eq(deployments.serviceId, serviceId),
+        inArray(deployments.status, [...ROUTABLE_STATUSES])
+      )
     );
 
   const upstreams: string[] = [];

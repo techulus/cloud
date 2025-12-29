@@ -277,6 +277,12 @@ func handleWork(work *pb.WorkItem) (status string, logs string) {
 			log.Printf("WireGuard update failed: %v", err)
 			status = "failed"
 		}
+	case "force_cleanup":
+		if err := handleForceCleanup(work); err != nil {
+			log.Printf("Force cleanup failed: %v", err)
+			status = "failed"
+			logs = err.Error()
+		}
 	default:
 		log.Printf("Unknown work type: %s", work.Type)
 	}
@@ -392,6 +398,32 @@ func handleStop(work *pb.WorkItem) error {
 	return nil
 }
 
+func handleForceCleanup(work *pb.WorkItem) error {
+	var payload struct {
+		ServiceID    string   `json:"serviceId"`
+		ContainerIDs []string `json:"containerIds"`
+	}
+
+	if err := json.Unmarshal(work.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to parse payload: %w", err)
+	}
+
+	log.Printf("[cleanup] Force cleanup for service %s, containers: %v", payload.ServiceID, payload.ContainerIDs)
+
+	var lastErr error
+	for _, containerID := range payload.ContainerIDs {
+		log.Printf("[cleanup] Force stopping container %s", containerID)
+		if err := podman.ForceRemove(containerID); err != nil {
+			log.Printf("[cleanup] Failed to remove container %s: %v", containerID, err)
+			lastErr = err
+		} else {
+			log.Printf("[cleanup] Container %s removed", containerID)
+		}
+	}
+
+	return lastErr
+}
+
 func handleWireguardUpdate(work *pb.WorkItem) error {
 	var payload struct {
 		Peers []api.Peer `json:"peers"`
@@ -426,13 +458,14 @@ func handleWireguardUpdate(work *pb.WorkItem) error {
 	return wireguard.Reload(wireguard.DefaultInterface)
 }
 
-func handleDnsConfig(config *pb.DnsConfig) {
+func handleDnsConfig(config *pb.DnsConfig) (bool, error) {
 	log.Printf("Updating DNS records (%d records)", len(config.Records))
 	if err := dns.UpdateRecords(config); err != nil {
 		log.Printf("Failed to update DNS records: %v", err)
-	} else {
-		log.Printf("DNS records updated successfully")
+		return false, err
 	}
+	log.Printf("DNS records updated successfully")
+	return true, nil
 }
 
 func convertPeers(apiPeers []api.Peer) []wireguard.Peer {

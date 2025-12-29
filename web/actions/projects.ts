@@ -7,6 +7,7 @@ import {
 	deploymentPorts,
 	deployments,
 	projects,
+	rollouts,
 	secrets,
 	servers,
 	servicePorts,
@@ -105,8 +106,19 @@ export async function deleteService(serviceId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
+	const activeStatuses = [
+		"pending",
+		"pulling",
+		"starting",
+		"healthy",
+		"dns_updating",
+		"caddy_updating",
+		"stopping_old",
+		"running",
+		"stopping",
+	];
 	const hasActiveDeployments = activeDeployments.some(
-		(d) => d.status === "running" || d.status === "stopping" || d.status === "pulling"
+		(d) => activeStatuses.includes(d.status)
 	);
 
 	if (hasActiveDeployments) {
@@ -288,28 +300,42 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
+	const inProgressStatuses = [
+		"pending",
+		"pulling",
+		"starting",
+		"healthy",
+		"dns_updating",
+		"caddy_updating",
+		"stopping_old",
+		"stopping",
+	];
+
 	const hasInProgressDeployment = existingDeployments.some(
-		(d) => d.status === "pending" || d.status === "pulling" || d.status === "stopping"
+		(d) => inProgressStatuses.includes(d.status)
 	);
 
 	if (hasInProgressDeployment) {
 		throw new Error("A deployment is already in progress");
 	}
 
+	const rolloutId = randomUUID();
+	const oldRunningDeployments = existingDeployments.filter(
+		(d) => d.status === "running" && d.containerId
+	);
+
+	await db.insert(rollouts).values({
+		id: rolloutId,
+		serviceId,
+		status: "in_progress",
+		currentStage: "deploying",
+	});
+
 	for (const dep of existingDeployments) {
-		if (dep.containerId && dep.status === "running") {
-			await db.insert(workQueue).values({
-				id: randomUUID(),
-				serverId: dep.serverId,
-				type: "stop",
-				payload: JSON.stringify({
-					deploymentId: dep.id,
-					containerId: dep.containerId,
-				}),
-			});
+		if (dep.status !== "running") {
+			await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
+			await db.delete(deployments).where(eq(deployments.id, dep.id));
 		}
-		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
-		await db.delete(deployments).where(eq(deployments.id, dep.id));
 	}
 
 	const servicePortsList = await db
@@ -354,6 +380,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 				serverId: server.id,
 				ipAddress,
 				status: "pending",
+				rolloutId,
 			});
 
 			const portMappings: { containerPort: number; hostPort: number }[] = [];
@@ -435,7 +462,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 			.where(eq(services.id, serviceId));
 	}
 
-	return { deploymentIds, replicaCount: totalReplicas };
+	return { deploymentIds, replicaCount: totalReplicas, rolloutId };
 }
 
 export async function deleteDeployment(deploymentId: string) {
@@ -644,6 +671,61 @@ export async function stopDeployment(deploymentId: string) {
 			containerId: dep.containerId,
 		}),
 	});
+
+	return { success: true };
+}
+
+export async function abortRollout(serviceId: string) {
+	const allRollouts = await db
+		.select()
+		.from(rollouts)
+		.where(eq(rollouts.serviceId, serviceId));
+
+	for (const rollout of allRollouts) {
+		if (rollout.status === "in_progress") {
+			await db
+				.update(rollouts)
+				.set({ status: "failed", currentStage: "aborted", completedAt: new Date() })
+				.where(eq(rollouts.id, rollout.id));
+		}
+	}
+
+	const allDeployments = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.serviceId, serviceId));
+
+	const serverContainers = new Map<string, string[]>();
+
+	for (const dep of allDeployments) {
+		if (dep.containerId) {
+			const containers = serverContainers.get(dep.serverId) || [];
+			containers.push(dep.containerId);
+			serverContainers.set(dep.serverId, containers);
+		}
+	}
+
+	for (const [serverId, containerIds] of serverContainers) {
+		await db.insert(workQueue).values({
+			id: randomUUID(),
+			serverId,
+			type: "force_cleanup",
+			payload: JSON.stringify({
+				serviceId,
+				containerIds,
+			}),
+		});
+	}
+
+	for (const dep of allDeployments) {
+		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
+	}
+
+	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
+
+	await db
+		.delete(workQueue)
+		.where(eq(workQueue.status, "pending"));
 
 	return { success: true };
 }

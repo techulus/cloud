@@ -36,6 +36,7 @@ import { DeploymentCanvas } from "./deployment-canvas";
 import { HealthCheckSection } from "./health-check-section";
 import { LogsViewer } from "./logs-viewer";
 import { PendingChangesBar } from "./pending-changes";
+import { RolloutStatusBar } from "./rollout-status";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
 import { SecretsSection } from "./secrets-section";
@@ -129,21 +130,37 @@ export function ServiceDetails({
 						{service.deployments.length > 0 && (
 							<div className="absolute top-4 left-4 flex items-center gap-2">
 								{service.deployments.some((d) => d.status === "running") && (
-									<ActionButton
-										action={async () => {
-											const running = service.deployments.filter(
-												(d) => d.status === "running",
-											);
-											for (const dep of running) {
-												await stopDeployment(dep.id);
-											}
-										}}
-										label="Stop All"
-										loadingLabel="Stopping..."
-										variant="destructive"
-										size="sm"
-										onComplete={handleActionComplete}
-									/>
+									<>
+										<ActionButton
+											action={async () => {
+												const placements = (service.configuredReplicas || []).map((r) => ({
+													serverId: r.serverId,
+													replicas: r.count,
+												}));
+												await deployService(service.id, placements);
+											}}
+											label="Redeploy"
+											loadingLabel="Redeploying..."
+											variant="outline"
+											size="sm"
+											onComplete={handleActionComplete}
+										/>
+										<ActionButton
+											action={async () => {
+												const running = service.deployments.filter(
+													(d) => d.status === "running",
+												);
+												for (const dep of running) {
+													await stopDeployment(dep.id);
+												}
+											}}
+											label="Stop All"
+											loadingLabel="Stopping..."
+											variant="destructive"
+											size="sm"
+											onComplete={handleActionComplete}
+										/>
+									</>
 								)}
 								{!service.deployments.some((d) => d.status === "running") &&
 									service.deployments.some(
@@ -269,6 +286,8 @@ export function ServiceDetails({
 				service={service}
 				onUpdate={handleActionComplete}
 			/>
+
+			<RolloutStatusBar service={service} onUpdate={handleActionComplete} />
 		</div>
 	);
 }

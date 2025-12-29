@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type PortMapping struct {
@@ -135,17 +136,53 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 func Stop(containerID string) error {
 	stopCmd := exec.Command("podman", "stop", containerID)
 	if output, err := stopCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to stop container: %s: %w", string(output), err)
+		outputStr := string(output)
+		if strings.Contains(outputStr, "no such container") ||
+			strings.Contains(outputStr, "no container with name or ID") {
+			return nil
+		}
+		return fmt.Errorf("failed to stop container: %s: %w", outputStr, err)
 	}
 
 	rmCmd := exec.Command("podman", "rm", containerID)
 	if output, err := rmCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to remove container: %s: %w", string(output), err)
+		outputStr := string(output)
+		if strings.Contains(outputStr, "no such container") ||
+			strings.Contains(outputStr, "no container with name or ID") {
+			return nil
+		}
+		return fmt.Errorf("failed to remove container: %s: %w", outputStr, err)
 	}
 
 	return nil
 }
 
+func ForceRemove(containerID string) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		cmd := exec.Command("podman", "rm", "-f", containerID)
+		output, err := cmd.CombinedOutput()
+		outputStr := string(output)
+
+		if err == nil {
+			return nil
+		}
+
+		if strings.Contains(outputStr, "no such container") ||
+			strings.Contains(outputStr, "no container with name or ID") {
+			return nil
+		}
+
+		lastErr = fmt.Errorf("attempt %d: %s: %w", attempt, outputStr, err)
+
+		if attempt < 3 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	return fmt.Errorf("failed to force remove container after 3 attempts: %w", lastErr)
+}
 
 func IsRunning(containerID string) (bool, error) {
 	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Running}}", containerID)

@@ -85,6 +85,7 @@ type AgentMessage struct {
 	//	*AgentMessage_WorkComplete
 	//	*AgentMessage_Heartbeat
 	//	*AgentMessage_LogEntry
+	//	*AgentMessage_ConfigAck
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -191,6 +192,15 @@ func (x *AgentMessage) GetLogEntry() *LogEntry {
 	return nil
 }
 
+func (x *AgentMessage) GetConfigAck() *ConfigAck {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_ConfigAck); ok {
+			return x.ConfigAck
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -211,6 +221,10 @@ type AgentMessage_LogEntry struct {
 	LogEntry *LogEntry `protobuf:"bytes,13,opt,name=log_entry,json=logEntry,proto3,oneof"`
 }
 
+type AgentMessage_ConfigAck struct {
+	ConfigAck *ConfigAck `protobuf:"bytes,14,opt,name=config_ack,json=configAck,proto3,oneof"`
+}
+
 func (*AgentMessage_StatusUpdate) isAgentMessage_Payload() {}
 
 func (*AgentMessage_WorkComplete) isAgentMessage_Payload() {}
@@ -218,6 +232,8 @@ func (*AgentMessage_WorkComplete) isAgentMessage_Payload() {}
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
 
 func (*AgentMessage_LogEntry) isAgentMessage_Payload() {}
+
+func (*AgentMessage_ConfigAck) isAgentMessage_Payload() {}
 
 type ControlPlaneMessage struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
@@ -873,6 +889,66 @@ func (x *Acknowledgement) GetSuccess() bool {
 	return false
 }
 
+type ConfigAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConfigType    string                 `protobuf:"bytes,1,opt,name=config_type,json=configType,proto3" json:"config_type,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigAck) Reset() {
+	*x = ConfigAck{}
+	mi := &file_proto_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigAck) ProtoMessage() {}
+
+func (x *ConfigAck) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigAck.ProtoReflect.Descriptor instead.
+func (*ConfigAck) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ConfigAck) GetConfigType() string {
+	if x != nil {
+		return x.ConfigType
+	}
+	return ""
+}
+
+func (x *ConfigAck) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ConfigAck) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type Error struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -884,7 +960,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_proto_agent_proto_msgTypes[11]
+	mi := &file_proto_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -896,7 +972,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[11]
+	mi := &file_proto_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -909,7 +985,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{11}
+	return file_proto_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Error) GetCode() int32 {
@@ -942,7 +1018,7 @@ type ConnectionAccepted struct {
 
 func (x *ConnectionAccepted) Reset() {
 	*x = ConnectionAccepted{}
-	mi := &file_proto_agent_proto_msgTypes[12]
+	mi := &file_proto_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1030,7 @@ func (x *ConnectionAccepted) String() string {
 func (*ConnectionAccepted) ProtoMessage() {}
 
 func (x *ConnectionAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[12]
+	mi := &file_proto_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1043,7 @@ func (x *ConnectionAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionAccepted.ProtoReflect.Descriptor instead.
 func (*ConnectionAccepted) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{12}
+	return file_proto_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ConnectionAccepted) GetSessionId() string {
@@ -986,7 +1062,7 @@ type DnsConfig struct {
 
 func (x *DnsConfig) Reset() {
 	*x = DnsConfig{}
-	mi := &file_proto_agent_proto_msgTypes[13]
+	mi := &file_proto_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -998,7 +1074,7 @@ func (x *DnsConfig) String() string {
 func (*DnsConfig) ProtoMessage() {}
 
 func (x *DnsConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[13]
+	mi := &file_proto_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1011,7 +1087,7 @@ func (x *DnsConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DnsConfig.ProtoReflect.Descriptor instead.
 func (*DnsConfig) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{13}
+	return file_proto_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DnsConfig) GetRecords() []*DnsRecord {
@@ -1031,7 +1107,7 @@ type DnsRecord struct {
 
 func (x *DnsRecord) Reset() {
 	*x = DnsRecord{}
-	mi := &file_proto_agent_proto_msgTypes[14]
+	mi := &file_proto_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1043,7 +1119,7 @@ func (x *DnsRecord) String() string {
 func (*DnsRecord) ProtoMessage() {}
 
 func (x *DnsRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[14]
+	mi := &file_proto_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1056,7 +1132,7 @@ func (x *DnsRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DnsRecord.ProtoReflect.Descriptor instead.
 func (*DnsRecord) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{14}
+	return file_proto_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DnsRecord) GetName() string {
@@ -1087,7 +1163,7 @@ type LogEntry struct {
 
 func (x *LogEntry) Reset() {
 	*x = LogEntry{}
-	mi := &file_proto_agent_proto_msgTypes[15]
+	mi := &file_proto_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1099,7 +1175,7 @@ func (x *LogEntry) String() string {
 func (*LogEntry) ProtoMessage() {}
 
 func (x *LogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[15]
+	mi := &file_proto_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1112,7 +1188,7 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
 func (*LogEntry) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{15}
+	return file_proto_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *LogEntry) GetStreamId() string {
@@ -1161,7 +1237,7 @@ var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/agent.proto\x12\x05agent\"\xe8\x02\n" +
+	"\x11proto/agent.proto\x12\x05agent\"\x9b\x03\n" +
 	"\fAgentMessage\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\tR\ttimestamp\x12\x1c\n" +
@@ -1171,7 +1247,9 @@ const file_proto_agent_proto_rawDesc = "" +
 	" \x01(\v2\x13.agent.StatusUpdateH\x00R\fstatusUpdate\x12:\n" +
 	"\rwork_complete\x18\v \x01(\v2\x13.agent.WorkCompleteH\x00R\fworkComplete\x120\n" +
 	"\theartbeat\x18\f \x01(\v2\x10.agent.HeartbeatH\x00R\theartbeat\x12.\n" +
-	"\tlog_entry\x18\r \x01(\v2\x0f.agent.LogEntryH\x00R\blogEntryB\t\n" +
+	"\tlog_entry\x18\r \x01(\v2\x0f.agent.LogEntryH\x00R\blogEntry\x121\n" +
+	"\n" +
+	"config_ack\x18\x0e \x01(\v2\x10.agent.ConfigAckH\x00R\tconfigAckB\t\n" +
 	"\apayload\"\xdc\x02\n" +
 	"\x13ControlPlaneMessage\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12%\n" +
@@ -1216,7 +1294,12 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x0fAcknowledgement\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess\"K\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"\\\n" +
+	"\tConfigAck\x12\x1f\n" +
+	"\vconfig_type\x18\x01 \x01(\tR\n" +
+	"configType\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"K\n" +
 	"\x05Error\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
@@ -1258,7 +1341,7 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_proto_agent_proto_goTypes = []any{
 	(LogStreamType)(0),          // 0: agent.LogStreamType
 	(*AgentMessage)(nil),        // 1: agent.AgentMessage
@@ -1272,35 +1355,37 @@ var file_proto_agent_proto_goTypes = []any{
 	(*WorkComplete)(nil),        // 9: agent.WorkComplete
 	(*Heartbeat)(nil),           // 10: agent.Heartbeat
 	(*Acknowledgement)(nil),     // 11: agent.Acknowledgement
-	(*Error)(nil),               // 12: agent.Error
-	(*ConnectionAccepted)(nil),  // 13: agent.ConnectionAccepted
-	(*DnsConfig)(nil),           // 14: agent.DnsConfig
-	(*DnsRecord)(nil),           // 15: agent.DnsRecord
-	(*LogEntry)(nil),            // 16: agent.LogEntry
+	(*ConfigAck)(nil),           // 12: agent.ConfigAck
+	(*Error)(nil),               // 13: agent.Error
+	(*ConnectionAccepted)(nil),  // 14: agent.ConnectionAccepted
+	(*DnsConfig)(nil),           // 15: agent.DnsConfig
+	(*DnsRecord)(nil),           // 16: agent.DnsRecord
+	(*LogEntry)(nil),            // 17: agent.LogEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.AgentMessage.status_update:type_name -> agent.StatusUpdate
 	9,  // 1: agent.AgentMessage.work_complete:type_name -> agent.WorkComplete
 	10, // 2: agent.AgentMessage.heartbeat:type_name -> agent.Heartbeat
-	16, // 3: agent.AgentMessage.log_entry:type_name -> agent.LogEntry
-	8,  // 4: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
-	11, // 5: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
-	12, // 6: agent.ControlPlaneMessage.error:type_name -> agent.Error
-	13, // 7: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
-	3,  // 8: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
-	14, // 9: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
-	4,  // 10: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
-	7,  // 11: agent.StatusUpdate.resources:type_name -> agent.Resources
-	6,  // 12: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
-	15, // 13: agent.DnsConfig.records:type_name -> agent.DnsRecord
-	0,  // 14: agent.LogEntry.stream_type:type_name -> agent.LogStreamType
-	1,  // 15: agent.AgentService.Connect:input_type -> agent.AgentMessage
-	2,  // 16: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
-	16, // [16:17] is the sub-list for method output_type
-	15, // [15:16] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	17, // 3: agent.AgentMessage.log_entry:type_name -> agent.LogEntry
+	12, // 4: agent.AgentMessage.config_ack:type_name -> agent.ConfigAck
+	8,  // 5: agent.ControlPlaneMessage.work:type_name -> agent.WorkItem
+	11, // 6: agent.ControlPlaneMessage.ack:type_name -> agent.Acknowledgement
+	13, // 7: agent.ControlPlaneMessage.error:type_name -> agent.Error
+	14, // 8: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
+	3,  // 9: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
+	15, // 10: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
+	4,  // 11: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
+	7,  // 12: agent.StatusUpdate.resources:type_name -> agent.Resources
+	6,  // 13: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
+	16, // 14: agent.DnsConfig.records:type_name -> agent.DnsRecord
+	0,  // 15: agent.LogEntry.stream_type:type_name -> agent.LogStreamType
+	1,  // 16: agent.AgentService.Connect:input_type -> agent.AgentMessage
+	2,  // 17: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
+	17, // [17:18] is the sub-list for method output_type
+	16, // [16:17] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_proto_agent_proto_init() }
@@ -1313,6 +1398,7 @@ func file_proto_agent_proto_init() {
 		(*AgentMessage_WorkComplete)(nil),
 		(*AgentMessage_Heartbeat)(nil),
 		(*AgentMessage_LogEntry)(nil),
+		(*AgentMessage_ConfigAck)(nil),
 	}
 	file_proto_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*ControlPlaneMessage_Work)(nil),
@@ -1328,7 +1414,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

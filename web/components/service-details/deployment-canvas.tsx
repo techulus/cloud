@@ -5,6 +5,25 @@ import { CanvasWrapper, getStatusColor, getHealthColor } from "@/components/ui/c
 import { Spinner } from "@/components/ui/spinner";
 import type { Service, Deployment } from "./types";
 
+const statusLabels: Record<string, string> = {
+	pending: "Queued",
+	pulling: "Pulling image",
+	starting: "Starting",
+	healthy: "Health check passed",
+	dns_updating: "Updating DNS",
+	caddy_updating: "Updating routes",
+	stopping_old: "Activating",
+	running: "Running",
+	stopping: "Stopping",
+	stopped: "Stopped",
+	failed: "Failed",
+	rolled_back: "Rolled back",
+};
+
+function getStatusLabel(status: string): string {
+	return statusLabels[status] || status;
+}
+
 function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	const colors = getStatusColor(deployment.status);
 	const healthColor = deployment.healthStatus && deployment.healthStatus !== "none"
@@ -13,11 +32,15 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	const isTransitioning =
 		deployment.status === "pending" ||
 		deployment.status === "pulling" ||
+		deployment.status === "starting" ||
+		deployment.status === "dns_updating" ||
+		deployment.status === "caddy_updating" ||
+		deployment.status === "stopping_old" ||
 		deployment.status === "stopping";
 
 	return (
 		<div
-			className={`p-2 rounded-lg border ${colors.border} ${colors.bg} space-y-1`}
+			className={`p-2 rounded-lg border ${colors.border} ${colors.bg} space-y-1 transition-all duration-300 ease-in-out`}
 		>
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-1">
@@ -35,34 +58,21 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 								className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.dot} opacity-75`}
 							/>
 						)}
-						<span className={`relative inline-flex rounded-full h-2 w-2 ${colors.dot}`} />
+						<span className={`relative inline-flex rounded-full h-2 w-2 ${colors.dot} transition-colors duration-300`} />
 					</span>
-					<span className={`text-xs font-medium capitalize ${colors.text}`}>
-						{deployment.status}
+					<span className={`text-xs font-medium ${colors.text} transition-colors duration-300`}>
+						{getStatusLabel(deployment.status)}
 					</span>
 					{isTransitioning && <Spinner className="h-3 w-3" />}
 				</div>
 			</div>
 
 			{healthColor && deployment.status === "running" && (
-				<div className="flex items-center gap-1">
-					<HeartPulse className={`h-3 w-3 ${healthColor.text}`} />
-					<span className={`text-xs font-medium capitalize ${healthColor.text}`}>
+				<div className="flex items-center gap-1 animate-in fade-in duration-300">
+					<HeartPulse className={`h-3 w-3 ${healthColor.text} transition-colors duration-300`} />
+					<span className={`text-xs font-medium capitalize ${healthColor.text} transition-colors duration-300`}>
 						{deployment.healthStatus}
 					</span>
-				</div>
-			)}
-
-			{deployment.ports.length > 0 && (
-				<div className="flex flex-wrap gap-1">
-					{deployment.ports.map((p) => (
-						<code
-							key={p.id}
-							className="text-xs font-mono bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
-						>
-							:{p.hostPort}→{p.containerPort}
-						</code>
-					))}
 				</div>
 			)}
 		</div>
@@ -71,11 +81,9 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 
 function ServerBox({
 	serverName,
-	serverIp,
 	deployments,
 }: {
 	serverName: string;
-	serverIp: string | null;
 	deployments: Deployment[];
 }) {
 	const hasRunning = deployments.some((d) => d.status === "running");
@@ -89,19 +97,17 @@ function ServerBox({
 				w-[280px] p-3 rounded-xl border-2 ${borderClass}
 				bg-white/50 dark:bg-zinc-900/50
 				backdrop-blur-sm
+				transition-all duration-300 ease-in-out
 			`}
 		>
 			<div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-200 dark:border-zinc-700">
-				<div className="flex items-center justify-center w-7 h-7 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-					<Server className="h-3.5 w-3.5 text-zinc-500" />
+				<div className="flex items-center justify-center w-5 h-5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+					<Server className="h-3 w-3 text-zinc-500" />
 				</div>
 				<div className="flex-1 min-w-0">
 					<h3 className="font-semibold text-sm text-foreground truncate">
 						{serverName}
 					</h3>
-					{serverIp && (
-						<p className="text-xs text-muted-foreground font-mono">{serverIp}</p>
-					)}
 				</div>
 			</div>
 
@@ -129,14 +135,13 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			if (!acc[serverId]) {
 				acc[serverId] = {
 					serverName: deployment.server?.name || "Unknown",
-					serverIp: deployment.server?.wireguardIp || null,
 					deployments: [],
 				};
 			}
 			acc[serverId].deployments.push(deployment);
 			return acc;
 		},
-		{} as Record<string, { serverName: string; serverIp: string | null; deployments: Deployment[] }>,
+		{} as Record<string, { serverName: string; deployments: Deployment[] }>,
 	);
 
 	const serverGroups = Object.values(deploymentsByServer);
@@ -167,7 +172,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			<div className="flex flex-col items-center gap-4">
 				{hasEndpoints && (
 					<>
-						<div className="flex flex-wrap gap-2 justify-center px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
+						<div className="flex flex-wrap gap-2 justify-center px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
 							{publicPorts.map((port) => (
 								<a
 									key={port.id}
@@ -200,12 +205,12 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 				<div className="flex flex-wrap gap-6 justify-center items-start">
 					{serverGroups.map((group) => (
-						<ServerBox
-							key={group.serverName}
-							serverName={group.serverName}
-							serverIp={group.serverIp}
-							deployments={group.deployments}
-						/>
+						<div key={group.serverName} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+							<ServerBox
+								serverName={group.serverName}
+								deployments={group.deployments}
+							/>
+						</div>
 					))}
 				</div>
 			</div>

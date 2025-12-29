@@ -1,8 +1,9 @@
 import { db } from "@/db";
-import { servers, workQueue, deployments } from "@/db/schema";
-import { eq, and, ne, isNotNull, lt, inArray } from "drizzle-orm";
+import { servers, workQueue, deployments, rollouts, services } from "@/db/schema";
+import { eq, and, ne, isNotNull, isNull, lt, inArray } from "drizzle-orm";
 import { getWireGuardPeers } from "@/lib/wireguard";
 import { randomUUID } from "node:crypto";
+import { checkRolloutProgress, handleRolloutFailure } from "./work";
 
 interface ContainerHealth {
   container_id: string;
@@ -68,7 +69,7 @@ export async function handleStatusUpdate(
   await reconcileDeployments(serverId, reportedContainerIds);
 
   if (status.container_health && status.container_health.length > 0) {
-    await updateContainerHealth(status.container_health);
+    await updateContainerHealth(status.container_health, serverId);
   }
 }
 
@@ -76,6 +77,16 @@ async function reconcileDeployments(
   serverId: string,
   reportedContainerIds: string[]
 ): Promise<void> {
+  const activeStatuses = [
+    "starting",
+    "healthy",
+    "dns_updating",
+    "caddy_updating",
+    "stopping_old",
+    "running",
+    "stopping",
+  ] as const;
+
   const activeDeployments = await db
     .select({ id: deployments.id, containerId: deployments.containerId })
     .from(deployments)
@@ -83,7 +94,7 @@ async function reconcileDeployments(
       and(
         eq(deployments.serverId, serverId),
         isNotNull(deployments.containerId),
-        inArray(deployments.status, ["running", "stopping"])
+        inArray(deployments.status, activeStatuses)
       )
     );
 
@@ -99,7 +110,8 @@ async function reconcileDeployments(
 }
 
 async function updateContainerHealth(
-  containerHealthList: ContainerHealth[]
+  containerHealthList: ContainerHealth[],
+  serverId: string
 ): Promise<void> {
   for (const ch of containerHealthList) {
     const healthStatus = ch.health_status as
@@ -107,10 +119,87 @@ async function updateContainerHealth(
       | "starting"
       | "healthy"
       | "unhealthy";
+
+    let [deployment] = await db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.containerId, ch.container_id));
+
+    if (!deployment) {
+      const stuckStatuses = ["pending", "pulling"] as const;
+      const [stuckDeployment] = await db
+        .select()
+        .from(deployments)
+        .where(
+          and(
+            eq(deployments.serverId, serverId),
+            isNull(deployments.containerId),
+            inArray(deployments.status, stuckStatuses)
+          )
+        );
+
+      if (stuckDeployment) {
+        console.log(`[health:recover] found stuck deployment ${stuckDeployment.id}, attaching container ${ch.container_id}`);
+
+        const service = await db
+          .select()
+          .from(services)
+          .where(eq(services.id, stuckDeployment.serviceId))
+          .then((r) => r[0]);
+
+        const hasHealthCheck = service?.healthCheckCmd != null;
+        const newStatus = hasHealthCheck ? "starting" : "healthy";
+
+        await db
+          .update(deployments)
+          .set({
+            containerId: ch.container_id,
+            status: newStatus,
+            healthStatus: hasHealthCheck ? "starting" : "none",
+          })
+          .where(eq(deployments.id, stuckDeployment.id));
+
+        deployment = { ...stuckDeployment, status: newStatus, containerId: ch.container_id };
+
+        if (!hasHealthCheck && deployment.rolloutId) {
+          await checkRolloutProgress(deployment.rolloutId);
+          continue;
+        }
+      } else {
+        continue;
+      }
+    }
+
     await db
       .update(deployments)
       .set({ healthStatus })
       .where(eq(deployments.containerId, ch.container_id));
+
+    if (deployment.status === "starting" && healthStatus === "healthy") {
+      console.log(`[health] deployment ${deployment.id} is now healthy`);
+
+      await db
+        .update(deployments)
+        .set({ status: "healthy" })
+        .where(eq(deployments.id, deployment.id));
+
+      if (deployment.rolloutId) {
+        await checkRolloutProgress(deployment.rolloutId);
+      }
+    }
+
+    if (deployment.status === "starting" && healthStatus === "unhealthy") {
+      console.log(`[health] deployment ${deployment.id} failed health check`);
+
+      await db
+        .update(deployments)
+        .set({ status: "failed", failedAt: "health_check" })
+        .where(eq(deployments.id, deployment.id));
+
+      if (deployment.rolloutId) {
+        await handleRolloutFailure(deployment.rolloutId, "health_check");
+      }
+    }
   }
 }
 
@@ -120,13 +209,25 @@ export async function markServerOffline(serverId: string): Promise<void> {
     .set({ status: "offline" })
     .where(eq(servers.id, serverId));
 
-  const result = await db
+  const activeStatuses = [
+    "pending",
+    "pulling",
+    "starting",
+    "healthy",
+    "dns_updating",
+    "caddy_updating",
+    "stopping_old",
+    "running",
+    "stopping",
+  ] as const;
+
+  await db
     .update(deployments)
     .set({ status: "stopped", healthStatus: null })
     .where(
       and(
         eq(deployments.serverId, serverId),
-        inArray(deployments.status, ["running", "stopping", "pulling", "pending"])
+        inArray(deployments.status, activeStatuses)
       )
     );
 
