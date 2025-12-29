@@ -1,11 +1,16 @@
 "use client";
 
-import useSWR, { useSWRConfig } from "swr";
-import { useMemo, useState } from "react";
+import { Layers, ScrollText, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useMemo, useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import {
+	deleteDeployment,
+	deleteService,
+	deployService,
+	stopDeployment,
+} from "@/actions/projects";
+import { ActionButton } from "@/components/action-button";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -17,29 +22,24 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-	deployService,
-	deleteService,
-	stopDeployment,
-	deleteDeployment,
-} from "@/actions/projects";
-import { ActionButton } from "@/components/action-button";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { fetcher } from "@/lib/fetcher";
 import {
 	buildCurrentConfig,
 	diffConfigs,
 	parseDeployedConfig,
 } from "@/lib/service-config";
-import { Layers, ScrollText, Settings } from "lucide-react";
-import type { Service } from "./types";
+import { ContainerSourceSection } from "./container-source-section";
+import { DeploymentCanvas } from "./deployment-canvas";
+import { HealthCheckSection } from "./health-check-section";
+import { LogsViewer } from "./logs-viewer";
+import { PendingChangesBar } from "./pending-changes";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
-import { HealthCheckSection } from "./health-check-section";
-import { ContainerSourceSection } from "./container-source-section";
 import { SecretsSection } from "./secrets-section";
-import { PendingChangesBar } from "./pending-changes";
-import { DeploymentCanvas } from "./deployment-canvas";
-import { LogsViewer } from "./logs-viewer";
-import { fetcher } from "@/lib/fetcher";
+import type { Service } from "./types";
 
 export type { Service } from "./types";
 
@@ -106,7 +106,10 @@ export function ServiceDetails({
 	return (
 		<div className="space-y-6">
 			<Tabs defaultValue="deployment">
-				<TabsList variant="default" className="min-w-100 -mt-2">
+				<TabsList
+					variant="default"
+					className="w-full lg:w-auto lg:max-w-160 -mt-2"
+				>
 					<TabsTrigger value="deployment">
 						<Layers className="h-4 w-4" />
 						Deployment
@@ -202,13 +205,14 @@ export function ServiceDetails({
 							onUpdate={handleActionComplete}
 						/>
 
+						<SecretsSection service={service} onUpdate={handleActionComplete} />
+
 						<PortsSection service={service} onUpdate={handleActionComplete} />
+
 						<HealthCheckSection
 							service={service}
 							onUpdate={handleActionComplete}
 						/>
-
-						<SecretsSection service={service} onUpdate={handleActionComplete} />
 
 						<div className="space-y-3">
 							<h2 className="text-xl font-semibold text-destructive">

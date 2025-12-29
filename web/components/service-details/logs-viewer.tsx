@@ -1,9 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import useSWR from "swr";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Terminal } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 
 interface LogEntry {
@@ -19,9 +16,6 @@ interface LogsViewerProps {
 }
 
 export function LogsViewer({ serviceId }: LogsViewerProps) {
-	const logsContainerRef = useRef<HTMLDivElement>(null);
-	const isNearBottomRef = useRef(true);
-
 	const { data } = useSWR<{ logs: LogEntry[]; hasMore: boolean }>(
 		`/api/services/${serviceId}/logs?limit=200`,
 		fetcher,
@@ -29,19 +23,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	);
 
 	const logs = data?.logs || [];
-
-	const handleScroll = () => {
-		if (!logsContainerRef.current) return;
-		const { scrollTop, scrollHeight, clientHeight } = logsContainerRef.current;
-		isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 50;
-	};
-
-	useEffect(() => {
-		if (logsContainerRef.current && isNearBottomRef.current) {
-			logsContainerRef.current.scrollTop =
-				logsContainerRef.current.scrollHeight;
-		}
-	}, [logs]);
 
 	const formatTimestamp = (ts: string) => {
 		return new Date(ts).toLocaleTimeString("en-US", {
@@ -53,11 +34,7 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	};
 
 	return (
-		<div
-			ref={logsContainerRef}
-			onScroll={handleScroll}
-			className="h-[70vh] overflow-y-auto font-mono text-xs rounded-lg border"
-		>
+		<div className="h-[70vh] overflow-y-auto font-mono rounded-lg border">
 			{logs.length === 0 ? (
 				<div className="flex items-center justify-center h-full">
 					No logs available

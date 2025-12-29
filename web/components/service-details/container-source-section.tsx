@@ -44,7 +44,7 @@ export const ContainerSourceSection = memo(function ContainerSourceSection({
 			<CardHeader className="pb-3">
 				<CardTitle className="text-base flex items-center gap-2">
 					<Box className="h-4 w-4" />
-					Container Source
+					Source
 				</CardTitle>
 			</CardHeader>
 			<CardContent>
