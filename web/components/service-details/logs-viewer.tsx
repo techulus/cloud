@@ -44,7 +44,7 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	return (
 		<div
 			ref={containerRef}
-			className="h-[70vh] overflow-y-auto font-mono text-[13px] leading-5 rounded-xl border bg-zinc-100 dark:bg-zinc-950"
+			className="h-[70vh] overflow-y-auto font-mono text-[11px] leading-4 rounded-xl border bg-zinc-100 dark:bg-zinc-950"
 		>
 			{logs.length === 0 ? (
 				<div className="flex items-center justify-center h-full text-muted-foreground">
