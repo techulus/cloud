@@ -143,7 +143,7 @@ function ServiceCard({
 
 				{service.deployments.length > 0 && (
 					<div
-						className={`hidden md:block border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasEndpoints ? "mt-2 pt-2" : "mt-2 pt-2"}`}
+						className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasEndpoints ? "mt-2 pt-2" : "mt-2 pt-2"}`}
 					>
 						<div className="flex items-center justify-between">
 							<span className="text-xs text-muted-foreground">Replicas</span>
@@ -179,7 +179,7 @@ function ServiceCard({
 				)}
 
 				{service.deployments.length === 0 && (
-					<div className="hidden md:block mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
+					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
 						<span className="text-xs text-muted-foreground">Not deployed</span>
 					</div>
 				)}
