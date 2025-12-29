@@ -25,6 +25,9 @@ type BuildLogFunc func(stream string, message string)
 type DeployConfig struct {
 	Name         string
 	Image        string
+	ServiceID    string
+	ServiceName  string
+	DeploymentID string
 	WireGuardIP  string
 	IPAddress    string
 	PortMappings []PortMapping
@@ -37,6 +40,27 @@ type DeployResult struct {
 	ContainerID string
 }
 
+func RemoveServiceContainers(serviceID string) error {
+	if serviceID == "" {
+		return nil
+	}
+
+	cmd := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("label=techulus.service.id=%s", serviceID), "--format", "{{.ID}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		exec.Command("podman", "rm", "-f", line).Run()
+	}
+
+	return nil
+}
+
 func Deploy(config *DeployConfig) (*DeployResult, error) {
 	logFunc := config.LogFunc
 	if logFunc == nil {
@@ -46,6 +70,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	image := config.Image
 
 	exec.Command("podman", "rm", "-f", config.Name).Run()
+	RemoveServiceContainers(config.ServiceID)
 
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
@@ -57,7 +82,15 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	}
 	logFunc("stdout", string(pullOutput))
 
-	args := []string{"run", "-d", "--name", config.Name, "--replace", "--restart", "unless-stopped"}
+	args := []string{
+		"run", "-d",
+		"--name", config.Name,
+		"--replace",
+		"--restart", "unless-stopped",
+		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
+		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
+		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
+	}
 
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
@@ -112,6 +145,7 @@ func Stop(containerID string) error {
 
 	return nil
 }
+
 
 func IsRunning(containerID string) (bool, error) {
 	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Running}}", containerID)

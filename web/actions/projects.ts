@@ -388,6 +388,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 				payload: JSON.stringify({
 					deploymentId,
 					serviceId,
+					serviceName: service.name,
 					image: normalizeImage(service.image),
 					portMappings,
 					wireguardIp: server.wireguardIp,

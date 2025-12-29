@@ -291,6 +291,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 	var payload struct {
 		DeploymentID string `json:"deploymentId"`
 		ServiceID    string `json:"serviceId"`
+		ServiceName  string `json:"serviceName"`
 		Image        string `json:"image"`
 		PortMappings []struct {
 			ContainerPort int `json:"containerPort"`
@@ -356,6 +357,9 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
+		ServiceID:    payload.ServiceID,
+		ServiceName:  payload.ServiceName,
+		DeploymentID: payload.DeploymentID,
 		WireGuardIP:  payload.WireGuardIP,
 		IPAddress:    payload.IPAddress,
 		PortMappings: portMappings,

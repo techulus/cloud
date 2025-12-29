@@ -53,44 +53,36 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	};
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="flex items-center gap-2 text-base">
-					<Terminal className="h-4 w-4" />
-					Logs
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="p-0">
-				<div
-					ref={logsContainerRef}
-					onScroll={handleScroll}
-					className="h-[400px] overflow-y-auto font-mono text-xs bg-zinc-950 text-zinc-100 rounded-b-lg"
-				>
-					{logs.length === 0 ? (
-						<div className="flex items-center justify-center h-full text-zinc-500">
-							No logs available
-						</div>
-					) : (
-						<div className="p-3 space-y-0.5">
-							{logs.map((entry) => (
-								<div
-									key={entry.id}
-									className={`flex gap-2 ${
-										entry.stream === "stderr" ? "text-red-400" : "text-zinc-300"
-									}`}
-								>
-									<span className="text-zinc-600 shrink-0">
-										{formatTimestamp(entry.timestamp)}
-									</span>
-									<span className="break-all whitespace-pre-wrap">
-										{entry.message}
-									</span>
-								</div>
-							))}
-						</div>
-					)}
+		<div
+			ref={logsContainerRef}
+			onScroll={handleScroll}
+			className="h-[70vh] overflow-y-auto font-mono text-xs rounded-lg border"
+		>
+			{logs.length === 0 ? (
+				<div className="flex items-center justify-center h-full">
+					No logs available
 				</div>
-			</CardContent>
-		</Card>
+			) : (
+				<div className="p-3 space-y-0.5">
+					{logs.map((entry) => (
+						<div
+							key={entry.id}
+							className={`flex gap-2 ${
+								entry.stream === "stderr"
+									? "text-red-600 dark:text-red-400"
+									: ""
+							}`}
+						>
+							<span className="shrink-0">
+								{formatTimestamp(entry.timestamp)}
+							</span>
+							<span className="break-all whitespace-pre-wrap">
+								{entry.message}
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
 	);
 }

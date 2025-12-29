@@ -144,7 +144,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	if (service.deployments.length === 0) {
 		return (
 			<CanvasWrapper
-				height="200px"
+				height="70vh"
 				isEmpty
 				emptyContent={
 					<div className="text-center space-y-4">
@@ -152,7 +152,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 							<Box className="h-8 w-8 text-zinc-400" />
 						</div>
 						<p className="text-muted-foreground">
-							No deployments yet. Configure replicas and deploy to start.
+							No deployments yet.
 						</p>
 					</div>
 				}
@@ -163,7 +163,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	const hasEndpoints = hasPublicIngress || hasRunningDeployments;
 
 	return (
-		<CanvasWrapper height="auto" className="flex items-center justify-center">
+		<CanvasWrapper height="auto" className="flex items-center justify-center min-h-[70vh]">
 			<div className="flex flex-col items-center gap-4">
 				{hasEndpoints && (
 					<>

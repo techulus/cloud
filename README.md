@@ -22,8 +22,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Per-machine subnet allocation
 - [x] Local DNS on each machine
 - [x] Health checks
+- [x] Secrets
+- [ ] Deploy Logs
+- [ ] HTTP Logs
 - [ ] Rolling updates
-- [ ] Secrets
-- [ ] Logs
 - [ ] GitHub deployments
 - [ ] Volumes
