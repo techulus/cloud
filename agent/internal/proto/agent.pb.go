@@ -246,6 +246,7 @@ type ControlPlaneMessage struct {
 	//	*ControlPlaneMessage_Connected
 	//	*ControlPlaneMessage_CaddyConfig
 	//	*ControlPlaneMessage_DnsConfig
+	//	*ControlPlaneMessage_ExpectedState
 	Payload       isControlPlaneMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -349,6 +350,15 @@ func (x *ControlPlaneMessage) GetDnsConfig() *DnsConfig {
 	return nil
 }
 
+func (x *ControlPlaneMessage) GetExpectedState() *ExpectedState {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlPlaneMessage_ExpectedState); ok {
+			return x.ExpectedState
+		}
+	}
+	return nil
+}
+
 type isControlPlaneMessage_Payload interface {
 	isControlPlaneMessage_Payload()
 }
@@ -377,6 +387,10 @@ type ControlPlaneMessage_DnsConfig struct {
 	DnsConfig *DnsConfig `protobuf:"bytes,15,opt,name=dns_config,json=dnsConfig,proto3,oneof"`
 }
 
+type ControlPlaneMessage_ExpectedState struct {
+	ExpectedState *ExpectedState `protobuf:"bytes,16,opt,name=expected_state,json=expectedState,proto3,oneof"`
+}
+
 func (*ControlPlaneMessage_Work) isControlPlaneMessage_Payload() {}
 
 func (*ControlPlaneMessage_Ack) isControlPlaneMessage_Payload() {}
@@ -388,6 +402,8 @@ func (*ControlPlaneMessage_Connected) isControlPlaneMessage_Payload() {}
 func (*ControlPlaneMessage_CaddyConfig) isControlPlaneMessage_Payload() {}
 
 func (*ControlPlaneMessage_DnsConfig) isControlPlaneMessage_Payload() {}
+
+func (*ControlPlaneMessage_ExpectedState) isControlPlaneMessage_Payload() {}
 
 type CaddyConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1241,6 +1257,118 @@ func (x *LogEntry) GetDeploymentId() string {
 	return ""
 }
 
+type ExpectedContainer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ContainerId   string                 `protobuf:"bytes,1,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	DeploymentId  string                 `protobuf:"bytes,2,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
+	ServiceId     string                 `protobuf:"bytes,3,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpectedContainer) Reset() {
+	*x = ExpectedContainer{}
+	mi := &file_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpectedContainer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpectedContainer) ProtoMessage() {}
+
+func (x *ExpectedContainer) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpectedContainer.ProtoReflect.Descriptor instead.
+func (*ExpectedContainer) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ExpectedContainer) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *ExpectedContainer) GetDeploymentId() string {
+	if x != nil {
+		return x.DeploymentId
+	}
+	return ""
+}
+
+func (x *ExpectedContainer) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+type ExpectedState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Containers    []*ExpectedContainer   `protobuf:"bytes,1,rep,name=containers,proto3" json:"containers,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpectedState) Reset() {
+	*x = ExpectedState{}
+	mi := &file_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpectedState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpectedState) ProtoMessage() {}
+
+func (x *ExpectedState) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpectedState.ProtoReflect.Descriptor instead.
+func (*ExpectedState) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ExpectedState) GetContainers() []*ExpectedContainer {
+	if x != nil {
+		return x.Containers
+	}
+	return nil
+}
+
+func (x *ExpectedState) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
 var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
@@ -1258,7 +1386,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tlog_entry\x18\r \x01(\v2\x0f.agent.LogEntryH\x00R\blogEntry\x121\n" +
 	"\n" +
 	"config_ack\x18\x0e \x01(\v2\x10.agent.ConfigAckH\x00R\tconfigAckB\t\n" +
-	"\apayload\"\xdc\x02\n" +
+	"\apayload\"\x9b\x03\n" +
 	"\x13ControlPlaneMessage\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12%\n" +
 	"\x04work\x18\n" +
@@ -1268,7 +1396,8 @@ const file_agent_proto_rawDesc = "" +
 	"\tconnected\x18\r \x01(\v2\x19.agent.ConnectionAcceptedH\x00R\tconnected\x127\n" +
 	"\fcaddy_config\x18\x0e \x01(\v2\x12.agent.CaddyConfigH\x00R\vcaddyConfig\x121\n" +
 	"\n" +
-	"dns_config\x18\x0f \x01(\v2\x10.agent.DnsConfigH\x00R\tdnsConfigB\t\n" +
+	"dns_config\x18\x0f \x01(\v2\x10.agent.DnsConfigH\x00R\tdnsConfig\x12=\n" +
+	"\x0eexpected_state\x18\x10 \x01(\v2\x14.agent.ExpectedStateH\x00R\rexpectedStateB\t\n" +
 	"\apayload\"8\n" +
 	"\vCaddyConfig\x12)\n" +
 	"\x06routes\x18\x01 \x03(\v2\x11.agent.CaddyRouteR\x06routes\"n\n" +
@@ -1328,7 +1457,17 @@ const file_agent_proto_rawDesc = "" +
 	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\fR\amessage\x12!\n" +
 	"\fcontainer_id\x18\x05 \x01(\tR\vcontainerId\x12#\n" +
-	"\rdeployment_id\x18\x06 \x01(\tR\fdeploymentId*\x83\x01\n" +
+	"\rdeployment_id\x18\x06 \x01(\tR\fdeploymentId\"z\n" +
+	"\x11ExpectedContainer\x12!\n" +
+	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12#\n" +
+	"\rdeployment_id\x18\x02 \x01(\tR\fdeploymentId\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x03 \x01(\tR\tserviceId\"g\n" +
+	"\rExpectedState\x128\n" +
+	"\n" +
+	"containers\x18\x01 \x03(\v2\x18.agent.ExpectedContainerR\n" +
+	"containers\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp*\x83\x01\n" +
 	"\rLogStreamType\x12\x1b\n" +
 	"\x17LOG_STREAM_TYPE_UNKNOWN\x10\x00\x12\x1a\n" +
 	"\x16LOG_STREAM_TYPE_STDOUT\x10\x01\x12\x1a\n" +
@@ -1350,7 +1489,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_agent_proto_goTypes = []any{
 	(LogStreamType)(0),          // 0: agent.LogStreamType
 	(*AgentMessage)(nil),        // 1: agent.AgentMessage
@@ -1370,6 +1509,8 @@ var file_agent_proto_goTypes = []any{
 	(*DnsConfig)(nil),           // 15: agent.DnsConfig
 	(*DnsRecord)(nil),           // 16: agent.DnsRecord
 	(*LogEntry)(nil),            // 17: agent.LogEntry
+	(*ExpectedContainer)(nil),   // 18: agent.ExpectedContainer
+	(*ExpectedState)(nil),       // 19: agent.ExpectedState
 }
 var file_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.AgentMessage.status_update:type_name -> agent.StatusUpdate
@@ -1383,18 +1524,20 @@ var file_agent_proto_depIdxs = []int32{
 	14, // 8: agent.ControlPlaneMessage.connected:type_name -> agent.ConnectionAccepted
 	3,  // 9: agent.ControlPlaneMessage.caddy_config:type_name -> agent.CaddyConfig
 	15, // 10: agent.ControlPlaneMessage.dns_config:type_name -> agent.DnsConfig
-	4,  // 11: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
-	7,  // 12: agent.StatusUpdate.resources:type_name -> agent.Resources
-	6,  // 13: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
-	16, // 14: agent.DnsConfig.records:type_name -> agent.DnsRecord
-	0,  // 15: agent.LogEntry.stream_type:type_name -> agent.LogStreamType
-	1,  // 16: agent.AgentService.Connect:input_type -> agent.AgentMessage
-	2,  // 17: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
-	17, // [17:18] is the sub-list for method output_type
-	16, // [16:17] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	19, // 11: agent.ControlPlaneMessage.expected_state:type_name -> agent.ExpectedState
+	4,  // 12: agent.CaddyConfig.routes:type_name -> agent.CaddyRoute
+	7,  // 13: agent.StatusUpdate.resources:type_name -> agent.Resources
+	6,  // 14: agent.StatusUpdate.container_health:type_name -> agent.ContainerHealth
+	16, // 15: agent.DnsConfig.records:type_name -> agent.DnsRecord
+	0,  // 16: agent.LogEntry.stream_type:type_name -> agent.LogStreamType
+	18, // 17: agent.ExpectedState.containers:type_name -> agent.ExpectedContainer
+	1,  // 18: agent.AgentService.Connect:input_type -> agent.AgentMessage
+	2,  // 19: agent.AgentService.Connect:output_type -> agent.ControlPlaneMessage
+	19, // [19:20] is the sub-list for method output_type
+	18, // [18:19] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -1416,6 +1559,7 @@ func file_agent_proto_init() {
 		(*ControlPlaneMessage_Connected)(nil),
 		(*ControlPlaneMessage_CaddyConfig)(nil),
 		(*ControlPlaneMessage_DnsConfig)(nil),
+		(*ControlPlaneMessage_ExpectedState)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1423,7 +1567,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -572,6 +572,6 @@ export function stopWorkDispatcher(): void {
   if (dispatchInterval) {
     clearInterval(dispatchInterval);
     dispatchInterval = null;
-    console.log("Work dispatcher stopped");
   }
+  console.log("Work dispatcher stopped");
 }

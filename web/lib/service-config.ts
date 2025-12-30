@@ -28,6 +28,11 @@ export type SecretConfig = {
 	updatedAt: string;
 };
 
+export type VolumeConfig = {
+	name: string;
+	containerPath: string;
+};
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	replicas: ReplicaConfig[];
@@ -35,6 +40,7 @@ export type DeployedConfig = {
 	ports: PortConfig[];
 	secretKeys?: string[];
 	secrets?: SecretConfig[];
+	volumes?: VolumeConfig[];
 };
 
 export type ConfigChange = {
@@ -55,6 +61,7 @@ export function buildCurrentConfig(
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
 	secrets?: { key: string; updatedAt: Date | string }[],
+	volumes?: { name: string; containerPath: string }[],
 ): DeployedConfig {
 	return {
 		source: {
@@ -84,6 +91,10 @@ export function buildCurrentConfig(
 			key: s.key,
 			updatedAt:
 				s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
+		})),
+		volumes: (volumes ?? []).map((v) => ({
+			name: v.name,
+			containerPath: v.containerPath,
 		})),
 	};
 }
@@ -129,6 +140,13 @@ export function diffConfigs(
 				field: "Secret",
 				from: "(none)",
 				to: secret.key,
+			});
+		}
+		for (const volume of current.volumes || []) {
+			changes.push({
+				field: "Volume",
+				from: "(none)",
+				to: `${volume.name} → ${volume.containerPath}`,
 			});
 		}
 		return changes;
@@ -301,6 +319,40 @@ export function diffConfigs(
 			changes.push({
 				field: "Secret",
 				from: key,
+				to: "(removed)",
+			});
+		}
+	}
+
+	const deployedVolumesMap = new Map(
+		(deployed.volumes || []).map((v) => [v.name, v]),
+	);
+	const currentVolumesMap = new Map(
+		(current.volumes || []).map((v) => [v.name, v]),
+	);
+
+	for (const [name, currentVolume] of currentVolumesMap) {
+		const deployedVolume = deployedVolumesMap.get(name);
+		if (!deployedVolume) {
+			changes.push({
+				field: "Volume",
+				from: "(none)",
+				to: `${name} → ${currentVolume.containerPath}`,
+			});
+		} else if (deployedVolume.containerPath !== currentVolume.containerPath) {
+			changes.push({
+				field: `Volume ${name}`,
+				from: deployedVolume.containerPath,
+				to: currentVolume.containerPath,
+			});
+		}
+	}
+
+	for (const [name, deployedVolume] of deployedVolumesMap) {
+		if (!currentVolumesMap.has(name)) {
+			changes.push({
+				field: "Volume",
+				from: `${name} → ${deployedVolume.containerPath}`,
 				to: "(removed)",
 			});
 		}

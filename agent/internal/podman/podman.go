@@ -1,12 +1,16 @@
 package podman
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"techulus/cloud-agent/internal/retry"
 )
 
 type PortMapping struct {
@@ -68,6 +72,59 @@ func RemoveServiceContainers(serviceID string) error {
 	}
 
 	return nil
+}
+
+type containerInspect struct {
+	State struct {
+		Status  string `json:"Status"`
+		Running bool   `json:"Running"`
+	} `json:"State"`
+}
+
+func ContainerExists(containerID string) (bool, error) {
+	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		if strings.Contains(outputStr, "no such container") ||
+			strings.Contains(outputStr, "no container with name or ID") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to inspect container: %s: %w", outputStr, err)
+	}
+	return true, nil
+}
+
+func IsContainerRunning(containerID string) (bool, error) {
+	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		if strings.Contains(outputStr, "no such container") ||
+			strings.Contains(outputStr, "no container with name or ID") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to inspect container: %s: %w", outputStr, err)
+	}
+
+	var containers []containerInspect
+	if err := json.Unmarshal(output, &containers); err != nil {
+		return false, fmt.Errorf("failed to parse container inspect: %w", err)
+	}
+
+	if len(containers) == 0 {
+		return false, nil
+	}
+
+	return containers[0].State.Running, nil
+}
+
+func IsContainerStopped(containerID string) (bool, error) {
+	running, err := IsContainerRunning(containerID)
+	if err != nil {
+		return false, err
+	}
+	return !running, nil
 }
 
 func Deploy(config *DeployConfig) (*DeployResult, error) {
@@ -148,12 +205,42 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	containerID := strings.TrimSpace(string(output))
 	logFunc("stdout", fmt.Sprintf("Container started: %s", containerID))
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	logFunc("stdout", "Verifying container is running...")
+	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
+		running, err := IsContainerRunning(containerID)
+		if err != nil {
+			return false, err
+		}
+		return running, nil
+	})
+
+	if err != nil {
+		logsCmd := exec.Command("podman", "logs", "--tail", "50", containerID)
+		logsOutput, _ := logsCmd.CombinedOutput()
+		logFunc("stderr", fmt.Sprintf("Container failed to stay running. Logs:\n%s", string(logsOutput)))
+		return nil, fmt.Errorf("container failed to stay running after start: %w", err)
+	}
+
+	logFunc("stdout", "Container verified running")
+
 	return &DeployResult{
 		ContainerID: containerID,
 	}, nil
 }
 
 func Stop(containerID string) error {
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+
+	log.Printf("[podman:stop] stopping container %s", containerID)
 	stopCmd := exec.Command("podman", "stop", containerID)
 	if output, err := stopCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
@@ -164,6 +251,23 @@ func Stop(containerID string) error {
 		return fmt.Errorf("failed to stop container: %s: %w", outputStr, err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	log.Printf("[podman:stop] verifying container %s stopped", containerID)
+	err = retry.WithBackoff(ctx, retry.StopBackoff, func() (bool, error) {
+		stopped, err := IsContainerStopped(containerID)
+		if err != nil {
+			return false, err
+		}
+		return stopped, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("container did not stop after verification: %w", err)
+	}
+
+	log.Printf("[podman:stop] removing container %s", containerID)
 	rmCmd := exec.Command("podman", "rm", containerID)
 	if output, err := rmCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
@@ -174,34 +278,74 @@ func Stop(containerID string) error {
 		return fmt.Errorf("failed to remove container: %s: %w", outputStr, err)
 	}
 
+	log.Printf("[podman:stop] verifying container %s removed", containerID)
+	err = retry.WithBackoff(ctx, retry.StopBackoff, func() (bool, error) {
+		exists, err := ContainerExists(containerID)
+		if err != nil {
+			return false, err
+		}
+		return !exists, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("container was not removed after verification: %w", err)
+	}
+
+	log.Printf("[podman:stop] container %s stopped and removed successfully", containerID)
 	return nil
 }
 
 func ForceRemove(containerID string) error {
-	var lastErr error
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return nil
+	}
 
-	for attempt := 1; attempt <= 3; attempt++ {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	log.Printf("[podman:force-remove] force removing container %s", containerID)
+
+	var lastErr error
+	err = retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
 		cmd := exec.Command("podman", "rm", "-f", containerID)
 		output, err := cmd.CombinedOutput()
 		outputStr := string(output)
 
 		if err == nil {
-			return nil
+			exists, checkErr := ContainerExists(containerID)
+			if checkErr != nil {
+				lastErr = checkErr
+				return false, checkErr
+			}
+			if !exists {
+				return true, nil
+			}
+			lastErr = fmt.Errorf("container still exists after rm -f")
+			return false, nil
 		}
 
 		if strings.Contains(outputStr, "no such container") ||
 			strings.Contains(outputStr, "no container with name or ID") {
-			return nil
+			return true, nil
 		}
 
-		lastErr = fmt.Errorf("attempt %d: %s: %w", attempt, outputStr, err)
+		lastErr = fmt.Errorf("%s: %w", outputStr, err)
+		return false, nil
+	})
 
-		if attempt < 3 {
-			time.Sleep(500 * time.Millisecond)
+	if err != nil {
+		if lastErr != nil {
+			return fmt.Errorf("failed to force remove container: %w", lastErr)
 		}
+		return fmt.Errorf("failed to force remove container: %w", err)
 	}
 
-	return fmt.Errorf("failed to force remove container after 3 attempts: %w", lastErr)
+	log.Printf("[podman:force-remove] container %s removed successfully", containerID)
+	return nil
 }
 
 func GetHealthStatus(containerID string) string {

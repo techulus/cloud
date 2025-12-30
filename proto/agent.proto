@@ -33,6 +33,7 @@ message ControlPlaneMessage {
     ConnectionAccepted connected = 13;
     CaddyConfig caddy_config = 14;
     DnsConfig dns_config = 15;
+    ExpectedState expected_state = 16;
   }
 }
 
@@ -125,4 +126,15 @@ message LogEntry {
   bytes message = 4;
   string container_id = 5;
   string deployment_id = 6;
+}
+
+message ExpectedContainer {
+  string container_id = 1;
+  string deployment_id = 2;
+  string service_id = 3;
+}
+
+message ExpectedState {
+  repeated ExpectedContainer containers = 1;
+  int64 timestamp = 2;
 }

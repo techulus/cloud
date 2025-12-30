@@ -85,6 +85,7 @@ export interface ControlPlaneMessage {
   connected?: ConnectionAccepted | undefined;
   caddy_config?: CaddyConfig | undefined;
   dns_config?: DnsConfig | undefined;
+  expected_state?: ExpectedState | undefined;
 }
 
 export interface CaddyConfig {
@@ -169,6 +170,17 @@ export interface LogEntry {
   message: Uint8Array;
   container_id: string;
   deployment_id: string;
+}
+
+export interface ExpectedContainer {
+  container_id: string;
+  deployment_id: string;
+  service_id: string;
+}
+
+export interface ExpectedState {
+  containers: ExpectedContainer[];
+  timestamp: number;
 }
 
 function createBaseAgentMessage(): AgentMessage {
@@ -388,6 +400,7 @@ function createBaseControlPlaneMessage(): ControlPlaneMessage {
     connected: undefined,
     caddy_config: undefined,
     dns_config: undefined,
+    expected_state: undefined,
   };
 }
 
@@ -413,6 +426,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
     }
     if (message.dns_config !== undefined) {
       DnsConfig.encode(message.dns_config, writer.uint32(122).fork()).join();
+    }
+    if (message.expected_state !== undefined) {
+      ExpectedState.encode(message.expected_state, writer.uint32(130).fork()).join();
     }
     return writer;
   },
@@ -480,6 +496,14 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
           message.dns_config = DnsConfig.decode(reader, reader.uint32());
           continue;
         }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.expected_state = ExpectedState.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -498,6 +522,7 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
       connected: isSet(object.connected) ? ConnectionAccepted.fromJSON(object.connected) : undefined,
       caddy_config: isSet(object.caddy_config) ? CaddyConfig.fromJSON(object.caddy_config) : undefined,
       dns_config: isSet(object.dns_config) ? DnsConfig.fromJSON(object.dns_config) : undefined,
+      expected_state: isSet(object.expected_state) ? ExpectedState.fromJSON(object.expected_state) : undefined,
     };
   },
 
@@ -524,6 +549,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
     if (message.dns_config !== undefined) {
       obj.dns_config = DnsConfig.toJSON(message.dns_config);
     }
+    if (message.expected_state !== undefined) {
+      obj.expected_state = ExpectedState.toJSON(message.expected_state);
+    }
     return obj;
   },
 
@@ -546,6 +574,9 @@ export const ControlPlaneMessage: MessageFns<ControlPlaneMessage> = {
       : undefined;
     message.dns_config = (object.dns_config !== undefined && object.dns_config !== null)
       ? DnsConfig.fromPartial(object.dns_config)
+      : undefined;
+    message.expected_state = (object.expected_state !== undefined && object.expected_state !== null)
+      ? ExpectedState.fromPartial(object.expected_state)
       : undefined;
     return message;
   },
@@ -1840,6 +1871,176 @@ export const LogEntry: MessageFns<LogEntry> = {
     message.message = object.message ?? new Uint8Array(0);
     message.container_id = object.container_id ?? "";
     message.deployment_id = object.deployment_id ?? "";
+    return message;
+  },
+};
+
+function createBaseExpectedContainer(): ExpectedContainer {
+  return { container_id: "", deployment_id: "", service_id: "" };
+}
+
+export const ExpectedContainer: MessageFns<ExpectedContainer> = {
+  encode(message: ExpectedContainer, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.container_id !== "") {
+      writer.uint32(10).string(message.container_id);
+    }
+    if (message.deployment_id !== "") {
+      writer.uint32(18).string(message.deployment_id);
+    }
+    if (message.service_id !== "") {
+      writer.uint32(26).string(message.service_id);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExpectedContainer {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExpectedContainer();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.container_id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.deployment_id = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.service_id = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExpectedContainer {
+    return {
+      container_id: isSet(object.container_id) ? globalThis.String(object.container_id) : "",
+      deployment_id: isSet(object.deployment_id) ? globalThis.String(object.deployment_id) : "",
+      service_id: isSet(object.service_id) ? globalThis.String(object.service_id) : "",
+    };
+  },
+
+  toJSON(message: ExpectedContainer): unknown {
+    const obj: any = {};
+    if (message.container_id !== "") {
+      obj.container_id = message.container_id;
+    }
+    if (message.deployment_id !== "") {
+      obj.deployment_id = message.deployment_id;
+    }
+    if (message.service_id !== "") {
+      obj.service_id = message.service_id;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExpectedContainer>, I>>(base?: I): ExpectedContainer {
+    return ExpectedContainer.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExpectedContainer>, I>>(object: I): ExpectedContainer {
+    const message = createBaseExpectedContainer();
+    message.container_id = object.container_id ?? "";
+    message.deployment_id = object.deployment_id ?? "";
+    message.service_id = object.service_id ?? "";
+    return message;
+  },
+};
+
+function createBaseExpectedState(): ExpectedState {
+  return { containers: [], timestamp: 0 };
+}
+
+export const ExpectedState: MessageFns<ExpectedState> = {
+  encode(message: ExpectedState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.containers) {
+      ExpectedContainer.encode(v!, writer.uint32(10).fork()).join();
+    }
+    if (message.timestamp !== 0) {
+      writer.uint32(16).int64(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExpectedState {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExpectedState();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.containers.push(ExpectedContainer.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.timestamp = longToNumber(reader.int64());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExpectedState {
+    return {
+      containers: globalThis.Array.isArray(object?.containers)
+        ? object.containers.map((e: any) => ExpectedContainer.fromJSON(e))
+        : [],
+      timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
+    };
+  },
+
+  toJSON(message: ExpectedState): unknown {
+    const obj: any = {};
+    if (message.containers?.length) {
+      obj.containers = message.containers.map((e) => ExpectedContainer.toJSON(e));
+    }
+    if (message.timestamp !== 0) {
+      obj.timestamp = Math.round(message.timestamp);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExpectedState>, I>>(base?: I): ExpectedState {
+    return ExpectedState.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExpectedState>, I>>(object: I): ExpectedState {
+    const message = createBaseExpectedState();
+    message.containers = object.containers?.map((e) => ExpectedContainer.fromPartial(e)) || [];
+    message.timestamp = object.timestamp ?? 0;
     return message;
   },
 };

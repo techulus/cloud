@@ -1,12 +1,18 @@
 package dns
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
+	"time"
 
 	pb "techulus/cloud-agent/internal/proto"
+	"techulus/cloud-agent/internal/retry"
 )
 
 const (
@@ -74,6 +80,41 @@ Domains=~internal
 	return nil
 }
 
+func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 2 * time.Second}
+			return d.DialContext(ctx, "udp", "127.0.0.1:53")
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ips, err := resolver.LookupHost(ctx, hostname)
+	if err != nil {
+		return false, fmt.Errorf("DNS lookup failed for %s: %w", hostname, err)
+	}
+
+	sort.Strings(ips)
+	sortedExpected := make([]string, len(expectedIPs))
+	copy(sortedExpected, expectedIPs)
+	sort.Strings(sortedExpected)
+
+	if len(ips) != len(sortedExpected) {
+		return false, nil
+	}
+
+	for i := range ips {
+		if ips[i] != sortedExpected[i] {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
 func UpdateRecords(config *pb.DnsConfig) error {
 	var configLines []string
 
@@ -88,6 +129,8 @@ func UpdateRecords(config *pb.DnsConfig) error {
 		configContent += "\n"
 	}
 
+	log.Printf("[dns] updating %d records", len(config.Records))
+
 	if err := os.WriteFile(dnsmasqConfigPath, []byte(configContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
@@ -97,5 +140,38 @@ func UpdateRecords(config *pb.DnsConfig) error {
 		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
 
+	if len(config.Records) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Printf("[dns] verifying DNS records...")
+	var failedRecords []string
+
+	for _, record := range config.Records {
+		err := retry.WithBackoff(ctx, retry.ConfigBackoff, func() (bool, error) {
+			verified, err := VerifyDNSRecord(record.Name, record.Ips)
+			if err != nil {
+				log.Printf("[dns:verify] record %s lookup error: %v", record.Name, err)
+				return false, nil
+			}
+			return verified, nil
+		})
+
+		if err != nil {
+			failedRecords = append(failedRecords, record.Name)
+			log.Printf("[dns:verify] record %s verification failed after retries", record.Name)
+		} else {
+			log.Printf("[dns:verify] record %s verified successfully", record.Name)
+		}
+	}
+
+	if len(failedRecords) > 0 {
+		return fmt.Errorf("failed to verify DNS records: %v", failedRecords)
+	}
+
+	log.Printf("[dns] all records verified successfully")
 	return nil
 }

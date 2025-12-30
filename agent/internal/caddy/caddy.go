@@ -2,15 +2,19 @@ package caddy
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os/exec"
+	"time"
 
 	pb "techulus/cloud-agent/internal/proto"
+	"techulus/cloud-agent/internal/retry"
 )
 
 const (
@@ -82,6 +86,43 @@ func getExistingRoutes() ([]map[string]any, error) {
 	return routes, nil
 }
 
+func VerifyRouteExists(routeID string, expectedDomain string) (bool, error) {
+	routes, err := getExistingRoutes()
+	if err != nil {
+		return false, fmt.Errorf("failed to get existing routes: %w", err)
+	}
+
+	for _, route := range routes {
+		id, ok := route["@id"].(string)
+		if !ok || id != routeID {
+			continue
+		}
+
+		matchList, ok := route["match"].([]any)
+		if !ok || len(matchList) == 0 {
+			continue
+		}
+
+		firstMatch, ok := matchList[0].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		hostList, ok := firstMatch["host"].([]any)
+		if !ok || len(hostList) == 0 {
+			continue
+		}
+
+		for _, h := range hostList {
+			if host, ok := h.(string); ok && host == expectedDomain {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
 func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
 	var managedRoutes []map[string]any
 	for _, route := range config.Routes {
@@ -97,6 +138,8 @@ func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
 	if configHash == lastConfigHash {
 		return true, nil
 	}
+
+	log.Printf("[caddy] updating %d routes", len(config.Routes))
 
 	existingRoutes, err := getExistingRoutes()
 	if err != nil {
@@ -126,6 +169,44 @@ func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
 		return false, fmt.Errorf("caddy PATCH returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	if len(config.Routes) == 0 {
+		lastConfigHash = configHash
+		return true, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Printf("[caddy] verifying routes...")
+	var failedRoutes []string
+
+	for _, route := range config.Routes {
+		if len(route.Upstreams) == 0 {
+			continue
+		}
+
+		err := retry.WithBackoff(ctx, retry.ConfigBackoff, func() (bool, error) {
+			verified, err := VerifyRouteExists(route.Id, route.Domain)
+			if err != nil {
+				log.Printf("[caddy:verify] route %s verification error: %v", route.Id, err)
+				return false, nil
+			}
+			return verified, nil
+		})
+
+		if err != nil {
+			failedRoutes = append(failedRoutes, route.Id)
+			log.Printf("[caddy:verify] route %s verification failed after retries", route.Id)
+		} else {
+			log.Printf("[caddy:verify] route %s verified successfully", route.Id)
+		}
+	}
+
+	if len(failedRoutes) > 0 {
+		return false, fmt.Errorf("failed to verify routes: %v", failedRoutes)
+	}
+
 	lastConfigHash = configHash
+	log.Printf("[caddy] all routes verified successfully")
 	return true, nil
 }
