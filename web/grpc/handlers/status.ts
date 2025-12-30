@@ -8,6 +8,7 @@ import { checkRolloutProgress, handleRolloutFailure } from "./work";
 interface ContainerHealth {
   container_id: string;
   health_status: string;
+  deployment_id: string;
 }
 
 interface StatusUpdate {
@@ -63,10 +64,10 @@ export async function handleStatusUpdate(
     await handlePublicIpChange(serverId);
   }
 
-  const reportedContainerIds = (status.container_health || []).map(
-    (ch) => ch.container_id
-  );
-  await reconcileDeployments(serverId, reportedContainerIds);
+  const reportedDeploymentIds = (status.container_health || [])
+    .map((ch) => ch.deployment_id)
+    .filter((id) => id !== "");
+  await reconcileDeployments(serverId, reportedDeploymentIds);
 
   if (status.container_health && status.container_health.length > 0) {
     await updateContainerHealth(status.container_health, serverId);
@@ -75,7 +76,7 @@ export async function handleStatusUpdate(
 
 async function reconcileDeployments(
   serverId: string,
-  reportedContainerIds: string[]
+  reportedDeploymentIds: string[]
 ): Promise<void> {
   const activeStatuses = [
     "starting",
@@ -99,7 +100,7 @@ async function reconcileDeployments(
     );
 
   for (const dep of activeDeployments) {
-    if (dep.containerId && !reportedContainerIds.includes(dep.containerId)) {
+    if (!reportedDeploymentIds.includes(dep.id)) {
       await db
         .update(deployments)
         .set({ status: "stopped", healthStatus: null })
@@ -120,10 +121,19 @@ async function updateContainerHealth(
       | "healthy"
       | "unhealthy";
 
-    let [deployment] = await db
-      .select()
-      .from(deployments)
-      .where(eq(deployments.containerId, ch.container_id));
+    let [deployment] = ch.deployment_id
+      ? await db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.id, ch.deployment_id))
+      : await db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.containerId, ch.container_id));
+
+    if (!deployment && ch.deployment_id) {
+      continue;
+    }
 
     if (!deployment) {
       const stuckStatuses = ["pending", "pulling"] as const;
@@ -170,13 +180,18 @@ async function updateContainerHealth(
       }
     }
 
+    const updateFields: Record<string, unknown> = { healthStatus };
+    if (deployment.containerId !== ch.container_id) {
+      updateFields.containerId = ch.container_id;
+    }
+
     await db
       .update(deployments)
-      .set({ healthStatus })
-      .where(eq(deployments.containerId, ch.container_id));
+      .set(updateFields)
+      .where(eq(deployments.id, deployment.id));
 
-    if (deployment.status === "starting" && healthStatus === "healthy") {
-      console.log(`[health] deployment ${deployment.id} is now healthy`);
+    if (deployment.status === "starting" && (healthStatus === "healthy" || healthStatus === "none")) {
+      console.log(`[health] deployment ${deployment.id} is now healthy (healthStatus=${healthStatus})`);
 
       await db
         .update(deployments)

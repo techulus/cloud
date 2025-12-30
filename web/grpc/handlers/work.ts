@@ -80,11 +80,6 @@ export async function handleWorkComplete(
 
     if (deploymentId) {
       if (status === "completed") {
-        const containerIdMatch = logs?.match(/Container started: ([a-f0-9]+)/);
-        const containerId = containerIdMatch ? containerIdMatch[1] : null;
-
-        console.log(`[work:deploy] deployment=${deploymentId} container=${containerId || "NOT_FOUND_IN_LOGS"}`);
-
         const [deployment] = await db
           .select()
           .from(deployments)
@@ -95,30 +90,15 @@ export async function handleWorkComplete(
           return;
         }
 
-        const service = await db
-          .select()
-          .from(services)
-          .where(eq(services.id, deployment.serviceId))
-          .then((r) => r[0]);
-
-        const hasHealthCheck = service?.healthCheckCmd != null;
-        const newStatus = hasHealthCheck ? "starting" : "healthy";
-
-        console.log(`[work:deploy] deployment=${deploymentId} hasHealthCheck=${hasHealthCheck} newStatus=${newStatus} rolloutId=${deployment.rolloutId || "none"}`);
+        console.log(`[work:deploy] deployment=${deploymentId} deploy completed, waiting for container status`);
 
         await db
           .update(deployments)
           .set({
-            status: newStatus,
-            containerId,
-            healthStatus: hasHealthCheck ? "starting" : "none",
+            status: "starting",
+            healthStatus: "starting",
           })
           .where(eq(deployments.id, deploymentId));
-
-        if (!hasHealthCheck && deployment.rolloutId) {
-          console.log(`[work:deploy] deployment=${deploymentId} no health check, checking rollout progress`);
-          await checkRolloutProgress(deployment.rolloutId);
-        }
       } else {
         console.log(`[work:deploy] deployment=${deploymentId} failed`);
         await db
@@ -286,6 +266,27 @@ async function checkOldDeploymentsStopped(rolloutId: string): Promise<void> {
       .update(rollouts)
       .set({ status: "completed", completedAt: new Date(), currentStage: "completed" })
       .where(eq(rollouts.id, rolloutId));
+
+    await pushDnsConfigToAll();
+
+    const [service] = await db
+      .select()
+      .from(services)
+      .where(eq(services.id, rollout.serviceId));
+
+    if (service?.stateful && !service.lockedServerId) {
+      const newDeployments = serviceDeployments.filter(
+        (d) => d.rolloutId === rolloutId
+      );
+      if (newDeployments.length > 0) {
+        const lockedServerId = newDeployments[0].serverId;
+        await db
+          .update(services)
+          .set({ lockedServerId })
+          .where(eq(services.id, rollout.serviceId));
+        console.log(`[rollout:${rolloutId}] Locked stateful service ${rollout.serviceId} to server ${lockedServerId}`);
+      }
+    }
 
     for (const dep of oldDeployments) {
       await db.delete(deployments).where(eq(deployments.id, dep.id));

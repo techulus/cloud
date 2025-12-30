@@ -11,6 +11,7 @@ import {
 	servicePorts,
 	serviceReplicas,
 	services,
+	serviceVolumes,
 } from "@/db/schema";
 
 async function getService(projectSlug: string, serviceId: string) {
@@ -30,7 +31,7 @@ async function getService(projectSlug: string, serviceId: string) {
 
 	if (!service) return null;
 
-	const [ports, serviceDeployments, configuredReplicas] = await Promise.all([
+	const [ports, serviceDeployments, configuredReplicas, volumes, lockedServer] = await Promise.all([
 		db
 			.select()
 			.from(servicePorts)
@@ -51,6 +52,17 @@ async function getService(projectSlug: string, serviceId: string) {
 			.from(serviceReplicas)
 			.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 			.where(eq(serviceReplicas.serviceId, service.id)),
+		db
+			.select()
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, service.id)),
+		service.lockedServerId
+			? db
+					.select({ name: servers.name })
+					.from(servers)
+					.where(eq(servers.id, service.lockedServerId))
+					.then((r) => r[0])
+			: Promise.resolve(null),
 	]);
 
 	const deploymentsWithDetails = await Promise.all(
@@ -90,6 +102,8 @@ async function getService(projectSlug: string, serviceId: string) {
 			ports,
 			configuredReplicas,
 			deployments: deploymentsWithDetails,
+			volumes,
+			lockedServer,
 		},
 	};
 }

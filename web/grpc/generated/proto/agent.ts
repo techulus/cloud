@@ -107,6 +107,7 @@ export interface StatusUpdate {
 export interface ContainerHealth {
   container_id: string;
   health_status: string;
+  deployment_id: string;
 }
 
 export interface Resources {
@@ -817,7 +818,7 @@ export const StatusUpdate: MessageFns<StatusUpdate> = {
 };
 
 function createBaseContainerHealth(): ContainerHealth {
-  return { container_id: "", health_status: "" };
+  return { container_id: "", health_status: "", deployment_id: "" };
 }
 
 export const ContainerHealth: MessageFns<ContainerHealth> = {
@@ -827,6 +828,9 @@ export const ContainerHealth: MessageFns<ContainerHealth> = {
     }
     if (message.health_status !== "") {
       writer.uint32(18).string(message.health_status);
+    }
+    if (message.deployment_id !== "") {
+      writer.uint32(26).string(message.deployment_id);
     }
     return writer;
   },
@@ -854,6 +858,14 @@ export const ContainerHealth: MessageFns<ContainerHealth> = {
           message.health_status = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.deployment_id = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -867,6 +879,7 @@ export const ContainerHealth: MessageFns<ContainerHealth> = {
     return {
       container_id: isSet(object.container_id) ? globalThis.String(object.container_id) : "",
       health_status: isSet(object.health_status) ? globalThis.String(object.health_status) : "",
+      deployment_id: isSet(object.deployment_id) ? globalThis.String(object.deployment_id) : "",
     };
   },
 
@@ -878,6 +891,9 @@ export const ContainerHealth: MessageFns<ContainerHealth> = {
     if (message.health_status !== "") {
       obj.health_status = message.health_status;
     }
+    if (message.deployment_id !== "") {
+      obj.deployment_id = message.deployment_id;
+    }
     return obj;
   },
 
@@ -888,6 +904,7 @@ export const ContainerHealth: MessageFns<ContainerHealth> = {
     const message = createBaseContainerHealth();
     message.container_id = object.container_id ?? "";
     message.health_status = object.health_status ?? "";
+    message.deployment_id = object.deployment_id ?? "";
     return message;
   },
 };

@@ -140,6 +140,10 @@ export const services = pgTable("services", {
 	hostname: text("hostname"),
 	image: text("image").notNull(),
 	replicas: integer("replicas").notNull().default(1),
+	stateful: boolean("stateful").notNull().default(false),
+	lockedServerId: text("locked_server_id").references(() => servers.id, {
+		onDelete: "set null",
+	}),
 	healthCheckCmd: text("health_check_cmd"),
 	healthCheckInterval: integer("health_check_interval").default(10),
 	healthCheckTimeout: integer("health_check_timeout").default(5),
@@ -170,6 +174,18 @@ export const servicePorts = pgTable("service_ports", {
 	port: integer("port").notNull(),
 	isPublic: boolean("is_public").notNull().default(false),
 	domain: text("domain").unique(),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
+});
+
+export const serviceVolumes = pgTable("service_volumes", {
+	id: text("id").primaryKey(),
+	serviceId: text("service_id")
+		.notNull()
+		.references(() => services.id, { onDelete: "cascade" }),
+	name: text("name").notNull(),
+	containerPath: text("container_path").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true })
 		.defaultNow()
 		.notNull(),
@@ -277,7 +293,14 @@ export const workQueue = pgTable("work_queue", {
 		.notNull()
 		.references(() => servers.id, { onDelete: "cascade" }),
 	type: text("type", {
-		enum: ["deploy", "stop", "update_wireguard", "sync_caddy", "force_cleanup"],
+		enum: [
+			"deploy",
+			"stop",
+			"update_wireguard",
+			"sync_caddy",
+			"force_cleanup",
+			"cleanup_volumes",
+		],
 	}).notNull(),
 	payload: text("payload").notNull(),
 	status: text("status", {

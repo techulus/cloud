@@ -62,6 +62,13 @@ export type ServiceSecret = {
 	updatedAt: Date | string;
 };
 
+export type ServiceVolume = {
+	id: string;
+	serviceId: string;
+	name: string;
+	containerPath: string;
+};
+
 export type Service = {
 	id: string;
 	projectId: string;
@@ -69,6 +76,9 @@ export type Service = {
 	hostname: string | null;
 	image: string;
 	replicas: number;
+	stateful: boolean;
+	lockedServerId: string | null;
+	lockedServer: { name: string } | null;
 	deployedConfig: string | null;
 	healthCheckCmd: string | null;
 	healthCheckInterval: number | null;
@@ -80,6 +90,7 @@ export type Service = {
 	deployments: Deployment[];
 	secrets?: ServiceSecret[];
 	rollouts?: Rollout[];
+	volumes?: ServiceVolume[];
 };
 
 export type StagedPort = {

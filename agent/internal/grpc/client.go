@@ -51,7 +51,6 @@ type Client struct {
 	reconnectMult     float64
 
 	outgoingSequence uint64
-	lastServerSeq    uint64
 	seqMu            sync.Mutex
 }
 
@@ -95,17 +94,6 @@ func (c *Client) resetSequences() {
 	c.seqMu.Lock()
 	defer c.seqMu.Unlock()
 	c.outgoingSequence = 0
-	c.lastServerSeq = 0
-}
-
-func (c *Client) validateServerSequence(seq uint64) bool {
-	c.seqMu.Lock()
-	defer c.seqMu.Unlock()
-	if seq <= c.lastServerSeq {
-		return false
-	}
-	c.lastServerSeq = seq
-	return true
 }
 
 func (c *Client) Connect(ctx context.Context) error {
@@ -158,6 +146,7 @@ func (c *Client) signProtoWithSeq(msg proto.Message, seq uint64) (timestamp, sig
 type ContainerHealthData struct {
 	ContainerID  string
 	HealthStatus string
+	DeploymentID string
 }
 
 type StatusData struct {
@@ -172,6 +161,7 @@ func (c *Client) SendStatusUpdate(status *StatusData) error {
 		containerHealth[i] = &pb.ContainerHealth{
 			ContainerId:  ch.ContainerID,
 			HealthStatus: ch.HealthStatus,
+			DeploymentId: ch.DeploymentID,
 		}
 	}
 
@@ -325,21 +315,7 @@ func (c *Client) RunReceiver(ctx context.Context) {
 	}
 }
 
-func (c *Client) validateServerMessage(msg *pb.ControlPlaneMessage) bool {
-	if !c.validateServerSequence(msg.Sequence) {
-		log.Printf("[grpc:verify] replay detected: seq=%d", msg.Sequence)
-		return false
-	}
-	return true
-}
-
 func (c *Client) handleMessage(msg *pb.ControlPlaneMessage) {
-	if !c.validateServerMessage(msg) {
-		log.Printf("[grpc:recv] REJECTED - replay detected seq=%d", msg.Sequence)
-		c.stopOnce.Do(func() { close(c.stopChan) })
-		return
-	}
-
 	switch payload := msg.Payload.(type) {
 	case *pb.ControlPlaneMessage_Connected:
 		c.sessionID = payload.Connected.SessionId

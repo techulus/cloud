@@ -8,7 +8,6 @@ interface Connection {
   connectedAt: Date;
   lastHeartbeat: Date;
   sessionId: string;
-  lastAgentSequence: number;
   outgoingSequence: number;
   closed: boolean;
 }
@@ -39,7 +38,6 @@ class ConnectionStore {
       connectedAt: new Date(),
       lastHeartbeat: new Date(),
       sessionId,
-      lastAgentSequence: 0,
       outgoingSequence: 0,
       closed: false,
     });
@@ -62,21 +60,6 @@ class ConnectionStore {
     if (conn) {
       conn.lastHeartbeat = new Date();
     }
-  }
-
-  validateAndUpdateSequence(serverId: string, sequence: number): boolean {
-    const conn = this.connections.get(serverId);
-    if (!conn) return false;
-
-    if (sequence <= conn.lastAgentSequence) {
-      console.error(
-        `[grpc:replay] server=${serverId} expected>${conn.lastAgentSequence} got=${sequence}`
-      );
-      return false;
-    }
-
-    conn.lastAgentSequence = sequence;
-    return true;
   }
 
   getNextOutgoingSequence(serverId: string): number {

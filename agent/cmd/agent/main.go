@@ -239,6 +239,7 @@ func getStatusData(publicIP string, includeResources bool) *agentgrpc.StatusData
 				containerHealth = append(containerHealth, agentgrpc.ContainerHealthData{
 					ContainerID:  c.ID,
 					HealthStatus: healthStatus,
+					DeploymentID: c.DeploymentID,
 				})
 			}
 		}
@@ -283,6 +284,12 @@ func handleWork(work *pb.WorkItem) (status string, logs string) {
 			status = "failed"
 			logs = err.Error()
 		}
+	case "cleanup_volumes":
+		if err := handleCleanupVolumes(work); err != nil {
+			log.Printf("Volume cleanup failed: %v", err)
+			status = "failed"
+			logs = err.Error()
+		}
 	default:
 		log.Printf("Unknown work type: %s", work.Type)
 	}
@@ -311,7 +318,12 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 			Retries     int    `json:"retries"`
 			StartPeriod int    `json:"startPeriod"`
 		} `json:"healthCheck"`
-		Env map[string]string `json:"env"`
+		Env          map[string]string `json:"env"`
+		VolumeMounts []struct {
+			Name          string `json:"name"`
+			HostPath      string `json:"hostPath"`
+			ContainerPath string `json:"containerPath"`
+		} `json:"volumeMounts"`
 	}
 
 	if err := json.Unmarshal(work.Payload, &payload); err != nil {
@@ -358,6 +370,15 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		}
 	}
 
+	volumeMounts := make([]podman.VolumeMount, len(payload.VolumeMounts))
+	for i, vm := range payload.VolumeMounts {
+		volumeMounts[i] = podman.VolumeMount{
+			Name:          vm.Name,
+			HostPath:      vm.HostPath,
+			ContainerPath: vm.ContainerPath,
+		}
+	}
+
 	result, err := podman.Deploy(&podman.DeployConfig{
 		Name:         payload.Name,
 		Image:        payload.Image,
@@ -369,6 +390,7 @@ func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
 		PortMappings: portMappings,
 		HealthCheck:  healthCheck,
 		Env:          decryptedEnv,
+		VolumeMounts: volumeMounts,
 		LogFunc:      buildLogFunc,
 	})
 	if err != nil {
@@ -422,6 +444,26 @@ func handleForceCleanup(work *pb.WorkItem) error {
 	}
 
 	return lastErr
+}
+
+func handleCleanupVolumes(work *pb.WorkItem) error {
+	var payload struct {
+		ServiceID string `json:"serviceId"`
+	}
+
+	if err := json.Unmarshal(work.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to parse payload: %w", err)
+	}
+
+	volumeBasePath := filepath.Join(defaultDataDir, "volumes", payload.ServiceID)
+	log.Printf("[cleanup] Removing volume directory: %s", volumeBasePath)
+
+	if err := os.RemoveAll(volumeBasePath); err != nil {
+		return fmt.Errorf("failed to remove volume directory: %w", err)
+	}
+
+	log.Printf("[cleanup] Volume directory removed for service %s", payload.ServiceID)
+	return nil
 }
 
 func handleWireguardUpdate(work *pb.WorkItem) error {

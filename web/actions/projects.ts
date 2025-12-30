@@ -13,6 +13,7 @@ import {
 	servicePorts,
 	serviceReplicas,
 	services,
+	serviceVolumes,
 	workQueue,
 } from "@/db/schema";
 import {
@@ -108,7 +109,7 @@ export async function validateDockerImage(
 				return { valid: true };
 			}
 
-			const url = `https://hub.docker.com/v2/repositories/${repoPath}/tags/${reference}`;
+			const url = `https://hub.docker.com/v2/repositories/${namespace === "library" ? "library/" : ""}${repoPath}/tags/${reference}`;
 			const response = await fetch(url, { method: "GET" });
 
 			if (response.status === 404) {
@@ -213,6 +214,7 @@ export async function createService(
 	name: string,
 	image: string,
 	ports: number[],
+	stateful: boolean = false,
 ) {
 	const id = randomUUID();
 	const hostname = slugify(name);
@@ -224,6 +226,7 @@ export async function createService(
 		hostname,
 		image,
 		replicas: 0,
+		stateful,
 	});
 
 	for (const port of ports) {
@@ -234,7 +237,7 @@ export async function createService(
 		});
 	}
 
-	return { id, name, image, ports };
+	return { id, name, image, ports, stateful };
 }
 
 export type ServerPlacement = {
@@ -270,6 +273,24 @@ export async function deleteService(serviceId: string) {
 
 	if (hasActiveDeployments) {
 		throw new Error("Stop all deployments before deleting the service");
+	}
+
+	if (service.stateful && service.lockedServerId) {
+		const volumes = await db
+			.select()
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, serviceId));
+
+		if (volumes.length > 0) {
+			await db.insert(workQueue).values({
+				id: randomUUID(),
+				serverId: service.lockedServerId,
+				type: "cleanup_volumes",
+				payload: JSON.stringify({
+					serviceId,
+				}),
+			});
+		}
 	}
 
 	for (const deployment of activeDeployments) {
@@ -467,6 +488,23 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		throw new Error("No servers selected for deployment");
 	}
 
+	if (service.stateful) {
+		if (totalReplicas !== 1) {
+			throw new Error("Stateful services can only have exactly 1 replica");
+		}
+
+		if (serverIds.length !== 1) {
+			throw new Error("Stateful services must be deployed to exactly one server");
+		}
+
+		const targetServerId = serverIds[0];
+		if (service.lockedServerId && service.lockedServerId !== targetServerId) {
+			throw new Error(
+				"This stateful service is locked to its original server. Volume data cannot be moved between machines."
+			);
+		}
+	}
+
 	const selectedServers = await db
 		.select()
 		.from(servers)
@@ -542,6 +580,11 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		.from(secrets)
 		.where(eq(secrets.serviceId, serviceId));
 
+	const volumes = await db
+		.select()
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
 	const env: Record<string, string> = {};
 	for (const secret of serviceSecrets) {
 		env[secret.key] = secret.encryptedValue;
@@ -602,6 +645,12 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					}
 				: null;
 
+			const volumeMounts = volumes.map((v) => ({
+				name: v.name,
+				hostPath: `/var/lib/techulus-agent/volumes/${serviceId}/${v.name}`,
+				containerPath: v.containerPath,
+			}));
+
 			await db.insert(workQueue).values({
 				id: randomUUID(),
 				serverId: server.id,
@@ -617,6 +666,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 					name: `${serviceId}-${replicaIndex}`,
 					healthCheck,
 					env,
+					volumeMounts,
 				}),
 			});
 		}
@@ -917,5 +967,93 @@ export async function abortRollout(serviceId: string) {
 		.where(eq(workQueue.status, "pending"));
 
 	return { success: true };
+}
+
+export async function addServiceVolume(
+	serviceId: string,
+	name: string,
+	containerPath: string,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (!service.stateful) {
+		throw new Error("Volumes can only be added to stateful services");
+	}
+
+	const sanitizedName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+	if (!sanitizedName || sanitizedName.length < 1) {
+		throw new Error("Invalid volume name");
+	}
+
+	const trimmedPath = containerPath.trim();
+	if (!trimmedPath.startsWith("/")) {
+		throw new Error("Container path must be an absolute path");
+	}
+
+	const existing = await db
+		.select()
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
+	if (existing.some((v) => v.name === sanitizedName)) {
+		throw new Error("Volume with this name already exists");
+	}
+
+	if (existing.some((v) => v.containerPath === trimmedPath)) {
+		throw new Error("A volume with this container path already exists");
+	}
+
+	const id = randomUUID();
+	await db.insert(serviceVolumes).values({
+		id,
+		serviceId,
+		name: sanitizedName,
+		containerPath: trimmedPath,
+	});
+
+	return { id, name: sanitizedName, containerPath: trimmedPath };
+}
+
+export async function removeServiceVolume(volumeId: string) {
+	const volume = await db
+		.select()
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.id, volumeId));
+
+	if (!volume[0]) {
+		throw new Error("Volume not found");
+	}
+
+	const service = await getService(volume[0].serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	const activeDeployments = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.serviceId, volume[0].serviceId));
+
+	const runningStatuses = ["pending", "pulling", "starting", "healthy", "dns_updating", "caddy_updating", "stopping_old", "running"];
+	const hasRunning = activeDeployments.some((d) => runningStatuses.includes(d.status));
+	if (hasRunning) {
+		throw new Error("Stop the service before removing volumes");
+	}
+
+	await db.delete(serviceVolumes).where(eq(serviceVolumes.id, volumeId));
+
+	return { success: true };
+}
+
+export async function getServiceVolumes(serviceId: string) {
+	const volumes = await db
+		.select()
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
+	return volumes;
 }
 

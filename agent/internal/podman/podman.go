@@ -3,6 +3,7 @@ package podman
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -21,6 +22,12 @@ type HealthCheck struct {
 	StartPeriod int
 }
 
+type VolumeMount struct {
+	Name          string
+	HostPath      string
+	ContainerPath string
+}
+
 type BuildLogFunc func(stream string, message string)
 
 type DeployConfig struct {
@@ -34,6 +41,7 @@ type DeployConfig struct {
 	PortMappings []PortMapping
 	HealthCheck  *HealthCheck
 	Env          map[string]string
+	VolumeMounts []VolumeMount
 	LogFunc      BuildLogFunc
 }
 
@@ -83,6 +91,14 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	}
 	logFunc("stdout", string(pullOutput))
 
+	for _, vm := range config.VolumeMounts {
+		if err := os.MkdirAll(vm.HostPath, 0755); err != nil {
+			logFunc("stderr", fmt.Sprintf("Failed to create volume directory %s: %s", vm.HostPath, err))
+			return nil, fmt.Errorf("failed to create volume directory %s: %w", vm.HostPath, err)
+		}
+		logFunc("stdout", fmt.Sprintf("Created volume directory: %s", vm.HostPath))
+	}
+
 	args := []string{
 		"run", "-d",
 		"--name", config.Name,
@@ -108,6 +124,10 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		args = append(args, "--health-timeout", fmt.Sprintf("%ds", config.HealthCheck.Timeout))
 		args = append(args, "--health-retries", fmt.Sprintf("%d", config.HealthCheck.Retries))
 		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
+	}
+
+	for _, vm := range config.VolumeMounts {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", vm.HostPath, vm.ContainerPath))
 	}
 
 	for key, value := range config.Env {
@@ -188,7 +208,7 @@ func GetHealthStatus(containerID string) string {
 	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return ""
+		return "none"
 	}
 	status := strings.TrimSpace(string(output))
 	if status == "<no value>" || status == "" {
@@ -205,19 +225,23 @@ func CheckPrerequisites() error {
 }
 
 type Container struct {
-	ID      string `json:"Id"`
-	Name    string `json:"Name"`
-	Image   string `json:"Image"`
-	State   string `json:"State"`
-	Created int64  `json:"Created"`
+	ID           string            `json:"Id"`
+	Name         string            `json:"Name"`
+	Image        string            `json:"Image"`
+	State        string            `json:"State"`
+	Created      int64             `json:"Created"`
+	Labels       map[string]string `json:"Labels"`
+	DeploymentID string
+	ServiceID    string
 }
 
 type podmanContainer struct {
-	Id      string   `json:"Id"`
-	Names   []string `json:"Names"`
-	Image   string   `json:"Image"`
-	State   string   `json:"State"`
-	Created int64    `json:"Created"`
+	Id      string            `json:"Id"`
+	Names   []string          `json:"Names"`
+	Image   string            `json:"Image"`
+	State   string            `json:"State"`
+	Created int64             `json:"Created"`
+	Labels  map[string]string `json:"Labels"`
 }
 
 func ListContainers() ([]Container, error) {
@@ -239,11 +263,14 @@ func ListContainers() ([]Container, error) {
 			name = pc.Names[0]
 		}
 		containers[i] = Container{
-			ID:      pc.Id,
-			Name:    name,
-			Image:   pc.Image,
-			State:   pc.State,
-			Created: pc.Created,
+			ID:           pc.Id,
+			Name:         name,
+			Image:        pc.Image,
+			State:        pc.State,
+			Created:      pc.Created,
+			Labels:       pc.Labels,
+			DeploymentID: pc.Labels["techulus.deployment.id"],
+			ServiceID:    pc.Labels["techulus.service.id"],
 		}
 	}
 

@@ -40,6 +40,7 @@ import { RolloutStatusBar } from "./rollout-status";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
 import { SecretsSection } from "./secrets-section";
+import { VolumesSection } from "./volumes-section";
 import type { Service } from "./types";
 
 export type { Service } from "./types";
@@ -218,6 +219,11 @@ export function ServiceDetails({
 						<ContainerSourceSection service={service} />
 
 						<ReplicasSection
+							service={service}
+							onUpdate={handleActionComplete}
+						/>
+
+						<VolumesSection
 							service={service}
 							onUpdate={handleActionComplete}
 						/>

@@ -6,6 +6,7 @@ import { createService, validateDockerImage } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
 	Dialog,
 	DialogContent,
@@ -26,6 +27,7 @@ export function CreateServiceDialog({
 	const [isOpen, setIsOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [image, setImage] = useState("");
+	const [stateful, setStateful] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -44,10 +46,11 @@ export function CreateServiceDialog({
 				return;
 			}
 
-			await createService(projectId, name.trim(), image.trim(), []);
+			await createService(projectId, name.trim(), image.trim(), [], stateful);
 			setIsOpen(false);
 			setName("");
 			setImage("");
+			setStateful(false);
 			setError(null);
 			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
@@ -64,6 +67,7 @@ export function CreateServiceDialog({
 		if (!open) {
 			setName("");
 			setImage("");
+			setStateful(false);
 			setError(null);
 		}
 	};
@@ -107,6 +111,19 @@ export function CreateServiceDialog({
 								<p className="text-xs text-muted-foreground">
 									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or any public registry
 								</p>
+							</div>
+							<div className="flex items-center justify-between rounded-lg border p-3">
+								<div className="space-y-0.5">
+									<Label htmlFor="stateful-toggle">Stateful Service</Label>
+									<p className="text-xs text-muted-foreground">
+										Enable to add persistent volumes. Limited to 1 replica and locked to a single server.
+									</p>
+								</div>
+								<Switch
+									id="stateful-toggle"
+									checked={stateful}
+									onCheckedChange={setStateful}
+								/>
 							</div>
 							<div className="flex justify-end gap-2">
 								<Button

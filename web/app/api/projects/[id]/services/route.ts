@@ -7,6 +7,7 @@ import {
   services,
   servicePorts,
   serviceReplicas,
+  serviceVolumes,
   deployments,
   deploymentPorts,
   servers,
@@ -37,7 +38,7 @@ export async function GET(
 
   const result = await Promise.all(
     servicesList.map(async (service) => {
-      const [ports, serviceDeployments, replicas, serviceSecrets, serviceRollouts] = await Promise.all([
+      const [ports, serviceDeployments, replicas, serviceSecrets, serviceRollouts, volumes, lockedServer] = await Promise.all([
         db
           .select()
           .from(servicePorts)
@@ -67,6 +68,17 @@ export async function GET(
           .from(rollouts)
           .where(eq(rollouts.serviceId, service.id))
           .orderBy(desc(rollouts.createdAt)),
+        db
+          .select()
+          .from(serviceVolumes)
+          .where(eq(serviceVolumes.serviceId, service.id)),
+        service.lockedServerId
+          ? db
+              .select({ name: servers.name })
+              .from(servers)
+              .where(eq(servers.id, service.lockedServerId))
+              .then((r) => r[0])
+          : Promise.resolve(null),
       ]);
 
       const deploymentsWithDetails = await Promise.all(
@@ -106,6 +118,8 @@ export async function GET(
         deployments: deploymentsWithDetails,
         secrets: serviceSecrets,
         rollouts: serviceRollouts,
+        volumes,
+        lockedServer,
       };
     })
   );

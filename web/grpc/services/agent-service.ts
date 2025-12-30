@@ -18,6 +18,8 @@ import { handleStatusUpdate, markServerOffline } from "../handlers/status";
 import { handleWorkComplete, handleConfigAck } from "../handlers/work";
 import { handleLogEntry } from "../handlers/logs";
 import { connectionStore } from "../store/connections";
+import { pushDnsConfigToAll } from "../handlers/dns";
+import { pushCaddyConfigToAll } from "../handlers/caddy";
 
 type AgentStream = grpc.ServerDuplexStream<AgentMessage, ControlPlaneMessage>;
 
@@ -194,6 +196,13 @@ export function createAgentService(): AgentServiceServer {
 							container_health: msg.status_update.container_health,
 						});
 
+						pushDnsConfigToAll().catch((err) =>
+							console.error("[dns] Failed to push config on connect:", err)
+						);
+						pushCaddyConfigToAll().catch((err) =>
+							console.error("[caddy] Failed to push config on connect:", err)
+						);
+
 						return;
 					}
 
@@ -219,26 +228,6 @@ export function createAgentService(): AgentServiceServer {
 							ctx.serverId,
 							401,
 							"Invalid signature",
-							true
-						);
-						call.end();
-						return;
-					}
-
-					if (
-						!connectionStore.validateAndUpdateSequence(
-							ctx.serverId!,
-							msg.sequence
-						)
-					) {
-						console.error(
-							`[agent:${ctx.serverName}] replay attack detected: seq=${msg.sequence}`
-						);
-						sendError(
-							call,
-							ctx.serverId,
-							400,
-							"Invalid sequence number (replay detected)",
 							true
 						);
 						call.end();
