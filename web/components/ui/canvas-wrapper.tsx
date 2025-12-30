@@ -46,6 +46,12 @@ const statusColorMap: Record<string, StatusColors> = {
 		dot: "bg-rose-500",
 		text: "text-rose-600 dark:text-rose-400",
 	},
+	unknown: {
+		bg: "bg-slate-500/5",
+		border: "border-slate-400/30",
+		dot: "bg-slate-400",
+		text: "text-slate-500 dark:text-slate-400",
+	},
 };
 
 const defaultColors: StatusColors = {
@@ -68,10 +74,12 @@ export function getStatusColorFromDeployments(
 	);
 	const hasFailed = deployments.some((d) => d.status === "failed");
 	const hasStopped = deployments.some((d) => d.status === "stopped");
+	const hasUnknown = deployments.some((d) => d.status === "unknown");
 
 	if (hasRunning) return statusColorMap.running;
 	if (hasPending) return statusColorMap.pending;
 	if (hasFailed) return statusColorMap.failed;
+	if (hasUnknown) return statusColorMap.unknown;
 	if (hasStopped) return statusColorMap.stopped;
 	return defaultColors;
 }

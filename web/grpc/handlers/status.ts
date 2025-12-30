@@ -185,6 +185,12 @@ async function updateContainerHealth(
       updateFields.containerId = ch.container_id;
     }
 
+    if (deployment.status === "unknown") {
+      const newStatus = healthStatus === "healthy" || healthStatus === "none" ? "running" : "starting";
+      updateFields.status = newStatus;
+      console.log(`[health:restore] deployment ${deployment.id} restored from unknown to ${newStatus}`);
+    }
+
     await db
       .update(deployments)
       .set(updateFields)
@@ -238,7 +244,7 @@ export async function markServerOffline(serverId: string): Promise<void> {
 
   await db
     .update(deployments)
-    .set({ status: "stopped", healthStatus: null })
+    .set({ status: "unknown", healthStatus: null })
     .where(
       and(
         eq(deployments.serverId, serverId),

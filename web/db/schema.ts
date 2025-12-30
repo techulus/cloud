@@ -232,6 +232,7 @@ export const deployments = pgTable(
 				"stopped",
 				"failed",
 				"rolled_back",
+				"unknown",
 			],
 		})
 			.notNull()

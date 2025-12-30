@@ -18,6 +18,7 @@ const statusLabels: Record<string, string> = {
 	stopped: "Stopped",
 	failed: "Failed",
 	rolled_back: "Rolled back",
+	unknown: "Unknown",
 };
 
 function getStatusLabel(status: string): string {

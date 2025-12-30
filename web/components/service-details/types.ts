@@ -16,7 +16,8 @@ export type DeploymentStatus =
 	| "stopping"
 	| "stopped"
 	| "failed"
-	| "rolled_back";
+	| "rolled_back"
+	| "unknown";
 
 export type Deployment = {
 	id: string;
