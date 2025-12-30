@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, memo } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,9 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
-import { updateServiceConfig } from "@/actions/projects";
+import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
+import { EditableText } from "@/components/editable-text";
+import { slugify } from "@/lib/utils";
 import type { Service, StagedPort } from "./types";
 
 type Server = {
@@ -84,6 +87,7 @@ export const PortsSection = memo(function PortsSection({
 	service: Service;
 	onUpdate: () => void;
 }) {
+	const router = useRouter();
 	const [pendingAdds, setPendingAdds] = useState<StagedPort[]>([]);
 	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
 	const [newPort, setNewPort] = useState("");
@@ -91,6 +95,13 @@ export const PortsSection = memo(function PortsSection({
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
 	const [servers, setServers] = useState<Server[]>([]);
+
+	const hostname = service.hostname || slugify(service.name);
+
+	const handleHostnameChange = async (newHostname: string) => {
+		await updateServiceHostname(service.id, newHostname);
+		router.refresh();
+	};
 
 	useEffect(() => {
 		fetch("/api/servers")
@@ -187,6 +198,18 @@ export const PortsSection = memo(function PortsSection({
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-4">
+				<div className="flex items-center gap-1 text-sm">
+					<Lock className="h-4 w-4 text-muted-foreground" />
+					<span className="text-muted-foreground">Private endpoint:</span>
+					<EditableText
+						value={hostname}
+						onChange={handleHostnameChange}
+						label="hostname"
+						textClassName="text-sm font-mono"
+					/>
+					<span className="text-muted-foreground">.internal</span>
+				</div>
+
 				{stagedPorts.length > 0 && (
 					<div className="space-y-2">
 						{stagedPorts.map((port) => {
