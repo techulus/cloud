@@ -184,16 +184,6 @@ func ForceRemove(containerID string) error {
 	return fmt.Errorf("failed to force remove container after 3 attempts: %w", lastErr)
 }
 
-func IsRunning(containerID string) (bool, error) {
-	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Running}}", containerID)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, nil
-	}
-
-	return strings.TrimSpace(string(output)) == "true", nil
-}
-
 func GetHealthStatus(containerID string) string {
 	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
 	output, err := cmd.CombinedOutput()

@@ -139,9 +139,3 @@ func LoadPrivateKey(dataDir string) (string, error) {
 	}
 	return strings.TrimSpace(string(data)), nil
 }
-
-func PrivateKeyExists(dataDir string) bool {
-	path := filepath.Join(dataDir, "wireguard.key")
-	_, err := os.Stat(path)
-	return err == nil
-}

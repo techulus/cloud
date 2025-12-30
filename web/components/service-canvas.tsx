@@ -43,6 +43,7 @@ type Service = {
 	id: string;
 	projectId: string;
 	name: string;
+	hostname: string | null;
 	image: string;
 	replicas: number;
 	deployedConfig: string | null;
@@ -134,7 +135,7 @@ function ServiceCard({
 							<div className="flex items-center gap-1.5 text-xs">
 								<Lock className="h-3 w-3 text-zinc-500" />
 								<span className="text-zinc-600 dark:text-zinc-400">
-									{service.name}.internal
+									{service.hostname || service.name}.internal
 								</span>
 							</div>
 						)}

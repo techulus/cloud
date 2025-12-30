@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { deployments, services } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { slugify } from "@/lib/utils";
 import { connectionStore } from "../store/connections";
 import type { DnsRecord } from "../generated/proto/agent";
 
@@ -25,8 +26,9 @@ export async function getAllDnsRecords(): Promise<DnsRecord[]> {
       .filter((ip): ip is string => ip !== null);
 
     if (ips.length > 0) {
+      const hostname = service.hostname || slugify(service.name);
       records.push({
-        name: `${service.name}.internal`,
+        name: `${hostname}.internal`,
         ips,
       });
     }

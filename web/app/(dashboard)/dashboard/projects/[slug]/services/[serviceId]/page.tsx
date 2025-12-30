@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { PageHeader } from "@/components/page-header";
+import { ServiceHeader } from "@/components/service-header";
 import { ServiceDetails } from "@/components/service-details";
 import { db } from "@/db";
+import { slugify } from "@/lib/utils";
 import {
 	deploymentPorts,
 	deployments,
@@ -108,8 +109,10 @@ export default async function ServicePage({
 
 	return (
 		<div className="space-y-6">
-			<PageHeader
-				title={data.service.name}
+			<ServiceHeader
+				serviceId={data.service.id}
+				serviceName={data.service.name}
+				serviceHostname={data.service.hostname || slugify(data.service.name)}
 				breadcrumbs={[
 					{ label: "Projects", href: "/dashboard" },
 					{ label: data.project.name, href: `/dashboard/projects/${slug}` },

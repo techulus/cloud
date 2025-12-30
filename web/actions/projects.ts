@@ -21,19 +21,136 @@ import {
 	type PortConfig,
 } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
+import { slugify } from "@/lib/utils";
 import { getService } from "@/db/queries";
 
-function slugify(text: string): string {
-	return text
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "");
+function parseImageReference(image: string): {
+	registry: string;
+	namespace: string;
+	repository: string;
+	tag: string | null;
+	digest: string | null;
+} {
+	let registry = "docker.io";
+	let namespace = "library";
+	let repository: string;
+	let tag: string | null = "latest";
+	let digest: string | null = null;
+	let imagePath = image;
+
+	const digestIndex = imagePath.indexOf("@");
+	if (digestIndex !== -1) {
+		digest = imagePath.substring(digestIndex + 1);
+		imagePath = imagePath.substring(0, digestIndex);
+		tag = null;
+	} else {
+		const tagIndex = imagePath.lastIndexOf(":");
+		if (tagIndex !== -1 && !imagePath.substring(tagIndex).includes("/")) {
+			tag = imagePath.substring(tagIndex + 1);
+			imagePath = imagePath.substring(0, tagIndex);
+		}
+	}
+
+	const parts = imagePath.split("/");
+
+	if (parts.length === 1) {
+		repository = parts[0];
+	} else if (parts.length === 2) {
+		if (parts[0].includes(".") || parts[0].includes(":")) {
+			registry = parts[0];
+			repository = parts[1];
+		} else {
+			namespace = parts[0];
+			repository = parts[1];
+		}
+	} else {
+		registry = parts[0];
+		namespace = parts.slice(1, -1).join("/");
+		repository = parts[parts.length - 1];
+	}
+
+	return { registry, namespace, repository, tag, digest };
 }
 
 export async function validateDockerImage(
-	_image: string,
+	image: string,
 ): Promise<{ valid: boolean; error?: string }> {
-	return { valid: true };
+	try {
+		const { registry, namespace, repository, tag, digest } = parseImageReference(image);
+		const reference = digest || tag || "latest";
+
+		if (registry === "docker.io") {
+			const repoPath = namespace === "library" ? repository : `${namespace}/${repository}`;
+
+			if (digest) {
+				const tokenUrl = `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${namespace === "library" ? "library/" : ""}${repoPath}:pull`;
+				const tokenResponse = await fetch(tokenUrl);
+				if (!tokenResponse.ok) {
+					return { valid: false, error: "Failed to authenticate with Docker Hub" };
+				}
+				const tokenData = await tokenResponse.json();
+				const token = tokenData.token;
+
+				const manifestUrl = `https://registry-1.docker.io/v2/${namespace === "library" ? "library/" : ""}${repoPath}/manifests/${digest}`;
+				const manifestResponse = await fetch(manifestUrl, {
+					headers: {
+						Authorization: `Bearer ${token}`,
+						Accept: "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+					},
+				});
+
+				if (manifestResponse.status === 404) {
+					return { valid: false, error: "Image digest not found on Docker Hub" };
+				}
+				if (!manifestResponse.ok) {
+					return { valid: false, error: "Failed to validate image" };
+				}
+				return { valid: true };
+			}
+
+			const url = `https://hub.docker.com/v2/repositories/${repoPath}/tags/${reference}`;
+			const response = await fetch(url, { method: "GET" });
+
+			if (response.status === 404) {
+				return { valid: false, error: "Image or tag not found on Docker Hub" };
+			}
+			if (!response.ok) {
+				return { valid: false, error: "Failed to validate image" };
+			}
+			return { valid: true };
+		}
+
+		if (registry === "ghcr.io") {
+			const tokenUrl = `https://ghcr.io/token?scope=repository:${namespace}/${repository}:pull`;
+			const tokenResponse = await fetch(tokenUrl);
+			if (!tokenResponse.ok) {
+				return { valid: false, error: "Image not found on GitHub Container Registry" };
+			}
+			const tokenData = await tokenResponse.json();
+			const token = tokenData.token;
+
+			const manifestUrl = `https://ghcr.io/v2/${namespace}/${repository}/manifests/${reference}`;
+			const manifestResponse = await fetch(manifestUrl, {
+				headers: {
+					Authorization: `Bearer ${token}`,
+					Accept: "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+				},
+			});
+
+			if (manifestResponse.status === 404) {
+				return { valid: false, error: `Image ${digest ? "digest" : "tag"} not found on GitHub Container Registry` };
+			}
+			if (!manifestResponse.ok) {
+				return { valid: false, error: "Failed to validate image" };
+			}
+			return { valid: true };
+		}
+
+		return { valid: true };
+	} catch (error) {
+		console.error("Image validation error:", error);
+		return { valid: false, error: "Failed to validate image" };
+	}
 }
 
 function normalizeImage(image: string): string {
@@ -63,6 +180,34 @@ export async function deleteProject(id: string) {
 	await db.delete(projects).where(eq(projects.id, id));
 }
 
+export async function updateProject(id: string, name: string) {
+	const trimmed = name.trim();
+	if (!trimmed) {
+		throw new Error("Project name cannot be empty");
+	}
+
+	const slug = slugify(trimmed);
+	if (!slug) {
+		throw new Error("Invalid project name");
+	}
+
+	const existing = await db
+		.select({ id: projects.id })
+		.from(projects)
+		.where(eq(projects.slug, slug));
+
+	if (existing.some((p) => p.id !== id)) {
+		throw new Error("A project with this name already exists");
+	}
+
+	await db
+		.update(projects)
+		.set({ name: trimmed, slug })
+		.where(eq(projects.id, id));
+
+	return { id, name: trimmed, slug };
+}
+
 export async function createService(
 	projectId: string,
 	name: string,
@@ -70,11 +215,13 @@ export async function createService(
 	ports: number[],
 ) {
 	const id = randomUUID();
+	const hostname = slugify(name);
 
 	await db.insert(services).values({
 		id,
 		projectId,
 		name,
+		hostname,
 		image,
 		replicas: 0,
 	});
@@ -133,6 +280,53 @@ export async function deleteService(serviceId: string) {
 	await db.delete(services).where(eq(services.id, serviceId));
 
 	return { success: true };
+}
+
+export async function updateServiceName(serviceId: string, name: string) {
+	const trimmed = name.trim();
+	if (!trimmed) {
+		throw new Error("Service name cannot be empty");
+	}
+
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	await db
+		.update(services)
+		.set({ name: trimmed })
+		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
+export async function updateServiceHostname(serviceId: string, hostname: string) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	const sanitized = slugify(hostname);
+	if (!sanitized) {
+		throw new Error("Invalid hostname");
+	}
+
+	const existing = await db
+		.select({ id: services.id })
+		.from(services)
+		.where(eq(services.hostname, sanitized));
+
+	if (existing.some((s) => s.id !== serviceId)) {
+		throw new Error("Hostname is already in use");
+	}
+
+	await db
+		.update(services)
+		.set({ hostname: sanitized })
+		.where(eq(services.id, serviceId));
+
+	return { success: true, hostname: sanitized };
 }
 
 type PortChange = {
@@ -428,11 +622,6 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		}
 	}
 
-	const servicePortsList2 = await db
-		.select()
-		.from(servicePorts)
-		.where(eq(servicePorts.serviceId, serviceId));
-
 	const replicaConfigs = placements
 		.filter((p) => p.replicas > 0)
 		.map((p) => ({
@@ -441,7 +630,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 			count: p.replicas,
 		}));
 
-	const portConfigs = servicePortsList2.map((p) => ({
+	const portConfigs = servicePortsList.map((p) => ({
 		port: p.port,
 		isPublic: p.isPublic,
 		domain: p.domain,

@@ -137,6 +137,7 @@ export const services = pgTable("services", {
 		.notNull()
 		.references(() => projects.id, { onDelete: "cascade" }),
 	name: text("name").notNull(),
+	hostname: text("hostname"),
 	image: text("image").notNull(),
 	replicas: integer("replicas").notNull().default(1),
 	healthCheckCmd: text("health_check_cmd"),

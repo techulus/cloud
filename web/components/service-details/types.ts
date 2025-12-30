@@ -66,6 +66,7 @@ export type Service = {
 	id: string;
 	projectId: string;
 	name: string;
+	hostname: string | null;
 	image: string;
 	replicas: number;
 	deployedConfig: string | null;

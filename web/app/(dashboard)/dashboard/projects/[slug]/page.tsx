@@ -8,7 +8,7 @@ import {
 	getServiceReplicas,
 } from "@/db/queries";
 import { ServiceCanvas } from "@/components/service-canvas";
-import { PageHeader } from "@/components/page-header";
+import { ProjectHeader } from "@/components/project-header";
 import { CreateServiceDialog } from "@/components/create-service-dialog";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
@@ -69,9 +69,9 @@ export default async function ProjectPage({
 	return (
 		<div className="relative">
 			<div className="absolute top-0 left-0 right-0 z-10 py-2 -mx-4 px-4">
-				<PageHeader
-					title={project.name}
-					breadcrumbs={[{ label: "Projects", href: "/dashboard" }]}
+				<ProjectHeader
+					projectId={project.id}
+					projectName={project.name}
 					actions={<CreateServiceDialog projectId={project.id} />}
 				/>
 			</div>
