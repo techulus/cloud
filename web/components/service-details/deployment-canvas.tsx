@@ -1,7 +1,11 @@
 "use client";
 
 import { Globe, Server, Box, HeartPulse, Lock, ArrowDown } from "lucide-react";
-import { CanvasWrapper, getStatusColor, getHealthColor } from "@/components/ui/canvas-wrapper";
+import {
+	CanvasWrapper,
+	getStatusColor,
+	getHealthColor,
+} from "@/components/ui/canvas-wrapper";
 import { Spinner } from "@/components/ui/spinner";
 import type { Service, Deployment } from "./types";
 
@@ -27,9 +31,10 @@ function getStatusLabel(status: string): string {
 
 function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	const colors = getStatusColor(deployment.status);
-	const healthColor = deployment.healthStatus && deployment.healthStatus !== "none"
-		? getHealthColor(deployment.healthStatus)
-		: null;
+	const healthColor =
+		deployment.healthStatus && deployment.healthStatus !== "none"
+			? getHealthColor(deployment.healthStatus)
+			: null;
 	const isTransitioning =
 		deployment.status === "pending" ||
 		deployment.status === "pulling" ||
@@ -59,9 +64,13 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 								className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.dot} opacity-75`}
 							/>
 						)}
-						<span className={`relative inline-flex rounded-full h-2 w-2 ${colors.dot} transition-colors duration-300`} />
+						<span
+							className={`relative inline-flex rounded-full h-2 w-2 ${colors.dot} transition-colors duration-300`}
+						/>
 					</span>
-					<span className={`text-xs font-medium ${colors.text} transition-colors duration-300`}>
+					<span
+						className={`text-xs font-medium ${colors.text} transition-colors duration-300`}
+					>
 						{getStatusLabel(deployment.status)}
 					</span>
 					{isTransitioning && <Spinner className="h-3 w-3" />}
@@ -70,8 +79,12 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 
 			{healthColor && deployment.status === "running" && (
 				<div className="flex items-center gap-1 animate-in fade-in duration-300">
-					<HeartPulse className={`h-3 w-3 ${healthColor.text} transition-colors duration-300`} />
-					<span className={`text-xs font-medium capitalize ${healthColor.text} transition-colors duration-300`}>
+					<HeartPulse
+						className={`h-3 w-3 ${healthColor.text} transition-colors duration-300`}
+					/>
+					<span
+						className={`text-xs font-medium capitalize ${healthColor.text} transition-colors duration-300`}
+					>
 						{deployment.healthStatus}
 					</span>
 				</div>
@@ -128,7 +141,9 @@ interface DeploymentCanvasProps {
 export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
 	const hasPublicIngress = publicPorts.length > 0;
-	const hasRunningDeployments = service.deployments.some((d) => d.status === "running");
+	const hasRunningDeployments = service.deployments.some(
+		(d) => d.status === "running",
+	);
 
 	const deploymentsByServer = service.deployments.reduce(
 		(acc, deployment) => {
@@ -157,9 +172,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 						<div className="w-16 h-16 mx-auto rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
 							<Box className="h-8 w-8 text-zinc-400" />
 						</div>
-						<p className="text-muted-foreground">
-							No deployments yet.
-						</p>
+						<p className="text-muted-foreground">No deployments yet.</p>
 					</div>
 				}
 			/>
@@ -169,7 +182,10 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	const hasEndpoints = hasPublicIngress || hasRunningDeployments;
 
 	return (
-		<CanvasWrapper height="auto" className="flex items-center justify-center min-h-[70vh]">
+		<CanvasWrapper
+			height="auto"
+			className="flex items-center justify-center min-h-[84vh]"
+		>
 			<div className="flex flex-col items-center gap-4">
 				{hasEndpoints && (
 					<>
@@ -206,7 +222,10 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 				<div className="flex flex-wrap gap-6 justify-center items-start">
 					{serverGroups.map((group) => (
-						<div key={group.serverName} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+						<div
+							key={group.serverName}
+							className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+						>
 							<ServerBox
 								serverName={group.serverName}
 								deployments={group.deployments}

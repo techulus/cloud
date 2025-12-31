@@ -316,22 +316,3 @@ export const workQueue = pgTable("work_queue", {
 	attempts: integer("attempts").notNull().default(0),
 });
 
-export const containerLogs = pgTable(
-	"container_logs",
-	{
-		id: text("id").primaryKey(),
-		deploymentId: text("deployment_id")
-			.notNull()
-			.references(() => deployments.id, { onDelete: "cascade" }),
-		stream: text("stream", { enum: ["stdout", "stderr"] }).notNull(),
-		message: text("message").notNull(),
-		timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
-		createdAt: timestamp("created_at", { withTimezone: true })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		index("container_logs_deployment_idx").on(table.deploymentId),
-		index("container_logs_timestamp_idx").on(table.timestamp),
-	],
-);

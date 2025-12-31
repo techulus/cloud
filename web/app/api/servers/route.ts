@@ -4,6 +4,9 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { and, eq, lt } from "drizzle-orm";
+
+const HEARTBEAT_STALE_THRESHOLD_MS = 30 * 1000;
 
 export async function GET() {
   const session = await auth.api.getSession({
@@ -13,6 +16,17 @@ export async function GET() {
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const staleThreshold = new Date(Date.now() - HEARTBEAT_STALE_THRESHOLD_MS);
+  await db
+    .update(servers)
+    .set({ status: "offline" })
+    .where(
+      and(
+        eq(servers.status, "online"),
+        lt(servers.lastHeartbeat, staleThreshold)
+      )
+    );
 
   const data = await db
     .select({

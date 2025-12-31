@@ -21,6 +21,7 @@ import (
 	"techulus/cloud-agent/internal/crypto"
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/logs"
 	"techulus/cloud-agent/internal/podman"
 	"techulus/cloud-agent/internal/reconcile"
 	"techulus/cloud-agent/internal/retry"
@@ -77,16 +78,18 @@ type Agent struct {
 	dataDir         string
 	expectedState   *agenthttp.ExpectedState
 	processingStart time.Time
+	logCollector    *logs.Collector
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector) *Agent {
 	return &Agent{
-		state:      StateIdle,
-		client:     client,
-		reconciler: reconciler,
-		config:     config,
-		publicIP:   publicIP,
-		dataDir:    dataDir,
+		state:        StateIdle,
+		client:       client,
+		reconciler:   reconciler,
+		config:       config,
+		publicIP:     publicIP,
+		dataDir:      dataDir,
+		logCollector: logCollector,
 	}
 }
 
@@ -94,16 +97,58 @@ func (a *Agent) Run(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
+	var logTickerC <-chan time.Time
+	if a.logCollector != nil {
+		a.logCollector.Start()
+		logTicker := time.NewTicker(5 * time.Second)
+		defer logTicker.Stop()
+		logTickerC = logTicker.C
+	}
+
 	a.tick()
 
 	for {
 		select {
 		case <-ctx.Done():
+			if a.logCollector != nil {
+				a.logCollector.Stop()
+			}
 			return
 		case <-ticker.C:
 			a.tick()
+		case <-logTickerC:
+			a.collectLogs()
 		}
 	}
+}
+
+func (a *Agent) collectLogs() {
+	if a.logCollector == nil {
+		return
+	}
+
+	containers, err := podman.ListContainers()
+	if err != nil {
+		return
+	}
+
+	var containerInfos []logs.ContainerInfo
+	for _, c := range containers {
+		if c.DeploymentID == "" || c.ServiceID == "" {
+			continue
+		}
+		if c.State != "running" {
+			continue
+		}
+		containerInfos = append(containerInfos, logs.ContainerInfo{
+			DeploymentID: c.DeploymentID,
+			ServiceID:    c.ServiceID,
+			ContainerID:  c.ID,
+		})
+	}
+
+	a.logCollector.UpdateContainers(containerInfos)
+	a.logCollector.Collect()
 }
 
 func (a *Agent) tick() {
@@ -576,11 +621,13 @@ func main() {
 	var (
 		controlPlaneURL string
 		token           string
+		logsEndpoint    string
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
+	flag.StringVar(&logsEndpoint, "logs-endpoint", "", "VictoriaLogs endpoint URL (enables logging)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -716,6 +763,12 @@ func main() {
 	reconciler := reconcile.NewReconciler(config.EncryptionKey)
 	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair)
 
+	var logCollector *logs.Collector
+	if logsEndpoint != "" {
+		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
+		logCollector = logs.NewCollector(logs.NewVictoriaLogsSender(logsEndpoint), dataDir)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	stop := make(chan os.Signal, 1)
@@ -730,7 +783,7 @@ func main() {
 	publicIP := getPublicIP()
 	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, dataDir)
+	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector)
 	agent.Run(ctx)
 
 	log.Println("Agent stopped")

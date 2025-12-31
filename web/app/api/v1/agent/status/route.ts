@@ -120,7 +120,6 @@ async function checkRolloutProgress(rolloutId: string): Promise<void> {
         .where(
           and(
             eq(deployments.serviceId, rollout.serviceId),
-            eq(deployments.status, "stopped"),
             or(
               isNull(deployments.rolloutId),
               ne(deployments.rolloutId, rolloutId)

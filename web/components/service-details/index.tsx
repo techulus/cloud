@@ -127,15 +127,17 @@ export function ServiceDetails({
 					</TabsTrigger>
 				</TabsList>
 
-				<TabsContent value="deployment" className="pt-4">
-					<div className="relative space-y-4 min-h-[70vh]">
+				<TabsContent value="deployment" className="pt-2">
+					<div className="relative space-y-4">
 						{service.deployments.length > 0 && (
 							<div className="absolute top-4 left-4 flex items-center gap-2">
 								{service.deployments.some((d) => d.status === "running") && (
 									<>
 										<ActionButton
 											action={async () => {
-												const placements = (service.configuredReplicas || []).map((r) => ({
+												const placements = (
+													service.configuredReplicas || []
+												).map((r) => ({
 													serverId: r.serverId,
 													replicas: r.count,
 												}));
@@ -166,7 +168,10 @@ export function ServiceDetails({
 								)}
 								{!service.deployments.some((d) => d.status === "running") &&
 									service.deployments.some(
-										(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
+										(d) =>
+											d.status === "stopped" ||
+											d.status === "failed" ||
+											d.status === "rolled_back",
 									) &&
 									(service.configuredReplicas || []).length > 0 && (
 										<ActionButton
@@ -187,12 +192,18 @@ export function ServiceDetails({
 										/>
 									)}
 								{service.deployments.some(
-									(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
+									(d) =>
+										d.status === "stopped" ||
+										d.status === "failed" ||
+										d.status === "rolled_back",
 								) && (
 									<ActionButton
 										action={async () => {
 											const deletable = service.deployments.filter(
-												(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
+												(d) =>
+													d.status === "stopped" ||
+													d.status === "failed" ||
+													d.status === "rolled_back",
 											);
 											for (const dep of deletable) {
 												await deleteDeployment(dep.id);
@@ -224,10 +235,7 @@ export function ServiceDetails({
 							onUpdate={handleActionComplete}
 						/>
 
-						<VolumesSection
-							service={service}
-							onUpdate={handleActionComplete}
-						/>
+						<VolumesSection service={service} onUpdate={handleActionComplete} />
 
 						<SecretsSection service={service} onUpdate={handleActionComplete} />
 

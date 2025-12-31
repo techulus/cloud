@@ -36,9 +36,7 @@ func StreamLogs(ctx context.Context, opts LogsOptions, entryCh chan<- LogEntry, 
 
 	if opts.Tail > 0 {
 		args = append(args, "--tail", strconv.Itoa(opts.Tail))
-	} else if opts.Tail == -1 {
-		args = append(args, "--tail", "all")
-	} else {
+	} else if opts.Tail != -1 {
 		args = append(args, "--tail", "100")
 	}
 

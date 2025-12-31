@@ -68,13 +68,7 @@ export default async function ProjectPage({
 
 	return (
 		<div className="relative">
-			<div className="absolute top-0 left-0 right-0 z-10 py-2 -mx-4 px-4">
-				<ProjectHeader
-					projectId={project.id}
-					projectName={project.name}
-					actions={<CreateServiceDialog projectId={project.id} />}
-				/>
-			</div>
+			<ProjectHeader projectId={project.id} projectName={project.name} />
 			<ServiceCanvas
 				projectId={project.id}
 				projectSlug={slug}

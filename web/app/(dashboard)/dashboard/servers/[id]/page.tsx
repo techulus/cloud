@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { PageHeader } from "@/components/page-header";
+import { ServerHeader } from "@/components/server-header";
 import { db } from "@/db";
 import { workQueue } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -90,9 +90,8 @@ export default async function ServerDetailPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={server.name}
-        breadcrumbs={[{ label: "Servers", href: "/dashboard" }]}
+      <ServerHeader
+        serverName={server.name}
         actions={<StatusIndicator status={server.status} />}
       />
 

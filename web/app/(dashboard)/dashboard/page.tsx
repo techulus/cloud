@@ -2,7 +2,6 @@ import { Box } from "lucide-react";
 import Link from "next/link";
 import { listProjects, listServers } from "@/db/queries";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
-import { PageHeader } from "@/components/page-header";
 import { ServerList } from "@/components/server-list";
 import {
 	Card,
@@ -21,11 +20,13 @@ export default async function DashboardPage() {
 	return (
 		<div className="pt-4 space-y-12">
 			<div className="space-y-6">
-				<PageHeader
-					title="Projects"
-					description="Deploy and manage services"
-					actions={<CreateProjectDialog />}
-				/>
+				<div className="flex items-center justify-between">
+					<div>
+						<h2 className="text-lg font-semibold">Projects</h2>
+						<p className="text-sm text-muted-foreground">Deploy and manage services</p>
+					</div>
+					<CreateProjectDialog />
+				</div>
 
 				{projects.length === 0 ? (
 					<Card>

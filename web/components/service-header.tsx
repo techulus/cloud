@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/page-header";
+import { useEffect } from "react";
 import { EditableText } from "@/components/editable-text";
+import { useBreadcrumbs } from "@/components/breadcrumb-context";
 import { updateServiceName } from "@/actions/projects";
 
 type Breadcrumb = {
@@ -20,23 +21,25 @@ export function ServiceHeader({
 	breadcrumbs: Breadcrumb[];
 }) {
 	const router = useRouter();
+	const { setBreadcrumbs, clearBreadcrumbs } = useBreadcrumbs();
 
 	const handleNameChange = async (newName: string) => {
 		await updateServiceName(serviceId, newName);
 		router.refresh();
 	};
 
-	return (
-		<PageHeader
-			title={
-				<EditableText
-					value={serviceName}
-					onChange={handleNameChange}
-					label="service name"
-					textClassName="text-base font-bold"
-				/>
-			}
-			breadcrumbs={breadcrumbs}
-		/>
-	);
+	useEffect(() => {
+		setBreadcrumbs(
+			breadcrumbs,
+			<EditableText
+				value={serviceName}
+				onChange={handleNameChange}
+				label="service name"
+				textClassName="text-sm font-semibold"
+			/>
+		);
+		return () => clearBreadcrumbs();
+	}, [breadcrumbs, serviceName]);
+
+	return null;
 }

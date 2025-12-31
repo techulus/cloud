@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/card";
 
 import { CreateServerDialog } from "@/components/create-server-dialog";
-import { PageHeader } from "@/components/page-header";
 import { fetcher } from "@/lib/fetcher";
 
 type Server = {
@@ -71,11 +70,13 @@ export function ServerList({ initialServers }: { initialServers: Server[] }) {
 
 	return (
 		<div className="space-y-6">
-			<PageHeader
-				title="Servers"
-				description="Manage your server fleet"
-				actions={<CreateServerDialog />}
-			/>
+			<div className="flex items-center justify-between">
+				<div>
+					<h2 className="text-lg font-semibold">Servers</h2>
+					<p className="text-sm text-muted-foreground">Manage your server fleet</p>
+				</div>
+				<CreateServerDialog />
+			</div>
 
 			{!servers || servers.length === 0 ? (
 				<Card>

@@ -1,8 +1,6 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { db } from "@/db";
-import { containerLogs, deployments } from "@/db/schema";
-import { eq, desc, inArray, gt, and } from "drizzle-orm";
+import { isLoggingEnabled, queryLogsByService } from "@/lib/victoria-logs";
 
 export async function GET(
 	request: Request,
@@ -16,51 +14,35 @@ export async function GET(
 		return new Response("Unauthorized", { status: 401 });
 	}
 
+	if (!isLoggingEnabled()) {
+		return Response.json({ logs: [], hasMore: false });
+	}
+
 	const { id: serviceId } = await params;
 	const url = new URL(request.url);
 	const limit = Math.min(
 		Number.parseInt(url.searchParams.get("limit") || "100", 10),
 		1000,
 	);
-	const after = url.searchParams.get("after");
+	const after = url.searchParams.get("after") || undefined;
 
-	const serviceDeployments = await db
-		.select({ id: deployments.id })
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
+	try {
+		const result = await queryLogsByService(serviceId, limit, after);
 
-	if (serviceDeployments.length === 0) {
+		const logs = result.logs.map((log) => ({
+			id: `${log.deployment_id}-${log._time}`,
+			deploymentId: log.deployment_id,
+			stream: log.stream,
+			message: log._msg,
+			timestamp: log._time,
+		}));
+
+		return Response.json({
+			logs: logs.reverse(),
+			hasMore: result.hasMore,
+		});
+	} catch (error) {
+		console.error("[logs:service] failed to query logs:", error);
 		return Response.json({ logs: [], hasMore: false });
 	}
-
-	const deploymentIds = serviceDeployments.map((d) => d.id);
-
-	const whereCondition = after
-		? and(
-				inArray(containerLogs.deploymentId, deploymentIds),
-				gt(containerLogs.timestamp, new Date(after)),
-			)
-		: inArray(containerLogs.deploymentId, deploymentIds);
-
-	let query = db
-		.select({
-			id: containerLogs.id,
-			deploymentId: containerLogs.deploymentId,
-			stream: containerLogs.stream,
-			message: containerLogs.message,
-			timestamp: containerLogs.timestamp,
-		})
-		.from(containerLogs)
-		.where(whereCondition)
-		.orderBy(desc(containerLogs.timestamp))
-		.limit(limit + 1);
-
-	const logs = await query;
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return Response.json({
-		logs: logs.reverse(),
-		hasMore,
-	});
 }
