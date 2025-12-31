@@ -1,6 +1,5 @@
 "use client";
 
-import { Layers, ScrollText, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
@@ -36,12 +35,12 @@ import { DeploymentCanvas } from "./deployment-canvas";
 import { HealthCheckSection } from "./health-check-section";
 import { LogsViewer } from "./logs-viewer";
 import { PendingChangesBar } from "./pending-changes";
-import { RolloutStatusBar } from "./rollout-status";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
+import { RolloutStatusBar } from "./rollout-status";
 import { SecretsSection } from "./secrets-section";
-import { VolumesSection } from "./volumes-section";
 import type { Service } from "./types";
+import { VolumesSection } from "./volumes-section";
 
 export type { Service } from "./types";
 
@@ -113,18 +112,9 @@ export function ServiceDetails({
 					variant="default"
 					className="w-full lg:w-auto lg:max-w-160 -mt-2"
 				>
-					<TabsTrigger value="deployment">
-						<Layers className="h-4 w-4" />
-						Deployment
-					</TabsTrigger>
-					<TabsTrigger value="logs">
-						<ScrollText className="h-4 w-4" />
-						Logs
-					</TabsTrigger>
-					<TabsTrigger value="configuration">
-						<Settings className="h-4 w-4" />
-						Configuration
-					</TabsTrigger>
+					<TabsTrigger value="deployment">Architecture</TabsTrigger>
+					<TabsTrigger value="logs">Logs</TabsTrigger>
+					<TabsTrigger value="configuration">Configuration</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="deployment" className="pt-2">
@@ -222,11 +212,11 @@ export function ServiceDetails({
 					</div>
 				</TabsContent>
 
-				<TabsContent value="logs" className="pt-4">
+				<TabsContent value="logs" className="pt-2">
 					<LogsViewer serviceId={service.id} />
 				</TabsContent>
 
-				<TabsContent value="configuration" className="pt-4">
+				<TabsContent value="configuration" className="pt-2">
 					<div className="space-y-6">
 						<ContainerSourceSection service={service} />
 
