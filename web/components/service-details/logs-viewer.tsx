@@ -12,6 +12,7 @@ import {
 	DropdownMenuCheckboxItem,
 	DropdownMenuSeparator,
 	DropdownMenuLabel,
+	DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
 import {
 	Search,
@@ -221,53 +222,55 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 						<ChevronDown className="size-3" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start">
-						<DropdownMenuLabel>Log Levels</DropdownMenuLabel>
-						<DropdownMenuSeparator />
-						<DropdownMenuCheckboxItem
-							checked={levels.has("error")}
-							onCheckedChange={() => toggleLevel("error")}
-						>
-							<span className="flex items-center gap-2">
-								<span className="size-2 rounded-full bg-red-500" />
-								Error
-							</span>
-						</DropdownMenuCheckboxItem>
-						<DropdownMenuCheckboxItem
-							checked={levels.has("warn")}
-							onCheckedChange={() => toggleLevel("warn")}
-						>
-							<span className="flex items-center gap-2">
-								<span className="size-2 rounded-full bg-yellow-500" />
-								Warn
-							</span>
-						</DropdownMenuCheckboxItem>
-						<DropdownMenuCheckboxItem
-							checked={levels.has("info")}
-							onCheckedChange={() => toggleLevel("info")}
-						>
-							<span className="flex items-center gap-2">
-								<span className="size-2 rounded-full bg-blue-500" />
-								Info
-							</span>
-						</DropdownMenuCheckboxItem>
-						<DropdownMenuCheckboxItem
-							checked={levels.has("debug")}
-							onCheckedChange={() => toggleLevel("debug")}
-						>
-							<span className="flex items-center gap-2">
-								<span className="size-2 rounded-full bg-zinc-500" />
-								Debug
-							</span>
-						</DropdownMenuCheckboxItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuCheckboxItem
-							checked={levels.size === 4}
-							onCheckedChange={() =>
-								levels.size === 4 ? selectNoneLevels() : selectAllLevels()
-							}
-						>
-							Select all
-						</DropdownMenuCheckboxItem>
+						<DropdownMenuGroup>
+							<DropdownMenuLabel>Log Levels</DropdownMenuLabel>
+							<DropdownMenuSeparator />
+							<DropdownMenuCheckboxItem
+								checked={levels.has("error")}
+								onCheckedChange={() => toggleLevel("error")}
+							>
+								<span className="flex items-center gap-2">
+									<span className="size-2 rounded-full bg-red-500" />
+									Error
+								</span>
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={levels.has("warn")}
+								onCheckedChange={() => toggleLevel("warn")}
+							>
+								<span className="flex items-center gap-2">
+									<span className="size-2 rounded-full bg-yellow-500" />
+									Warn
+								</span>
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={levels.has("info")}
+								onCheckedChange={() => toggleLevel("info")}
+							>
+								<span className="flex items-center gap-2">
+									<span className="size-2 rounded-full bg-blue-500" />
+									Info
+								</span>
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={levels.has("debug")}
+								onCheckedChange={() => toggleLevel("debug")}
+							>
+								<span className="flex items-center gap-2">
+									<span className="size-2 rounded-full bg-zinc-500" />
+									Debug
+								</span>
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuCheckboxItem
+								checked={levels.size === 4}
+								onCheckedChange={() =>
+									levels.size === 4 ? selectNoneLevels() : selectAllLevels()
+								}
+							>
+								Select all
+							</DropdownMenuCheckboxItem>
+						</DropdownMenuGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
 
