@@ -23,8 +23,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Local DNS on each machine
 - [x] Health checks
 - [x] Secrets
-- [ ] Deploy Logs
-- [ ] HTTP Logs
+- [x] Volumes
+- [x] Deploy Logs
 - [ ] Rolling updates
 - [ ] GitHub deployments
-- [ ] Volumes
+- [ ] HTTP Logs

@@ -7,13 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -91,7 +84,6 @@ export const PortsSection = memo(function PortsSection({
 	const [pendingAdds, setPendingAdds] = useState<StagedPort[]>([]);
 	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
 	const [newPort, setNewPort] = useState("");
-	const [visibility, setVisibility] = useState<"private" | "public">("private");
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
 	const [servers, setServers] = useState<Server[]>([]);
@@ -121,13 +113,12 @@ export const PortsSection = memo(function PortsSection({
 	const stagedPorts = [...existingPorts, ...pendingAdds];
 	const hasChanges = pendingAdds.length > 0 || pendingRemoveIds.size > 0;
 
-	const isPublic = visibility === "public";
 	const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 	const isValidDomain = domain.trim() && domainRegex.test(domain.trim());
 	const canAdd =
 		newPort &&
 		!stagedPorts.some((p) => p.port === parseInt(newPort)) &&
-		(!isPublic || isValidDomain);
+		isValidDomain;
 
 	const handleAdd = () => {
 		const port = parseInt(newPort);
@@ -138,14 +129,13 @@ export const PortsSection = memo(function PortsSection({
 			{
 				id: `new-${Date.now()}`,
 				port,
-				isPublic,
-				domain: isPublic ? domain.trim().toLowerCase() : null,
+				isPublic: true,
+				domain: domain.trim().toLowerCase(),
 				isNew: true,
 			},
 		]);
 		setNewPort("");
 		setDomain("");
-		setVisibility("private");
 	};
 
 	const handleRemove = (portId: string) => {
@@ -181,14 +171,6 @@ export const PortsSection = memo(function PortsSection({
 		}
 	};
 
-	const getPrivateUrl = (port: StagedPort) => {
-		if (port.isNew) return null;
-		const deployment = service.deployments.find((d) => d.status === "running");
-		if (!deployment?.server?.wireguardIp) return null;
-		const depPort = deployment.ports.find((p) => p.containerPort === port.port);
-		return depPort ? `${deployment.server.wireguardIp}:${depPort.hostPort}` : null;
-	};
-
 	return (
 		<Card>
 			<CardHeader className="pb-3">
@@ -212,44 +194,34 @@ export const PortsSection = memo(function PortsSection({
 
 				{stagedPorts.length > 0 && (
 					<div className="space-y-2">
-						{stagedPorts.map((port) => {
-							const privateUrl = getPrivateUrl(port);
-							return (
-								<div
-									key={port.id}
-									className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
-										port.isNew ? "bg-primary/10 border border-primary/20" : "bg-muted"
-									}`}
-								>
-									<div className="flex items-center gap-2">
-										{port.isPublic ? (
-											<Globe className="h-4 w-4 text-primary" />
-										) : (
-											<Lock className="h-4 w-4 text-muted-foreground" />
-										)}
-										<span className="font-medium">{port.port}</span>
-										{port.isNew && (
-											<Badge variant="outline" className="text-xs">
-												new
-											</Badge>
-										)}
-										{port.isPublic && port.domain && (
-											<span className="text-xs text-muted-foreground">{port.domain}</span>
-										)}
-										{!port.isPublic && privateUrl && (
-											<span className="text-xs text-muted-foreground">{privateUrl}</span>
-										)}
-									</div>
-									<button
-										type="button"
-										onClick={() => handleRemove(port.id)}
-										className="text-muted-foreground hover:text-foreground"
-									>
-										<X className="h-4 w-4" />
-									</button>
+						{stagedPorts.map((port) => (
+							<div
+								key={port.id}
+								className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
+									port.isNew ? "bg-primary/10 border border-primary/20" : "bg-muted"
+								}`}
+							>
+								<div className="flex items-center gap-2">
+									<Globe className="h-4 w-4 text-primary" />
+									<span className="font-medium">{port.port}</span>
+									{port.isNew && (
+										<Badge variant="outline" className="text-xs">
+											new
+										</Badge>
+									)}
+									{port.domain && (
+										<span className="text-xs text-muted-foreground">{port.domain}</span>
+									)}
 								</div>
-							);
-						})}
+								<button
+									type="button"
+									onClick={() => handleRemove(port.id)}
+									className="text-muted-foreground hover:text-foreground"
+								>
+									<X className="h-4 w-4" />
+								</button>
+							</div>
+						))}
 					</div>
 				)}
 
@@ -263,36 +235,14 @@ export const PortsSection = memo(function PortsSection({
 						min={1}
 						max={65535}
 					/>
-					<Select
-						value={visibility}
-						onValueChange={(v) => setVisibility(v as "private" | "public")}
-					>
-						<SelectTrigger className="w-24">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="private">
-								<Lock className="h-3 w-3" />
-								Private
-							</SelectItem>
-							<SelectItem value="public">
-								<Globe className="h-3 w-3" />
-								Public
-							</SelectItem>
-						</SelectContent>
-					</Select>
-					{isPublic && (
-						<>
-							<Input
-								type="text"
-								placeholder="api.example.com"
-								value={domain}
-								onChange={(e) => setDomain(e.target.value)}
-								className="flex-1 min-w-32"
-							/>
-							<DnsInstructionsModal servers={servers} />
-						</>
-					)}
+					<Input
+						type="text"
+						placeholder="api.example.com"
+						value={domain}
+						onChange={(e) => setDomain(e.target.value)}
+						className="flex-1 min-w-32"
+					/>
+					<DnsInstructionsModal servers={servers} />
 					<Button size="sm" variant="outline" onClick={handleAdd} disabled={!canAdd}>
 						<Plus className="h-4 w-4" />
 					</Button>
