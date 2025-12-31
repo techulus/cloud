@@ -14,14 +14,16 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"techulus/cloud-agent/internal/api"
 	"techulus/cloud-agent/internal/caddy"
 	"techulus/cloud-agent/internal/crypto"
 	"techulus/cloud-agent/internal/dns"
-	agentgrpc "techulus/cloud-agent/internal/grpc"
+	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/podman"
-	pb "techulus/cloud-agent/internal/proto"
+	"techulus/cloud-agent/internal/reconcile"
+	"techulus/cloud-agent/internal/retry"
 	"techulus/cloud-agent/internal/wireguard"
 
 	"github.com/shirou/gopsutil/v3/disk"
@@ -29,8 +31,28 @@ import (
 )
 
 const (
-	defaultDataDir = "/var/lib/techulus-agent"
+	defaultDataDir       = "/var/lib/techulus-agent"
+	tickInterval         = 10 * time.Second
+	processingTimeout    = 5 * time.Minute
 )
+
+type AgentState int
+
+const (
+	StateIdle AgentState = iota
+	StateProcessing
+)
+
+func (s AgentState) String() string {
+	switch s {
+	case StateIdle:
+		return "IDLE"
+	case StateProcessing:
+		return "PROCESSING"
+	default:
+		return "UNKNOWN"
+	}
+}
 
 type Config struct {
 	ServerID      string `json:"serverId"`
@@ -39,24 +61,526 @@ type Config struct {
 	EncryptionKey string `json:"encryptionKey"`
 }
 
+type ActualState struct {
+	Containers      []podman.Container
+	DnsConfigHash   string
+	CaddyConfigHash string
+	WireguardHash   string
+}
+
+type Agent struct {
+	state           AgentState
+	client          *agenthttp.Client
+	reconciler      *reconcile.Reconciler
+	config          *Config
+	publicIP        string
+	dataDir         string
+	expectedState   *agenthttp.ExpectedState
+	processingStart time.Time
+}
+
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string) *Agent {
+	return &Agent{
+		state:      StateIdle,
+		client:     client,
+		reconciler: reconciler,
+		config:     config,
+		publicIP:   publicIP,
+		dataDir:    dataDir,
+	}
+}
+
+func (a *Agent) Run(ctx context.Context) {
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
+
+	a.tick()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.tick()
+		}
+	}
+}
+
+func (a *Agent) tick() {
+	switch a.state {
+	case StateIdle:
+		a.handleIdle()
+	case StateProcessing:
+		a.handleProcessing()
+	}
+}
+
+func (a *Agent) handleIdle() {
+	expected, err := a.client.GetExpectedState()
+	if err != nil {
+		log.Printf("[idle] failed to get expected state: %v", err)
+		return
+	}
+
+	actual, err := a.getActualState()
+	if err != nil {
+		log.Printf("[idle] failed to get actual state: %v", err)
+		return
+	}
+
+	changes := a.detectChanges(expected, actual)
+	if len(changes) > 0 {
+		log.Printf("[idle] drift detected, %d change(s) to apply:", len(changes))
+		for _, change := range changes {
+			log.Printf("  → %s", change)
+		}
+		log.Printf("[idle] transitioning to PROCESSING")
+		a.expectedState = expected
+		a.processingStart = time.Now()
+		a.state = StateProcessing
+		a.reportStatus(false)
+		return
+	}
+
+	a.reportStatus(true)
+}
+
+func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualState) []string {
+	var changes []string
+
+	expectedMap := make(map[string]agenthttp.ExpectedContainer)
+	for _, c := range expected.Containers {
+		expectedMap[c.DeploymentID] = c
+	}
+
+	actualMap := make(map[string]podman.Container)
+	for _, c := range actual.Containers {
+		if c.DeploymentID != "" {
+			actualMap[c.DeploymentID] = c
+		}
+	}
+
+	for _, c := range actual.Containers {
+		if c.DeploymentID == "" {
+			changes = append(changes, fmt.Sprintf("STOP orphan container %s (no deployment ID)", c.Name))
+		}
+	}
+
+	for id, act := range actualMap {
+		if _, exists := expectedMap[id]; !exists {
+			changes = append(changes, fmt.Sprintf("STOP orphan container %s (deployment %s not in expected state)", act.Name, id[:8]))
+		}
+	}
+
+	for id, exp := range expectedMap {
+		if _, exists := actualMap[id]; !exists {
+			changes = append(changes, fmt.Sprintf("DEPLOY %s (%s)", exp.Name, exp.Image))
+		}
+	}
+
+	for id, exp := range expectedMap {
+		if act, exists := actualMap[id]; exists {
+			if act.State == "created" || act.State == "exited" {
+				changes = append(changes, fmt.Sprintf("START %s (state: %s)", exp.Name, act.State))
+			} else if act.State != "running" {
+				changes = append(changes, fmt.Sprintf("RESTART %s (state: %s)", exp.Name, act.State))
+			} else if normalizeImage(exp.Image) != normalizeImage(act.Image) {
+				changes = append(changes, fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image))
+			}
+		}
+	}
+
+	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
+	for i, r := range expected.Dns.Records {
+		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
+	}
+	expectedDnsHash := dns.HashRecords(expectedDnsRecords)
+	log.Printf("[dns:hash] expected: %d records, hash=%s, current=%s", len(expectedDnsRecords), expectedDnsHash, actual.DnsConfigHash)
+	if expectedDnsHash != actual.DnsConfigHash {
+		changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
+	}
+
+	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
+	for i, r := range expected.Caddy.Routes {
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+	}
+	expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
+	log.Printf("[caddy:hash] expected: %d routes, hash=%s, current=%s", len(expectedCaddyRoutes), expectedCaddyHash, actual.CaddyConfigHash)
+	if expectedCaddyHash != actual.CaddyConfigHash {
+		changes = append(changes, fmt.Sprintf("UPDATE Caddy (%d routes)", len(expected.Caddy.Routes)))
+	}
+
+	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
+	for i, p := range expected.Wireguard.Peers {
+		expectedWgPeers[i] = wireguard.Peer{
+			PublicKey:  p.PublicKey,
+			AllowedIPs: p.AllowedIPs,
+			Endpoint:   p.Endpoint,
+		}
+	}
+	expectedWgHash := wireguard.HashPeers(expectedWgPeers)
+	log.Printf("[wg:hash] expected: %d peers, hash=%s, current=%s", len(expectedWgPeers), expectedWgHash, actual.WireguardHash)
+	if expectedWgHash != actual.WireguardHash {
+		changes = append(changes, fmt.Sprintf("UPDATE WireGuard (%d peers)", len(expected.Wireguard.Peers)))
+	}
+
+	return changes
+}
+
+func (a *Agent) handleProcessing() {
+	if time.Since(a.processingStart) > processingTimeout {
+		log.Printf("[processing] timeout after %v, forcing transition to IDLE", processingTimeout)
+		a.reportStatus(false)
+		a.state = StateIdle
+		return
+	}
+
+	actual, err := a.getActualState()
+	if err != nil {
+		log.Printf("[processing] failed to get actual state: %v", err)
+		a.reportStatus(false)
+		a.state = StateIdle
+		return
+	}
+
+	if !a.hasDrift(a.expectedState, actual) {
+		log.Printf("[processing] state converged, transitioning to IDLE")
+		a.reportStatus(false)
+		a.state = StateIdle
+		return
+	}
+
+	err = a.reconcileOne(actual)
+	if err != nil {
+		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
+		a.reportStatus(false)
+		a.state = StateIdle
+		return
+	}
+
+	a.reportStatus(false)
+}
+
+func (a *Agent) getActualState() (*ActualState, error) {
+	containers, err := podman.ListContainers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	return &ActualState{
+		Containers:      containers,
+		DnsConfigHash:   dns.GetCurrentConfigHash(),
+		CaddyConfigHash: caddy.GetCurrentConfigHash(),
+		WireguardHash:   wireguard.GetCurrentPeersHash(),
+	}, nil
+}
+
+func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState) bool {
+	if a.hasContainerDrift(expected.Containers, actual.Containers) {
+		return true
+	}
+
+	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
+	for i, r := range expected.Dns.Records {
+		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
+	}
+	if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
+		return true
+	}
+
+	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
+	for i, r := range expected.Caddy.Routes {
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+	}
+	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
+		return true
+	}
+
+	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
+	for i, p := range expected.Wireguard.Peers {
+		expectedWgPeers[i] = wireguard.Peer{
+			PublicKey:  p.PublicKey,
+			AllowedIPs: p.AllowedIPs,
+			Endpoint:   p.Endpoint,
+		}
+	}
+	if wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash {
+		return true
+	}
+
+	return false
+}
+
+func (a *Agent) hasContainerDrift(expected []agenthttp.ExpectedContainer, actual []podman.Container) bool {
+	expectedMap := make(map[string]agenthttp.ExpectedContainer)
+	for _, c := range expected {
+		expectedMap[c.DeploymentID] = c
+	}
+
+	actualMap := make(map[string]podman.Container)
+	for _, c := range actual {
+		if c.DeploymentID != "" {
+			actualMap[c.DeploymentID] = c
+		}
+	}
+
+	for _, c := range actual {
+		if c.DeploymentID == "" {
+			return true
+		}
+	}
+
+	for id := range expectedMap {
+		if _, exists := actualMap[id]; !exists {
+			return true
+		}
+	}
+
+	for id := range actualMap {
+		if _, exists := expectedMap[id]; !exists {
+			return true
+		}
+	}
+
+	for id, exp := range expectedMap {
+		if act, exists := actualMap[id]; exists {
+			if act.State != "running" || normalizeImage(exp.Image) != normalizeImage(act.Image) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func normalizeImage(image string) string {
+	parts := strings.Split(image, "@")
+	image = parts[0]
+
+	if !strings.Contains(image, ":") {
+		image = image + ":latest"
+	}
+	return image
+}
+
+func (a *Agent) reconcileOne(actual *ActualState) error {
+	expectedMap := make(map[string]agenthttp.ExpectedContainer)
+	for _, c := range a.expectedState.Containers {
+		expectedMap[c.DeploymentID] = c
+	}
+
+	actualMap := make(map[string]podman.Container)
+	for _, c := range actual.Containers {
+		if c.DeploymentID != "" {
+			actualMap[c.DeploymentID] = c
+		}
+	}
+
+	for _, act := range actual.Containers {
+		if act.DeploymentID == "" {
+			if act.State == "running" {
+				log.Printf("[reconcile] stopping orphan container %s (no deployment ID)", act.ID)
+				if err := podman.Stop(act.ID); err != nil {
+					return fmt.Errorf("failed to stop orphan container: %w", err)
+				}
+				return nil
+			} else {
+				log.Printf("[reconcile] removing orphan container %s (no deployment ID)", act.ID)
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				err := retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
+					if err := podman.ForceRemove(act.ID); err != nil {
+						log.Printf("[reconcile] remove attempt failed: %v, retrying...", err)
+						return false, err
+					}
+					return true, nil
+				})
+				cancel()
+				if err != nil {
+					log.Printf("[reconcile] warning: failed to remove orphan container after retries: %v", err)
+				}
+				return nil
+			}
+		}
+	}
+
+	for id, act := range actualMap {
+		if _, exists := expectedMap[id]; !exists {
+			if act.State == "running" {
+				log.Printf("[reconcile] stopping orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
+				if err := podman.Stop(act.ID); err != nil {
+					return fmt.Errorf("failed to stop orphan container: %w", err)
+				}
+				return nil
+			} else {
+				log.Printf("[reconcile] removing orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
+				if err := podman.ForceRemove(act.ID); err != nil {
+					log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
+				}
+				return nil
+			}
+		}
+	}
+
+	for id, exp := range expectedMap {
+		if _, exists := actualMap[id]; !exists {
+			log.Printf("[reconcile] deploying missing container for deployment %s", id)
+			if err := a.reconciler.Deploy(exp); err != nil {
+				return fmt.Errorf("failed to deploy container: %w", err)
+			}
+			return nil
+		}
+	}
+
+	for id, exp := range expectedMap {
+		if act, exists := actualMap[id]; exists {
+			if act.State == "created" || act.State == "exited" {
+				log.Printf("[reconcile] starting %s container %s for deployment %s", act.State, act.ID, id)
+				if err := podman.Start(act.ID); err != nil {
+					log.Printf("[reconcile] start failed, will redeploy: %v", err)
+					if err := podman.Stop(act.ID); err != nil {
+						log.Printf("[reconcile] warning: failed to stop old container: %v", err)
+					}
+					if err := a.reconciler.Deploy(exp); err != nil {
+						return fmt.Errorf("failed to redeploy container: %w", err)
+					}
+				}
+				return nil
+			}
+			if act.State != "running" || normalizeImage(exp.Image) != normalizeImage(act.Image) {
+				log.Printf("[reconcile] redeploying container for deployment %s (state=%s)", id, act.State)
+				if err := podman.Stop(act.ID); err != nil {
+					log.Printf("[reconcile] warning: failed to stop old container: %v", err)
+				}
+				if err := a.reconciler.Deploy(exp); err != nil {
+					return fmt.Errorf("failed to redeploy container: %w", err)
+				}
+				return nil
+			}
+		}
+	}
+
+	expectedDnsRecords := make([]dns.DnsRecord, len(a.expectedState.Dns.Records))
+	for i, r := range a.expectedState.Dns.Records {
+		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
+	}
+	if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
+		log.Printf("[reconcile] updating DNS records")
+		if err := dns.UpdateDnsRecords(expectedDnsRecords); err != nil {
+			return fmt.Errorf("failed to update DNS: %w", err)
+		}
+		return nil
+	}
+
+	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(a.expectedState.Caddy.Routes))
+	for i, r := range a.expectedState.Caddy.Routes {
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+	}
+	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
+		log.Printf("[reconcile] updating Caddy routes")
+		if err := caddy.UpdateCaddyRoutes(expectedCaddyRoutes); err != nil {
+			return fmt.Errorf("failed to update Caddy: %w", err)
+		}
+		return nil
+	}
+
+	expectedWgPeers := make([]wireguard.Peer, len(a.expectedState.Wireguard.Peers))
+	for i, p := range a.expectedState.Wireguard.Peers {
+		expectedWgPeers[i] = wireguard.Peer{
+			PublicKey:  p.PublicKey,
+			AllowedIPs: p.AllowedIPs,
+			Endpoint:   p.Endpoint,
+		}
+	}
+	if wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash {
+		log.Printf("[reconcile] updating WireGuard peers")
+		if err := a.reconcileWireguard(expectedWgPeers); err != nil {
+			return fmt.Errorf("failed to update WireGuard: %w", err)
+		}
+		return nil
+	}
+
+	return nil
+}
+
+func (a *Agent) reconcileWireguard(peers []wireguard.Peer) error {
+	wgPrivateKey, err := wireguard.LoadPrivateKey(a.dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to load wireguard private key: %w", err)
+	}
+
+	wgConfig := &wireguard.Config{
+		PrivateKey: wgPrivateKey,
+		Address:    a.config.WireGuardIP,
+		ListenPort: wireguard.DefaultPort,
+		Peers:      peers,
+	}
+
+	if err := wireguard.WriteConfig(wireguard.DefaultInterface, wgConfig); err != nil {
+		return fmt.Errorf("failed to write wireguard config: %w", err)
+	}
+
+	if err := wireguard.Reload(wireguard.DefaultInterface); err != nil {
+		return fmt.Errorf("failed to reload wireguard: %w", err)
+	}
+
+	log.Printf("[wireguard] config updated successfully")
+	return nil
+}
+
+func (a *Agent) reportStatus(includeResources bool) {
+	report := &agenthttp.StatusReport{
+		PublicIP:   a.publicIP,
+		Containers: []agenthttp.ContainerStatus{},
+	}
+
+	if includeResources {
+		report.Resources = getSystemStats()
+	}
+
+	containers, err := podman.ListContainers()
+	if err == nil {
+		for _, c := range containers {
+			if c.DeploymentID == "" {
+				continue
+			}
+
+			status := "stopped"
+			if c.State == "running" {
+				status = "running"
+			} else if c.State == "exited" {
+				status = "stopped"
+			}
+
+			healthStatus := "none"
+			if c.State == "running" {
+				healthStatus = podman.GetHealthStatus(c.ID)
+			}
+
+			report.Containers = append(report.Containers, agenthttp.ContainerStatus{
+				DeploymentID: c.DeploymentID,
+				ContainerID:  c.ID,
+				Status:       status,
+				HealthStatus: healthStatus,
+			})
+		}
+	}
+
+	if err := a.client.ReportStatus(report); err != nil {
+		log.Printf("[status] failed to report status: %v", err)
+	}
+}
+
 var httpClient *api.Client
 var dataDir string
-var agentConfig *Config
-var grpcClient *agentgrpc.Client
 
 func main() {
 	var (
 		controlPlaneURL string
 		token           string
-		grpcURL         string
-		grpcTLS         bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
-	flag.StringVar(&grpcURL, "grpc-url", "", "gRPC server URL (e.g., 100.0.0.1:50051)")
-	flag.BoolVar(&grpcTLS, "grpc-tls", false, "Use TLS for gRPC connection")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -189,18 +713,8 @@ func main() {
 		}
 	}
 
-	agentConfig = config
-
-	grpcAddress := grpcURL
-	if grpcAddress == "" {
-		log.Fatal("--grpc-url is required")
-	}
-	log.Printf("Connecting to gRPC server at %s (TLS: %v)...", grpcAddress, grpcTLS)
-
-	grpcClient = agentgrpc.NewClient(grpcAddress, config.ServerID, signingKeyPair, grpcTLS)
-	grpcClient.SetWorkHandler(handleWork)
-	grpcClient.SetCaddyHandler(caddy.HandleCaddyConfig)
-	grpcClient.SetDnsHandler(handleDnsConfig)
+	reconciler := reconcile.NewReconciler(config.EncryptionKey)
+	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -214,300 +728,12 @@ func main() {
 	}()
 
 	publicIP := getPublicIP()
-	log.Printf("Agent started. Public IP: %s. Using gRPC streaming...", publicIP)
+	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
-	grpcClient.RunWithReconnect(ctx, func(includeResources bool) *agentgrpc.StatusData {
-		return getStatusData(publicIP, includeResources)
-	})
+	agent := NewAgent(client, reconciler, config, publicIP, dataDir)
+	agent.Run(ctx)
 
-	grpcClient.Close()
 	log.Println("Agent stopped")
-}
-
-func getStatusData(publicIP string, includeResources bool) *agentgrpc.StatusData {
-	var resources *pb.Resources
-	if includeResources {
-		resources = getSystemStats()
-	}
-
-	var containerHealth []agentgrpc.ContainerHealthData
-	containers, err := podman.ListContainers()
-	if err == nil {
-		for _, c := range containers {
-			if c.State == "running" {
-				healthStatus := podman.GetHealthStatus(c.ID)
-				containerHealth = append(containerHealth, agentgrpc.ContainerHealthData{
-					ContainerID:  c.ID,
-					HealthStatus: healthStatus,
-					DeploymentID: c.DeploymentID,
-				})
-			}
-		}
-	}
-
-	return &agentgrpc.StatusData{
-		Resources:       resources,
-		PublicIP:        publicIP,
-		ContainerHealth: containerHealth,
-	}
-}
-
-func handleWork(work *pb.WorkItem) (status string, logs string) {
-	log.Printf("Processing work %s (type: %s)", work.Id, work.Type)
-
-	status = "completed"
-
-	switch work.Type {
-	case "deploy":
-		result, err := handleDeploy(work)
-		if err != nil {
-			log.Printf("Deploy failed: %v", err)
-			status = "failed"
-			logs = err.Error()
-		} else {
-			logs = fmt.Sprintf("Container started: %s", result.ContainerID)
-		}
-	case "stop":
-		if err := handleStop(work); err != nil {
-			log.Printf("Stop failed: %v", err)
-			status = "failed"
-			logs = err.Error()
-		}
-	case "update_wireguard":
-		if err := handleWireguardUpdate(work); err != nil {
-			log.Printf("WireGuard update failed: %v", err)
-			status = "failed"
-		}
-	case "force_cleanup":
-		if err := handleForceCleanup(work); err != nil {
-			log.Printf("Force cleanup failed: %v", err)
-			status = "failed"
-			logs = err.Error()
-		}
-	case "cleanup_volumes":
-		if err := handleCleanupVolumes(work); err != nil {
-			log.Printf("Volume cleanup failed: %v", err)
-			status = "failed"
-			logs = err.Error()
-		}
-	default:
-		log.Printf("Unknown work type: %s", work.Type)
-	}
-
-	log.Printf("Work %s completed with status: %s", work.Id, status)
-	return status, logs
-}
-
-func handleDeploy(work *pb.WorkItem) (*podman.DeployResult, error) {
-	var payload struct {
-		DeploymentID string `json:"deploymentId"`
-		ServiceID    string `json:"serviceId"`
-		ServiceName  string `json:"serviceName"`
-		Image        string `json:"image"`
-		PortMappings []struct {
-			ContainerPort int `json:"containerPort"`
-			HostPort      int `json:"hostPort"`
-		} `json:"portMappings"`
-		WireGuardIP string `json:"wireguardIp"`
-		IPAddress   string `json:"ipAddress"`
-		Name        string `json:"name"`
-		HealthCheck *struct {
-			Cmd         string `json:"cmd"`
-			Interval    int    `json:"interval"`
-			Timeout     int    `json:"timeout"`
-			Retries     int    `json:"retries"`
-			StartPeriod int    `json:"startPeriod"`
-		} `json:"healthCheck"`
-		Env          map[string]string `json:"env"`
-		VolumeMounts []struct {
-			Name          string `json:"name"`
-			HostPath      string `json:"hostPath"`
-			ContainerPath string `json:"containerPath"`
-		} `json:"volumeMounts"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return nil, fmt.Errorf("failed to parse payload: %w", err)
-	}
-
-	portMappings := make([]podman.PortMapping, len(payload.PortMappings))
-	for i, pm := range payload.PortMappings {
-		portMappings[i] = podman.PortMapping{
-			ContainerPort: pm.ContainerPort,
-			HostPort:      pm.HostPort,
-		}
-	}
-
-	log.Printf("Deploying %s (image: %s, ip: %s, ports: %d mappings)", payload.Name, payload.Image, payload.IPAddress, len(portMappings))
-
-	var healthCheck *podman.HealthCheck
-	if payload.HealthCheck != nil && payload.HealthCheck.Cmd != "" {
-		healthCheck = &podman.HealthCheck{
-			Cmd:         payload.HealthCheck.Cmd,
-			Interval:    payload.HealthCheck.Interval,
-			Timeout:     payload.HealthCheck.Timeout,
-			Retries:     payload.HealthCheck.Retries,
-			StartPeriod: payload.HealthCheck.StartPeriod,
-		}
-		log.Printf("Health check configured: %s", healthCheck.Cmd)
-	}
-
-	decryptedEnv := make(map[string]string)
-	for key, encryptedValue := range payload.Env {
-		if agentConfig.EncryptionKey == "" {
-			return nil, fmt.Errorf("encryption key not configured, cannot decrypt secret %s", key)
-		}
-		decrypted, err := crypto.DecryptSecret(encryptedValue, agentConfig.EncryptionKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt secret %s: %w", key, err)
-		}
-		decryptedEnv[key] = decrypted
-	}
-
-	buildLogFunc := func(stream string, message string) {
-		if grpcClient != nil {
-			grpcClient.SendBuildLog(payload.DeploymentID, stream, message)
-		}
-	}
-
-	volumeMounts := make([]podman.VolumeMount, len(payload.VolumeMounts))
-	for i, vm := range payload.VolumeMounts {
-		volumeMounts[i] = podman.VolumeMount{
-			Name:          vm.Name,
-			HostPath:      vm.HostPath,
-			ContainerPath: vm.ContainerPath,
-		}
-	}
-
-	result, err := podman.Deploy(&podman.DeployConfig{
-		Name:         payload.Name,
-		Image:        payload.Image,
-		ServiceID:    payload.ServiceID,
-		ServiceName:  payload.ServiceName,
-		DeploymentID: payload.DeploymentID,
-		WireGuardIP:  payload.WireGuardIP,
-		IPAddress:    payload.IPAddress,
-		PortMappings: portMappings,
-		HealthCheck:  healthCheck,
-		Env:          decryptedEnv,
-		VolumeMounts: volumeMounts,
-		LogFunc:      buildLogFunc,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	log.Printf("Container %s started successfully", result.ContainerID)
-	return result, nil
-}
-
-func handleStop(work *pb.WorkItem) error {
-	var payload struct {
-		ContainerID string `json:"containerId"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return fmt.Errorf("failed to parse payload: %w", err)
-	}
-
-	log.Printf("Stopping container %s", payload.ContainerID)
-
-	if err := podman.Stop(payload.ContainerID); err != nil {
-		return err
-	}
-
-	log.Printf("Container %s stopped successfully", payload.ContainerID)
-	return nil
-}
-
-func handleForceCleanup(work *pb.WorkItem) error {
-	var payload struct {
-		ServiceID    string   `json:"serviceId"`
-		ContainerIDs []string `json:"containerIds"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return fmt.Errorf("failed to parse payload: %w", err)
-	}
-
-	log.Printf("[cleanup] Force cleanup for service %s, containers: %v", payload.ServiceID, payload.ContainerIDs)
-
-	var lastErr error
-	for _, containerID := range payload.ContainerIDs {
-		log.Printf("[cleanup] Force stopping container %s", containerID)
-		if err := podman.ForceRemove(containerID); err != nil {
-			log.Printf("[cleanup] Failed to remove container %s: %v", containerID, err)
-			lastErr = err
-		} else {
-			log.Printf("[cleanup] Container %s removed", containerID)
-		}
-	}
-
-	return lastErr
-}
-
-func handleCleanupVolumes(work *pb.WorkItem) error {
-	var payload struct {
-		ServiceID string `json:"serviceId"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return fmt.Errorf("failed to parse payload: %w", err)
-	}
-
-	volumeBasePath := filepath.Join(defaultDataDir, "volumes", payload.ServiceID)
-	log.Printf("[cleanup] Removing volume directory: %s", volumeBasePath)
-
-	if err := os.RemoveAll(volumeBasePath); err != nil {
-		return fmt.Errorf("failed to remove volume directory: %w", err)
-	}
-
-	log.Printf("[cleanup] Volume directory removed for service %s", payload.ServiceID)
-	return nil
-}
-
-func handleWireguardUpdate(work *pb.WorkItem) error {
-	var payload struct {
-		Peers []api.Peer `json:"peers"`
-	}
-
-	if err := json.Unmarshal(work.Payload, &payload); err != nil {
-		return err
-	}
-
-	wgPrivateKey, err := wireguard.LoadPrivateKey(dataDir)
-	if err != nil {
-		return err
-	}
-
-	configPath := filepath.Join(dataDir, "config.json")
-	config, err := loadConfig(configPath)
-	if err != nil {
-		return err
-	}
-
-	wgConfig := &wireguard.Config{
-		PrivateKey: wgPrivateKey,
-		Address:    config.WireGuardIP,
-		ListenPort: wireguard.DefaultPort,
-		Peers:      convertPeers(payload.Peers),
-	}
-
-	if err := wireguard.WriteConfig(wireguard.DefaultInterface, wgConfig); err != nil {
-		return err
-	}
-
-	return wireguard.Reload(wireguard.DefaultInterface)
-}
-
-func handleDnsConfig(config *pb.DnsConfig) (bool, error) {
-	log.Printf("Updating DNS records (%d records)", len(config.Records))
-	if err := dns.UpdateRecords(config); err != nil {
-		log.Printf("Failed to update DNS records: %v", err)
-		return false, err
-	}
-	log.Printf("DNS records updated successfully")
-	return true, nil
 }
 
 func convertPeers(apiPeers []api.Peer) []wireguard.Peer {
@@ -545,19 +771,19 @@ func saveConfig(path string, config *Config) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-func getSystemStats() *pb.Resources {
-	resources := &pb.Resources{}
+func getSystemStats() *agenthttp.Resources {
+	resources := &agenthttp.Resources{}
 
-	resources.CpuCores = int32(runtime.NumCPU())
+	resources.CpuCores = runtime.NumCPU()
 
 	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		resources.MemoryTotalMb = int32(memInfo.Total / 1024 / 1024)
+		resources.MemoryMb = int(memInfo.Total / 1024 / 1024)
 	}
 
 	diskInfo, err := disk.Usage("/")
 	if err == nil {
-		resources.DiskTotalGb = int32(diskInfo.Total / 1024 / 1024 / 1024)
+		resources.DiskGb = int(diskInfo.Total / 1024 / 1024 / 1024)
 	}
 
 	return resources
@@ -577,5 +803,5 @@ func getPublicIP() string {
 		return ""
 	}
 
-	return strings.TrimSpace(string(ip))
+	return string(ip)
 }

@@ -12,13 +12,13 @@ A stateless container deployment platform with three core principles:
 | Component | Choice | Rationale |
 |-----------|--------|-----------|
 | Control Plane | Next.js (full-stack) | Single deployment, React frontend + API routes |
-| Database | SQLite + Drizzle | Simple, no external deps, single file, easy backup |
+| Database | Postgres + Drizzle | Simple, no external deps, single file, easy backup |
 | Server Agent | Go | Single binary, shells out to Podman |
 | Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
 | Reverse Proxy | Caddy | Automatic HTTPS, runs on every server |
 | Private Network | WireGuard (self-managed) | Full mesh, control plane coordinates |
 | Service Discovery | dnsmasq | Local DNS on each server for .internal domains |
-| Agent Communication | gRPC streaming | Bidirectional, real-time updates |
+| Agent Communication | Pull-based HTTP | Agent polls for expected state, reports status |
 
 ## Architecture Diagram
 
@@ -26,11 +26,14 @@ A stateless container deployment platform with three core principles:
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CONTROL PLANE                           │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │   Next.js (App Router + API Routes + gRPC + SQLite)      │  │
+│  │   Next.js (App Router + API Routes + Postgres)           │  │
+│  │                                                          │  │
+│  │   GET /api/v1/agent/expected-state  (agent polls)        │  │
+│  │   POST /api/v1/agent/status         (agent reports)      │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               ▲
-                              │ gRPC (bidirectional streaming)
+                              │ HTTPS (poll every 10s)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        WORKER SERVERS                           │
@@ -60,6 +63,79 @@ A stateless container deployment platform with three core principles:
 │                      WireGuard Full Mesh                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Agent State Machine
+
+The agent uses a two-state machine to prevent race conditions during reconciliation:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│    ┌─────────┐                         ┌────────────┐          │
+│    │  IDLE   │───drift detected───────▶│ PROCESSING │          │
+│    │ (poll)  │◀────────────────────────│  (no poll) │          │
+│    └─────────┘    done/failed/timeout  └────────────┘          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### IDLE State
+- Poll control plane every 10 seconds for expected state
+- Compare expected state vs actual state (containers, DNS, Caddy, WireGuard)
+- If no drift: send status report, stay in IDLE
+- If drift detected: snapshot expected state, transition to PROCESSING
+
+### PROCESSING State
+- Stop polling (use the expected state snapshot)
+- Apply ONE change at a time with verification
+- After each change, re-check drift
+- If no drift remains: transition to IDLE
+- Timeout after 5 minutes: force transition to IDLE
+- Always send status report before transitioning to IDLE
+
+### Drift Detection
+
+The agent detects drift using hash comparisons:
+- **Containers**: Missing, orphaned, wrong state, or image mismatch
+- **DNS**: Hash of sorted records vs current dnsmasq config
+- **Caddy**: Hash of sorted routes vs current Caddy config
+- **WireGuard**: Hash of sorted peers vs current wg0.conf
+
+### Container Reconciliation
+
+Order of operations:
+1. Stop orphan containers (no deployment ID)
+2. Start containers in "created" or "exited" state
+3. Deploy missing containers
+4. Redeploy containers with wrong state or image mismatch
+5. Update DNS records
+6. Update Caddy routes
+7. Update WireGuard peers
+
+## Rollout Stages
+
+Deployments go through these stages:
+
+```
+pending → pulling → starting → healthy → dns_updating → caddy_updating → stopping_old → running
+```
+
+| Stage | Description |
+|-------|-------------|
+| `pending` | Deployment created, waiting for agent |
+| `pulling` | Agent is pulling the container image |
+| `starting` | Container started, waiting for health check |
+| `healthy` | Health check passed (or no health check) |
+| `dns_updating` | DNS records being updated |
+| `caddy_updating` | Caddy routes being updated |
+| `stopping_old` | Old deployment containers being stopped |
+| `running` | Deployment complete and serving traffic |
+
+Special states:
+- `unknown`: Agent stopped reporting this deployment (container may still exist)
+- `stopped`: Container explicitly stopped
+- `failed`: Deployment failed (health check, etc.)
+- `rolled_back`: Rollout failed, reverted to previous deployment
 
 ## Networking
 
@@ -95,16 +171,16 @@ podman network create \
   techulus
 ```
 
-Containers get static IPs:
+Containers get static IPs assigned by the control plane:
 ```bash
 podman run -d \
-  --name whoami-1 \
+  --name service-deployment \
   --network techulus \
   --ip 10.200.1.2 \
+  --label techulus.deployment.id=<deployment-id> \
+  --label techulus.service.id=<service-id> \
   traefik/whoami
 ```
-
-No port mappings needed - containers are directly reachable at their IP.
 
 ### DNS Resolution (dnsmasq)
 
@@ -121,8 +197,7 @@ Services resolve via `.internal` domain with round-robin across replicas.
 ### Caddy (Distributed Reverse Proxy)
 
 Every server runs Caddy with identical routes pushed from control plane:
-- Internal routes: `service.internal` → container IPs (via WireGuard mesh)
-- Public routes: `subdomain.techulus.app` → container IPs
+- Public routes: `subdomain.example.com` → container IPs
 
 Any server can handle any request - if the container is remote, traffic routes via WireGuard.
 
@@ -140,36 +215,37 @@ Container A (10.200.1.2)
 **External (public):**
 ```
 Internet → DNS round-robin → Server 2 public IP
-  → Caddy: test.techulus.app → 10.200.1.2:80
+  → Caddy: app.example.com → 10.200.1.2:80
   → WireGuard tunnel to Server 1
   → Container (10.200.1.2)
 ```
 
 ## Components
 
-### 1. Control Plane (Next.js + gRPC)
+### 1. Control Plane (Next.js)
 
 **Responsibilities:**
 - User authentication
 - Project and service configuration
 - WireGuard coordination (assigns subnets, broadcasts peer updates)
-- Deployment orchestration (work queue)
-- Pushes Caddy routes and DNS records to all agents
+- Deployment orchestration (rollouts)
+- Serves expected state to agents
+- Processes status reports from agents
+- Advances rollout stages based on deployment status
 
-**gRPC Communication:**
-- Bidirectional streaming with all connected agents
-- Pushes work items, Caddy config, DNS config in real-time
-- Receives status updates, work completion, heartbeats
+**API Endpoints:**
+- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Caddy, WireGuard config
+- `POST /api/v1/agent/status` - Receives container status, advances rollout stages
 
 ### 2. Server Agent (Go)
 
 **Responsibilities:**
-- Maintains gRPC stream with control plane
+- Polls control plane for expected state
 - Manages containers via Podman with static IPs
 - Manages local WireGuard interface
-- Runs Caddy and updates routes on push
-- Runs dnsmasq and updates records on push
-- Reports status (resources, public IP)
+- Updates Caddy routes via admin API
+- Updates dnsmasq records
+- Reports status (resources, public IP, container health)
 
 **Agent Lifecycle:**
 1. User creates server in control plane, receives agent token
@@ -179,24 +255,19 @@ Internet → DNS round-robin → Server 2 public IP
 5. Agent registers with control plane via HTTP
 6. Control plane assigns subnet, returns WireGuard peers
 7. Agent configures WireGuard, container network, dnsmasq
-8. Agent connects via gRPC for ongoing communication
+8. Agent enters IDLE state, begins polling
 
-### 3. Work Queue
+### 3. Container Labels
 
-Jobs dispatched to agents via gRPC:
-- `deploy` - Pull image, start container with IP
-- `stop` - Stop and remove container
-- `update_wireguard` - Update WireGuard peers
-
-Timeout handling:
-- Jobs in `processing` state timeout after 5 minutes
-- Reset to `pending` with attempts incremented
-- After 3 attempts, marked as `failed`
+Containers are tracked via Podman labels:
+- `techulus.deployment.id` - Links container to deployment record
+- `techulus.service.id` - Links container to service
+- `techulus.service.name` - Human-readable service name
 
 ## Security Model
 
-1. **Agent Authentication**: Ed25519 signatures on all gRPC messages
-2. **Sequence Numbers**: Replay attack prevention
+1. **Agent Authentication**: HMAC signatures on all HTTP requests
+2. **Request Signing**: Body + timestamp signed with server-specific secret
 3. **WireGuard**: All inter-server traffic encrypted
 4. **No Public Ports on Containers**: Only reachable via WireGuard mesh
 5. **Caddy**: Only entry point for public traffic
@@ -205,7 +276,7 @@ Timeout handling:
 - One-time-use token for initial registration
 - Invalidated after successful registration
 
-**Message Signing:**
-- Agent signs all messages with Ed25519 private key
-- Control plane verifies using stored public key
-- Sequence numbers prevent replay attacks
+**Request Signing:**
+- Agent signs request body with HMAC-SHA256
+- Includes timestamp to prevent replay attacks
+- Control plane verifies using stored server secret

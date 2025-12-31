@@ -53,22 +53,6 @@ sudo systemctl start caddy
 sudo journalctl -u caddy -f
 ```
 
-## Generating Proto Files
-
-Install protobuf compiler and Go plugins:
-
-```bash
-brew install protobuf protoc-gen-go protoc-gen-go-grpc
-```
-
-Generate Go code from proto definitions (run from repository root):
-
-```bash
-protoc --go_out=agent/internal/proto --go_opt=paths=source_relative \
-       --go-grpc_out=agent/internal/proto --go-grpc_opt=paths=source_relative \
-       proto/agent.proto
-```
-
 ## Build
 
 ```bash
@@ -83,13 +67,13 @@ GOOS=linux GOARCH=amd64 go build -o bin/agent-linux-amd64 ./cmd/agent
 ### First Run (Registration)
 
 ```bash
-sudo ./agent --url <control-plane-url> --grpc-url <grpc-server>:50051 --token <registration-token> --data-dir /var/lib/techulus-agent
+sudo ./agent --url <control-plane-url> --token <registration-token> --data-dir /var/lib/techulus-agent
 ```
 
 ### Subsequent Runs
 
 ```bash
-sudo ./agent --url <control-plane-url> --grpc-url <grpc-server>:50051 --data-dir /var/lib/techulus-agent
+sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
 ```
 
 ### Run as systemd Service
@@ -105,13 +89,16 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/agent --url <control-plane-url> --grpc-url <grpc-server>:50051 --data-dir /var/lib/techulus-agent
+ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
 Restart=always
 RestartSec=5
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+**Important:** `KillMode=process` ensures only the agent process is killed on restart, not the container processes (conmon) which are children of the agent.
 
 ```bash
 sudo systemctl daemon-reload
@@ -126,16 +113,55 @@ sudo systemctl start techulus-agent
 | `--url` | (required) | Control plane URL |
 | `--token` | | Registration token (required for first run) |
 | `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
-| `--grpc-url` | | gRPC server URL (e.g., `100.65.138.73:50051`) |
-| `--grpc-tls` | `false` | Use TLS for gRPC connection |
 
-## Behavior
+## State Machine
 
-- Agent connects to the control plane via gRPC bidirectional streaming
-- Status updates are sent every 10 seconds, heartbeats every 30 seconds
-- Work items are received in real-time over the persistent stream
-- Automatic reconnection with exponential backoff (1s to 5min max)
-- Containers bind to WireGuard IP only (not exposed on public interface)
+The agent uses a two-state machine for reconciliation:
+
+```
+┌─────────┐                         ┌────────────┐
+│  IDLE   │───drift detected───────▶│ PROCESSING │
+│ (poll)  │◀────────────────────────│  (no poll) │
+└─────────┘    done/failed/timeout  └────────────┘
+```
+
+### IDLE State
+- Polls control plane every 10 seconds for expected state
+- Compares expected vs actual state
+- If drift detected: transitions to PROCESSING
+
+### PROCESSING State
+- Uses snapshot of expected state (no re-polling)
+- Applies ONE change at a time:
+  1. Stop orphan containers (no deployment ID)
+  2. Start containers in "created" or "exited" state
+  3. Deploy missing containers
+  4. Redeploy containers with wrong image
+  5. Update DNS records
+  6. Update Caddy routes
+  7. Update WireGuard peers
+- Timeout: 5 minutes max
+- Always reports status before returning to IDLE
+
+### Drift Detection
+
+Uses hash comparisons for deterministic drift detection:
+- Containers: Missing, orphaned, wrong state, or image mismatch
+- DNS: Hash of sorted records
+- Caddy: Hash of sorted routes
+- WireGuard: Hash of sorted peers
+
+## Container Labels
+
+The agent tracks containers using Podman labels:
+
+| Label | Description |
+|-------|-------------|
+| `techulus.deployment.id` | Links container to deployment record |
+| `techulus.service.id` | Links container to service |
+| `techulus.service.name` | Human-readable service name |
+
+Containers with a `techulus.deployment.id` label are managed by the agent. Containers without this label are considered orphans and will be cleaned up.
 
 ## Data Directory Structure
 
@@ -146,4 +172,33 @@ sudo systemctl start techulus-agent
 │   ├── private.key   # Ed25519 signing key
 │   └── public.key    # Ed25519 public key
 └── wireguard.key     # WireGuard private key
+```
+
+## Troubleshooting
+
+### Agent restart kills containers
+
+If containers are killed when the agent restarts, ensure `KillMode=process` is set in the systemd service file. Without this, systemd kills all child processes (including conmon container managers).
+
+### Containers in "created" state after restart
+
+This is normal - the agent will automatically start these containers. Look for logs like:
+```
+[reconcile] starting created container <id> for deployment <deployment-id>
+```
+
+### IP allocation errors
+
+If you see "IPAM error: requested ip address is already allocated", this usually means a container in "created" state still has the IP allocated. The agent should handle this by starting the existing container instead of creating a new one.
+
+### Checking agent status
+
+```bash
+sudo journalctl -u techulus-agent -f
+```
+
+### Manual container inspection
+
+```bash
+podman ps -a --format "table {{.Names}}\t{{.State}}\t{{.Labels}}"
 ```

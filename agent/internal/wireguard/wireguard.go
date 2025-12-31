@@ -1,10 +1,13 @@
 package wireguard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -138,4 +141,65 @@ func LoadPrivateKey(dataDir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+func HashPeers(peers []Peer) string {
+	sortedPeers := make([]Peer, len(peers))
+	copy(sortedPeers, peers)
+	sort.Slice(sortedPeers, func(i, j int) bool {
+		return sortedPeers[i].PublicKey < sortedPeers[j].PublicKey
+	})
+
+	var sb strings.Builder
+	for _, p := range sortedPeers {
+		sb.WriteString(p.PublicKey)
+		sb.WriteString(":")
+		sb.WriteString(p.AllowedIPs)
+		sb.WriteString(":")
+		if p.Endpoint != nil {
+			sb.WriteString(*p.Endpoint)
+		}
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func GetCurrentPeersHash() string {
+	configPath := filepath.Join(ConfigDir, DefaultInterface+".conf")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	var peers []Peer
+	var currentPeer *Peer
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "[Peer]" {
+			if currentPeer != nil {
+				peers = append(peers, *currentPeer)
+			}
+			currentPeer = &Peer{}
+			continue
+		}
+		if currentPeer == nil {
+			continue
+		}
+		if strings.HasPrefix(line, "PublicKey = ") {
+			currentPeer.PublicKey = strings.TrimPrefix(line, "PublicKey = ")
+		} else if strings.HasPrefix(line, "AllowedIPs = ") {
+			currentPeer.AllowedIPs = strings.TrimPrefix(line, "AllowedIPs = ")
+		} else if strings.HasPrefix(line, "Endpoint = ") {
+			endpoint := strings.TrimPrefix(line, "Endpoint = ")
+			currentPeer.Endpoint = &endpoint
+		}
+	}
+	if currentPeer != nil {
+		peers = append(peers, *currentPeer)
+	}
+
+	return HashPeers(peers)
 }

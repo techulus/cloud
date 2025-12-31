@@ -87,7 +87,8 @@ func ContainerExists(containerID string) (bool, error) {
 	if err != nil {
 		outputStr := string(output)
 		if strings.Contains(outputStr, "no such container") ||
-			strings.Contains(outputStr, "no container with name or ID") {
+			strings.Contains(outputStr, "no container with name or ID") ||
+			strings.Contains(outputStr, "no such object") {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to inspect container: %s: %w", outputStr, err)
@@ -101,7 +102,8 @@ func IsContainerRunning(containerID string) (bool, error) {
 	if err != nil {
 		outputStr := string(output)
 		if strings.Contains(outputStr, "no such container") ||
-			strings.Contains(outputStr, "no container with name or ID") {
+			strings.Contains(outputStr, "no container with name or ID") ||
+			strings.Contains(outputStr, "no such object") {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to inspect container: %s: %w", outputStr, err)
@@ -136,7 +138,6 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	image := config.Image
 
 	exec.Command("podman", "rm", "-f", config.Name).Run()
-	RemoveServiceContainers(config.ServiceID)
 
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
@@ -245,7 +246,8 @@ func Stop(containerID string) error {
 	if output, err := stopCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 		if strings.Contains(outputStr, "no such container") ||
-			strings.Contains(outputStr, "no container with name or ID") {
+			strings.Contains(outputStr, "no container with name or ID") ||
+			strings.Contains(outputStr, "no such object") {
 			return nil
 		}
 		return fmt.Errorf("failed to stop container: %s: %w", outputStr, err)
@@ -272,7 +274,8 @@ func Stop(containerID string) error {
 	if output, err := rmCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 		if strings.Contains(outputStr, "no such container") ||
-			strings.Contains(outputStr, "no container with name or ID") {
+			strings.Contains(outputStr, "no container with name or ID") ||
+			strings.Contains(outputStr, "no such object") {
 			return nil
 		}
 		return fmt.Errorf("failed to remove container: %s: %w", outputStr, err)
@@ -329,7 +332,8 @@ func ForceRemove(containerID string) error {
 		}
 
 		if strings.Contains(outputStr, "no such container") ||
-			strings.Contains(outputStr, "no container with name or ID") {
+			strings.Contains(outputStr, "no container with name or ID") ||
+			strings.Contains(outputStr, "no such object") {
 			return true, nil
 		}
 
@@ -345,6 +349,41 @@ func ForceRemove(containerID string) error {
 	}
 
 	log.Printf("[podman:force-remove] container %s removed successfully", containerID)
+	return nil
+}
+
+func Start(containerID string) error {
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("container does not exist: %s", containerID)
+	}
+
+	log.Printf("[podman:start] starting container %s", containerID)
+	startCmd := exec.Command("podman", "start", containerID)
+	if output, err := startCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to start container: %s: %w", string(output), err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Printf("[podman:start] verifying container %s is running", containerID)
+	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
+		running, err := IsContainerRunning(containerID)
+		if err != nil {
+			return false, err
+		}
+		return running, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("container failed to start: %w", err)
+	}
+
+	log.Printf("[podman:start] container %s started successfully", containerID)
 	return nil
 }
 

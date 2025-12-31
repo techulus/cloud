@@ -166,7 +166,7 @@ export function ServiceDetails({
 								)}
 								{!service.deployments.some((d) => d.status === "running") &&
 									service.deployments.some(
-										(d) => d.status === "stopped" || d.status === "failed",
+										(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
 									) &&
 									(service.configuredReplicas || []).length > 0 && (
 										<ActionButton
@@ -187,12 +187,12 @@ export function ServiceDetails({
 										/>
 									)}
 								{service.deployments.some(
-									(d) => d.status === "stopped" || d.status === "failed",
+									(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
 								) && (
 									<ActionButton
 										action={async () => {
 											const deletable = service.deployments.filter(
-												(d) => d.status === "stopped" || d.status === "failed",
+												(d) => d.status === "stopped" || d.status === "failed" || d.status === "rolled_back",
 											);
 											for (const dep of deletable) {
 												await deleteDeployment(dep.id);

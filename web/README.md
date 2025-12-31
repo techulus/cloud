@@ -14,5 +14,5 @@ Open [http://localhost:3000](http://localhost:3000) to access the control plane.
 ## Stack
 
 - **Framework**: Next.js with App Router
-- **Database**: SQLite with Drizzle ORM
+- **Database**: Postgres with Drizzle ORM
 - **Styling**: Tailwind CSS & Shadcn

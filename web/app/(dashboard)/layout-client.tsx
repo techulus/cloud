@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Toaster } from "@/components/ui/sonner";
+import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { signOut, useSession } from "@/lib/auth-client";
 
 export function DashboardLayoutClient({
@@ -64,7 +66,9 @@ export function DashboardLayoutClient({
 					</div>
 				</div>
 			</header>
+			<OfflineServersBanner />
 			<main className="container max-w-7xl mx-auto px-4 py-6">{children}</main>
+			<Toaster />
 		</div>
 	);
 }

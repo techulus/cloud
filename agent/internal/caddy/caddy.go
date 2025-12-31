@@ -11,9 +11,10 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"sort"
+	"strings"
 	"time"
 
-	pb "techulus/cloud-agent/internal/proto"
 	"techulus/cloud-agent/internal/retry"
 )
 
@@ -29,32 +30,6 @@ func CheckPrerequisites() error {
 		return fmt.Errorf("caddy command not found: %w", err)
 	}
 	return nil
-}
-
-func buildCaddyRoute(route *pb.CaddyRoute) map[string]any {
-	upstreams := make([]map[string]string, len(route.Upstreams))
-	for i, u := range route.Upstreams {
-		upstreams[i] = map[string]string{"dial": u}
-	}
-
-	caddyRoute := map[string]any{
-		"@id": route.Id,
-		"match": []map[string]any{
-			{"host": []string{route.Domain}},
-		},
-		"handle": []map[string]any{
-			{
-				"handler":   "reverse_proxy",
-				"upstreams": upstreams,
-			},
-		},
-	}
-
-	if route.Internal {
-		caddyRoute["terminal"] = true
-	}
-
-	return caddyRoute
 }
 
 func hashConfig(data []byte) string {
@@ -123,23 +98,47 @@ func VerifyRouteExists(routeID string, expectedDomain string) (bool, error) {
 	return false, nil
 }
 
-func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
+type CaddyRoute struct {
+	ID        string
+	Domain    string
+	Upstreams []string
+}
+
+func UpdateCaddyRoutes(routes []CaddyRoute) error {
 	var managedRoutes []map[string]any
-	for _, route := range config.Routes {
+	for _, route := range routes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
-		managedRoutes = append(managedRoutes, buildCaddyRoute(route))
+
+		upstreams := make([]map[string]string, len(route.Upstreams))
+		for i, u := range route.Upstreams {
+			upstreams[i] = map[string]string{"dial": u}
+		}
+
+		caddyRoute := map[string]any{
+			"@id": route.ID,
+			"match": []map[string]any{
+				{"host": []string{route.Domain}},
+			},
+			"handle": []map[string]any{
+				{
+					"handler":   "reverse_proxy",
+					"upstreams": upstreams,
+				},
+			},
+		}
+		managedRoutes = append(managedRoutes, caddyRoute)
 	}
 
 	managedJSON, _ := json.Marshal(managedRoutes)
 	configHash := hashConfig(managedJSON)
 
 	if configHash == lastConfigHash {
-		return true, nil
+		return nil
 	}
 
-	log.Printf("[caddy] updating %d routes", len(config.Routes))
+	log.Printf("[caddy] updating %d routes", len(routes))
 
 	existingRoutes, err := getExistingRoutes()
 	if err != nil {
@@ -160,18 +159,18 @@ func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("caddy PATCH returned %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("caddy PATCH returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	if len(config.Routes) == 0 {
+	if len(routes) == 0 {
 		lastConfigHash = configHash
-		return true, nil
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -180,33 +179,108 @@ func HandleCaddyConfig(config *pb.CaddyConfig) (bool, error) {
 	log.Printf("[caddy] verifying routes...")
 	var failedRoutes []string
 
-	for _, route := range config.Routes {
+	for _, route := range routes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
 
 		err := retry.WithBackoff(ctx, retry.ConfigBackoff, func() (bool, error) {
-			verified, err := VerifyRouteExists(route.Id, route.Domain)
+			verified, err := VerifyRouteExists(route.ID, route.Domain)
 			if err != nil {
-				log.Printf("[caddy:verify] route %s verification error: %v", route.Id, err)
+				log.Printf("[caddy:verify] route %s verification error: %v", route.ID, err)
 				return false, nil
 			}
 			return verified, nil
 		})
 
 		if err != nil {
-			failedRoutes = append(failedRoutes, route.Id)
-			log.Printf("[caddy:verify] route %s verification failed after retries", route.Id)
+			failedRoutes = append(failedRoutes, route.ID)
+			log.Printf("[caddy:verify] route %s verification failed after retries", route.ID)
 		} else {
-			log.Printf("[caddy:verify] route %s verified successfully", route.Id)
+			log.Printf("[caddy:verify] route %s verified successfully", route.ID)
 		}
 	}
 
 	if len(failedRoutes) > 0 {
-		return false, fmt.Errorf("failed to verify routes: %v", failedRoutes)
+		return fmt.Errorf("failed to verify routes: %v", failedRoutes)
 	}
 
 	lastConfigHash = configHash
 	log.Printf("[caddy] all routes verified successfully")
-	return true, nil
+	return nil
 }
+
+func HashRoutes(routes []CaddyRoute) string {
+	sortedRoutes := make([]CaddyRoute, len(routes))
+	copy(sortedRoutes, routes)
+	sort.Slice(sortedRoutes, func(i, j int) bool {
+		return sortedRoutes[i].ID < sortedRoutes[j].ID
+	})
+
+	var sb strings.Builder
+	for _, r := range sortedRoutes {
+		sb.WriteString(r.ID)
+		sb.WriteString(":")
+		sb.WriteString(r.Domain)
+		sb.WriteString(":")
+		sortedUpstreams := make([]string, len(r.Upstreams))
+		copy(sortedUpstreams, r.Upstreams)
+		sort.Strings(sortedUpstreams)
+		sb.WriteString(strings.Join(sortedUpstreams, ","))
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func GetCurrentConfigHash() string {
+	routes, err := getExistingRoutes()
+	if err != nil {
+		log.Printf("[caddy:hash] failed to get routes: %v", err)
+		return ""
+	}
+
+	var managedRoutes []CaddyRoute
+	for _, route := range routes {
+		id, hasID := route["@id"].(string)
+		if !hasID || id == "" {
+			continue
+		}
+
+		var domain string
+		var upstreams []string
+
+		if matchList, ok := route["match"].([]any); ok && len(matchList) > 0 {
+			if firstMatch, ok := matchList[0].(map[string]any); ok {
+				if hostList, ok := firstMatch["host"].([]any); ok && len(hostList) > 0 {
+					if h, ok := hostList[0].(string); ok {
+						domain = h
+					}
+				}
+			}
+		}
+
+		if handleList, ok := route["handle"].([]any); ok && len(handleList) > 0 {
+			if handler, ok := handleList[0].(map[string]any); ok {
+				if upstreamList, ok := handler["upstreams"].([]any); ok {
+					for _, u := range upstreamList {
+						if upstream, ok := u.(map[string]any); ok {
+							if dial, ok := upstream["dial"].(string); ok {
+								upstreams = append(upstreams, dial)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		managedRoutes = append(managedRoutes, CaddyRoute{
+			ID:        id,
+			Domain:    domain,
+			Upstreams: upstreams,
+		})
+	}
+
+	return HashRoutes(managedRoutes)
+}
+

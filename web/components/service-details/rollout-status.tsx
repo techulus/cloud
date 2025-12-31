@@ -1,10 +1,11 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, XCircle, X } from "lucide-react";
+import { memo, useMemo, useState, useEffect, useRef } from "react";
+import { Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import { FloatingBar } from "@/components/ui/floating-bar";
 import { abortRollout } from "@/actions/projects";
-import type { Service, Rollout, DeploymentStatus } from "./types";
+import type { Service, DeploymentStatus } from "./types";
 
 type StageInfo = {
 	id: string;
@@ -12,11 +13,10 @@ type StageInfo = {
 };
 
 const STAGES: StageInfo[] = [
-	{ id: "deploying", label: "Pulling & Starting" },
-	{ id: "health_check", label: "Health Check" },
-	{ id: "dns_updating", label: "Updating DNS" },
-	{ id: "caddy_updating", label: "Updating Routes" },
-	{ id: "stopping_old", label: "Stopping Old" },
+	{ id: "deploying", label: "Starting" },
+	{ id: "health_check", label: "Checking Health" },
+	{ id: "routing", label: "Routing Traffic" },
+	{ id: "cleaning", label: "Cleaning Up" },
 	{ id: "completed", label: "Complete" },
 ];
 
@@ -29,11 +29,10 @@ function mapDeploymentStatusToStage(status: DeploymentStatus): string {
 		case "healthy":
 			return "health_check";
 		case "dns_updating":
-			return "dns_updating";
 		case "caddy_updating":
-			return "caddy_updating";
+			return "routing";
 		case "stopping_old":
-			return "stopping_old";
+			return "cleaning";
 		case "running":
 			return "completed";
 		default:
@@ -66,11 +65,9 @@ function getRolloutState(service: Service): {
 			if (statuses.every((s) => s === "running")) {
 				currentStage = "completed";
 			} else if (statuses.some((s) => s === "stopping_old")) {
-				currentStage = "stopping_old";
-			} else if (statuses.some((s) => s === "caddy_updating")) {
-				currentStage = "caddy_updating";
-			} else if (statuses.some((s) => s === "dns_updating")) {
-				currentStage = "dns_updating";
+				currentStage = "cleaning";
+			} else if (statuses.some((s) => s === "caddy_updating" || s === "dns_updating")) {
+				currentStage = "routing";
 			} else if (statuses.some((s) => s === "healthy" || s === "starting")) {
 				currentStage = "health_check";
 			} else if (statuses.some((s) => s === "pending" || s === "pulling")) {
@@ -174,18 +171,42 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 }) {
 	const [isAborting, setIsAborting] = useState(false);
 	const rolloutState = useMemo(() => getRolloutState(service), [service]);
+	const shownToastsRef = useRef<Set<string>>(new Set());
 
-	if (!rolloutState.isActive) {
-		return null;
-	}
-
-	const currentStageIndex = getStageIndex(rolloutState.currentStage);
-	const currentStage = STAGES[currentStageIndex];
 	const isFailed =
 		rolloutState.rolloutStatus === "failed" ||
 		rolloutState.rolloutStatus === "rolled_back";
 	const isCompleted = rolloutState.rolloutStatus === "completed";
 	const isInProgress = rolloutState.rolloutStatus === "in_progress";
+
+	useEffect(() => {
+		const activeRollout = service.rollouts?.find(
+			(r) => r.status === "completed" || r.status === "failed" || r.status === "rolled_back"
+		);
+
+		if (!activeRollout) return;
+
+		const toastKey = `${activeRollout.id}-${activeRollout.status}`;
+		if (shownToastsRef.current.has(toastKey)) return;
+
+		if (isCompleted) {
+			toast.success("Deployment completed successfully");
+			shownToastsRef.current.add(toastKey);
+		} else if (isFailed) {
+			const message = rolloutState.rolloutStatus === "rolled_back"
+				? "Deployment rolled back"
+				: "Deployment failed";
+			toast.error(message);
+			shownToastsRef.current.add(toastKey);
+		}
+	}, [service.rollouts, isCompleted, isFailed, rolloutState.rolloutStatus]);
+
+	if (!rolloutState.isActive || !isInProgress) {
+		return null;
+	}
+
+	const currentStageIndex = getStageIndex(rolloutState.currentStage);
+	const currentStage = STAGES[currentStageIndex];
 
 	const handleAbort = async () => {
 		setIsAborting(true);
@@ -197,55 +218,27 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 		}
 	};
 
-	const textColor = isFailed
-		? "text-red-600 dark:text-red-400"
-		: isCompleted
-			? "text-emerald-600 dark:text-emerald-400"
-			: "text-zinc-700 dark:text-zinc-300";
-
-	const label = isFailed
-		? rolloutState.rolloutStatus === "rolled_back"
-			? "Rolled Back"
-			: "Failed"
-		: isCompleted
-			? "Deployed"
-			: currentStage?.label || "Deploying";
-
-	const variant = isFailed ? "error" : isCompleted ? "success" : "info";
-
 	return (
-		<FloatingBar visible variant={variant}>
-			{isFailed ? (
-				<XCircle className="h-4 w-4 text-red-500" />
-			) : isCompleted ? (
-				<CheckCircle2 className="h-4 w-4 text-emerald-500" />
-			) : (
-				<Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-			)}
+		<FloatingBar visible variant="info">
+			<Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
 
-			<span
-				className={`text-sm font-medium transition-all duration-300 ${textColor}`}
-			>
-				{label}
+			<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+				{currentStage?.label || "Deploying"}
 			</span>
 
-			{isInProgress && (
-				<ProgressDots current={currentStageIndex} total={STAGES.length} />
-			)}
+			<ProgressDots current={currentStageIndex} total={STAGES.length} />
 
-			{isInProgress && (
-				<button
-					onClick={handleAbort}
-					disabled={isAborting}
-					className="ml-1 p-1 rounded-full text-zinc-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
-				>
-					{isAborting ? (
-						<Loader2 className="h-3.5 w-3.5 animate-spin" />
-					) : (
-						<X className="h-3.5 w-3.5" />
-					)}
-				</button>
-			)}
+			<button
+				onClick={handleAbort}
+				disabled={isAborting}
+				className="ml-1 p-1 rounded-full text-zinc-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+			>
+				{isAborting ? (
+					<Loader2 className="h-3.5 w-3.5 animate-spin" />
+				) : (
+					<X className="h-3.5 w-3.5" />
+				)}
+			</button>
 		</FloatingBar>
 	);
 });

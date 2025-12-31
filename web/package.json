@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"scripts": {
-		"dev": "concurrently \"next dev\" \"node --env-file=.env --import tsx --watch grpc/server.ts\" \"drizzle-kit studio\"",
+		"dev": "concurrently \"next dev\" \"drizzle-kit studio\"",
 		"prebuild": "drizzle-kit push",
 		"build": "next build",
 		"start": "next start",
@@ -11,15 +11,10 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:push": "drizzle-kit push",
-		"db:studio": "drizzle-kit studio",
-		"grpc:build": "tsup grpc/server.ts --format esm --target node22 --outDir dist/grpc",
-		"grpc:server": "node dist/grpc/server.mjs",
-		"proto:generate": "cd .. && protoc --plugin=./web/node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./web/grpc/generated --ts_proto_opt=snakeToCamel=false --ts_proto_opt=outputServices=grpc-js --ts_proto_opt=esModuleInterop=true proto/agent.proto"
+		"db:studio": "drizzle-kit studio"
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.0.0",
-		"@bufbuild/protobuf": "^2.10.2",
-		"@grpc/grpc-js": "^1.12.5",
 		"better-auth": "^1.4.9",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
@@ -49,8 +44,6 @@
 		"eslint": "^9",
 		"eslint-config-next": "16.1.1",
 		"tailwindcss": "^4",
-		"ts-proto": "^2.10.1",
-		"tsup": "^8.5.1",
 		"tsx": "^4.19.2",
 		"typescript": "^5"
 	},

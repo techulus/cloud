@@ -2,6 +2,8 @@ package dns
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -11,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	pb "techulus/cloud-agent/internal/proto"
 	"techulus/cloud-agent/internal/retry"
 )
 
 const (
-	dnsmasqConfigPath  = "/etc/dnsmasq.d/internal.conf"
-	resolvedDropInPath = "/etc/systemd/resolved.conf.d/internal.conf"
+	dnsmasqInternalPath = "/etc/dnsmasq.d/internal.conf"
+	dnsmasqServicesPath = "/etc/dnsmasq.d/services.conf"
+	resolvedDropInPath  = "/etc/systemd/resolved.conf.d/internal.conf"
 )
 
 func SetupLocalDNS(wireguardIP string) error {
@@ -27,7 +29,7 @@ func SetupLocalDNS(wireguardIP string) error {
 
 	config := fmt.Sprintf("address=/internal/%s\n", wireguardIP)
 
-	if err := os.WriteFile(dnsmasqConfigPath, []byte(config), 0o644); err != nil {
+	if err := os.WriteFile(dnsmasqInternalPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
@@ -115,10 +117,15 @@ func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
 	return true, nil
 }
 
-func UpdateRecords(config *pb.DnsConfig) error {
+type DnsRecord struct {
+	Name string
+	Ips  []string
+}
+
+func UpdateDnsRecords(records []DnsRecord) error {
 	var configLines []string
 
-	for _, record := range config.Records {
+	for _, record := range records {
 		for _, ip := range record.Ips {
 			configLines = append(configLines, fmt.Sprintf("address=/%s/%s", record.Name, ip))
 		}
@@ -129,9 +136,9 @@ func UpdateRecords(config *pb.DnsConfig) error {
 		configContent += "\n"
 	}
 
-	log.Printf("[dns] updating %d records", len(config.Records))
+	log.Printf("[dns] updating %d records", len(records))
 
-	if err := os.WriteFile(dnsmasqConfigPath, []byte(configContent), 0o644); err != nil {
+	if err := os.WriteFile(dnsmasqServicesPath, []byte(configContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
@@ -140,7 +147,7 @@ func UpdateRecords(config *pb.DnsConfig) error {
 		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
 
-	if len(config.Records) == 0 {
+	if len(records) == 0 {
 		return nil
 	}
 
@@ -150,7 +157,7 @@ func UpdateRecords(config *pb.DnsConfig) error {
 	log.Printf("[dns] verifying DNS records...")
 	var failedRecords []string
 
-	for _, record := range config.Records {
+	for _, record := range records {
 		err := retry.WithBackoff(ctx, retry.ConfigBackoff, func() (bool, error) {
 			verified, err := VerifyDNSRecord(record.Name, record.Ips)
 			if err != nil {
@@ -175,3 +182,59 @@ func UpdateRecords(config *pb.DnsConfig) error {
 	log.Printf("[dns] all records verified successfully")
 	return nil
 }
+
+func HashRecords(records []DnsRecord) string {
+	sortedRecords := make([]DnsRecord, len(records))
+	copy(sortedRecords, records)
+	sort.Slice(sortedRecords, func(i, j int) bool {
+		return sortedRecords[i].Name < sortedRecords[j].Name
+	})
+
+	var sb strings.Builder
+	for _, r := range sortedRecords {
+		sb.WriteString(r.Name)
+		sb.WriteString(":")
+		sortedIps := make([]string, len(r.Ips))
+		copy(sortedIps, r.Ips)
+		sort.Strings(sortedIps)
+		sb.WriteString(strings.Join(sortedIps, ","))
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func GetCurrentConfigHash() string {
+	data, err := os.ReadFile(dnsmasqServicesPath)
+	if err != nil {
+		return HashRecords(nil)
+	}
+
+	recordMap := make(map[string][]string)
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "address=/") {
+			continue
+		}
+		parts := strings.Split(strings.TrimPrefix(line, "address=/"), "/")
+		if len(parts) >= 2 {
+			name := parts[0]
+			ip := parts[1]
+			recordMap[name] = append(recordMap[name], ip)
+		}
+	}
+
+	var records []DnsRecord
+	for name, ips := range recordMap {
+		records = append(records, DnsRecord{Name: name, Ips: ips})
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Name < records[j].Name
+	})
+
+	return HashRecords(records)
+}
+
