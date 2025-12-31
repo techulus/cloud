@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, Server, Box, HeartPulse, Lock, ArrowDown } from "lucide-react";
+import { Globe, Server, Box, HeartPulse, Lock, ArrowDown, HardDrive } from "lucide-react";
 import {
 	CanvasWrapper,
 	getStatusColor,
@@ -93,17 +93,26 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	);
 }
 
+type ServiceVolume = {
+	id: string;
+	name: string;
+	containerPath: string;
+};
+
 function ServerBox({
 	serverName,
 	deployments,
+	volumes,
 }: {
 	serverName: string;
 	deployments: Deployment[];
+	volumes?: ServiceVolume[];
 }) {
 	const hasRunning = deployments.some((d) => d.status === "running");
 	const borderClass = hasRunning
 		? "border-emerald-500/30"
 		: "border-zinc-200 dark:border-zinc-700";
+	const hasVolumes = volumes && volumes.length > 0;
 
 	return (
 		<div
@@ -114,7 +123,7 @@ function ServerBox({
 				transition-all duration-300 ease-in-out
 			`}
 		>
-			<div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-200 dark:border-zinc-700">
+			<div className="flex items-center gap-2 mb-2">
 				<div className="flex items-center justify-center w-5 h-5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
 					<Server className="h-3 w-3 text-zinc-500" />
 				</div>
@@ -130,6 +139,17 @@ function ServerBox({
 					<DeploymentCard key={deployment.id} deployment={deployment} />
 				))}
 			</div>
+
+			{hasVolumes && (
+				<div className="mt-2 space-y-1">
+					{volumes!.map((volume) => (
+						<div key={volume.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+							<HardDrive className="h-3.5 w-3.5" />
+							<span>{volume.name}</span>
+						</div>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -229,6 +249,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 							<ServerBox
 								serverName={group.serverName}
 								deployments={group.deployments}
+								volumes={service.volumes}
 							/>
 						</div>
 					))}

@@ -2,7 +2,7 @@
 
 import useSWR from "swr";
 import Link from "next/link";
-import { Globe, Lock, Box } from "lucide-react";
+import { Globe, Lock, Box, HardDrive } from "lucide-react";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 import { fetcher } from "@/lib/fetcher";
@@ -39,6 +39,12 @@ type ServiceReplica = {
 	count: number;
 };
 
+type ServiceVolume = {
+	id: string;
+	name: string;
+	containerPath: string;
+};
+
 type Service = {
 	id: string;
 	projectId: string;
@@ -55,6 +61,7 @@ type Service = {
 	ports: ServicePort[];
 	configuredReplicas: ServiceReplica[];
 	deployments: Deployment[];
+	volumes?: ServiceVolume[];
 };
 
 function ServiceCard({
@@ -72,6 +79,7 @@ function ServiceCard({
 	const runningCount = service.deployments.filter(
 		(d) => d.status === "running",
 	).length;
+	const hasVolumes = service.volumes && service.volumes.length > 0;
 
 	const hasEndpoints = publicPorts.length > 0 || hasInternalDns;
 
@@ -119,7 +127,7 @@ function ServiceCard({
 				</div>
 
 				{hasEndpoints && (
-					<div className="hidden md:block mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50 space-y-1.5">
+					<div className="mt-2 space-y-1.5">
 						{publicPorts.map((port) => (
 							<div
 								key={port.id}
@@ -142,45 +150,30 @@ function ServiceCard({
 					</div>
 				)}
 
+				{hasVolumes && (
+					<div className="mt-2 space-y-1">
+						{service.volumes!.map((volume) => (
+							<div key={volume.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+								<HardDrive className="h-3.5 w-3.5" />
+								<span>{volume.name}</span>
+							</div>
+						))}
+					</div>
+				)}
+
 				{service.deployments.length > 0 && (
-					<div
-						className={`border-t border-zinc-200/50 dark:border-zinc-700/50 ${hasEndpoints ? "mt-2 pt-2" : "mt-2 pt-2"}`}
-					>
+					<div className="mt-2">
 						<div className="flex items-center justify-between">
 							<span className="text-xs text-muted-foreground">Replicas</span>
-							<div className="flex items-center gap-1">
-								{Array.from({
-									length: Math.max(service.deployments.length, 1),
-								}).map((_, i) => {
-									const deployment = service.deployments[i];
-									const isRunning = deployment?.status === "running";
-									const isPending =
-										deployment?.status === "pending" ||
-										deployment?.status === "pulling";
-									const isFailed = deployment?.status === "failed";
-									return (
-										<div
-											key={i}
-											className={`
-                        w-3 h-3 rounded-sm
-                        ${isRunning ? "bg-emerald-500" : ""}
-                        ${isPending ? "bg-amber-500 animate-pulse" : ""}
-                        ${isFailed ? "bg-rose-500" : ""}
-                        ${!isRunning && !isPending && !isFailed ? "bg-zinc-300 dark:bg-zinc-600" : ""}
-                      `}
-										/>
-									);
-								})}
-								<span className={`ml-2 text-sm font-medium ${colors.text}`}>
-									{runningCount}/{service.deployments.length}
-								</span>
-							</div>
+							<span className={`text-sm font-medium ${colors.text}`}>
+								{runningCount}/{service.deployments.length}
+							</span>
 						</div>
 					</div>
 				)}
 
 				{service.deployments.length === 0 && (
-					<div className="mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
+					<div className="mt-2">
 						<span className="text-xs text-muted-foreground">Not deployed</span>
 					</div>
 				)}
