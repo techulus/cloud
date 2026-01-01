@@ -4,12 +4,10 @@ import {
 	ArrowDownToLine,
 	ChevronDown,
 	ChevronUp,
-	Download,
 	Search,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,35 +23,35 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { fetcher } from "@/lib/fetcher";
 
-interface LogEntry {
+interface RequestEntry {
 	id: string;
-	deploymentId?: string;
-	stream: "stdout" | "stderr";
-	message: string;
+	method: string;
+	path: string;
+	status: number;
+	duration: number;
+	clientIp: string;
 	timestamp: string;
 }
 
-interface LogsViewerProps {
+interface RequestsViewerProps {
 	serviceId: string;
 }
 
-type LogLevel = "error" | "warn" | "info" | "debug";
+type StatusFilter = "all" | "2xx" | "3xx" | "4xx" | "5xx";
 
-const LEVEL_COLORS: Record<LogLevel, string> = {
-	error: "text-red-500 bg-red-500/10",
-	warn: "text-yellow-500 bg-yellow-500/10",
-	info: "text-blue-500 bg-blue-500/10",
-	debug: "text-zinc-500 bg-zinc-500/10",
+const STATUS_COLORS: Record<string, string> = {
+	"2xx": "text-green-500 bg-green-500/10",
+	"3xx": "text-blue-500 bg-blue-500/10",
+	"4xx": "text-yellow-500 bg-yellow-500/10",
+	"5xx": "text-red-500 bg-red-500/10",
 };
 
-function detectLevel(message: string): LogLevel | null {
-	const m = message.toLowerCase();
-	if (/\berror\b|\[error\]|error:|"level":"error"/.test(m)) return "error";
-	if (/\bwarn(ing)?\b|\[warn(ing)?\]|warn:|"level":"warn"/.test(m))
-		return "warn";
-	if (/\binfo\b|\[info\]|info:|"level":"info"/.test(m)) return "info";
-	if (/\bdebug\b|\[debug\]|debug:|"level":"debug"/.test(m)) return "debug";
-	return null;
+function getStatusCategory(status: number): string {
+	if (status >= 200 && status < 300) return "2xx";
+	if (status >= 300 && status < 400) return "3xx";
+	if (status >= 400 && status < 500) return "4xx";
+	if (status >= 500) return "5xx";
+	return "unknown";
 }
 
 function highlightMatches(text: string, search: string): React.ReactNode {
@@ -79,21 +77,19 @@ function highlightMatches(text: string, search: string): React.ReactNode {
 	);
 }
 
-export function LogsViewer({ serviceId }: LogsViewerProps) {
+export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [search, setSearch] = useState("");
-	const [levels, setLevels] = useState<Set<LogLevel>>(
-		new Set(["error", "warn", "info", "debug"]),
+	const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(
+		new Set(["2xx", "3xx", "4xx", "5xx"]),
 	);
-	const [showStdout, setShowStdout] = useState(true);
-	const [showStderr, setShowStderr] = useState(true);
 	const [isPaused, setIsPaused] = useState(false);
 	const [autoScroll, setAutoScroll] = useState(true);
 
 	const { data, mutate, isLoading } = useSWR<{
-		logs: LogEntry[];
+		logs: RequestEntry[];
 		hasMore: boolean;
-	}>(`/api/services/${serviceId}/logs?limit=500&type=container`, fetcher, {
+	}>(`/api/services/${serviceId}/requests?limit=500`, fetcher, {
 		refreshInterval: isPaused ? 0 : 2000,
 	});
 
@@ -102,18 +98,23 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 
 	const filteredLogs = useMemo(() => {
 		return logs.filter((log) => {
-			if (log.stream === "stdout" && !showStdout) return false;
-			if (log.stream === "stderr" && !showStderr) return false;
+			const category = getStatusCategory(log.status) as StatusFilter;
+			if (!statusFilter.has(category)) return false;
 
-			const level = detectLevel(log.message);
-			if (level && !levels.has(level)) return false;
-
-			if (search && !log.message.toLowerCase().includes(search.toLowerCase()))
-				return false;
+			if (search) {
+				const searchLower = search.toLowerCase();
+				const matchesPath = log.path.toLowerCase().includes(searchLower);
+				const matchesMethod = log.method.toLowerCase().includes(searchLower);
+				const matchesStatus = log.status.toString().includes(search);
+				const matchesIp = log.clientIp.includes(search);
+				if (!matchesPath && !matchesMethod && !matchesStatus && !matchesIp) {
+					return false;
+				}
+			}
 
 			return true;
 		});
-	}, [logs, showStdout, showStderr, levels, search]);
+	}, [logs, statusFilter, search]);
 
 	useEffect(() => {
 		if (autoScroll && containerRef.current) {
@@ -142,60 +143,44 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 		});
 	};
 
-	const toggleLevel = (level: LogLevel) => {
-		const newLevels = new Set(levels);
-		if (newLevels.has(level)) {
-			newLevels.delete(level);
+	const toggleStatus = (status: StatusFilter) => {
+		const newStatuses = new Set(statusFilter);
+		if (newStatuses.has(status)) {
+			newStatuses.delete(status);
 		} else {
-			newLevels.add(level);
+			newStatuses.add(status);
 		}
-		setLevels(newLevels);
+		setStatusFilter(newStatuses);
 	};
 
-	const selectAllLevels = () => {
-		setLevels(new Set(["error", "warn", "info", "debug"]));
+	const selectAllStatuses = () => {
+		setStatusFilter(new Set(["2xx", "3xx", "4xx", "5xx"]));
 	};
 
-	const selectNoneLevels = () => {
-		setLevels(new Set());
+	const selectNoneStatuses = () => {
+		setStatusFilter(new Set());
 	};
 
-	const downloadLogs = useCallback(() => {
-		const text = filteredLogs
-			.map(
-				(log) =>
-					`${formatFullTimestamp(log.timestamp)} [${log.stream}] ${log.message}`,
-			)
-			.join("\n");
-		const blob = new Blob([text], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = `logs-${serviceId}-${new Date().toISOString().slice(0, 10)}.log`;
-		a.click();
-		URL.revokeObjectURL(url);
-		toast.success("Logs downloaded");
-	}, [filteredLogs, serviceId]);
-
-	const levelLabel = useMemo(() => {
-		if (levels.size === 4) return "All levels";
-		if (levels.size === 0) return "No levels";
-		return Array.from(levels).join(", ");
-	}, [levels]);
+	const statusLabel = useMemo(() => {
+		if (statusFilter.size === 4) return "All statuses";
+		if (statusFilter.size === 0) return "No statuses";
+		return Array.from(statusFilter).join(", ");
+	}, [statusFilter]);
 
 	return (
 		<div className="fixed inset-0 top-32 z-50 flex flex-col bg-zinc-100 dark:bg-zinc-950">
 			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900">
-				<div className="relative flex-1 min-w-[200px]">
+				<div className="relative flex-1 min-w-50">
 					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
 					<Input
-						placeholder="Search logs..."
+						placeholder="Search path, method, status, IP..."
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						className="pl-8 pr-8 h-8"
 					/>
 					{search && (
 						<button
+							type="button"
 							onClick={() => setSearch("")}
 							className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 						>
@@ -206,54 +191,56 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 
 				<DropdownMenu>
 					<DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 h-7 px-2.5 text-[0.8rem] font-medium rounded-[min(var(--radius-md),12px)] border border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50">
-						{levelLabel}
+						{statusLabel}
 						<ChevronDown className="size-3" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start">
 						<DropdownMenuGroup>
-							<DropdownMenuLabel>Log Levels</DropdownMenuLabel>
+							<DropdownMenuLabel>Status Codes</DropdownMenuLabel>
 							<DropdownMenuSeparator />
 							<DropdownMenuCheckboxItem
-								checked={levels.has("error")}
-								onCheckedChange={() => toggleLevel("error")}
+								checked={statusFilter.has("2xx")}
+								onCheckedChange={() => toggleStatus("2xx")}
 							>
 								<span className="flex items-center gap-2">
-									<span className="size-2 rounded-full bg-red-500" />
-									Error
+									<span className="size-2 rounded-full bg-green-500" />
+									2xx Success
 								</span>
 							</DropdownMenuCheckboxItem>
 							<DropdownMenuCheckboxItem
-								checked={levels.has("warn")}
-								onCheckedChange={() => toggleLevel("warn")}
-							>
-								<span className="flex items-center gap-2">
-									<span className="size-2 rounded-full bg-yellow-500" />
-									Warn
-								</span>
-							</DropdownMenuCheckboxItem>
-							<DropdownMenuCheckboxItem
-								checked={levels.has("info")}
-								onCheckedChange={() => toggleLevel("info")}
+								checked={statusFilter.has("3xx")}
+								onCheckedChange={() => toggleStatus("3xx")}
 							>
 								<span className="flex items-center gap-2">
 									<span className="size-2 rounded-full bg-blue-500" />
-									Info
+									3xx Redirect
 								</span>
 							</DropdownMenuCheckboxItem>
 							<DropdownMenuCheckboxItem
-								checked={levels.has("debug")}
-								onCheckedChange={() => toggleLevel("debug")}
+								checked={statusFilter.has("4xx")}
+								onCheckedChange={() => toggleStatus("4xx")}
 							>
 								<span className="flex items-center gap-2">
-									<span className="size-2 rounded-full bg-zinc-500" />
-									Debug
+									<span className="size-2 rounded-full bg-yellow-500" />
+									4xx Client Error
+								</span>
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={statusFilter.has("5xx")}
+								onCheckedChange={() => toggleStatus("5xx")}
+							>
+								<span className="flex items-center gap-2">
+									<span className="size-2 rounded-full bg-red-500" />
+									5xx Server Error
 								</span>
 							</DropdownMenuCheckboxItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuCheckboxItem
-								checked={levels.size === 4}
+								checked={statusFilter.size === 4}
 								onCheckedChange={() =>
-									levels.size === 4 ? selectNoneLevels() : selectAllLevels()
+									statusFilter.size === 4
+										? selectNoneStatuses()
+										: selectAllStatuses()
 								}
 							>
 								Select all
@@ -261,23 +248,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 						</DropdownMenuGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
-
-				<div className="flex items-center gap-1">
-					<Button
-						variant={showStdout ? "default" : "outline"}
-						size="sm"
-						onClick={() => setShowStdout(!showStdout)}
-					>
-						stdout
-					</Button>
-					<Button
-						variant={showStderr ? "destructive" : "outline"}
-						size="sm"
-						onClick={() => setShowStderr(!showStderr)}
-					>
-						stderr
-					</Button>
-				</div>
 
 				<div className="flex items-center gap-2 ml-auto">
 					<button
@@ -297,14 +267,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 						/>
 						{isPaused ? "Paused" : "Live"}
 					</button>
-					<Button
-						variant="outline"
-						size="icon-sm"
-						onClick={downloadLogs}
-						title="Download logs"
-					>
-						<Download className="size-4" />
-					</Button>
 					<Button
 						variant={autoScroll ? "default" : "outline"}
 						size="icon-sm"
@@ -329,7 +291,7 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 							className="gap-1 text-muted-foreground"
 						>
 							<ChevronUp className="size-3" />
-							Load older logs
+							Load older requests
 						</Button>
 					</div>
 				)}
@@ -340,7 +302,9 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 					</div>
 				) : filteredLogs.length === 0 ? (
 					<div className="flex items-center justify-center h-full text-muted-foreground">
-						{logs.length === 0 ? "No logs available" : "No logs match filters"}
+						{logs.length === 0
+							? "No requests available"
+							: "No requests match filters"}
 					</div>
 				) : (
 					<>
@@ -352,7 +316,9 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 						)}
 						<div className="p-4 py-2">
 							{[...filteredLogs].reverse().map((entry) => {
-								const level = detectLevel(entry.message);
+								const category = getStatusCategory(entry.status);
+								const statusColor = STATUS_COLORS[category] || "";
+
 								return (
 									<div
 										key={entry.id}
@@ -364,30 +330,22 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 										>
 											{formatTimestamp(entry.timestamp)}
 										</span>
-										{level && (
-											<span
-												className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
-											>
-												{level}
-											</span>
-										)}
 										<span
-											className={`shrink-0 px-1 rounded text-[10px] mr-2 ${
-												entry.stream === "stderr"
-													? "text-red-600 dark:text-red-400 bg-red-500/10"
-													: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10"
-											}`}
+											className={`shrink-0 px-1.5 rounded text-[10px] font-medium mr-2 tabular-nums ${statusColor}`}
 										>
-											{entry.stream}
+											{entry.status}
 										</span>
-										<span
-											className={`break-all whitespace-pre-wrap ${
-												entry.stream === "stderr"
-													? "text-red-600 dark:text-red-400"
-													: "text-zinc-800 dark:text-zinc-200"
-											}`}
-										>
-											{highlightMatches(entry.message, search)}
+										<span className="shrink-0 w-12 text-zinc-500 dark:text-zinc-400 font-medium">
+											{entry.method}
+										</span>
+										<span className="flex-1 break-all whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+											{highlightMatches(entry.path, search)}
+										</span>
+										<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums">
+											{Math.round(Number(entry.duration) || 0)}ms
+										</span>
+										<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums hidden group-hover:inline">
+											{entry.clientIp}
 										</span>
 									</div>
 								);

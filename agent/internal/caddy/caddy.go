@@ -102,6 +102,7 @@ type CaddyRoute struct {
 	ID        string
 	Domain    string
 	Upstreams []string
+	ServiceId string
 }
 
 func UpdateCaddyRoutes(routes []CaddyRoute) error {
@@ -122,6 +123,15 @@ func UpdateCaddyRoutes(routes []CaddyRoute) error {
 				{"host": []string{route.Domain}},
 			},
 			"handle": []map[string]any{
+				{
+					"handler":    "vars",
+					"service_id": route.ServiceId,
+				},
+				{
+					"handler": "log_append",
+					"key":     "service_id",
+					"value":   "{http.vars.service_id}",
+				},
 				{
 					"handler":   "reverse_proxy",
 					"upstreams": upstreams,
@@ -223,6 +233,8 @@ func HashRoutes(routes []CaddyRoute) string {
 		sb.WriteString(":")
 		sb.WriteString(r.Domain)
 		sb.WriteString(":")
+		sb.WriteString(r.ServiceId)
+		sb.WriteString(":")
 		sortedUpstreams := make([]string, len(r.Upstreams))
 		copy(sortedUpstreams, r.Upstreams)
 		sort.Strings(sortedUpstreams)
@@ -260,13 +272,26 @@ func GetCurrentConfigHash() string {
 			}
 		}
 
-		if handleList, ok := route["handle"].([]any); ok && len(handleList) > 0 {
-			if handler, ok := handleList[0].(map[string]any); ok {
-				if upstreamList, ok := handler["upstreams"].([]any); ok {
-					for _, u := range upstreamList {
-						if upstream, ok := u.(map[string]any); ok {
-							if dial, ok := upstream["dial"].(string); ok {
-								upstreams = append(upstreams, dial)
+		var serviceId string
+		if handleList, ok := route["handle"].([]any); ok {
+			for _, h := range handleList {
+				handler, ok := h.(map[string]any)
+				if !ok {
+					continue
+				}
+				handlerType, _ := handler["handler"].(string)
+				if handlerType == "vars" {
+					if sid, ok := handler["service_id"].(string); ok {
+						serviceId = sid
+					}
+				}
+				if handlerType == "reverse_proxy" {
+					if upstreamList, ok := handler["upstreams"].([]any); ok {
+						for _, u := range upstreamList {
+							if upstream, ok := u.(map[string]any); ok {
+								if dial, ok := upstream["dial"].(string); ok {
+									upstreams = append(upstreams, dial)
+								}
 							}
 						}
 					}
@@ -278,6 +303,7 @@ func GetCurrentConfigHash() string {
 			ID:        id,
 			Domain:    domain,
 			Upstreams: upstreams,
+			ServiceId: serviceId,
 		})
 	}
 

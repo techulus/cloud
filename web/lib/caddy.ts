@@ -6,6 +6,7 @@ export type CaddyRoute = {
   id: string;
   domain: string;
   upstreams: string[];
+  serviceId: string;
 };
 
 const ROUTABLE_STATUSES = ["caddy_updating", "running"] as const;
@@ -56,6 +57,7 @@ export async function getAllRoutes(): Promise<CaddyRoute[]> {
             id: port.domain,
             domain: port.domain,
             upstreams: portUpstreams,
+            serviceId: service.id,
           });
         }
       }

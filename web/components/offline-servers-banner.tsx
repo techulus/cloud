@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import Link from "next/link";
 
@@ -12,6 +12,9 @@ type Server = {
 
 export function OfflineServersBanner() {
   const [offlineServers, setOfflineServers] = useState<Server[]>([]);
+  const [isVisible, setIsVisible] = useState(false);
+  const [shouldRender, setShouldRender] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     async function fetchServers() {
@@ -33,12 +36,44 @@ export function OfflineServersBanner() {
     return () => clearInterval(interval);
   }, []);
 
-  if (offlineServers.length === 0) return null;
+  useEffect(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    if (offlineServers.length > 0) {
+      setShouldRender(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setIsVisible(true);
+        });
+      });
+    } else {
+      setIsVisible(false);
+      timeoutRef.current = setTimeout(() => {
+        setShouldRender(false);
+      }, 300);
+    }
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [offlineServers.length]);
+
+  if (!shouldRender) return null;
 
   const serverNames = offlineServers.map((s) => s.name).join(", ");
 
   return (
-    <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50">
+    <div
+      className={`fixed bottom-12 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out ${
+        isVisible
+          ? "opacity-100 translate-y-0"
+          : "opacity-0 translate-y-4"
+      }`}
+    >
       <div className="bg-destructive/10 border border-destructive/20 text-destructive rounded-lg shadow-lg px-4 py-2 flex items-center gap-3 text-sm">
         <AlertTriangle className="h-4 w-4 flex-shrink-0" />
         <span>

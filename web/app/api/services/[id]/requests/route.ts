@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { isLoggingEnabled, queryLogsByService, type LogType } from "@/lib/victoria-logs";
+import { isLoggingEnabled, queryLogsByService } from "@/lib/victoria-logs";
 
 export async function GET(
 	request: Request,
@@ -25,24 +25,18 @@ export async function GET(
 		1000,
 	);
 	const after = url.searchParams.get("after") || undefined;
-	const logTypeParam = url.searchParams.get("type");
-	const logType = logTypeParam === "container" || logTypeParam === "http" ? logTypeParam as LogType : undefined;
 
 	try {
-		const result = await queryLogsByService(serviceId, limit, after, logType);
+		const result = await queryLogsByService(serviceId, limit, after, "http");
 
 		const logs = result.logs.map((log) => ({
-			id: `${log.deployment_id || log.service_id}-${log._time}`,
-			deploymentId: log.deployment_id,
-			stream: log.stream || (log.log_type === "http" ? "http" : "stdout"),
-			message: log._msg,
+			id: `${log.service_id}-${log._time}`,
+			method: log.method || "GET",
+			path: log.path || log._msg,
+			status: log.status || 0,
+			duration: log.duration_ms || 0,
+			clientIp: log.client_ip || "",
 			timestamp: log._time,
-			logType: log.log_type || "container",
-			status: log.status,
-			method: log.method,
-			path: log.path,
-			duration: log.duration_ms,
-			clientIp: log.client_ip,
 		}));
 
 		return Response.json({
@@ -50,7 +44,7 @@ export async function GET(
 			hasMore: result.hasMore,
 		});
 	} catch (error) {
-		console.error("[logs:service] failed to query logs:", error);
+		console.error("[logs:requests] failed to query HTTP logs:", error);
 		return Response.json({ logs: [], hasMore: false });
 	}
 }

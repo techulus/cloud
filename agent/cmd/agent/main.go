@@ -70,26 +70,28 @@ type ActualState struct {
 }
 
 type Agent struct {
-	state           AgentState
-	client          *agenthttp.Client
-	reconciler      *reconcile.Reconciler
-	config          *Config
-	publicIP        string
-	dataDir         string
-	expectedState   *agenthttp.ExpectedState
-	processingStart time.Time
-	logCollector    *logs.Collector
+	state              AgentState
+	client             *agenthttp.Client
+	reconciler         *reconcile.Reconciler
+	config             *Config
+	publicIP           string
+	dataDir            string
+	expectedState      *agenthttp.ExpectedState
+	processingStart    time.Time
+	logCollector       *logs.Collector
+	caddyLogCollector  *logs.CaddyCollector
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector) *Agent {
 	return &Agent{
-		state:        StateIdle,
-		client:       client,
-		reconciler:   reconciler,
-		config:       config,
-		publicIP:     publicIP,
-		dataDir:      dataDir,
-		logCollector: logCollector,
+		state:             StateIdle,
+		client:            client,
+		reconciler:        reconciler,
+		config:            config,
+		publicIP:          publicIP,
+		dataDir:           dataDir,
+		logCollector:      logCollector,
+		caddyLogCollector: caddyLogCollector,
 	}
 }
 
@@ -105,6 +107,10 @@ func (a *Agent) Run(ctx context.Context) {
 		logTickerC = logTicker.C
 	}
 
+	if a.caddyLogCollector != nil {
+		a.caddyLogCollector.Start()
+	}
+
 	a.tick()
 
 	for {
@@ -112,6 +118,9 @@ func (a *Agent) Run(ctx context.Context) {
 		case <-ctx.Done():
 			if a.logCollector != nil {
 				a.logCollector.Stop()
+			}
+			if a.caddyLogCollector != nil {
+				a.caddyLogCollector.Stop()
 			}
 			return
 		case <-ticker.C:
@@ -247,7 +256,7 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 
 	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
 	for i, r := range expected.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 	}
 	expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
 	log.Printf("[caddy:hash] expected: %d routes, hash=%s, current=%s", len(expectedCaddyRoutes), expectedCaddyHash, actual.CaddyConfigHash)
@@ -334,7 +343,7 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 
 	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
 	for i, r := range expected.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 	}
 	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
 		return true
@@ -517,7 +526,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 
 	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(a.expectedState.Caddy.Routes))
 	for i, r := range a.expectedState.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams}
+		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 	}
 	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
 		log.Printf("[reconcile] updating Caddy routes")
@@ -764,9 +773,13 @@ func main() {
 	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair)
 
 	var logCollector *logs.Collector
+	var caddyLogCollector *logs.CaddyCollector
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
-		logCollector = logs.NewCollector(logs.NewVictoriaLogsSender(logsEndpoint), dataDir)
+		sender := logs.NewVictoriaLogsSender(logsEndpoint)
+		logCollector = logs.NewCollector(sender, dataDir)
+		caddyLogCollector = logs.NewCaddyCollector(sender)
+		log.Println("[caddy-logs] Caddy HTTP log collection enabled")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -783,7 +796,7 @@ func main() {
 	publicIP := getPublicIP()
 	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector)
+	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector)
 	agent.Run(ctx)
 
 	log.Println("Agent stopped")

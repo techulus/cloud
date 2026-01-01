@@ -81,6 +81,7 @@ type CaddyRoute struct {
 	ID        string   `json:"id"`
 	Domain    string   `json:"domain"`
 	Upstreams []string `json:"upstreams"`
+	ServiceId string   `json:"serviceId"`
 }
 
 type WireGuardPeer struct {

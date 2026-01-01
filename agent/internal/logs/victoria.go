@@ -29,6 +29,7 @@ type victoriaLogEntry struct {
 	DeploymentID string `json:"deployment_id"`
 	ServiceID    string `json:"service_id"`
 	Stream       string `json:"stream"`
+	LogType      string `json:"log_type"`
 }
 
 func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
@@ -40,6 +41,7 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 			DeploymentID: l.DeploymentID,
 			ServiceID:    l.ServiceID,
 			Stream:       l.Stream,
+			LogType:      "container",
 		}
 		data, err := json.Marshal(entry)
 		if err != nil {
@@ -66,6 +68,70 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 	defer resp.Body.Close()
 
 	log.Printf("[logs] response: %d in %v", resp.StatusCode, time.Since(start))
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+type victoriaHTTPLogEntry struct {
+	Msg       string  `json:"_msg"`
+	Time      string  `json:"_time"`
+	ServiceID string  `json:"service_id"`
+	Host      string  `json:"host"`
+	Method    string  `json:"method"`
+	Path      string  `json:"path"`
+	Status    int     `json:"status"`
+	Duration  float64 `json:"duration_ms"`
+	Size      int     `json:"size"`
+	ClientIP  string  `json:"client_ip"`
+	LogType   string  `json:"log_type"`
+}
+
+func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
+	var buf bytes.Buffer
+	for _, l := range logs {
+		msg := fmt.Sprintf("%s %s %d %dms", l.Method, l.Path, l.Status, int(l.Duration))
+		entry := victoriaHTTPLogEntry{
+			Msg:       msg,
+			Time:      l.Timestamp,
+			ServiceID: l.ServiceId,
+			Host:      l.Host,
+			Method:    l.Method,
+			Path:      l.Path,
+			Status:    l.Status,
+			Duration:  l.Duration,
+			Size:      l.Size,
+			ClientIP:  l.ClientIP,
+			LogType:   "http",
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+
+	url := v.endpoint + "/insert/jsonline"
+	log.Printf("[caddy-logs] sending %d HTTP logs (%d bytes) to %s", len(logs), buf.Len(), url)
+
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send HTTP logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[caddy-logs] response: %d in %v", resp.StatusCode, time.Since(start))
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)

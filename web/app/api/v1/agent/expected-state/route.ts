@@ -199,6 +199,7 @@ export async function GET(request: NextRequest) {
             id: port.domain,
             domain: port.domain,
             upstreams,
+            serviceId: service.id,
           });
         }
       }

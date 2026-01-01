@@ -16,5 +16,14 @@
       dns cloudflare {$CF_API_TOKEN}
     }
   }
+
+  log {
+    output file /var/log/caddy/techulus.log {
+      roll_size 50mb
+      roll_keep 3
+    }
+    format json
+  }
+
   respond /__caddy_health__ "ok" 200
 }

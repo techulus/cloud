@@ -4,14 +4,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Toaster } from "@/components/ui/sonner";
-import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import {
 	BreadcrumbProvider,
 	useBreadcrumbs,
 } from "@/components/breadcrumb-context";
+import { OfflineServersBanner } from "@/components/offline-servers-banner";
+import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
+import { Spinner } from "@/components/ui/spinner";
 import { signOut, useSession } from "@/lib/auth-client";
 
 function DashboardHeader({ email }: { email: string }) {
@@ -34,8 +34,8 @@ function DashboardHeader({ email }: { email: string }) {
 					{breadcrumbs.length > 0 && (
 						<>
 							<nav className="flex items-center gap-2 text-sm">
-								{breadcrumbs.map((crumb, i) => (
-									<span key={i} className="flex items-center gap-2">
+								{breadcrumbs.map((crumb) => (
+									<span key={crumb.href} className="flex items-center gap-2">
 										{crumb.href ? (
 											<Link
 												href={crumb.href}

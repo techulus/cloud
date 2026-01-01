@@ -34,6 +34,7 @@ import { ContainerSourceSection } from "./container-source-section";
 import { DeploymentCanvas } from "./deployment-canvas";
 import { HealthCheckSection } from "./health-check-section";
 import { LogsViewer } from "./logs-viewer";
+import { RequestsViewer } from "./requests-viewer";
 import { PendingChangesBar } from "./pending-changes";
 import { PortsSection } from "./ports-section";
 import { ReplicasSection } from "./replicas-section";
@@ -113,8 +114,9 @@ export function ServiceDetails({
 					className="w-full lg:w-auto lg:max-w-160 -mt-2"
 				>
 					<TabsTrigger value="deployment">Architecture</TabsTrigger>
-					<TabsTrigger value="logs">Logs</TabsTrigger>
 					<TabsTrigger value="configuration">Configuration</TabsTrigger>
+					<TabsTrigger value="logs">Logs</TabsTrigger>
+					<TabsTrigger value="requests">Requests</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="deployment" className="pt-2">
@@ -212,10 +214,6 @@ export function ServiceDetails({
 					</div>
 				</TabsContent>
 
-				<TabsContent value="logs" className="pt-2">
-					<LogsViewer serviceId={service.id} />
-				</TabsContent>
-
 				<TabsContent value="configuration" className="pt-2">
 					<div className="space-y-6">
 						<ContainerSourceSection service={service} />
@@ -283,6 +281,14 @@ export function ServiceDetails({
 							</Card>
 						</div>
 					</div>
+				</TabsContent>
+
+				<TabsContent value="logs" className="pt-2">
+					<LogsViewer serviceId={service.id} />
+				</TabsContent>
+
+				<TabsContent value="requests" className="pt-2">
+					<RequestsViewer serviceId={service.id} />
 				</TabsContent>
 			</Tabs>
 
