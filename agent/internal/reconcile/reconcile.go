@@ -19,54 +19,6 @@ func NewReconciler(encryptionKey string) *Reconciler {
 	}
 }
 
-func (r *Reconciler) Reconcile(expected []agenthttp.ExpectedContainer, actual []podman.Container) error {
-	expectedMap := make(map[string]agenthttp.ExpectedContainer)
-	for _, c := range expected {
-		expectedMap[c.DeploymentID] = c
-	}
-
-	actualMap := make(map[string]podman.Container)
-	for _, c := range actual {
-		if c.DeploymentID != "" {
-			actualMap[c.DeploymentID] = c
-		}
-	}
-
-	for deploymentID, exp := range expectedMap {
-		act, exists := actualMap[deploymentID]
-		if !exists {
-			log.Printf("[reconcile] deploying missing container for deployment %s", deploymentID)
-			if err := r.Deploy(exp); err != nil {
-				log.Printf("[reconcile] failed to deploy %s: %v", deploymentID, err)
-			}
-			continue
-		}
-
-		if r.needsRedeploy(exp, act) {
-			log.Printf("[reconcile] redeploying container for deployment %s (config changed)", deploymentID)
-			if err := podman.Stop(act.ID); err != nil {
-				log.Printf("[reconcile] failed to stop old container %s: %v", act.ID, err)
-			}
-			if err := r.Deploy(exp); err != nil {
-				log.Printf("[reconcile] failed to redeploy %s: %v", deploymentID, err)
-			}
-		}
-	}
-
-	for deploymentID, act := range actualMap {
-		if _, exists := expectedMap[deploymentID]; !exists {
-			if act.State == "running" {
-				log.Printf("[reconcile] stopping orphan container %s (deployment %s)", act.ID, deploymentID)
-				if err := podman.Stop(act.ID); err != nil {
-					log.Printf("[reconcile] failed to stop orphan %s: %v", act.ID, err)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	portMappings := make([]podman.PortMapping, len(exp.Ports))
 	for i, p := range exp.Ports {
@@ -123,13 +75,4 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	})
 
 	return err
-}
-
-func (r *Reconciler) needsRedeploy(exp agenthttp.ExpectedContainer, act podman.Container) bool {
-	if exp.Image != act.Image {
-		log.Printf("[reconcile] image mismatch: expected %s, actual %s", exp.Image, act.Image)
-		return true
-	}
-
-	return false
 }

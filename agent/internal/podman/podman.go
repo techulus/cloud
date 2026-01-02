@@ -53,27 +53,6 @@ type DeployResult struct {
 	ContainerID string
 }
 
-func RemoveServiceContainers(serviceID string) error {
-	if serviceID == "" {
-		return nil
-	}
-
-	cmd := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("label=techulus.service.id=%s", serviceID), "--format", "{{.ID}}")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil
-	}
-
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if line == "" {
-			continue
-		}
-		exec.Command("podman", "rm", "-f", line).Run()
-	}
-
-	return nil
-}
-
 type containerInspect struct {
 	State struct {
 		Status  string `json:"Status"`
