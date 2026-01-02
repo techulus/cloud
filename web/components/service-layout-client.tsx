@@ -11,8 +11,7 @@ import {
 	parseDeployedConfig,
 } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
-import { PendingChangesBar } from "./service-details/pending-changes";
-import { RolloutStatusBar } from "./service-details/rollout-status";
+import { DeploymentStatusBar } from "./service-details/deployment-status-bar";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { createContext, useContext } from "react";
 import { Spinner } from "./ui/spinner";
@@ -123,14 +122,12 @@ export function ServiceLayoutClient({
 				{children}
 			</ServiceContext.Provider>
 
-			<PendingChangesBar
+			<DeploymentStatusBar
 				changes={pendingChanges}
 				service={service}
 				projectSlug={projectSlug}
 				onUpdate={handleActionComplete}
 			/>
-
-			<RolloutStatusBar service={service} onUpdate={handleActionComplete} />
 		</div>
 	);
 }
