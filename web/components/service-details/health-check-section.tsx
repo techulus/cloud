@@ -3,15 +3,10 @@
 import { useState, useReducer, useMemo, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { HeartPulse, ChevronDown } from "lucide-react";
 import { updateServiceHealthCheck } from "@/actions/projects";
-import type { Service } from "./types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 
 type HealthCheckState = {
 	cmd: string;

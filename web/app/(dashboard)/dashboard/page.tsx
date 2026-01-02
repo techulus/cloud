@@ -2,7 +2,7 @@ import { Box } from "lucide-react";
 import Link from "next/link";
 import { listProjects, listServers } from "@/db/queries";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
-import { ServerList } from "@/components/server-list";
+import { ServerList } from "@/components/server/server-list";
 import {
 	Item,
 	ItemContent,
@@ -24,7 +24,9 @@ export default async function DashboardPage() {
 				<div className="flex items-center justify-between">
 					<div>
 						<h2 className="text-lg font-semibold">Projects</h2>
-						<p className="text-sm text-muted-foreground">Deploy and manage services</p>
+						<p className="text-sm text-muted-foreground">
+							Deploy and manage services
+						</p>
 					</div>
 					<CreateProjectDialog />
 				</div>

@@ -4,25 +4,21 @@ import { useState, useMemo, useEffect, memo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Server, Lock } from "lucide-react";
 import { updateServiceConfig } from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
-import type { Service, ServerInfo } from "./types";
+import type { Server as ServerType, ServiceWithDetails as Service } from "@/db/types";
 
+type ServerInfo = Pick<ServerType, "id" | "name" | "wireguardIp">;
 type ServerWithStatus = ServerInfo & { status: string };
 
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
-  const res = await fetch(url);
-  const servers: ServerWithStatus[] = await res.json();
-  return servers
-    .filter((s) => s.status === "online")
-    .map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
+	const res = await fetch(url);
+	const servers: ServerWithStatus[] = await res.json();
+	return servers
+		.filter((s) => s.status === "online")
+		.map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
 };
 
 export const ReplicasSection = memo(function ReplicasSection({
@@ -33,7 +29,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 	onUpdate: () => void;
 }) {
 	const { data: servers, isLoading } = useSWR("/api/servers", fetcher);
-	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>({});
+	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>(
+		{},
+	);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 
@@ -66,7 +64,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 	const hasChanges = useMemo(() => {
 		if (service.stateful) {
-			const currentServerId = configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
+			const currentServerId =
+				configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
 			return selectedServerId !== currentServerId;
 		}
 
@@ -91,7 +90,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 		setIsSaving(true);
 		try {
 			if (service.stateful) {
-				const replicas = selectedServerId ? [{ serverId: selectedServerId, count: 1 }] : [];
+				const replicas = selectedServerId
+					? [{ serverId: selectedServerId, count: 1 }]
+					: [];
 				await updateServiceConfig(service.id, { replicas });
 			} else {
 				const replicas = Object.entries(localReplicas)
@@ -106,7 +107,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 	};
 
 	const totalReplicas = service.stateful
-		? (selectedServerId ? 1 : 0)
+		? selectedServerId
+			? 1
+			: 0
 		: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
 
 	if (service.stateful) {
@@ -126,11 +129,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 							<div className="flex items-center gap-2 mb-1">
 								<Lock className="h-4 w-4 text-muted-foreground" />
 								<span className="font-medium">
-									Locked to: {service.lockedServer?.name || service.lockedServerId}
+									Locked to:{" "}
+									{service.lockedServer?.name || service.lockedServerId}
 								</span>
 							</div>
 							<p className="text-sm text-muted-foreground">
-								Stateful services cannot be moved between servers. Volume data is stored on this machine.
+								Stateful services cannot be moved between servers. Volume data
+								is stored on this machine.
 							</p>
 						</div>
 					) : isLoading ? (
@@ -144,7 +149,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 					) : (
 						<>
 							<p className="text-sm text-muted-foreground">
-								Select a server for this stateful service. Once deployed, it cannot be moved.
+								Select a server for this stateful service. Once deployed, it
+								cannot be moved.
 							</p>
 							<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 								{servers.map((server) => (
@@ -160,11 +166,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 									>
 										<div className="flex-1 min-w-0">
 											<p className="font-medium truncate">{server.name}</p>
-											<p className={`text-xs font-mono ${
-												selectedServerId === server.id
-													? "text-primary-foreground/70"
-													: "text-muted-foreground"
-											}`}>
+											<p
+												className={`text-xs font-mono ${
+													selectedServerId === server.id
+														? "text-primary-foreground/70"
+														: "text-muted-foreground"
+												}`}
+											>
 												{server.wireguardIp}
 											</p>
 										</div>

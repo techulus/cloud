@@ -326,7 +326,9 @@ export const githubInstallations = pgTable("github_installations", {
 	id: text("id").primaryKey(),
 	installationId: integer("installation_id").notNull().unique(),
 	accountLogin: text("account_login").notNull(),
-	accountType: text("account_type", { enum: ["User", "Organization"] }).notNull(),
+	accountType: text("account_type", {
+		enum: ["User", "Organization"],
+	}).notNull(),
 	userId: text("user_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
@@ -341,7 +343,9 @@ export const githubRepos = pgTable(
 		id: text("id").primaryKey(),
 		installationId: integer("installation_id")
 			.notNull()
-			.references(() => githubInstallations.installationId, { onDelete: "cascade" }),
+			.references(() => githubInstallations.installationId, {
+				onDelete: "cascade",
+			}),
 		repoId: integer("repo_id").notNull().unique(),
 		repoFullName: text("repo_full_name").notNull(),
 		defaultBranch: text("default_branch").notNull().default("main"),
@@ -391,7 +395,9 @@ export const builds = pgTable(
 		imageUri: text("image_uri"),
 		error: text("error"),
 		githubDeploymentId: integer("github_deployment_id"),
-		claimedBy: text("claimed_by").references(() => servers.id, { onDelete: "set null" }),
+		claimedBy: text("claimed_by").references(() => servers.id, {
+			onDelete: "set null",
+		}),
 		claimedAt: timestamp("claimed_at", { withTimezone: true }),
 		startedAt: timestamp("started_at", { withTimezone: true }),
 		completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -405,4 +411,3 @@ export const builds = pgTable(
 		index("builds_github_repo_id_idx").on(table.githubRepoId),
 	],
 );
-

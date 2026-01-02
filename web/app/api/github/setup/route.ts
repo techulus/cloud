@@ -38,13 +38,13 @@ async function getInstallationDetails(installationId: number): Promise<{
 				Authorization: `Bearer ${jwt}`,
 				"X-GitHub-Api-Version": "2022-11-28",
 			},
-		}
+		},
 	);
 
 	if (!response.ok) {
 		console.error(
 			`[github:setup] failed to get installation ${installationId}:`,
-			await response.text()
+			await response.text(),
 		);
 		return null;
 	}
@@ -68,13 +68,17 @@ export async function GET(request: NextRequest) {
 	const setupAction = searchParams.get("setup_action");
 
 	if (!installationIdParam) {
-		return NextResponse.redirect(new URL("/dashboard?error=missing_installation_id", request.url));
+		return NextResponse.redirect(
+			new URL("/dashboard?error=missing_installation_id", request.url),
+		);
 	}
 
 	const installationId = parseInt(installationIdParam, 10);
 
 	if (isNaN(installationId)) {
-		return NextResponse.redirect(new URL("/dashboard?error=invalid_installation_id", request.url));
+		return NextResponse.redirect(
+			new URL("/dashboard?error=invalid_installation_id", request.url),
+		);
 	}
 
 	if (setupAction === "install" || setupAction === "update") {
@@ -86,7 +90,7 @@ export async function GET(request: NextRequest) {
 
 		if (existingInstallation) {
 			return NextResponse.redirect(
-				new URL(`/dashboard?github_connected=true`, request.url)
+				new URL(`/dashboard?github_connected=true`, request.url),
 			);
 		}
 
@@ -94,7 +98,7 @@ export async function GET(request: NextRequest) {
 
 		if (!installation) {
 			return NextResponse.redirect(
-				new URL("/dashboard?error=github_fetch_failed", request.url)
+				new URL("/dashboard?error=github_fetch_failed", request.url),
 			);
 		}
 
@@ -107,11 +111,11 @@ export async function GET(request: NextRequest) {
 		});
 
 		console.log(
-			`[github:setup] created installation ${installationId} for user ${session.user.id}`
+			`[github:setup] created installation ${installationId} for user ${session.user.id}`,
 		);
 	}
 
 	return NextResponse.redirect(
-		new URL(`/dashboard?github_connected=true`, request.url)
+		new URL(`/dashboard?github_connected=true`, request.url),
 	);
 }

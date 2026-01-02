@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds, githubRepos, githubInstallations, services, projects, secrets } from "@/db/schema";
+import {
+	builds,
+	githubRepos,
+	githubInstallations,
+	services,
+	projects,
+	secrets,
+} from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { getInstallationToken, buildCloneUrl } from "@/lib/github";
 
 export async function POST(
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> }
+	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const auth = await verifyAgentRequest(request);
 	if (!auth.success) {
@@ -30,7 +37,7 @@ export async function POST(
 	if (result.length === 0) {
 		return NextResponse.json(
 			{ error: "Build already claimed or not found" },
-			{ status: 409 }
+			{ status: 409 },
 		);
 	}
 
@@ -60,7 +67,7 @@ export async function POST(
 	if (!registryHost) {
 		return NextResponse.json(
 			{ error: "REGISTRY_HOST environment variable is required" },
-			{ status: 500 }
+			{ status: 500 },
 		);
 	}
 	const commitSha = build.commitSha === "HEAD" ? "latest" : build.commitSha;
@@ -81,7 +88,10 @@ export async function POST(
 			.then((r) => r[0]);
 
 		if (!githubRepo) {
-			return NextResponse.json({ error: "GitHub repo not found" }, { status: 404 });
+			return NextResponse.json(
+				{ error: "GitHub repo not found" },
+				{ status: 404 },
+			);
 		}
 
 		const installation = await db
@@ -91,27 +101,38 @@ export async function POST(
 			.then((r) => r[0]);
 
 		if (!installation) {
-			return NextResponse.json({ error: "GitHub installation not found" }, { status: 404 });
+			return NextResponse.json(
+				{ error: "GitHub installation not found" },
+				{ status: 404 },
+			);
 		}
 
 		let installationToken: string;
 		try {
-			installationToken = await getInstallationToken(installation.installationId);
+			installationToken = await getInstallationToken(
+				installation.installationId,
+			);
 		} catch (error) {
 			console.error("[build:claim] failed to get installation token:", error);
 			await db
 				.update(builds)
-				.set({ status: "failed", error: "Failed to get GitHub installation token" })
+				.set({
+					status: "failed",
+					error: "Failed to get GitHub installation token",
+				})
 				.where(eq(builds.id, buildId));
 			return NextResponse.json(
 				{ error: "Failed to get GitHub installation token" },
-				{ status: 500 }
+				{ status: 500 },
 			);
 		}
 
 		cloneUrl = buildCloneUrl(installationToken, githubRepo.repoFullName);
 	} else {
-		return NextResponse.json({ error: "No repository configured" }, { status: 400 });
+		return NextResponse.json(
+			{ error: "No repository configured" },
+			{ status: 400 },
+		);
 	}
 
 	const serviceSecrets = await db
@@ -125,7 +146,7 @@ export async function POST(
 	}
 
 	console.log(
-		`[build:claim] build ${buildId.slice(0, 8)} claimed by ${serverId.slice(0, 8)}, image: ${imageUri}, secrets: ${Object.keys(secretsMap).length}`
+		`[build:claim] build ${buildId.slice(0, 8)} claimed by ${serverId.slice(0, 8)}, image: ${imageUri}, secrets: ${Object.keys(secretsMap).length}`,
 	);
 
 	return NextResponse.json({

@@ -3,7 +3,7 @@ import { isLoggingEnabled, queryLogsByBuild } from "@/lib/victoria-logs";
 
 export async function GET(
 	request: NextRequest,
-	{ params }: { params: Promise<{ buildId: string }> }
+	{ params }: { params: Promise<{ buildId: string }> },
 ) {
 	const { buildId } = await params;
 

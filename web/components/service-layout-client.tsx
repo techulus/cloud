@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useMemo } from "react";
-import useSWR, { useSWRConfig } from "swr";
-import { deleteService } from "@/actions/projects";
+import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
 import {
 	buildCurrentConfig,
@@ -14,39 +13,37 @@ import {
 import { cn } from "@/lib/utils";
 import { PendingChangesBar } from "./service-details/pending-changes";
 import { RolloutStatusBar } from "./service-details/rollout-status";
-import type { Service } from "./service-details/types";
-
-export { type Service } from "./service-details/types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 
 interface ServiceLayoutClientProps {
+	serviceId: string;
+	projectId: string;
 	projectSlug: string;
-	initialService: Service;
 	children: React.ReactNode;
 }
 
 export function ServiceLayoutClient({
+	serviceId,
+	projectId,
 	projectSlug,
-	initialService,
 	children,
 }: ServiceLayoutClientProps) {
-	const router = useRouter();
 	const pathname = usePathname();
-	const { mutate: globalMutate } = useSWRConfig();
 
-	const { data: services, mutate } = useSWR<Service[]>(
-		`/api/projects/${initialService.projectId}/services`,
-		fetcher,
-		{
-			fallbackData: [initialService],
-			refreshInterval: 5000,
-			revalidateOnFocus: true,
-		},
-	);
+	const {
+		data: services,
+		mutate,
+		isLoading,
+	} = useSWR<Service[]>(`/api/projects/${projectId}/services`, fetcher, {
+		refreshInterval: 5000,
+		revalidateOnFocus: true,
+	});
 
-	const service =
-		services?.find((s) => s.id === initialService.id) || initialService;
+	const service = services?.find((s) => s.id === serviceId);
 
 	const pendingChanges = useMemo(() => {
+		if (!service) return [];
+
 		const deployed = parseDeployedConfig(service.deployedConfig);
 		const replicas = (service.configuredReplicas || []).map((r) => ({
 			serverId: r.serverId,
@@ -72,12 +69,12 @@ export function ServiceLayoutClient({
 		mutate();
 	};
 
-	const basePath = `/dashboard/projects/${projectSlug}/services/${service.id}`;
+	const basePath = `/dashboard/projects/${projectSlug}/services/${service?.id}`;
 
 	const tabs = [
 		{ name: "Architecture", href: basePath },
 		{ name: "Configuration", href: `${basePath}/configuration` },
-		...(service.sourceType === "github"
+		...(service?.sourceType === "github"
 			? [{ name: "Builds", href: `${basePath}/builds` }]
 			: []),
 		{ name: "Logs", href: `${basePath}/logs` },
@@ -91,11 +88,12 @@ export function ServiceLayoutClient({
 		return pathname.startsWith(href);
 	};
 
+	if (isLoading || !service) {
+		return <div>Loading...</div>;
+	}
+
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-lg font-semibold">{service.name}</h1>
-			</div>
 			<nav className="flex gap-1 border-b -mt-2">
 				{tabs.map((tab) => (
 					<Link
@@ -105,7 +103,7 @@ export function ServiceLayoutClient({
 							"px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
 							isActiveTab(tab.href)
 								? "border-primary text-foreground"
-								: "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50"
+								: "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50",
 						)}
 					>
 						{tab.name}

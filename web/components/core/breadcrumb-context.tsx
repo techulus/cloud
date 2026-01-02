@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+	createContext,
+	useContext,
+	useState,
+	useCallback,
+	type ReactNode,
+} from "react";
 
 type Breadcrumb = {
 	label: string;
@@ -31,7 +37,9 @@ export function BreadcrumbProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	return (
-		<BreadcrumbContext.Provider value={{ breadcrumbs, title, setBreadcrumbs, clearBreadcrumbs }}>
+		<BreadcrumbContext.Provider
+			value={{ breadcrumbs, title, setBreadcrumbs, clearBreadcrumbs }}
+		>
 			{children}
 		</BreadcrumbContext.Provider>
 	);

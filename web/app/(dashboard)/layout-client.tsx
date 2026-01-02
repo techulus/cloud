@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import {
 	BreadcrumbProvider,
 	useBreadcrumbs,
-} from "@/components/breadcrumb-context";
+} from "@/components/core/breadcrumb-context";
 import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";

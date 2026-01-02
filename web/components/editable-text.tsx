@@ -73,7 +73,7 @@ export function EditableText({
 						type="button"
 						className={cn(
 							"outline-none hover:bg-muted p-1 px-2 rounded-md -mx-2 group flex items-center gap-1",
-							textClassName
+							textClassName,
 						)}
 					/>
 				}

@@ -1,6 +1,10 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { isLoggingEnabled, queryLogsByService, type LogType } from "@/lib/victoria-logs";
+import {
+	isLoggingEnabled,
+	queryLogsByService,
+	type LogType,
+} from "@/lib/victoria-logs";
 
 export async function GET(
 	request: Request,
@@ -26,7 +30,10 @@ export async function GET(
 	);
 	const after = url.searchParams.get("after") || undefined;
 	const logTypeParam = url.searchParams.get("type");
-	const logType = logTypeParam === "container" || logTypeParam === "http" ? logTypeParam as LogType : undefined;
+	const logType =
+		logTypeParam === "container" || logTypeParam === "http"
+			? (logTypeParam as LogType)
+			: undefined;
 
 	try {
 		const result = await queryLogsByService(serviceId, limit, after, logType);

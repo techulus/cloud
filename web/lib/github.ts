@@ -1,4 +1,4 @@
-import { createHmac, createPrivateKey, timingSafeEqual } from "crypto";
+import { createHmac, createPrivateKey, timingSafeEqual } from "node:crypto";
 import { SignJWT } from "jose";
 
 function getAppId(): string {
@@ -27,7 +27,7 @@ function getWebhookSecret(): string {
 
 export function verifyWebhookSignature(
 	payload: string,
-	signature: string | null
+	signature: string | null,
 ): boolean {
 	if (!signature) {
 		return false;
@@ -61,7 +61,7 @@ async function generateAppJwt(): Promise<string> {
 }
 
 export async function getInstallationToken(
-	installationId: number
+	installationId: number,
 ): Promise<string> {
 	const jwt = await generateAppJwt();
 
@@ -74,7 +74,7 @@ export async function getInstallationToken(
 				Authorization: `Bearer ${jwt}`,
 				"X-GitHub-Api-Version": "2022-11-28",
 			},
-		}
+		},
 	);
 
 	if (!response.ok) {
@@ -87,7 +87,7 @@ export async function getInstallationToken(
 }
 
 export async function getInstallationRepositories(
-	installationId: number
+	installationId: number,
 ): Promise<
 	Array<{
 		id: number;
@@ -106,7 +106,7 @@ export async function getInstallationRepositories(
 				Authorization: `Bearer ${token}`,
 				"X-GitHub-Api-Version": "2022-11-28",
 			},
-		}
+		},
 	);
 
 	if (!response.ok) {
@@ -118,21 +118,23 @@ export async function getInstallationRepositories(
 	return data.repositories;
 }
 
-export function buildCloneUrl(
-	token: string,
-	repoFullName: string
-): string {
+export function buildCloneUrl(token: string, repoFullName: string): string {
 	return `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 }
 
-type DeploymentState = "pending" | "in_progress" | "success" | "failure" | "error";
+type DeploymentState =
+	| "pending"
+	| "in_progress"
+	| "success"
+	| "failure"
+	| "error";
 
 export async function createGitHubDeployment(
 	installationId: number,
 	repoFullName: string,
 	ref: string,
 	environment: string,
-	description: string
+	description: string,
 ): Promise<number> {
 	const token = await getInstallationToken(installationId);
 
@@ -153,7 +155,7 @@ export async function createGitHubDeployment(
 				auto_merge: false,
 				required_contexts: [],
 			}),
-		}
+		},
 	);
 
 	if (!response.ok) {
@@ -174,7 +176,7 @@ export async function updateGitHubDeploymentStatus(
 		description?: string;
 		logUrl?: string;
 		environmentUrl?: string;
-	}
+	},
 ): Promise<void> {
 	const token = await getInstallationToken(installationId);
 
@@ -205,7 +207,7 @@ export async function updateGitHubDeploymentStatus(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(body),
-		}
+		},
 	);
 
 	if (!response.ok) {

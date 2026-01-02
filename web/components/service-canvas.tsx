@@ -1,74 +1,19 @@
 "use client";
 
-import useSWR from "swr";
 import Link from "next/link";
-import { Globe, Lock, Box, HardDrive } from "lucide-react";
+import useSWR from "swr";
+import { Box, Globe, HardDrive, Lock } from "lucide-react";
+import type { ServiceWithDetails } from "@/db/types";
+import { fetcher } from "@/lib/fetcher";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
-import { fetcher } from "@/lib/fetcher";
-
-type DeploymentPort = {
-	id: string;
-	hostPort: number;
-	containerPort: number;
-};
-
-type Deployment = {
-	id: string;
-	serviceId: string;
-	serverId: string;
-	containerId: string | null;
-	status: string;
-	healthStatus: "none" | "starting" | "healthy" | "unhealthy" | null;
-	ports: DeploymentPort[];
-	server: { name: string; wireguardIp: string | null } | null;
-};
-
-type ServicePort = {
-	id: string;
-	serviceId: string;
-	port: number;
-	isPublic: boolean;
-	domain: string | null;
-};
-
-type ServiceReplica = {
-	id: string;
-	serverId: string;
-	serverName: string;
-	count: number;
-};
-
-type ServiceVolume = {
-	id: string;
-	name: string;
-	containerPath: string;
-};
-
-type Service = {
-	id: string;
-	projectId: string;
-	name: string;
-	hostname: string | null;
-	image: string;
-	replicas: number;
-	deployedConfig: string | null;
-	healthCheckCmd: string | null;
-	healthCheckInterval: number | null;
-	healthCheckTimeout: number | null;
-	healthCheckRetries: number | null;
-	healthCheckStartPeriod: number | null;
-	ports: ServicePort[];
-	configuredReplicas: ServiceReplica[];
-	deployments: Deployment[];
-	volumes?: ServiceVolume[];
-};
+import { Spinner } from "./ui/spinner";
 
 function ServiceCard({
 	service,
 	projectSlug,
 }: {
-	service: Service;
+	service: ServiceWithDetails;
 	projectSlug: string;
 }) {
 	const colors = getStatusColorFromDeployments(service.deployments);
@@ -79,7 +24,6 @@ function ServiceCard({
 	const runningCount = service.deployments.filter(
 		(d) => d.status === "running",
 	).length;
-	const hasVolumes = service.volumes && service.volumes.length > 0;
 
 	const hasEndpoints = publicPorts.length > 0 || hasInternalDns;
 
@@ -129,10 +73,7 @@ function ServiceCard({
 				{hasEndpoints && (
 					<div className="mt-2 space-y-1.5">
 						{publicPorts.map((port) => (
-							<div
-								key={port.id}
-								className="flex items-center gap-1.5 text-xs"
-							>
+							<div key={port.id} className="flex items-center gap-1.5 text-xs">
 								<Globe className="h-3 w-3 text-sky-500" />
 								<span className="text-sky-600 dark:text-sky-400">
 									{port.domain}
@@ -150,10 +91,13 @@ function ServiceCard({
 					</div>
 				)}
 
-				{hasVolumes && (
+				{service.volumes && service.volumes.length > 0 && (
 					<div className="mt-2 space-y-1">
-						{service.volumes!.map((volume) => (
-							<div key={volume.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+						{service.volumes.map((volume) => (
+							<div
+								key={volume.id}
+								className="flex items-center gap-2 text-xs text-muted-foreground"
+							>
 								<HardDrive className="h-3.5 w-3.5" />
 								<span>{volume.name}</span>
 							</div>
@@ -185,21 +129,33 @@ function ServiceCard({
 export function ServiceCanvas({
 	projectId,
 	projectSlug,
-	initialServices,
 }: {
 	projectId: string;
 	projectSlug: string;
-	initialServices: Service[];
 }) {
-	const { data: services, mutate } = useSWR<Service[]>(
-		`/api/projects/${projectId}/services`,
-		fetcher,
-		{
-			fallbackData: initialServices,
-			refreshInterval: 5000,
-			revalidateOnFocus: true,
-		},
-	);
+	const {
+		data: services,
+		mutate,
+		isLoading,
+	} = useSWR<ServiceWithDetails[]>(`/api/projects/${projectId}/services`, fetcher, {
+		refreshInterval: 5000,
+		revalidateOnFocus: true,
+	});
+
+	if (isLoading) {
+		return (
+			<div
+				className="
+					relative -mt-6 -mb-6
+					left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
+					flex items-center justify-center
+				"
+				style={{ height: "calc(100vh - 5rem)" }}
+			>
+				<Spinner />
+			</div>
+		);
+	}
 
 	if (!services || services.length === 0) {
 		return (
@@ -249,10 +205,7 @@ export function ServiceCanvas({
 			}}
 		>
 			<div className="absolute top-4 right-4">
-				<CreateServiceDialog
-					projectId={projectId}
-					onSuccess={() => mutate()}
-				/>
+				<CreateServiceDialog projectId={projectId} onSuccess={() => mutate()} />
 			</div>
 			<div className="flex flex-wrap gap-10 justify-center items-center">
 				{services.map((service) => (

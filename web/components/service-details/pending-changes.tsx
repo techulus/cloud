@@ -14,7 +14,7 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { deployService, type ServerPlacement } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
 import type { ConfigChange } from "@/lib/service-config";
-import type { Service } from "./types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 
 function PendingChangesModal({
 	changes,
@@ -80,7 +80,7 @@ function PendingChangesModal({
 
 function hasActiveRollout(service: Service): boolean {
 	const hasInProgressRollout = service.rollouts?.some(
-		(r) => r.status === "in_progress"
+		(r) => r.status === "in_progress",
 	);
 	if (hasInProgressRollout) return true;
 
@@ -94,9 +94,7 @@ function hasActiveRollout(service: Service): boolean {
 		"stopping_old",
 		"stopping",
 	];
-	return service.deployments.some((d) =>
-		inProgressStatuses.includes(d.status)
-	);
+	return service.deployments.some((d) => inProgressStatuses.includes(d.status));
 }
 
 export const PendingChangesBar = memo(function PendingChangesBar({
@@ -114,14 +112,19 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 	const [showModal, setShowModal] = useState(false);
 	const [isDeploying, setIsDeploying] = useState(false);
 
-	const totalReplicas = service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
+	const totalReplicas = service.configuredReplicas.reduce(
+		(sum, r) => sum + r.count,
+		0,
+	);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
 	const rolloutActive = hasActiveRollout(service);
 
-	const showBar = !rolloutActive && (hasChanges || (hasNoDeployments && totalReplicas > 0));
+	const showBar =
+		!rolloutActive && (hasChanges || (hasNoDeployments && totalReplicas > 0));
 
-	const isGithubWithNoDeployments = service.sourceType === "github" && hasNoDeployments;
+	const isGithubWithNoDeployments =
+		service.sourceType === "github" && hasNoDeployments;
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -129,7 +132,9 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 			if (isGithubWithNoDeployments) {
 				const result = await triggerBuild(service.id);
 				if (result.buildId) {
-					router.push(`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${result.buildId}`);
+					router.push(
+						`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${result.buildId}`,
+					);
 				}
 			} else {
 				const placements: ServerPlacement[] = service.configuredReplicas.map(

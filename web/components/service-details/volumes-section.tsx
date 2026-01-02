@@ -3,15 +3,10 @@
 import { useState, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { HardDrive, Trash2, Plus, Lock } from "lucide-react";
 import { addServiceVolume, removeServiceVolume } from "@/actions/projects";
-import type { Service } from "./types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const VolumesSection = memo(function VolumesSection({
 	service,
@@ -33,7 +28,16 @@ export const VolumesSection = memo(function VolumesSection({
 	const volumes = service.volumes || [];
 
 	const hasRunningDeployments = service.deployments?.some((d) =>
-		["pending", "pulling", "starting", "healthy", "dns_updating", "caddy_updating", "stopping_old", "running"].includes(d.status)
+		[
+			"pending",
+			"pulling",
+			"starting",
+			"healthy",
+			"dns_updating",
+			"caddy_updating",
+			"stopping_old",
+			"running",
+		].includes(d.status),
 	);
 
 	const handleAdd = async () => {
@@ -80,7 +84,8 @@ export const VolumesSection = memo(function VolumesSection({
 					<div className="flex items-center gap-2 text-sm text-muted-foreground">
 						<Lock className="h-3 w-3" />
 						<span>
-							Volume data stored on: {service.lockedServer?.name || service.lockedServerId}
+							Volume data stored on:{" "}
+							{service.lockedServer?.name || service.lockedServerId}
 						</span>
 					</div>
 				)}
@@ -107,7 +112,11 @@ export const VolumesSection = memo(function VolumesSection({
 									size="icon"
 									onClick={() => handleRemove(volume.id)}
 									disabled={removingId === volume.id || hasRunningDeployments}
-									title={hasRunningDeployments ? "Stop service before removing volumes" : "Remove volume"}
+									title={
+										hasRunningDeployments
+											? "Stop service before removing volumes"
+											: "Remove volume"
+									}
 								>
 									<Trash2 className="h-4 w-4" />
 								</Button>

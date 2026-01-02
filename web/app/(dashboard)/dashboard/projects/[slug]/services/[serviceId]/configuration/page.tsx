@@ -23,12 +23,7 @@ import {
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Trash2 } from "lucide-react";
 
 export default function ConfigurationPage() {
@@ -63,9 +58,7 @@ export default function ConfigurationPage() {
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
 
 			<div className="space-y-3">
-				<h2 className="text-xl font-semibold text-destructive">
-					Danger Zone
-				</h2>
+				<h2 className="text-xl font-semibold text-destructive">Danger Zone</h2>
 				<div className="rounded-lg border border-destructive/50">
 					<Item className="border-0">
 						<ItemMedia variant="icon">
@@ -74,24 +67,20 @@ export default function ConfigurationPage() {
 						<ItemContent>
 							<ItemTitle>Delete this service</ItemTitle>
 							<p className="text-sm text-muted-foreground">
-								Once deleted, this service and all its deployments will
-								be permanently removed.
+								Once deleted, this service and all its deployments will be
+								permanently removed.
 							</p>
 						</ItemContent>
 						<AlertDialog>
-							<AlertDialogTrigger
-								render={<Button variant="destructive" />}
-							>
+							<AlertDialogTrigger render={<Button variant="destructive" />}>
 								Delete Service
 							</AlertDialogTrigger>
 							<AlertDialogContent>
 								<AlertDialogHeader>
-									<AlertDialogTitle>
-										Delete {service.name}?
-									</AlertDialogTitle>
+									<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
 									<AlertDialogDescription>
-										This action cannot be undone. This will permanently
-										delete the service and all its deployments.
+										This action cannot be undone. This will permanently delete
+										the service and all its deployments.
 									</AlertDialogDescription>
 								</AlertDialogHeader>
 								<AlertDialogFooter>

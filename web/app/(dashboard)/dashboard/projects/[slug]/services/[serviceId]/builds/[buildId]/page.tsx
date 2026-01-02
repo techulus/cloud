@@ -7,7 +7,7 @@ import { BuildDetails } from "@/components/build-details";
 async function getBuild(
 	projectSlug: string,
 	serviceId: string,
-	buildId: string
+	buildId: string,
 ) {
 	const project = await db
 		.select()

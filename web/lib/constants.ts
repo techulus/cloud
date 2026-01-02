@@ -1,3 +1,2 @@
 export const WIREGUARD_SUBNET_PREFIX = "10.100";
-export const WIREGUARD_SUBNET_CIDR = "10.100.0.0/16";
 export const CONTAINER_SUBNET_PREFIX = "10.200";

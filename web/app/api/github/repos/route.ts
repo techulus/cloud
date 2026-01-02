@@ -36,7 +36,9 @@ export async function GET() {
 
 	for (const installation of installations) {
 		try {
-			const repos = await getInstallationRepositories(installation.installationId);
+			const repos = await getInstallationRepositories(
+				installation.installationId,
+			);
 			for (const repo of repos) {
 				allRepos.push({
 					id: repo.id,
@@ -50,7 +52,7 @@ export async function GET() {
 		} catch (error) {
 			console.error(
 				`[github:repos] failed to fetch repos for installation ${installation.installationId}:`,
-				error
+				error,
 			);
 		}
 	}

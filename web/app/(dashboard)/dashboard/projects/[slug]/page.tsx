@@ -1,18 +1,7 @@
 import { notFound } from "next/navigation";
-import {
-	getProjectBySlug,
-	listServices,
-	listDeployments,
-	getServicePorts,
-	getDeploymentPorts,
-	getServiceReplicas,
-} from "@/db/queries";
+import { PageHeader } from "@/components/core/page-header";
 import { ServiceCanvas } from "@/components/service-canvas";
-import { ProjectHeader } from "@/components/project-header";
-import { CreateServiceDialog } from "@/components/create-service-dialog";
-import { db } from "@/db";
-import { servers } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getProjectBySlug } from "@/db/queries";
 
 export default async function ProjectPage({
 	params,
@@ -26,54 +15,13 @@ export default async function ProjectPage({
 		notFound();
 	}
 
-	const servicesList = await listServices(project.id);
-
-	const initialServices = await Promise.all(
-		servicesList.map(async (service) => {
-			const [ports, serviceDeployments, configuredReplicas] = await Promise.all(
-				[
-					getServicePorts(service.id),
-					listDeployments(service.id),
-					getServiceReplicas(service.id),
-				],
-			);
-
-			const deploymentsWithDetails = await Promise.all(
-				serviceDeployments.map(async (deployment) => {
-					const [depPorts, server] = await Promise.all([
-						getDeploymentPorts(deployment.id),
-						db
-							.select({ name: servers.name, wireguardIp: servers.wireguardIp })
-							.from(servers)
-							.where(eq(servers.id, deployment.serverId))
-							.then((r) => r[0]),
-					]);
-
-					return {
-						...deployment,
-						ports: depPorts,
-						server,
-					};
-				}),
-			);
-
-			return {
-				...service,
-				ports,
-				configuredReplicas,
-				deployments: deploymentsWithDetails,
-			};
-		}),
-	);
-
 	return (
 		<div className="relative">
-			<ProjectHeader projectId={project.id} projectName={project.name} />
-			<ServiceCanvas
-				projectId={project.id}
-				projectSlug={slug}
-				initialServices={initialServices}
+			<PageHeader
+				breadcrumbs={[{ label: "Projects", href: "/dashboard" }]}
+				title={project.name}
 			/>
+			<ServiceCanvas projectId={project.id} projectSlug={slug} />
 		</div>
 	);
 }

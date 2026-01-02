@@ -3,132 +3,138 @@ const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 export type LogType = "container" | "http";
 
 export type StoredLog = {
-  _msg: string;
-  _time: string;
-  deployment_id?: string;
-  service_id: string;
-  server_id?: string;
-  stream?: string;
-  log_type?: string;
-  host?: string;
-  method?: string;
-  path?: string;
-  status?: number;
-  duration_ms?: number;
-  size?: number;
-  client_ip?: string;
+	_msg: string;
+	_time: string;
+	deployment_id?: string;
+	service_id: string;
+	server_id?: string;
+	stream?: string;
+	log_type?: string;
+	host?: string;
+	method?: string;
+	path?: string;
+	status?: number;
+	duration_ms?: number;
+	size?: number;
+	client_ip?: string;
 };
 
 export function isLoggingEnabled(): boolean {
-  return !!VICTORIA_LOGS_URL;
+	return !!VICTORIA_LOGS_URL;
 }
 
 export async function queryLogsByService(
-  serviceId: string,
-  limit: number,
-  after?: string,
-  logType?: LogType
+	serviceId: string,
+	limit: number,
+	after?: string,
+	logType?: LogType,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-  if (!VICTORIA_LOGS_URL) {
-    throw new Error("VICTORIA_LOGS_URL is not configured");
-  }
+	if (!VICTORIA_LOGS_URL) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
 
-  let query = `service_id:${serviceId}`;
-  if (logType === "http") {
-    query += ` log_type:http`;
-  } else if (logType === "container") {
-    query += ` -log_type:http`;
-  }
-  if (after) {
-    query += ` _time:>${after}`;
-  }
+	let query = `service_id:${serviceId}`;
+	if (logType === "http") {
+		query += ` log_type:http`;
+	} else if (logType === "container") {
+		query += ` -log_type:http`;
+	}
+	if (after) {
+		query += ` _time:>${after}`;
+	}
 
-  const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("limit", String(limit + 1));
+	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit + 1));
 
-  const response = await fetch(url.toString());
+	const response = await fetch(url.toString());
 
-  if (!response.ok) {
-    throw new Error(`Failed to query logs: ${response.status} ${response.statusText}`);
-  }
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query logs: ${response.status} ${response.statusText}`,
+		);
+	}
 
-  const text = await response.text();
-  const lines = text.trim().split("\n").filter(Boolean);
-  const logs = lines.map((line) => JSON.parse(line) as StoredLog);
+	const text = await response.text();
+	const lines = text.trim().split("\n").filter(Boolean);
+	const logs = lines.map((line) => JSON.parse(line) as StoredLog);
 
-  const hasMore = logs.length > limit;
-  if (hasMore) logs.pop();
+	const hasMore = logs.length > limit;
+	if (hasMore) logs.pop();
 
-  return { logs, hasMore };
+	return { logs, hasMore };
 }
 
 export async function queryLogsByDeployment(
-  deploymentId: string,
-  limit: number,
-  after?: string
+	deploymentId: string,
+	limit: number,
+	after?: string,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-  if (!VICTORIA_LOGS_URL) {
-    throw new Error("VICTORIA_LOGS_URL is not configured");
-  }
+	if (!VICTORIA_LOGS_URL) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
 
-  let query = `deployment_id:${deploymentId}`;
-  if (after) {
-    query += ` _time:>${after}`;
-  }
+	let query = `deployment_id:${deploymentId}`;
+	if (after) {
+		query += ` _time:>${after}`;
+	}
 
-  const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("limit", String(limit + 1));
+	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit + 1));
 
-  const response = await fetch(url.toString());
+	const response = await fetch(url.toString());
 
-  if (!response.ok) {
-    throw new Error(`Failed to query logs: ${response.status} ${response.statusText}`);
-  }
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query logs: ${response.status} ${response.statusText}`,
+		);
+	}
 
-  const text = await response.text();
-  const lines = text.trim().split("\n").filter(Boolean);
-  const logs = lines.map((line) => JSON.parse(line) as StoredLog);
+	const text = await response.text();
+	const lines = text.trim().split("\n").filter(Boolean);
+	const logs = lines.map((line) => JSON.parse(line) as StoredLog);
 
-  const hasMore = logs.length > limit;
-  if (hasMore) logs.pop();
+	const hasMore = logs.length > limit;
+	if (hasMore) logs.pop();
 
-  return { logs, hasMore };
+	return { logs, hasMore };
 }
 
 export type BuildLog = {
-  _msg: string;
-  _time: string;
-  build_id: string;
-  service_id: string;
-  project_id: string;
-  log_type: "build";
+	_msg: string;
+	_time: string;
+	build_id: string;
+	service_id: string;
+	project_id: string;
+	log_type: "build";
 };
 
 export async function queryLogsByBuild(
-  buildId: string,
-  limit: number = 1000
+	buildId: string,
+	limit: number = 1000,
 ): Promise<{ logs: BuildLog[] }> {
-  if (!VICTORIA_LOGS_URL) {
-    throw new Error("VICTORIA_LOGS_URL is not configured");
-  }
+	if (!VICTORIA_LOGS_URL) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
 
-  const query = `build_id:${buildId} log_type:build | sort by (_time)`;
+	const query = `build_id:${buildId} log_type:build | sort by (_time)`;
 
-  const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("limit", String(limit));
+	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit));
 
-  const response = await fetch(url.toString());
+	const response = await fetch(url.toString());
 
-  if (!response.ok) {
-    throw new Error(`Failed to query build logs: ${response.status} ${response.statusText}`);
-  }
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query build logs: ${response.status} ${response.statusText}`,
+		);
+	}
 
-  const text = await response.text();
-  const lines = text.trim().split("\n").filter(Boolean);
-  const logs = lines.map((line) => JSON.parse(line) as BuildLog);
+	const text = await response.text();
+	const lines = text.trim().split("\n").filter(Boolean);
+	const logs = lines.map((line) => JSON.parse(line) as BuildLog);
 
-  return { logs };
+	return { logs };
 }

@@ -5,7 +5,7 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { FloatingBar } from "@/components/ui/floating-bar";
 import { abortRollout } from "@/actions/projects";
-import type { Service, DeploymentStatus } from "./types";
+import type { DeploymentStatus, ServiceWithDetails as Service } from "@/db/types";
 
 type StageInfo = {
 	id: string;
@@ -50,13 +50,15 @@ function getRolloutState(service: Service): {
 	rolloutStatus: "in_progress" | "completed" | "failed" | "rolled_back" | null;
 	failedStage: string | null;
 } {
-	const activeRollout = service.rollouts?.find((r) => r.status === "in_progress");
+	const activeRollout = service.rollouts?.find(
+		(r) => r.status === "in_progress",
+	);
 
 	if (activeRollout) {
 		let currentStage = activeRollout.currentStage || "deploying";
 
 		const rolloutDeployments = service.deployments.filter(
-			(d) => d.rolloutId === activeRollout.id
+			(d) => d.rolloutId === activeRollout.id,
 		);
 
 		if (rolloutDeployments.length > 0) {
@@ -66,7 +68,9 @@ function getRolloutState(service: Service): {
 				currentStage = "completed";
 			} else if (statuses.some((s) => s === "stopping_old")) {
 				currentStage = "cleaning";
-			} else if (statuses.some((s) => s === "caddy_updating" || s === "dns_updating")) {
+			} else if (
+				statuses.some((s) => s === "caddy_updating" || s === "dns_updating")
+			) {
 				currentStage = "routing";
 			} else if (statuses.some((s) => s === "healthy" || s === "starting")) {
 				currentStage = "health_check";
@@ -83,7 +87,9 @@ function getRolloutState(service: Service): {
 		};
 	}
 
-	const completedRollout = service.rollouts?.find((r) => r.status === "completed");
+	const completedRollout = service.rollouts?.find(
+		(r) => r.status === "completed",
+	);
 
 	if (completedRollout) {
 		const timeSinceCompletion = completedRollout.completedAt
@@ -101,7 +107,7 @@ function getRolloutState(service: Service): {
 	}
 
 	const failedRollout = service.rollouts?.find(
-		(r) => r.status === "failed" || r.status === "rolled_back"
+		(r) => r.status === "failed" || r.status === "rolled_back",
 	);
 
 	if (failedRollout) {
@@ -120,12 +126,23 @@ function getRolloutState(service: Service): {
 	}
 
 	const inProgressDeployments = service.deployments.filter((d) =>
-		["pending", "pulling", "starting", "healthy", "dns_updating", "caddy_updating", "stopping_old", "stopping"].includes(d.status)
+		[
+			"pending",
+			"pulling",
+			"starting",
+			"healthy",
+			"dns_updating",
+			"caddy_updating",
+			"stopping_old",
+			"stopping",
+		].includes(d.status),
 	);
 
 	if (inProgressDeployments.length > 0) {
 		const maxStageIndex = Math.max(
-			...inProgressDeployments.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status)))
+			...inProgressDeployments.map((d) =>
+				getStageIndex(mapDeploymentStatusToStage(d.status)),
+			),
 		);
 		return {
 			isActive: true,
@@ -181,7 +198,10 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 
 	useEffect(() => {
 		const activeRollout = service.rollouts?.find(
-			(r) => r.status === "completed" || r.status === "failed" || r.status === "rolled_back"
+			(r) =>
+				r.status === "completed" ||
+				r.status === "failed" ||
+				r.status === "rolled_back",
 		);
 
 		if (!activeRollout) return;
@@ -193,9 +213,10 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 			toast.success("Deployment completed successfully");
 			shownToastsRef.current.add(toastKey);
 		} else if (isFailed) {
-			const message = rolloutState.rolloutStatus === "rolled_back"
-				? "Deployment rolled back"
-				: "Deployment failed";
+			const message =
+				rolloutState.rolloutStatus === "rolled_back"
+					? "Deployment rolled back"
+					: "Deployment failed";
 			toast.error(message);
 			shownToastsRef.current.add(toastKey);
 		}

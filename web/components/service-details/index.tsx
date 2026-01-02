@@ -1,4 +1,4 @@
-export type { Service } from "./types";
+export type { ServiceWithDetails as Service } from "@/db/types";
 export { DeploymentCanvas } from "./deployment-canvas";
 export { SourceSection } from "./source-section";
 export { ReplicasSection } from "./replicas-section";

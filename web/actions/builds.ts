@@ -6,16 +6,19 @@ import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 
 export async function cancelBuild(buildId: string) {
-	const [build] = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.id, buildId));
+	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
 		throw new Error("Build not found");
 	}
 
-	const cancellableStatuses = ["pending", "claimed", "cloning", "building", "pushing"];
+	const cancellableStatuses = [
+		"pending",
+		"claimed",
+		"cloning",
+		"building",
+		"pushing",
+	];
 	if (!cancellableStatuses.includes(build.status)) {
 		throw new Error(`Cannot cancel build in ${build.status} status`);
 	}
@@ -29,10 +32,7 @@ export async function cancelBuild(buildId: string) {
 }
 
 export async function retryBuild(buildId: string) {
-	const [build] = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.id, buildId));
+	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
 		throw new Error("Build not found");
@@ -114,7 +114,9 @@ export async function triggerBuild(serviceId: string) {
 		.limit(1);
 
 	if (!latestBuild) {
-		throw new Error("No previous builds found. Push to the repository to trigger a build.");
+		throw new Error(
+			"No previous builds found. Push to the repository to trigger a build.",
+		);
 	}
 
 	const pendingBuild = await db
@@ -124,8 +126,8 @@ export async function triggerBuild(serviceId: string) {
 			and(
 				eq(builds.serviceId, serviceId),
 				eq(builds.commitSha, latestBuild.commitSha),
-				eq(builds.status, "pending")
-			)
+				eq(builds.status, "pending"),
+			),
 		)
 		.then((r) => r[0]);
 
@@ -158,10 +160,7 @@ export async function getBuilds(serviceId: string) {
 }
 
 export async function getBuild(buildId: string) {
-	const [build] = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.id, buildId));
+	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	return build;
 }

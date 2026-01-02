@@ -1,35 +1,37 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from "@/components/core/theme-provider";
 import "./globals.css";
 
 const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-ibm-plex-sans",
+	subsets: ["latin"],
+	weight: ["400", "500", "600", "700"],
+	variable: "--font-ibm-plex-sans",
 });
 
 const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-ibm-plex-mono",
+	subsets: ["latin"],
+	weight: ["400", "500", "600"],
+	variable: "--font-ibm-plex-mono",
 });
 
 export const metadata: Metadata = {
-  title: "Techulus Cloud",
-  description: "Stateless container deployment platform",
+	title: "Techulus Cloud",
+	description: "Stateless container deployment platform",
 };
 
 export default function RootLayout({
-  children,
+	children,
 }: Readonly<{
-  children: React.ReactNode;
+	children: React.ReactNode;
 }>) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} font-sans antialiased`}>
-        <ThemeProvider>{children}</ThemeProvider>
-      </body>
-    </html>
-  );
+	return (
+		<html lang="en" suppressHydrationWarning>
+			<body
+				className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} font-sans antialiased`}
+			>
+				<ThemeProvider>{children}</ThemeProvider>
+			</body>
+		</html>
+	);
 }

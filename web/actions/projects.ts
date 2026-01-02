@@ -78,17 +78,22 @@ export async function validateDockerImage(
 	image: string,
 ): Promise<{ valid: boolean; error?: string }> {
 	try {
-		const { registry, namespace, repository, tag, digest } = parseImageReference(image);
+		const { registry, namespace, repository, tag, digest } =
+			parseImageReference(image);
 		const reference = digest || tag || "latest";
 
 		if (registry === "docker.io") {
-			const repoPath = namespace === "library" ? repository : `${namespace}/${repository}`;
+			const repoPath =
+				namespace === "library" ? repository : `${namespace}/${repository}`;
 
 			if (digest) {
 				const tokenUrl = `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${namespace === "library" ? "library/" : ""}${repoPath}:pull`;
 				const tokenResponse = await fetch(tokenUrl);
 				if (!tokenResponse.ok) {
-					return { valid: false, error: "Failed to authenticate with Docker Hub" };
+					return {
+						valid: false,
+						error: "Failed to authenticate with Docker Hub",
+					};
 				}
 				const tokenData = await tokenResponse.json();
 				const token = tokenData.token;
@@ -97,12 +102,16 @@ export async function validateDockerImage(
 				const manifestResponse = await fetch(manifestUrl, {
 					headers: {
 						Authorization: `Bearer ${token}`,
-						Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+						Accept:
+							"application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
 					},
 				});
 
 				if (manifestResponse.status === 404) {
-					return { valid: false, error: "Image digest not found on Docker Hub" };
+					return {
+						valid: false,
+						error: "Image digest not found on Docker Hub",
+					};
 				}
 				if (!manifestResponse.ok) {
 					return { valid: false, error: "Failed to validate image" };
@@ -126,7 +135,10 @@ export async function validateDockerImage(
 			const tokenUrl = `https://ghcr.io/token?scope=repository:${namespace}/${repository}:pull`;
 			const tokenResponse = await fetch(tokenUrl);
 			if (!tokenResponse.ok) {
-				return { valid: false, error: "Image not found on GitHub Container Registry" };
+				return {
+					valid: false,
+					error: "Image not found on GitHub Container Registry",
+				};
 			}
 			const tokenData = await tokenResponse.json();
 			const token = tokenData.token;
@@ -135,12 +147,16 @@ export async function validateDockerImage(
 			const manifestResponse = await fetch(manifestUrl, {
 				headers: {
 					Authorization: `Bearer ${token}`,
-					Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+					Accept:
+						"application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
 				},
 			});
 
 			if (manifestResponse.status === 404) {
-				return { valid: false, error: `Image ${digest ? "digest" : "tag"} not found on GitHub Container Registry` };
+				return {
+					valid: false,
+					error: `Image ${digest ? "digest" : "tag"} not found on GitHub Container Registry`,
+				};
 			}
 			if (!manifestResponse.ok) {
 				return { valid: false, error: "Failed to validate image" };
@@ -216,7 +232,12 @@ export async function createService(
 	image: string,
 	ports: number[],
 	stateful: boolean = false,
-	github?: { repoUrl: string; branch: string; installationId?: number; repoId?: number },
+	github?: {
+		repoUrl: string;
+		branch: string;
+		installationId?: number;
+		repoId?: number;
+	},
 ) {
 	const id = randomUUID();
 	const hostname = slugify(name);
@@ -302,8 +323,8 @@ export async function deleteService(serviceId: string) {
 		"running",
 		"stopping",
 	];
-	const hasActiveDeployments = activeDeployments.some(
-		(d) => activeStatuses.includes(d.status)
+	const hasActiveDeployments = activeDeployments.some((d) =>
+		activeStatuses.includes(d.status),
 	);
 
 	if (hasActiveDeployments) {
@@ -329,7 +350,9 @@ export async function deleteService(serviceId: string) {
 	}
 
 	for (const deployment of activeDeployments) {
-		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, deployment.id));
+		await db
+			.delete(deploymentPorts)
+			.where(eq(deploymentPorts.deploymentId, deployment.id));
 	}
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
@@ -357,7 +380,10 @@ export async function updateServiceName(serviceId: string, name: string) {
 	return { success: true };
 }
 
-export async function updateServiceHostname(serviceId: string, hostname: string) {
+export async function updateServiceHostname(
+	serviceId: string,
+	hostname: string,
+) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -388,7 +414,7 @@ export async function updateServiceHostname(serviceId: string, hostname: string)
 export async function updateServiceGithubRepo(
 	serviceId: string,
 	repoUrl: string | null,
-	branch: string
+	branch: string,
 ) {
 	const service = await getService(serviceId);
 	if (!service) {
@@ -399,7 +425,9 @@ export async function updateServiceGithubRepo(
 	if (repoUrl) {
 		normalizedUrl = repoUrl.trim();
 		if (!normalizedUrl.startsWith("https://github.com/")) {
-			throw new Error("Repository URL must be a GitHub URL (https://github.com/...)");
+			throw new Error(
+				"Repository URL must be a GitHub URL (https://github.com/...)",
+			);
 		}
 	}
 
@@ -419,10 +447,7 @@ export async function updateServiceGithubRepo(
 		updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
 	}
 
-	await db
-		.update(services)
-		.set(updateData)
-		.where(eq(services.id, serviceId));
+	await db.update(services).set(updateData).where(eq(services.id, serviceId));
 
 	return { success: true };
 }
@@ -435,7 +460,10 @@ type PortChange = {
 	domain?: string;
 };
 
-export async function updateServicePorts(serviceId: string, changes: PortChange[]) {
+export async function updateServicePorts(
+	serviceId: string,
+	changes: PortChange[],
+) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -443,7 +471,9 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 
 	for (const change of changes) {
 		if (change.action === "remove" && change.portId) {
-			await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, change.portId));
+			await db
+				.delete(deploymentPorts)
+				.where(eq(deploymentPorts.servicePortId, change.portId));
 			await db.delete(servicePorts).where(eq(servicePorts.id, change.portId));
 		} else if (change.action === "add" && change.port) {
 			const existing = await db
@@ -497,16 +527,18 @@ export async function updateServicePorts(serviceId: string, changes: PortChange[
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
-	const runningDeployments = existingDeployments.filter((d) => d.status === "running");
+	const runningDeployments = existingDeployments.filter(
+		(d) => d.status === "running",
+	);
 
 	if (runningDeployments.length > 0) {
 		const placementMap = new Map<string, number>();
 		for (const dep of runningDeployments) {
 			placementMap.set(dep.serverId, (placementMap.get(dep.serverId) || 0) + 1);
 		}
-		const placements: ServerPlacement[] = Array.from(placementMap.entries()).map(
-			([serverId, replicas]) => ({ serverId, replicas })
-		);
+		const placements: ServerPlacement[] = Array.from(
+			placementMap.entries(),
+		).map(([serverId, replicas]) => ({ serverId, replicas }));
 		await deployService(serviceId, placements);
 	}
 
@@ -533,7 +565,11 @@ async function allocateHostPorts(
 	const usedPorts = await getUsedPorts(serverId);
 	const allocated: number[] = [];
 
-	for (let port = PORT_RANGE_START; port <= PORT_RANGE_END && allocated.length < count; port++) {
+	for (
+		let port = PORT_RANGE_START;
+		port <= PORT_RANGE_END && allocated.length < count;
+		port++
+	) {
 		if (!usedPorts.has(port)) {
 			allocated.push(port);
 		}
@@ -546,7 +582,10 @@ async function allocateHostPorts(
 	return allocated;
 }
 
-export async function deployService(serviceId: string, placements: ServerPlacement[]) {
+export async function deployService(
+	serviceId: string,
+	placements: ServerPlacement[],
+) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -560,7 +599,9 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		throw new Error("Maximum 10 replicas allowed");
 	}
 
-	const serverIds = placements.filter(p => p.replicas > 0).map(p => p.serverId);
+	const serverIds = placements
+		.filter((p) => p.replicas > 0)
+		.map((p) => p.serverId);
 	if (serverIds.length === 0) {
 		throw new Error("No servers selected for deployment");
 	}
@@ -571,13 +612,15 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		}
 
 		if (serverIds.length !== 1) {
-			throw new Error("Stateful services must be deployed to exactly one server");
+			throw new Error(
+				"Stateful services must be deployed to exactly one server",
+			);
 		}
 
 		const targetServerId = serverIds[0];
 		if (service.lockedServerId && service.lockedServerId !== targetServerId) {
 			throw new Error(
-				"This stateful service is locked to its original server. Volume data cannot be moved between machines."
+				"This stateful service is locked to its original server. Volume data cannot be moved between machines.",
 			);
 		}
 	}
@@ -587,7 +630,7 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		.from(servers)
 		.where(inArray(servers.id, serverIds));
 
-	const serverMap = new Map(selectedServers.map(s => [s.id, s]));
+	const serverMap = new Map(selectedServers.map((s) => [s.id, s]));
 
 	for (const placement of placements) {
 		if (placement.replicas > 0) {
@@ -620,8 +663,8 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 		"stopping",
 	];
 
-	const hasInProgressDeployment = existingDeployments.some(
-		(d) => inProgressStatuses.includes(d.status)
+	const hasInProgressDeployment = existingDeployments.some((d) =>
+		inProgressStatuses.includes(d.status),
 	);
 
 	if (hasInProgressDeployment) {
@@ -629,9 +672,6 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 	}
 
 	const rolloutId = randomUUID();
-	const oldRunningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" && d.containerId
-	);
 
 	await db.insert(rollouts).values({
 		id: rolloutId,
@@ -642,7 +682,9 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 
 	for (const dep of existingDeployments) {
 		if (dep.status !== "running") {
-			await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
+			await db
+				.delete(deploymentPorts)
+				.where(eq(deploymentPorts.deploymentId, dep.id));
 			await db.delete(deployments).where(eq(deployments.id, dep.id));
 		}
 	}
@@ -682,7 +724,10 @@ export async function deployService(serviceId: string, placements: ServerPlaceme
 
 		for (let i = 0; i < placement.replicas; i++) {
 			replicaIndex++;
-			const hostPorts = await allocateHostPorts(server.id, servicePortsList.length);
+			const hostPorts = await allocateHostPorts(
+				server.id,
+				servicePortsList.length,
+			);
 			const ipAddress = await assignContainerIp(server.id);
 
 			const deploymentId = randomUUID();
@@ -813,7 +858,7 @@ export type HealthCheckConfig = {
 
 export async function updateServiceHealthCheck(
 	serviceId: string,
-	config: HealthCheckConfig
+	config: HealthCheckConfig,
 ) {
 	const service = await getService(serviceId);
 	if (!service) {
@@ -886,7 +931,9 @@ export async function updateServiceConfig(
 	if (config.ports) {
 		if (config.ports.remove && config.ports.remove.length > 0) {
 			for (const portId of config.ports.remove) {
-				await db.delete(deploymentPorts).where(eq(deploymentPorts.servicePortId, portId));
+				await db
+					.delete(deploymentPorts)
+					.where(eq(deploymentPorts.servicePortId, portId));
 				await db.delete(servicePorts).where(eq(servicePorts.id, portId));
 			}
 		}
@@ -941,7 +988,9 @@ export async function updateServiceConfig(
 	}
 
 	if (config.replicas) {
-		await db.delete(serviceReplicas).where(eq(serviceReplicas.serviceId, serviceId));
+		await db
+			.delete(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId));
 
 		for (const replica of config.replicas) {
 			if (replica.count > 0) {
@@ -1004,7 +1053,7 @@ export async function restartService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	const deploymentsToRestart = runningDeployments.filter(
-		(d) => d.status === "running" && d.containerId
+		(d) => d.status === "running" && d.containerId,
 	);
 
 	if (deploymentsToRestart.length === 0) {
@@ -1036,7 +1085,11 @@ export async function abortRollout(serviceId: string) {
 		if (rollout.status === "in_progress") {
 			await db
 				.update(rollouts)
-				.set({ status: "failed", currentStage: "aborted", completedAt: new Date() })
+				.set({
+					status: "failed",
+					currentStage: "aborted",
+					completedAt: new Date(),
+				})
 				.where(eq(rollouts.id, rollout.id));
 		}
 	}
@@ -1069,14 +1122,14 @@ export async function abortRollout(serviceId: string) {
 	}
 
 	for (const dep of allDeployments) {
-		await db.delete(deploymentPorts).where(eq(deploymentPorts.deploymentId, dep.id));
+		await db
+			.delete(deploymentPorts)
+			.where(eq(deploymentPorts.deploymentId, dep.id));
 	}
 
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 
-	await db
-		.delete(workQueue)
-		.where(eq(workQueue.status, "pending"));
+	await db.delete(workQueue).where(eq(workQueue.status, "pending"));
 
 	return { success: true };
 }
@@ -1149,8 +1202,19 @@ export async function removeServiceVolume(volumeId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, volume[0].serviceId));
 
-	const runningStatuses = ["pending", "pulling", "starting", "healthy", "dns_updating", "caddy_updating", "stopping_old", "running"];
-	const hasRunning = activeDeployments.some((d) => runningStatuses.includes(d.status));
+	const runningStatuses = [
+		"pending",
+		"pulling",
+		"starting",
+		"healthy",
+		"dns_updating",
+		"caddy_updating",
+		"stopping_old",
+		"running",
+	];
+	const hasRunning = activeDeployments.some((d) =>
+		runningStatuses.includes(d.status),
+	);
 	if (hasRunning) {
 		throw new Error("Stop the service before removing volumes");
 	}
@@ -1168,4 +1232,3 @@ export async function getServiceVolumes(serviceId: string) {
 
 	return volumes;
 }
-

@@ -4,22 +4,11 @@ import { useState, memo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Key, Plus, X, Eye, EyeOff } from "lucide-react";
 import { createSecret, deleteSecret } from "@/actions/secrets";
+import type { Secret, ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
-import type { Service } from "./types";
-
-type Secret = {
-	id: string;
-	key: string;
-	createdAt: Date | null;
-};
 
 export const SecretsSection = memo(function SecretsSection({
 	service,
@@ -32,7 +21,7 @@ export const SecretsSection = memo(function SecretsSection({
 		data: secrets,
 		isLoading,
 		mutate,
-	} = useSWR<Secret[]>(`/api/services/${service.id}/secrets`, fetcher);
+	} = useSWR<Pick<Secret, "id" | "key" | "createdAt">[]>(`/api/services/${service.id}/secrets`, fetcher);
 	const [newKey, setNewKey] = useState("");
 	const [newValue, setNewValue] = useState("");
 	const [showValue, setShowValue] = useState(false);

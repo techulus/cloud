@@ -27,36 +27,15 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
+import type { Build, BuildStatus } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
-type BuildStatus =
-	| "pending"
-	| "claimed"
-	| "cloning"
-	| "building"
-	| "pushing"
-	| "completed"
-	| "failed"
-	| "cancelled";
-
-interface Build {
-	id: string;
-	commitSha: string;
-	commitMessage: string | null;
-	branch: string;
-	author: string | null;
-	status: BuildStatus;
-	error: string | null;
+type BuildListItem = Pick<Build, "id" | "commitSha" | "commitMessage" | "branch" | "author" | "status" | "error"> & {
 	createdAt: string;
 	startedAt: string | null;
 	completedAt: string | null;
-}
-
-interface BuildsViewerProps {
-	serviceId: string;
-	projectSlug: string;
-}
+};
 
 const STATUS_CONFIG: Record<
 	BuildStatus,
@@ -135,18 +114,18 @@ function formatDuration(start: string, end: string | null): string {
 	return `${seconds}s`;
 }
 
-export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
+export function BuildsViewer({ serviceId, projectSlug }: { serviceId: string; projectSlug: string }) {
 	const router = useRouter();
 	const [isTriggering, setIsTriggering] = useState(false);
 	const [cancellingId, setCancellingId] = useState<string | null>(null);
 	const [retryingId, setRetryingId] = useState<string | null>(null);
 
-	const { data, isLoading, mutate } = useSWR<{ builds: Build[] }>(
+	const { data, isLoading, mutate } = useSWR<{ builds: BuildListItem[] }>(
 		`/api/services/${serviceId}/builds`,
 		fetcher,
 		{
 			refreshInterval: 5000,
-		}
+		},
 	);
 
 	const builds = data?.builds || [];
@@ -158,7 +137,9 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 			toast.success("Build triggered");
 			mutate();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Failed to trigger build");
+			toast.error(
+				error instanceof Error ? error.message : "Failed to trigger build",
+			);
 		} finally {
 			setIsTriggering(false);
 		}
@@ -171,7 +152,9 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 			toast.success("Build cancelled");
 			mutate();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Failed to cancel build");
+			toast.error(
+				error instanceof Error ? error.message : "Failed to cancel build",
+			);
 		} finally {
 			setCancellingId(null);
 		}
@@ -184,7 +167,9 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 			toast.success("Build queued");
 			mutate();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Failed to retry build");
+			toast.error(
+				error instanceof Error ? error.message : "Failed to retry build",
+			);
 		} finally {
 			setRetryingId(null);
 		}
@@ -213,11 +198,7 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 						Builds are triggered automatically on push to the deploy branch.
 					</p>
 				</div>
-				<Button
-					onClick={handleTriggerBuild}
-					disabled={isTriggering}
-					size="sm"
-				>
+				<Button onClick={handleTriggerBuild} disabled={isTriggering} size="sm">
 					{isTriggering ? (
 						<Loader2 className="size-4 mr-1.5 animate-spin" />
 					) : (
@@ -240,7 +221,7 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 							className="cursor-pointer hover:bg-muted/50"
 							onClick={() =>
 								router.push(
-									`/dashboard/projects/${projectSlug}/services/${serviceId}/builds/${build.id}`
+									`/dashboard/projects/${projectSlug}/services/${serviceId}/builds/${build.id}`,
 								)
 							}
 						>
@@ -260,11 +241,16 @@ export function BuildsViewer({ serviceId, projectSlug }: BuildsViewerProps) {
 										<GitBranch className="size-3" />
 										{build.branch}
 									</span>
-									{build.author && <span className="ml-3">by {build.author}</span>}
-									<span className="ml-3">{formatRelativeTime(build.createdAt)}</span>
+									{build.author && (
+										<span className="ml-3">by {build.author}</span>
+									)}
+									<span className="ml-3">
+										{formatRelativeTime(build.createdAt)}
+									</span>
 									{build.startedAt && (
 										<span className="ml-3">
-											Duration: {formatDuration(build.startedAt, build.completedAt)}
+											Duration:{" "}
+											{formatDuration(build.startedAt, build.completedAt)}
 										</span>
 									)}
 								</ItemDescription>

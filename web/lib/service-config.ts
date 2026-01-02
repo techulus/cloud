@@ -247,8 +247,12 @@ export function diffConfigs(
 		}
 	}
 
-	const deployedPortsMap = new Map((deployed.ports || []).map((p) => [p.port, p]));
-	const currentPortsMap = new Map((current.ports || []).map((p) => [p.port, p]));
+	const deployedPortsMap = new Map(
+		(deployed.ports || []).map((p) => [p.port, p]),
+	);
+	const currentPortsMap = new Map(
+		(current.ports || []).map((p) => [p.port, p]),
+	);
 
 	for (const [port, currentPort] of currentPortsMap) {
 		const deployedPort = deployedPortsMap.get(port);
@@ -361,7 +365,9 @@ export function diffConfigs(
 	return changes;
 }
 
-export function parseDeployedConfig(json: string | null): DeployedConfig | null {
+export function parseDeployedConfig(
+	json: string | null,
+): DeployedConfig | null {
 	if (!json) return null;
 	try {
 		return JSON.parse(json) as DeployedConfig;

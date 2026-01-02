@@ -1,13 +1,26 @@
 "use client";
 
-import { Globe, Server, Box, HeartPulse, Lock, ArrowDown, HardDrive } from "lucide-react";
+import {
+	Globe,
+	Server,
+	Box,
+	HeartPulse,
+	Lock,
+	ArrowDown,
+	HardDrive,
+} from "lucide-react";
 import {
 	CanvasWrapper,
 	getStatusColor,
 	getHealthColor,
 } from "@/components/ui/canvas-wrapper";
 import { Spinner } from "@/components/ui/spinner";
-import type { Service, Deployment } from "./types";
+import type { Deployment as BaseDeployment, DeploymentPort, Server as ServerType, ServiceVolume, ServiceWithDetails as Service } from "@/db/types";
+
+type Deployment = BaseDeployment & {
+	server: Pick<ServerType, "name" | "wireguardIp"> | null;
+	ports: Array<Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }>;
+};
 
 const statusLabels: Record<string, string> = {
 	pending: "Queued",
@@ -93,12 +106,6 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	);
 }
 
-type ServiceVolume = {
-	id: string;
-	name: string;
-	containerPath: string;
-};
-
 function ServerBox({
 	serverName,
 	deployments,
@@ -143,7 +150,10 @@ function ServerBox({
 			{hasVolumes && (
 				<div className="mt-2 space-y-1">
 					{volumes!.map((volume) => (
-						<div key={volume.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+						<div
+							key={volume.id}
+							className="flex items-center gap-2 text-xs text-muted-foreground"
+						>
 							<HardDrive className="h-3.5 w-3.5" />
 							<span>{volume.name}</span>
 						</div>

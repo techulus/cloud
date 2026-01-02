@@ -5,7 +5,7 @@ import { builds } from "@/db/schema";
 
 export async function GET(
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> }
+	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const { id: serviceId } = await params;
 

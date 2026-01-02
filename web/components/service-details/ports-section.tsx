@@ -12,25 +12,22 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-	Item,
-	ItemContent,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
 import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
 import { EditableText } from "@/components/editable-text";
+import type { Server, ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
-import type { Service, StagedPort } from "./types";
 
-type Server = {
+type StagedPort = {
 	id: string;
-	name: string;
-	publicIp: string | null;
+	port: number;
+	isPublic: boolean;
+	domain: string | null;
+	isNew?: boolean;
 };
 
-function DnsInstructionsModal({ servers }: { servers: Server[] }) {
+function DnsInstructionsModal({ servers }: { servers: Pick<Server, "id" | "name" | "publicIp">[] }) {
 	const serversWithIp = servers.filter((s) => s.publicIp);
 
 	return (
@@ -87,11 +84,13 @@ export const PortsSection = memo(function PortsSection({
 }) {
 	const router = useRouter();
 	const [pendingAdds, setPendingAdds] = useState<StagedPort[]>([]);
-	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
+	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(
+		new Set(),
+	);
 	const [newPort, setNewPort] = useState("");
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
-	const [servers, setServers] = useState<Server[]>([]);
+	const [servers, setServers] = useState<Pick<Server, "id" | "name" | "publicIp">[]>([]);
 
 	const hostname = service.hostname || slugify(service.name);
 
@@ -205,7 +204,9 @@ export const PortsSection = memo(function PortsSection({
 							<div
 								key={port.id}
 								className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
-									port.isNew ? "bg-primary/10 border border-primary/20" : "bg-muted"
+									port.isNew
+										? "bg-primary/10 border border-primary/20"
+										: "bg-muted"
 								}`}
 							>
 								<div className="flex items-center gap-2">
@@ -217,7 +218,9 @@ export const PortsSection = memo(function PortsSection({
 										</Badge>
 									)}
 									{port.domain && (
-										<span className="text-xs text-muted-foreground">{port.domain}</span>
+										<span className="text-xs text-muted-foreground">
+											{port.domain}
+										</span>
 									)}
 								</div>
 								<button
@@ -250,7 +253,12 @@ export const PortsSection = memo(function PortsSection({
 						className="flex-1 min-w-32"
 					/>
 					<DnsInstructionsModal servers={servers} />
-					<Button size="sm" variant="outline" onClick={handleAdd} disabled={!canAdd}>
+					<Button
+						size="sm"
+						variant="outline"
+						onClick={handleAdd}
+						disabled={!canAdd}
+					>
 						<Plus className="h-4 w-4" />
 					</Button>
 				</div>

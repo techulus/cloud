@@ -15,8 +15,8 @@ export default function Page() {
 					</h1>
 
 					<p className="text-lg md:text-xl text-muted-foreground max-w-2xl">
-						Run your containers without the headache. Fast, reliable, and
-						you're in control.
+						Run your containers without the headache. Fast, reliable, and you're
+						in control.
 					</p>
 
 					<Link
@@ -39,8 +39,8 @@ export default function Page() {
 								Stateless or Stateful
 							</h3>
 							<p className="text-muted-foreground text-sm">
-								Containers come and go, that's the point. But when you need
-								data to stick around, volumes have you covered.
+								Containers come and go, that's the point. But when you need data
+								to stick around, volumes have you covered.
 							</p>
 						</CardContent>
 					</Card>
@@ -64,9 +64,7 @@ export default function Page() {
 							<div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
 								<Network className="h-6 w-6 text-primary" />
 							</div>
-							<h3 className="text-lg font-semibold mb-2">
-								Private by Default
-							</h3>
+							<h3 className="text-lg font-semibold mb-2">Private by Default</h3>
 							<p className="text-muted-foreground text-sm">
 								Your services talk to each other privately. Nothing gets exposed
 								unless you say so.

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds, services, projects, serviceReplicas, githubRepos } from "@/db/schema";
+import {
+	builds,
+	services,
+	projects,
+	serviceReplicas,
+	githubRepos,
+} from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { deployService } from "@/actions/projects";
@@ -13,7 +19,7 @@ type StatusUpdate = {
 
 export async function POST(
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> }
+	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const body = await request.text();
 	const auth = await verifyAgentRequest(request, body);
@@ -39,7 +45,7 @@ export async function POST(
 	if (!build) {
 		return NextResponse.json(
 			{ error: "Build not found or not claimed by this agent" },
-			{ status: 404 }
+			{ status: 404 },
 		);
 	}
 
@@ -72,10 +78,15 @@ export async function POST(
 				.then((r) => r[0]);
 
 			if (githubRepo) {
-				const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://cloud.techulus.com";
+				const baseUrl =
+					process.env.NEXT_PUBLIC_APP_URL || "https://cloud.techulus.com";
 				const logUrl = `${baseUrl}/builds/${buildId}/logs`;
 
-				if (update.status === "cloning" || update.status === "building" || update.status === "pushing") {
+				if (
+					update.status === "cloning" ||
+					update.status === "building" ||
+					update.status === "pushing"
+				) {
 					await updateGitHubDeploymentStatus(
 						githubRepo.installationId,
 						githubRepo.repoFullName,
@@ -84,7 +95,7 @@ export async function POST(
 						{
 							description: `Build ${update.status}...`,
 							logUrl,
-						}
+						},
 					);
 				} else if (update.status === "completed") {
 					await updateGitHubDeploymentStatus(
@@ -95,7 +106,7 @@ export async function POST(
 						{
 							description: "Build completed successfully",
 							logUrl,
-						}
+						},
 					);
 				} else if (update.status === "failed") {
 					await updateGitHubDeploymentStatus(
@@ -106,12 +117,15 @@ export async function POST(
 						{
 							description: update.error || "Build failed",
 							logUrl,
-						}
+						},
 					);
 				}
 			}
 		} catch (error) {
-			console.error("[build:status] failed to update GitHub deployment:", error);
+			console.error(
+				"[build:status] failed to update GitHub deployment:",
+				error,
+			);
 		}
 	}
 
@@ -140,16 +154,13 @@ export async function POST(
 		if (!registryHost) {
 			return NextResponse.json(
 				{ error: "REGISTRY_HOST environment variable is required" },
-				{ status: 500 }
+				{ status: 500 },
 			);
 		}
 		const commitSha = build.commitSha === "HEAD" ? "latest" : build.commitSha;
 		const imageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
 
-		await db
-			.update(builds)
-			.set({ imageUri })
-			.where(eq(builds.id, buildId));
+		await db.update(builds).set({ imageUri }).where(eq(builds.id, buildId));
 
 		await db
 			.update(services)
@@ -168,7 +179,7 @@ export async function POST(
 			}));
 
 			console.log(
-				`[build:complete] triggering deployment for service ${build.serviceId} with ${placements.length} placements`
+				`[build:complete] triggering deployment for service ${build.serviceId} with ${placements.length} placements`,
 			);
 
 			try {
@@ -182,19 +193,21 @@ export async function POST(
 			}
 		} else {
 			console.log(
-				`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`
+				`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
 			);
 		}
 	}
 
-	console.log(`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`);
+	console.log(
+		`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
+	);
 
 	return NextResponse.json({ ok: true });
 }
 
 export async function GET(
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> }
+	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const auth = await verifyAgentRequest(request);
 	if (!auth.success) {

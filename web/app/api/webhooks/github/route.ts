@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { builds, githubInstallations, githubRepos, services } from "@/db/schema";
+import {
+	builds,
+	githubInstallations,
+	githubRepos,
+	services,
+} from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
 	verifyWebhookSignature,
@@ -55,7 +60,10 @@ async function handleInstallationEvent(payload: InstallationPayload) {
 			.then((r) => r[0]);
 
 		if (existingInstallation) {
-			return NextResponse.json({ ok: true, message: "Installation already exists" });
+			return NextResponse.json({
+				ok: true,
+				message: "Installation already exists",
+			});
 		}
 
 		return NextResponse.json({
@@ -80,7 +88,11 @@ async function handlePushEvent(payload: PushPayload) {
 	const { ref, repository, head_commit } = payload;
 
 	if (!head_commit) {
-		return NextResponse.json({ ok: true, skipped: true, reason: "no head commit" });
+		return NextResponse.json({
+			ok: true,
+			skipped: true,
+			reason: "no head commit",
+		});
 	}
 
 	const branch = ref.replace("refs/heads/", "");
@@ -92,15 +104,27 @@ async function handlePushEvent(payload: PushPayload) {
 		.then((r) => r[0]);
 
 	if (!githubRepo) {
-		return NextResponse.json({ ok: true, skipped: true, reason: "repo not linked" });
+		return NextResponse.json({
+			ok: true,
+			skipped: true,
+			reason: "repo not linked",
+		});
 	}
 
 	if (!githubRepo.serviceId) {
-		return NextResponse.json({ ok: true, skipped: true, reason: "no service linked" });
+		return NextResponse.json({
+			ok: true,
+			skipped: true,
+			reason: "no service linked",
+		});
 	}
 
 	if (!githubRepo.autoDeploy) {
-		return NextResponse.json({ ok: true, skipped: true, reason: "auto-deploy disabled" });
+		return NextResponse.json({
+			ok: true,
+			skipped: true,
+			reason: "auto-deploy disabled",
+		});
 	}
 
 	const deployBranch = githubRepo.deployBranch || githubRepo.defaultBranch;
@@ -119,7 +143,11 @@ async function handlePushEvent(payload: PushPayload) {
 		.then((r) => r[0]);
 
 	if (!service) {
-		return NextResponse.json({ ok: true, skipped: true, reason: "service not found" });
+		return NextResponse.json({
+			ok: true,
+			skipped: true,
+			reason: "service not found",
+		});
 	}
 
 	const existingBuild = await db
@@ -128,8 +156,8 @@ async function handlePushEvent(payload: PushPayload) {
 		.where(
 			and(
 				eq(builds.serviceId, githubRepo.serviceId),
-				eq(builds.commitSha, head_commit.id)
-			)
+				eq(builds.commitSha, head_commit.id),
+			),
 		)
 		.then((r) => r[0]);
 
@@ -151,7 +179,7 @@ async function handlePushEvent(payload: PushPayload) {
 			repository.full_name,
 			head_commit.id,
 			service.name,
-			`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`
+			`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`,
 		);
 
 		await updateGitHubDeploymentStatus(
@@ -159,7 +187,7 @@ async function handlePushEvent(payload: PushPayload) {
 			repository.full_name,
 			githubDeploymentId,
 			"pending",
-			{ description: "Build queued" }
+			{ description: "Build queued" },
 		);
 	} catch (error) {
 		console.error("[webhook:push] failed to create GitHub deployment:", error);
@@ -178,7 +206,7 @@ async function handlePushEvent(payload: PushPayload) {
 	});
 
 	console.log(
-		`[webhook:push] created build ${buildId} for ${repository.full_name}@${head_commit.id.slice(0, 7)}`
+		`[webhook:push] created build ${buildId} for ${repository.full_name}@${head_commit.id.slice(0, 7)}`,
 	);
 
 	return NextResponse.json({ ok: true, buildId });
@@ -206,6 +234,9 @@ export async function POST(request: NextRequest) {
 		case "ping":
 			return NextResponse.json({ ok: true, message: "pong" });
 		default:
-			return NextResponse.json({ ok: true, message: `Ignored event: ${event}` });
+			return NextResponse.json({
+				ok: true,
+				message: `Ignored event: ${event}`,
+			});
 	}
 }

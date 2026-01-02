@@ -19,63 +19,27 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild } from "@/actions/builds";
-import { useBreadcrumbs } from "@/components/breadcrumb-context";
+import { useBreadcrumbs } from "@/components/core/breadcrumb-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Item,
 	ItemContent,
 	ItemDescription,
-	ItemGroup,
 	ItemMedia,
 	ItemTitle,
 } from "@/components/ui/item";
+import type { Build, BuildStatus, GithubRepo, Project, Service } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
-import { BuildLogsViewer } from "./build-logs-viewer";
+import { BuildLogsViewer } from "./logging/build-logs-viewer";
 
-type BuildStatus =
-	| "pending"
-	| "claimed"
-	| "cloning"
-	| "building"
-	| "pushing"
-	| "completed"
-	| "failed"
-	| "cancelled";
-
-interface Build {
-	id: string;
-	serviceId: string;
-	githubRepoId: string | null;
-	commitSha: string;
-	commitMessage: string | null;
-	branch: string;
-	author: string | null;
-	status: BuildStatus;
-	imageUri: string | null;
-	error: string | null;
-	claimedBy: string | null;
-	claimedAt: string | Date | null;
+type BuildWithDates = Omit<Build, "createdAt" | "startedAt" | "completedAt" | "claimedAt"> & {
+	createdAt: string | Date;
 	startedAt: string | Date | null;
 	completedAt: string | Date | null;
-	createdAt: string | Date;
-}
-
-interface GithubRepo {
-	id: string;
-	repoFullName: string;
-}
-
-interface Project {
-	id: string;
-	name: string;
-}
-
-interface Service {
-	id: string;
-	name: string;
-}
+	claimedAt: string | Date | null;
+};
 
 const STATUS_CONFIG: Record<
 	BuildStatus,
@@ -159,17 +123,17 @@ export function BuildDetails({
 	githubRepo,
 }: {
 	projectSlug: string;
-	project: Project;
-	service: Service;
-	build: Build;
-	githubRepo: GithubRepo | null;
+	project: Pick<Project, "id" | "name">;
+	service: Pick<Service, "id" | "name">;
+	build: BuildWithDates;
+	githubRepo: Pick<GithubRepo, "id" | "repoFullName"> | null;
 }) {
 	const router = useRouter();
 	const { setBreadcrumbs, clearBreadcrumbs } = useBreadcrumbs();
 	const [isCancelling, setIsCancelling] = useState(false);
 	const [isRetrying, setIsRetrying] = useState(false);
 
-	const { data } = useSWR<{ build: Build }>(
+	const { data } = useSWR<{ build: BuildWithDates }>(
 		`/api/builds/${initialBuild.id}`,
 		fetcher,
 		{
@@ -310,7 +274,9 @@ export function BuildDetails({
 					</ItemMedia>
 					<ItemContent>
 						<ItemTitle>
-							<code className="font-mono text-sm">{build.commitSha.slice(0, 7)}</code>
+							<code className="font-mono text-sm">
+								{build.commitSha.slice(0, 7)}
+							</code>
 							{githubRepo && (
 								<Link
 									href={`https://github.com/${githubRepo.repoFullName}/commit/${build.commitSha}`}
@@ -354,7 +320,9 @@ export function BuildDetails({
 							{build.startedAt && (
 								<div className="flex justify-between">
 									<span>Duration</span>
-									<span>{formatDuration(build.startedAt, build.completedAt)}</span>
+									<span>
+										{formatDuration(build.startedAt, build.completedAt)}
+									</span>
 								</div>
 							)}
 						</ItemDescription>

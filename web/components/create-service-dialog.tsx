@@ -153,14 +153,16 @@ export function CreateServiceDialog({
 								/>
 								{error && <p className="text-sm text-red-500">{error}</p>}
 								<p className="text-xs text-muted-foreground">
-									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or any public registry
+									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or
+									any public registry
 								</p>
 							</div>
 							<div className="flex items-center justify-between rounded-lg border p-3">
 								<div className="space-y-0.5">
 									<Label htmlFor="stateful-toggle">Stateful Service</Label>
 									<p className="text-xs text-muted-foreground">
-										Enable to add persistent volumes. Limited to 1 replica and locked to a single server.
+										Enable to add persistent volumes. Limited to 1 replica and
+										locked to a single server.
 									</p>
 								</div>
 								<Switch
@@ -226,7 +228,8 @@ export function CreateServiceDialog({
 								<div className="space-y-0.5">
 									<Label htmlFor="gh-stateful-toggle">Stateful Service</Label>
 									<p className="text-xs text-muted-foreground">
-										Enable to add persistent volumes. Limited to 1 replica and locked to a single server.
+										Enable to add persistent volumes. Limited to 1 replica and
+										locked to a single server.
 									</p>
 								</div>
 								<Switch

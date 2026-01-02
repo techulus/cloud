@@ -53,7 +53,11 @@ export function GitHubRepoSelector({
 
 	const { data, isLoading } = useSWR<{
 		repos: GitHubRepo[];
-		installations: Array<{ id: number; accountLogin: string; accountType: string }>;
+		installations: Array<{
+			id: number;
+			accountLogin: string;
+			accountType: string;
+		}>;
 	}>("/api/github/repos", fetcher);
 
 	const repos = data?.repos || [];
@@ -74,7 +78,7 @@ export function GitHubRepoSelector({
 		const repoName = isValidGitHubUrl(search);
 		if (!repoName) return null;
 		const alreadyInList = repos.some(
-			(r) => r.fullName.toLowerCase() === repoName.toLowerCase()
+			(r) => r.fullName.toLowerCase() === repoName.toLowerCase(),
 		);
 		if (alreadyInList) return null;
 		return repoName;
@@ -188,22 +192,25 @@ export function GitHubRepoSelector({
 										<div className="space-y-2 p-2">
 											<p>No GitHub App installed.</p>
 											<p className="text-muted-foreground">
-												Paste a public repo URL or install the GitHub App for private repos.
+												Paste a public repo URL or install the GitHub App for
+												private repos.
 											</p>
 										</div>
 									</CommandEmpty>
 								)}
 
-								{hasInstallations && filteredRepos.length === 0 && !publicRepoFromSearch && (
-									<CommandEmpty>
-										<div className="space-y-2 p-2">
-											<p>No matching repositories.</p>
-											<p className="text-muted-foreground">
-												Paste a public GitHub URL to use any public repo.
-											</p>
-										</div>
-									</CommandEmpty>
-								)}
+								{hasInstallations &&
+									filteredRepos.length === 0 &&
+									!publicRepoFromSearch && (
+										<CommandEmpty>
+											<div className="space-y-2 p-2">
+												<p>No matching repositories.</p>
+												<p className="text-muted-foreground">
+													Paste a public GitHub URL to use any public repo.
+												</p>
+											</div>
+										</CommandEmpty>
+									)}
 							</>
 						)}
 					</CommandList>

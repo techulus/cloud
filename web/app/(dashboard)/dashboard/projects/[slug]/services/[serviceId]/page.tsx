@@ -6,7 +6,7 @@ import {
 	restartService,
 	stopDeployment,
 } from "@/actions/projects";
-import { ActionButton } from "@/components/action-button";
+import { ActionButton } from "@/components/core/action-button";
 import { useService } from "@/components/service-layout-client";
 import { DeploymentCanvas } from "@/components/service-details/deployment-canvas";
 
@@ -31,12 +31,12 @@ export default function ArchitecturePage() {
 							/>
 							<ActionButton
 								action={async () => {
-									const placements = (
-										service.configuredReplicas || []
-									).map((r) => ({
-										serverId: r.serverId,
-										replicas: r.count,
-									}));
+									const placements = (service.configuredReplicas || []).map(
+										(r) => ({
+											serverId: r.serverId,
+											replicas: r.count,
+										}),
+									);
 									await deployService(service.id, placements);
 								}}
 								label="Redeploy"
@@ -72,12 +72,12 @@ export default function ArchitecturePage() {
 						(service.configuredReplicas || []).length > 0 && (
 							<ActionButton
 								action={async () => {
-									const placements = (
-										service.configuredReplicas || []
-									).map((r) => ({
-										serverId: r.serverId,
-										replicas: r.count,
-									}));
+									const placements = (service.configuredReplicas || []).map(
+										(r) => ({
+											serverId: r.serverId,
+											replicas: r.count,
+										}),
+									);
 									await deployService(service.id, placements);
 								}}
 								label="Start All"

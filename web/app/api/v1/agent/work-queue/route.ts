@@ -15,7 +15,9 @@ export async function GET(request: NextRequest) {
 	const items = await db
 		.select()
 		.from(workQueue)
-		.where(and(eq(workQueue.serverId, serverId), eq(workQueue.status, "pending")));
+		.where(
+			and(eq(workQueue.serverId, serverId), eq(workQueue.status, "pending")),
+		);
 
 	return NextResponse.json({ items });
 }

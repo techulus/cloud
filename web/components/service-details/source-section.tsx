@@ -14,7 +14,7 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
-import type { Service } from "./types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 
 function parseImageInfo(image: string): {
 	registry: string;
@@ -60,11 +60,7 @@ export const SourceSection = memo(function SourceSection({
 	const handleSave = async () => {
 		setIsSaving(true);
 		try {
-			await updateServiceGithubRepo(
-				service.id,
-				repoUrl || null,
-				branch
-			);
+			await updateServiceGithubRepo(service.id, repoUrl || null, branch);
 			toast.success("Repository settings updated");
 			setIsEditing(false);
 			onUpdate?.();
@@ -126,7 +122,9 @@ export const SourceSection = memo(function SourceSection({
 							</div>
 							<div className="flex items-center gap-2">
 								<Button onClick={handleSave} disabled={isSaving} size="sm">
-									{isSaving && <Loader2 className="size-4 mr-1.5 animate-spin" />}
+									{isSaving && (
+										<Loader2 className="size-4 mr-1.5 animate-spin" />
+									)}
 									Save
 								</Button>
 								<Button
@@ -159,7 +157,9 @@ export const SourceSection = memo(function SourceSection({
 									<GitBranch className="size-3" />
 									Branch
 								</p>
-								<p className="text-sm font-mono">{service.githubBranch || "main"}</p>
+								<p className="text-sm font-mono">
+									{service.githubBranch || "main"}
+								</p>
 							</div>
 						</div>
 					)}
@@ -214,7 +214,11 @@ export const SourceSection = memo(function SourceSection({
 							/>
 						</div>
 						<div className="flex items-center gap-2">
-							<Button onClick={handleSave} disabled={isSaving || !repoUrl} size="sm">
+							<Button
+								onClick={handleSave}
+								disabled={isSaving || !repoUrl}
+								size="sm"
+							>
 								{isSaving && <Loader2 className="size-4 mr-1.5 animate-spin" />}
 								Connect
 							</Button>
