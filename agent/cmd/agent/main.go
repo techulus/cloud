@@ -13,10 +13,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"techulus/cloud-agent/internal/api"
+	"techulus/cloud-agent/internal/build"
 	"techulus/cloud-agent/internal/caddy"
 	"techulus/cloud-agent/internal/crypto"
 	"techulus/cloud-agent/internal/dns"
@@ -35,6 +37,8 @@ const (
 	defaultDataDir       = "/var/lib/techulus-agent"
 	tickInterval         = 10 * time.Second
 	processingTimeout    = 5 * time.Minute
+	buildCheckInterval   = 30 * time.Second
+	buildCleanupInterval = 1 * time.Hour
 )
 
 type AgentState int
@@ -53,6 +57,13 @@ func (s AgentState) String() string {
 	default:
 		return "UNKNOWN"
 	}
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
 }
 
 type Config struct {
@@ -80,9 +91,13 @@ type Agent struct {
 	processingStart    time.Time
 	logCollector       *logs.Collector
 	caddyLogCollector  *logs.CaddyCollector
+	builder            *build.Builder
+	isBuilding         bool
+	buildMutex         sync.Mutex
+	currentBuildID     string
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder) *Agent {
 	return &Agent{
 		state:             StateIdle,
 		client:            client,
@@ -92,6 +107,7 @@ func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config
 		dataDir:           dataDir,
 		logCollector:      logCollector,
 		caddyLogCollector: caddyLogCollector,
+		builder:           builder,
 	}
 }
 
@@ -111,6 +127,21 @@ func (a *Agent) Run(ctx context.Context) {
 		a.caddyLogCollector.Start()
 	}
 
+	var buildTickerC <-chan time.Time
+	var cleanupTickerC <-chan time.Time
+	if a.builder != nil {
+		buildTicker := time.NewTicker(buildCheckInterval)
+		defer buildTicker.Stop()
+		buildTickerC = buildTicker.C
+
+		cleanupTicker := time.NewTicker(buildCleanupInterval)
+		defer cleanupTicker.Stop()
+		cleanupTickerC = cleanupTicker.C
+	}
+
+	workQueueTicker := time.NewTicker(5 * time.Second)
+	defer workQueueTicker.Stop()
+
 	a.tick()
 
 	for {
@@ -127,6 +158,12 @@ func (a *Agent) Run(ctx context.Context) {
 			a.tick()
 		case <-logTickerC:
 			a.collectLogs()
+		case <-buildTickerC:
+			go a.checkForBuilds(ctx)
+		case <-cleanupTickerC:
+			go a.runBuildCleanup()
+		case <-workQueueTicker.C:
+			a.processWorkQueue()
 		}
 	}
 }
@@ -249,7 +286,6 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
 	}
 	expectedDnsHash := dns.HashRecords(expectedDnsRecords)
-	log.Printf("[dns:hash] expected: %d records, hash=%s, current=%s", len(expectedDnsRecords), expectedDnsHash, actual.DnsConfigHash)
 	if expectedDnsHash != actual.DnsConfigHash {
 		changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
 	}
@@ -259,7 +295,6 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 	}
 	expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
-	log.Printf("[caddy:hash] expected: %d routes, hash=%s, current=%s", len(expectedCaddyRoutes), expectedCaddyHash, actual.CaddyConfigHash)
 	if expectedCaddyHash != actual.CaddyConfigHash {
 		changes = append(changes, fmt.Sprintf("UPDATE Caddy (%d routes)", len(expected.Caddy.Routes)))
 	}
@@ -273,7 +308,6 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		}
 	}
 	expectedWgHash := wireguard.HashPeers(expectedWgPeers)
-	log.Printf("[wg:hash] expected: %d peers, hash=%s, current=%s", len(expectedWgPeers), expectedWgHash, actual.WireguardHash)
 	if expectedWgHash != actual.WireguardHash {
 		changes = append(changes, fmt.Sprintf("UPDATE WireGuard (%d peers)", len(expected.Wireguard.Peers)))
 	}
@@ -623,6 +657,231 @@ func (a *Agent) reportStatus(includeResources bool) {
 	}
 }
 
+func (a *Agent) processWorkQueue() {
+	items, err := a.client.GetWorkQueue()
+	if err != nil {
+		log.Printf("[work-queue] failed to get work queue: %v", err)
+		return
+	}
+
+	for _, item := range items {
+		log.Printf("[work-queue] processing item %s (type=%s)", truncate(item.ID, 8), item.Type)
+
+		var processErr error
+		switch item.Type {
+		case "restart":
+			processErr = a.processRestart(item)
+		case "stop":
+			processErr = a.processStop(item)
+		case "deploy":
+			log.Printf("[work-queue] deploy handled via expected state reconciliation, marking complete")
+		case "force_cleanup":
+			processErr = a.processForceCleanup(item)
+		case "cleanup_volumes":
+			processErr = a.processCleanupVolumes(item)
+		default:
+			log.Printf("[work-queue] unknown work item type: %s", item.Type)
+			continue
+		}
+
+		if processErr != nil {
+			log.Printf("[work-queue] item %s failed: %v", truncate(item.ID, 8), processErr)
+			if err := a.client.CompleteWorkItem(item.ID, "failed", processErr.Error()); err != nil {
+				log.Printf("[work-queue] failed to mark item as failed: %v", err)
+			}
+		} else {
+			log.Printf("[work-queue] item %s completed", truncate(item.ID, 8))
+			if err := a.client.CompleteWorkItem(item.ID, "completed", ""); err != nil {
+				log.Printf("[work-queue] failed to mark item as completed: %v", err)
+			}
+		}
+	}
+}
+
+func (a *Agent) processRestart(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		DeploymentID string `json:"deploymentId"`
+		ContainerID  string `json:"containerId"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse restart payload: %w", err)
+	}
+
+	log.Printf("[restart] restarting container %s for deployment %s", truncate(payload.ContainerID, 12), truncate(payload.DeploymentID, 8))
+
+	if err := podman.Restart(payload.ContainerID); err != nil {
+		return fmt.Errorf("failed to restart container: %w", err)
+	}
+
+	return nil
+}
+
+func (a *Agent) processStop(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		DeploymentID string `json:"deploymentId"`
+		ContainerID  string `json:"containerId"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse stop payload: %w", err)
+	}
+
+	log.Printf("[stop] stopping container %s for deployment %s", truncate(payload.ContainerID, 12), truncate(payload.DeploymentID, 8))
+
+	if err := podman.Stop(payload.ContainerID); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	return nil
+}
+
+func (a *Agent) processForceCleanup(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		ServiceID    string   `json:"serviceId"`
+		ContainerIDs []string `json:"containerIds"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse force_cleanup payload: %w", err)
+	}
+
+	log.Printf("[force_cleanup] cleaning up %d containers for service %s", len(payload.ContainerIDs), truncate(payload.ServiceID, 8))
+
+	for _, containerID := range payload.ContainerIDs {
+		if err := podman.Stop(containerID); err != nil {
+			log.Printf("[force_cleanup] failed to stop %s: %v", truncate(containerID, 12), err)
+		}
+		if err := podman.ForceRemove(containerID); err != nil {
+			log.Printf("[force_cleanup] failed to remove %s: %v", truncate(containerID, 12), err)
+		}
+	}
+
+	return nil
+}
+
+func (a *Agent) processCleanupVolumes(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		ServiceID string `json:"serviceId"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse cleanup_volumes payload: %w", err)
+	}
+
+	volumePath := filepath.Join(a.dataDir, "volumes", payload.ServiceID)
+	log.Printf("[cleanup_volumes] removing volumes at %s", volumePath)
+
+	if err := os.RemoveAll(volumePath); err != nil {
+		return fmt.Errorf("failed to remove volume directory: %w", err)
+	}
+
+	return nil
+}
+
+func (a *Agent) checkForBuilds(ctx context.Context) {
+	if a.builder == nil {
+		return
+	}
+
+	a.buildMutex.Lock()
+	if a.isBuilding {
+		a.buildMutex.Unlock()
+		return
+	}
+	a.buildMutex.Unlock()
+
+	pending, err := a.client.GetPendingBuild()
+	if err != nil {
+		log.Printf("[build] failed to check for pending builds: %v", err)
+		return
+	}
+
+	if pending == nil {
+		return
+	}
+
+	log.Printf("[build] found pending build %s for commit %s", truncate(pending.ID, 8), truncate(pending.CommitSha, 8))
+
+	claimed, err := a.client.ClaimBuild(pending.ID)
+	if err != nil {
+		log.Printf("[build] failed to claim build %s: %v", truncate(pending.ID, 8), err)
+		return
+	}
+
+	a.buildMutex.Lock()
+	a.isBuilding = true
+	a.currentBuildID = pending.ID
+	a.buildMutex.Unlock()
+
+	defer func() {
+		a.buildMutex.Lock()
+		a.isBuilding = false
+		a.currentBuildID = ""
+		a.buildMutex.Unlock()
+	}()
+
+	log.Printf("[build] starting build %s", truncate(pending.ID, 8))
+
+	if err := a.client.UpdateBuildStatus(pending.ID, "cloning", ""); err != nil {
+		log.Printf("[build] failed to update status to cloning: %v", err)
+	}
+
+	checkCancelled := func() bool {
+		status, err := a.client.GetBuildStatus(pending.ID)
+		if err != nil {
+			return false
+		}
+		return status == "cancelled"
+	}
+
+	decryptedSecrets := make(map[string]string)
+	for key, encryptedValue := range claimed.Secrets {
+		decrypted, err := crypto.DecryptSecret(encryptedValue, a.config.EncryptionKey)
+		if err != nil {
+			log.Printf("[build] failed to decrypt secret %s: %v", key, err)
+			continue
+		}
+		decryptedSecrets[key] = decrypted
+	}
+
+	buildConfig := &build.Config{
+		BuildID:   pending.ID,
+		CloneURL:  claimed.CloneURL,
+		CommitSha: claimed.Build.CommitSha,
+		Branch:    claimed.Build.Branch,
+		ImageURI:  claimed.ImageURI,
+		ServiceID: claimed.Build.ServiceID,
+		ProjectID: claimed.Build.ProjectID,
+		Secrets:   decryptedSecrets,
+	}
+
+	err = a.builder.Build(ctx, buildConfig, checkCancelled)
+	if err != nil {
+		log.Printf("[build] build %s failed: %v", truncate(pending.ID, 8), err)
+		if err := a.client.UpdateBuildStatus(pending.ID, "failed", err.Error()); err != nil {
+			log.Printf("[build] failed to update status to failed: %v", err)
+		}
+		return
+	}
+
+	log.Printf("[build] build %s completed successfully", truncate(pending.ID, 8))
+	if err := a.client.UpdateBuildStatus(pending.ID, "completed", ""); err != nil {
+		log.Printf("[build] failed to update status to completed: %v", err)
+	}
+}
+
+func (a *Agent) runBuildCleanup() {
+	if a.builder == nil {
+		return
+	}
+
+	log.Printf("[build:cleanup] running periodic cleanup")
+	if err := a.builder.Cleanup(); err != nil {
+		log.Printf("[build:cleanup] cleanup failed: %v", err)
+	}
+}
+
 var httpClient *api.Client
 var dataDir string
 
@@ -653,6 +912,10 @@ func main() {
 
 	if err := caddy.CheckPrerequisites(); err != nil {
 		log.Fatalf("Caddy prerequisites check failed: %v", err)
+	}
+
+	if err := build.CheckPrerequisites(); err != nil {
+		log.Fatalf("Build prerequisites check failed: %v", err)
 	}
 
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
@@ -774,12 +1037,22 @@ func main() {
 
 	var logCollector *logs.Collector
 	var caddyLogCollector *logs.CaddyCollector
+	var logsSender *logs.VictoriaLogsSender
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
-		sender := logs.NewVictoriaLogsSender(logsEndpoint)
-		logCollector = logs.NewCollector(sender, dataDir)
-		caddyLogCollector = logs.NewCaddyCollector(sender)
+		logsSender = logs.NewVictoriaLogsSender(logsEndpoint)
+		logCollector = logs.NewCollector(logsSender, dataDir)
+		caddyLogCollector = logs.NewCaddyCollector(logsSender)
 		log.Println("[caddy-logs] Caddy HTTP log collection enabled")
+	}
+
+	var builder *build.Builder
+	if logsSender != nil {
+		builder = build.NewBuilder(dataDir, logsSender)
+		log.Println("[build] build system enabled")
+	} else {
+		builder = build.NewBuilder(dataDir, nil)
+		log.Println("[build] build system enabled (no log streaming)")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -796,7 +1069,7 @@ func main() {
 	publicIP := getPublicIP()
 	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector)
+	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector, builder)
 	agent.Run(ctx)
 
 	log.Println("Agent stopped")

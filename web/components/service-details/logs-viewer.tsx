@@ -4,12 +4,10 @@ import {
 	ArrowDownToLine,
 	ChevronDown,
 	ChevronUp,
-	Download,
 	Search,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { formatDateTime, formatTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 interface LogEntry {
@@ -87,14 +86,13 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	);
 	const [showStdout, setShowStdout] = useState(true);
 	const [showStderr, setShowStderr] = useState(true);
-	const [isPaused, setIsPaused] = useState(false);
 	const [autoScroll, setAutoScroll] = useState(true);
 
 	const { data, mutate, isLoading } = useSWR<{
 		logs: LogEntry[];
 		hasMore: boolean;
 	}>(`/api/services/${serviceId}/logs?limit=500&type=container`, fetcher, {
-		refreshInterval: isPaused ? 0 : 2000,
+		refreshInterval: 2000,
 	});
 
 	const logs = data?.logs || [];
@@ -121,27 +119,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 		}
 	}, [filteredLogs.length, autoScroll]);
 
-	const formatTimestamp = (ts: string) => {
-		return new Date(ts).toLocaleTimeString("en-US", {
-			hour12: false,
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-		});
-	};
-
-	const formatFullTimestamp = (ts: string) => {
-		return new Date(ts).toLocaleString("en-US", {
-			hour12: false,
-			year: "numeric",
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-		});
-	};
-
 	const toggleLevel = (level: LogLevel) => {
 		const newLevels = new Set(levels);
 		if (newLevels.has(level)) {
@@ -160,23 +137,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 		setLevels(new Set());
 	};
 
-	const downloadLogs = useCallback(() => {
-		const text = filteredLogs
-			.map(
-				(log) =>
-					`${formatFullTimestamp(log.timestamp)} [${log.stream}] ${log.message}`,
-			)
-			.join("\n");
-		const blob = new Blob([text], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = `logs-${serviceId}-${new Date().toISOString().slice(0, 10)}.log`;
-		a.click();
-		URL.revokeObjectURL(url);
-		toast.success("Logs downloaded");
-	}, [filteredLogs, serviceId]);
-
 	const levelLabel = useMemo(() => {
 		if (levels.size === 4) return "All levels";
 		if (levels.size === 0) return "No levels";
@@ -184,9 +144,9 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 	}, [levels]);
 
 	return (
-		<div className="fixed inset-0 top-32 z-50 flex flex-col bg-zinc-100 dark:bg-zinc-950">
+		<div className="flex flex-col h-[84vh] bg-zinc-100 dark:bg-zinc-950 rounded-lg border">
 			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900">
-				<div className="relative flex-1 min-w-[200px]">
+				<div className="relative flex-1 min-w-50">
 					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
 					<Input
 						placeholder="Search logs..."
@@ -196,6 +156,7 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 					/>
 					{search && (
 						<button
+							type="button"
 							onClick={() => setSearch("")}
 							className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 						>
@@ -280,31 +241,6 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 				</div>
 
 				<div className="flex items-center gap-2 ml-auto">
-					<button
-						type="button"
-						onClick={() => setIsPaused(!isPaused)}
-						className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border transition-colors ${
-							isPaused
-								? "border-border bg-background hover:bg-muted text-muted-foreground"
-								: "border-primary bg-primary/10 text-primary hover:bg-primary/20"
-						}`}
-						title={isPaused ? "Resume live updates" : "Pause live updates"}
-					>
-						<span
-							className={`size-2 rounded-full ${
-								isPaused ? "bg-muted-foreground" : "bg-primary animate-pulse"
-							}`}
-						/>
-						{isPaused ? "Paused" : "Live"}
-					</button>
-					<Button
-						variant="outline"
-						size="icon-sm"
-						onClick={downloadLogs}
-						title="Download logs"
-					>
-						<Download className="size-4" />
-					</Button>
 					<Button
 						variant={autoScroll ? "default" : "outline"}
 						size="icon-sm"
@@ -343,57 +279,49 @@ export function LogsViewer({ serviceId }: LogsViewerProps) {
 						{logs.length === 0 ? "No logs available" : "No logs match filters"}
 					</div>
 				) : (
-					<>
-						{!isPaused && (
-							<div className="flex items-center gap-2 py-1 px-2 text-xs font-medium text-primary bg-primary/5 border-y border-primary/20 sticky top-0">
-								<span className="text-primary">▶</span>
-								Live Mode
-							</div>
-						)}
-						<div className="p-4 py-2">
-							{[...filteredLogs].reverse().map((entry) => {
-								const level = detectLevel(entry.message);
-								return (
-									<div
-										key={entry.id}
-										className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group"
+					<div className="p-4 py-2">
+						{filteredLogs.map((entry, idx) => {
+							const level = detectLevel(entry.message);
+							return (
+								<div
+									key={`${entry.id}-${idx}`}
+									className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group"
+								>
+									<span
+										className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+										title={formatDateTime(entry.timestamp)}
 									>
+										{formatTime(entry.timestamp)}
+									</span>
+									{level && (
 										<span
-											className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
-											title={formatFullTimestamp(entry.timestamp)}
+											className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
 										>
-											{formatTimestamp(entry.timestamp)}
+											{level}
 										</span>
-										{level && (
-											<span
-												className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
-											>
-												{level}
-											</span>
-										)}
-										<span
-											className={`shrink-0 px-1 rounded text-[10px] mr-2 ${
-												entry.stream === "stderr"
-													? "text-red-600 dark:text-red-400 bg-red-500/10"
-													: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10"
-											}`}
-										>
-											{entry.stream}
-										</span>
-										<span
-											className={`break-all whitespace-pre-wrap ${
-												entry.stream === "stderr"
-													? "text-red-600 dark:text-red-400"
-													: "text-zinc-800 dark:text-zinc-200"
-											}`}
-										>
-											{highlightMatches(entry.message, search)}
-										</span>
-									</div>
-								);
-							})}
-						</div>
-					</>
+									)}
+									<span
+										className={`shrink-0 px-1 rounded text-[10px] mr-2 ${
+											entry.stream === "stderr"
+												? "text-red-600 dark:text-red-400 bg-red-500/10"
+												: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10"
+										}`}
+									>
+										{entry.stream}
+									</span>
+									<span
+										className={`break-all whitespace-pre-wrap ${
+											entry.stream === "stderr"
+												? "text-red-600 dark:text-red-400"
+												: "text-zinc-800 dark:text-zinc-200"
+										}`}
+									>
+										{highlightMatches(entry.message, search)}
+									</span>
+								</div>
+							);
+						})}
+					</div>
 				)}
 			</div>
 		</div>

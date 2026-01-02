@@ -20,7 +20,7 @@ function DashboardHeader({ email }: { email: string }) {
 
 	return (
 		<header className="border-b">
-			<div className="container max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+			<div className="container max-w-full mx-auto px-4 h-14 flex items-center justify-between">
 				<div className="flex items-center gap-3">
 					<Link href="/dashboard" className="flex items-center">
 						<Image
@@ -34,8 +34,11 @@ function DashboardHeader({ email }: { email: string }) {
 					{breadcrumbs.length > 0 && (
 						<>
 							<nav className="flex items-center gap-2 text-sm">
-								{breadcrumbs.map((crumb) => (
-									<span key={crumb.href} className="flex items-center gap-2">
+								{breadcrumbs.map((crumb, index) => (
+									<span
+										key={crumb.href || `crumb-${index}`}
+										className="flex items-center gap-2"
+									>
 										{crumb.href ? (
 											<Link
 												href={crumb.href}

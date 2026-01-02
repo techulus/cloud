@@ -126,10 +126,6 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 }
 
 func (r *Reconciler) needsRedeploy(exp agenthttp.ExpectedContainer, act podman.Container) bool {
-	if act.State != "running" {
-		return true
-	}
-
 	if exp.Image != act.Image {
 		log.Printf("[reconcile] image mismatch: expected %s, actual %s", exp.Image, act.Image)
 		return true

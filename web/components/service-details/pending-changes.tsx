@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, memo } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
 import { FloatingBar } from "@/components/ui/floating-bar";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { deployService, type ServerPlacement } from "@/actions/projects";
+import { triggerBuild } from "@/actions/builds";
 import type { ConfigChange } from "@/lib/service-config";
 import type { Service } from "./types";
 
@@ -21,6 +23,7 @@ function PendingChangesModal({
 	onDeploy,
 	isDeploying,
 	canDeploy,
+	isBuild,
 }: {
 	changes: ConfigChange[];
 	isOpen: boolean;
@@ -28,8 +31,12 @@ function PendingChangesModal({
 	onDeploy: () => void;
 	isDeploying: boolean;
 	canDeploy: boolean;
+	isBuild?: boolean;
 }) {
 	if (!isOpen) return null;
+
+	const actionLabel = isBuild ? "Build" : "Deploy";
+	const actioningLabel = isBuild ? "Building..." : "Deploying...";
 
 	return (
 		<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -63,7 +70,7 @@ function PendingChangesModal({
 						disabled={isDeploying || !canDeploy}
 						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white"
 					>
-						{isDeploying ? "Deploying..." : "Deploy Now"}
+						{isDeploying ? actioningLabel : `${actionLabel} Now`}
 					</Button>
 				</div>
 			</DialogContent>
@@ -95,12 +102,15 @@ function hasActiveRollout(service: Service): boolean {
 export const PendingChangesBar = memo(function PendingChangesBar({
 	changes,
 	service,
+	projectSlug,
 	onUpdate,
 }: {
 	changes: ConfigChange[];
 	service: Service;
+	projectSlug: string;
 	onUpdate: () => void;
 }) {
+	const router = useRouter();
 	const [showModal, setShowModal] = useState(false);
 	const [isDeploying, setIsDeploying] = useState(false);
 
@@ -111,16 +121,25 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 
 	const showBar = !rolloutActive && (hasChanges || (hasNoDeployments && totalReplicas > 0));
 
+	const isGithubWithNoDeployments = service.sourceType === "github" && hasNoDeployments;
+
 	const handleDeploy = async () => {
 		setIsDeploying(true);
 		try {
-			const placements: ServerPlacement[] = service.configuredReplicas.map(
-				(r) => ({
-					serverId: r.serverId,
-					replicas: r.count,
-				}),
-			);
-			await deployService(service.id, placements);
+			if (isGithubWithNoDeployments) {
+				const result = await triggerBuild(service.id);
+				if (result.buildId) {
+					router.push(`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${result.buildId}`);
+				}
+			} else {
+				const placements: ServerPlacement[] = service.configuredReplicas.map(
+					(r) => ({
+						serverId: r.serverId,
+						replicas: r.count,
+					}),
+				);
+				await deployService(service.id, placements);
+			}
 			onUpdate();
 			setShowModal(false);
 		} finally {
@@ -153,6 +172,8 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				>
 					{isDeploying ? (
 						<Loader2 className="h-4 w-4 animate-spin" />
+					) : isGithubWithNoDeployments ? (
+						"Build"
 					) : (
 						"Deploy"
 					)}
@@ -165,6 +186,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				onDeploy={handleDeploy}
 				isDeploying={isDeploying}
 				canDeploy={totalReplicas > 0}
+				isBuild={isGithubWithNoDeployments}
 			/>
 		</>
 	);

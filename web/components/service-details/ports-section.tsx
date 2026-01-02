@@ -3,7 +3,6 @@
 import { useState, useEffect, memo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,6 +12,12 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+	Item,
+	ItemContent,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
 import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
 import { EditableText } from "@/components/editable-text";
@@ -172,14 +177,16 @@ export const PortsSection = memo(function PortsSection({
 	};
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-base flex items-center gap-2">
-					<Settings className="h-4 w-4" />
-					Ports
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
+		<div className="rounded-lg border">
+			<Item className="border-0 border-b rounded-none">
+				<ItemMedia variant="icon">
+					<Settings className="size-5 text-muted-foreground" />
+				</ItemMedia>
+				<ItemContent>
+					<ItemTitle>Ports</ItemTitle>
+				</ItemContent>
+			</Item>
+			<div className="p-4 space-y-4">
 				<div className="flex items-center gap-1 text-sm">
 					<Lock className="h-4 w-4 text-muted-foreground" />
 					<span className="text-muted-foreground">Private endpoint:</span>
@@ -255,7 +262,7 @@ export const PortsSection = memo(function PortsSection({
 						</Button>
 					</div>
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 });

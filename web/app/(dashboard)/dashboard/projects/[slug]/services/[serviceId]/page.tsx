@@ -1,136 +1,120 @@
-import { and, eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import { ServiceHeader } from "@/components/service-header";
-import { ServiceDetails } from "@/components/service-details";
-import { db } from "@/db";
+"use client";
+
 import {
-	deploymentPorts,
-	deployments,
-	projects,
-	servers,
-	servicePorts,
-	serviceReplicas,
-	services,
-	serviceVolumes,
-} from "@/db/schema";
+	deleteDeployment,
+	deployService,
+	restartService,
+	stopDeployment,
+} from "@/actions/projects";
+import { ActionButton } from "@/components/action-button";
+import { useService } from "@/components/service-layout-client";
+import { DeploymentCanvas } from "@/components/service-details/deployment-canvas";
 
-async function getService(projectSlug: string, serviceId: string) {
-	const project = await db
-		.select()
-		.from(projects)
-		.where(eq(projects.slug, projectSlug))
-		.then((r) => r[0]);
-
-	if (!project) return null;
-
-	const service = await db
-		.select()
-		.from(services)
-		.where(and(eq(services.id, serviceId), eq(services.projectId, project.id)))
-		.then((r) => r[0]);
-
-	if (!service) return null;
-
-	const [ports, serviceDeployments, configuredReplicas, volumes, lockedServer] = await Promise.all([
-		db
-			.select()
-			.from(servicePorts)
-			.where(eq(servicePorts.serviceId, service.id))
-			.orderBy(servicePorts.port),
-		db
-			.select()
-			.from(deployments)
-			.where(eq(deployments.serviceId, service.id))
-			.orderBy(deployments.createdAt),
-		db
-			.select({
-				id: serviceReplicas.id,
-				serverId: serviceReplicas.serverId,
-				serverName: servers.name,
-				count: serviceReplicas.count,
-			})
-			.from(serviceReplicas)
-			.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-			.where(eq(serviceReplicas.serviceId, service.id)),
-		db
-			.select()
-			.from(serviceVolumes)
-			.where(eq(serviceVolumes.serviceId, service.id)),
-		service.lockedServerId
-			? db
-					.select({ name: servers.name })
-					.from(servers)
-					.where(eq(servers.id, service.lockedServerId))
-					.then((r) => r[0])
-			: Promise.resolve(null),
-	]);
-
-	const deploymentsWithDetails = await Promise.all(
-		serviceDeployments.map(async (deployment) => {
-			const [depPorts, server] = await Promise.all([
-				db
-					.select({
-						id: deploymentPorts.id,
-						hostPort: deploymentPorts.hostPort,
-						containerPort: servicePorts.port,
-					})
-					.from(deploymentPorts)
-					.innerJoin(
-						servicePorts,
-						eq(deploymentPorts.servicePortId, servicePorts.id),
-					)
-					.where(eq(deploymentPorts.deploymentId, deployment.id)),
-				db
-					.select({ name: servers.name, wireguardIp: servers.wireguardIp })
-					.from(servers)
-					.where(eq(servers.id, deployment.serverId))
-					.then((r) => r[0]),
-			]);
-
-			return {
-				...deployment,
-				ports: depPorts,
-				server,
-			};
-		}),
-	);
-
-	return {
-		project,
-		service: {
-			...service,
-			ports,
-			configuredReplicas,
-			deployments: deploymentsWithDetails,
-			volumes,
-			lockedServer,
-		},
-	};
-}
-
-export default async function ServicePage({
-	params,
-}: {
-	params: Promise<{ slug: string; serviceId: string }>;
-}) {
-	const { slug, serviceId } = await params;
-	const data = await getService(slug, serviceId);
-
-	if (!data) {
-		notFound();
-	}
+export default function ArchitecturePage() {
+	const { service, onUpdate } = useService();
 
 	return (
-		<div className="space-y-6">
-			<ServiceHeader
-				serviceId={data.service.id}
-				serviceName={data.service.name}
-				breadcrumbs={[
-					{ label: "Projects", href: "/dashboard" },
-					{ label: data.project.name, href: `/dashboard/projects/${slug}` },
-				]}
-			/>
-			<ServiceDetails projectSlug={slug} service={data.service} />
+		<div className="relative space-y-4">
+			{service.deployments.length > 0 && (
+				<div className="absolute top-4 left-4 flex items-center gap-2 z-10">
+					{service.deployments.some((d) => d.status === "running") && (
+						<>
+							<ActionButton
+								action={async () => {
+									await restartService(service.id);
+								}}
+								label="Restart"
+								loadingLabel="Restarting..."
+								variant="outline"
+								size="sm"
+								onComplete={onUpdate}
+							/>
+							<ActionButton
+								action={async () => {
+									const placements = (
+										service.configuredReplicas || []
+									).map((r) => ({
+										serverId: r.serverId,
+										replicas: r.count,
+									}));
+									await deployService(service.id, placements);
+								}}
+								label="Redeploy"
+								loadingLabel="Redeploying..."
+								variant="outline"
+								size="sm"
+								onComplete={onUpdate}
+							/>
+							<ActionButton
+								action={async () => {
+									const running = service.deployments.filter(
+										(d) => d.status === "running",
+									);
+									for (const dep of running) {
+										await stopDeployment(dep.id);
+									}
+								}}
+								label="Stop All"
+								loadingLabel="Stopping..."
+								variant="destructive"
+								size="sm"
+								onComplete={onUpdate}
+							/>
+						</>
+					)}
+					{!service.deployments.some((d) => d.status === "running") &&
+						service.deployments.some(
+							(d) =>
+								d.status === "stopped" ||
+								d.status === "failed" ||
+								d.status === "rolled_back",
+						) &&
+						(service.configuredReplicas || []).length > 0 && (
+							<ActionButton
+								action={async () => {
+									const placements = (
+										service.configuredReplicas || []
+									).map((r) => ({
+										serverId: r.serverId,
+										replicas: r.count,
+									}));
+									await deployService(service.id, placements);
+								}}
+								label="Start All"
+								loadingLabel="Starting..."
+								variant="default"
+								size="sm"
+								onComplete={onUpdate}
+							/>
+						)}
+					{service.deployments.some(
+						(d) =>
+							d.status === "stopped" ||
+							d.status === "failed" ||
+							d.status === "rolled_back",
+					) && (
+						<ActionButton
+							action={async () => {
+								const deletable = service.deployments.filter(
+									(d) =>
+										d.status === "stopped" ||
+										d.status === "failed" ||
+										d.status === "rolled_back",
+								);
+								for (const dep of deletable) {
+									await deleteDeployment(dep.id);
+								}
+							}}
+							label="Delete All"
+							loadingLabel="Deleting..."
+							variant="destructive"
+							size="sm"
+							onComplete={onUpdate}
+						/>
+					)}
+				</div>
+			)}
+			<DeploymentCanvas service={service} />
 		</div>
 	);
 }

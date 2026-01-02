@@ -2,8 +2,13 @@
 
 import { useState, useReducer, useMemo, memo } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+	Item,
+	ItemContent,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import { HeartPulse, ChevronDown } from "lucide-react";
 import { updateServiceHealthCheck } from "@/actions/projects";
 import type { Service } from "./types";
@@ -126,16 +131,18 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 	};
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-base flex items-center gap-2">
+		<div className="rounded-lg border">
+			<Item className="border-0 border-b rounded-none">
+				<ItemMedia variant="icon">
 					<HeartPulse
-						className={`h-4 w-4 ${hasHealthCheck ? "text-green-500" : ""}`}
+						className={`size-5 ${hasHealthCheck ? "text-green-500" : "text-muted-foreground"}`}
 					/>
-					Health Check
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
+				</ItemMedia>
+				<ItemContent>
+					<ItemTitle>Health Check</ItemTitle>
+				</ItemContent>
+			</Item>
+			<div className="p-4 space-y-4">
 				<div className="space-y-2">
 					<label className="text-sm font-medium">Command</label>
 					<Input
@@ -241,7 +248,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 						)}
 					</div>
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 });

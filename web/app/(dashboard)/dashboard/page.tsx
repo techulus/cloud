@@ -4,12 +4,13 @@ import { listProjects, listServers } from "@/db/queries";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { ServerList } from "@/components/server-list";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+	Item,
+	ItemContent,
+	ItemDescription,
+	ItemGroup,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 
 export default async function DashboardPage() {
 	const [servers, projects] = await Promise.all([
@@ -29,39 +30,36 @@ export default async function DashboardPage() {
 				</div>
 
 				{projects.length === 0 ? (
-					<Card>
-						<CardContent className="py-10 text-center">
-							<p className="text-muted-foreground mb-4">
-								No projects yet. Create your first project to deploy services.
-							</p>
-							<CreateProjectDialog />
-						</CardContent>
-					</Card>
-				) : (
-					<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-						{projects.map((project) => (
-							<Link
-								key={project.id}
-								href={`/dashboard/projects/${project.slug}`}
-							>
-								<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-									<CardHeader>
-										<div className="flex items-center gap-2">
-											<CardTitle>{project.name}</CardTitle>
-										</div>
-										<CardDescription className="flex items-center gap-1.5">
-											<Box className="h-3 w-3" />
-											{project.serviceCount === 0
-												? "No services"
-												: project.serviceCount === 1
-													? "1 service"
-													: `${project.serviceCount} services`}
-										</CardDescription>
-									</CardHeader>
-								</Card>
-							</Link>
-						))}
+					<div className="py-10 text-center border rounded-lg">
+						<p className="text-muted-foreground mb-4">
+							No projects yet. Create your first project to deploy services.
+						</p>
+						<CreateProjectDialog />
 					</div>
+				) : (
+					<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+						{projects.map((project) => (
+							<Item
+								key={project.id}
+								variant="outline"
+								render={<Link href={`/dashboard/projects/${project.slug}`} />}
+							>
+								<ItemMedia variant="icon">
+									<Box className="size-5 text-muted-foreground" />
+								</ItemMedia>
+								<ItemContent>
+									<ItemTitle>{project.name}</ItemTitle>
+									<ItemDescription>
+										{project.serviceCount === 0
+											? "No services"
+											: project.serviceCount === 1
+												? "1 service"
+												: `${project.serviceCount} services`}
+									</ItemDescription>
+								</ItemContent>
+							</Item>
+						))}
+					</ItemGroup>
 				)}
 			</div>
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -132,6 +133,68 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 	defer resp.Body.Close()
 
 	log.Printf("[caddy-logs] response: %d in %v", resp.StatusCode, time.Since(start))
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+type victoriaBuildLogEntry struct {
+	Msg       string `json:"_msg"`
+	Time      string `json:"_time"`
+	BuildID   string `json:"build_id"`
+	ServiceID string `json:"service_id"`
+	ProjectID string `json:"project_id"`
+	LogType   string `json:"log_type"`
+}
+
+func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string, logs []string) error {
+	if len(logs) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	now := time.Now().Format(time.RFC3339Nano)
+
+	for _, msg := range logs {
+		if strings.TrimSpace(msg) == "" {
+			continue
+		}
+		entry := victoriaBuildLogEntry{
+			Msg:       msg,
+			Time:      now,
+			BuildID:   buildID,
+			ServiceID: serviceID,
+			ProjectID: projectID,
+			LogType:   "build",
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+
+	if buf.Len() == 0 {
+		return nil
+	}
+
+	url := v.endpoint + "/insert/jsonline"
+
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send build logs: %w", err)
+	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)

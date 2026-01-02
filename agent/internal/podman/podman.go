@@ -141,7 +141,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
-	pullCmd := exec.Command("podman", "pull", image)
+	pullCmd := exec.Command("podman", "pull", "--tls-verify=false", image)
 	pullOutput, err := pullCmd.CombinedOutput()
 	if err != nil {
 		logFunc("stderr", fmt.Sprintf("Pull failed: %s", string(pullOutput)))
@@ -161,7 +161,8 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"run", "-d",
 		"--name", config.Name,
 		"--replace",
-		"--restart", "unless-stopped",
+		"--restart", "on-failure:5",
+		"--cap-add", "NET_BIND_SERVICE",
 		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
@@ -352,6 +353,41 @@ func ForceRemove(containerID string) error {
 	return nil
 }
 
+func Restart(containerID string) error {
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("container does not exist: %s", containerID)
+	}
+
+	log.Printf("[podman:restart] restarting container %s", containerID)
+	restartCmd := exec.Command("podman", "restart", containerID)
+	if output, err := restartCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to restart container: %s: %w", string(output), err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Printf("[podman:restart] verifying container %s is running", containerID)
+	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
+		running, err := IsContainerRunning(containerID)
+		if err != nil {
+			return false, err
+		}
+		return running, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("container failed to restart: %w", err)
+	}
+
+	log.Printf("[podman:restart] container %s restarted successfully", containerID)
+	return nil
+}
+
 func Start(containerID string) error {
 	exists, err := ContainerExists(containerID)
 	if err != nil {
@@ -428,7 +464,7 @@ type podmanContainer struct {
 }
 
 func ListContainers() ([]Container, error) {
-	cmd := exec.Command("podman", "ps", "-a", "--format", "json")
+	cmd := exec.Command("podman", "ps", "-a", "--filter", "label=techulus.service.id", "--format", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %s: %w", string(output), err)

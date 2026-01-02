@@ -3,8 +3,13 @@
 import { useState, useMemo, useEffect, memo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+	Item,
+	ItemContent,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import { Server, Lock } from "lucide-react";
 import { updateServiceConfig } from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
@@ -106,14 +111,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 	if (service.stateful) {
 		return (
-			<Card>
-				<CardHeader className="pb-3">
-					<CardTitle className="text-base flex items-center gap-2">
-						<Server className="h-4 w-4" />
-						Placement
-					</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-4">
+			<div className="rounded-lg border">
+				<Item className="border-0 border-b rounded-none">
+					<ItemMedia variant="icon">
+						<Server className="size-5 text-muted-foreground" />
+					</ItemMedia>
+					<ItemContent>
+						<ItemTitle>Placement</ItemTitle>
+					</ItemContent>
+				</Item>
+				<div className="p-4 space-y-4">
 					{service.lockedServerId ? (
 						<div className="p-3 bg-muted rounded-md">
 							<div className="flex items-center gap-2 mb-1">
@@ -178,20 +185,22 @@ export const ReplicasSection = memo(function ReplicasSection({
 							)}
 						</>
 					)}
-				</CardContent>
-			</Card>
+				</div>
+			</div>
 		);
 	}
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-base flex items-center gap-2">
-					<Server className="h-4 w-4" />
-					Replicas
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
+		<div className="rounded-lg border">
+			<Item className="border-0 border-b rounded-none">
+				<ItemMedia variant="icon">
+					<Server className="size-5 text-muted-foreground" />
+				</ItemMedia>
+				<ItemContent>
+					<ItemTitle>Replicas</ItemTitle>
+				</ItemContent>
+			</Item>
+			<div className="p-4 space-y-4">
 				{isLoading ? (
 					<div className="flex justify-center py-4">
 						<Spinner />
@@ -277,7 +286,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 						)}
 					</>
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 });

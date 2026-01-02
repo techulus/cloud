@@ -39,8 +39,8 @@ export type Rollout = {
 	serviceId: string;
 	status: RolloutStatus;
 	currentStage: string | null;
-	createdAt: string;
-	completedAt: string | null;
+	createdAt: string | Date;
+	completedAt: string | Date | null;
 };
 
 export type ServicePort = {
@@ -78,6 +78,9 @@ export type Service = {
 	image: string;
 	replicas: number;
 	stateful: boolean;
+	sourceType: "image" | "github";
+	githubRepoUrl: string | null;
+	githubBranch: string | null;
 	lockedServerId: string | null;
 	lockedServer: { name: string } | null;
 	deployedConfig: string | null;

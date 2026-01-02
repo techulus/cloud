@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { formatDateTime, formatTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 interface RequestEntry {
@@ -83,14 +84,13 @@ export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 	const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(
 		new Set(["2xx", "3xx", "4xx", "5xx"]),
 	);
-	const [isPaused, setIsPaused] = useState(false);
 	const [autoScroll, setAutoScroll] = useState(true);
 
 	const { data, mutate, isLoading } = useSWR<{
 		logs: RequestEntry[];
 		hasMore: boolean;
 	}>(`/api/services/${serviceId}/requests?limit=500`, fetcher, {
-		refreshInterval: isPaused ? 0 : 2000,
+		refreshInterval: 2000,
 	});
 
 	const logs = data?.logs || [];
@@ -122,27 +122,6 @@ export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 		}
 	}, [filteredLogs.length, autoScroll]);
 
-	const formatTimestamp = (ts: string) => {
-		return new Date(ts).toLocaleTimeString("en-US", {
-			hour12: false,
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-		});
-	};
-
-	const formatFullTimestamp = (ts: string) => {
-		return new Date(ts).toLocaleString("en-US", {
-			hour12: false,
-			year: "numeric",
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-		});
-	};
-
 	const toggleStatus = (status: StatusFilter) => {
 		const newStatuses = new Set(statusFilter);
 		if (newStatuses.has(status)) {
@@ -168,7 +147,7 @@ export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 	}, [statusFilter]);
 
 	return (
-		<div className="fixed inset-0 top-32 z-50 flex flex-col bg-zinc-100 dark:bg-zinc-950">
+		<div className="flex flex-col h-[84vh] bg-zinc-100 dark:bg-zinc-950 rounded-lg border">
 			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900">
 				<div className="relative flex-1 min-w-50">
 					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -250,23 +229,6 @@ export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 				</DropdownMenu>
 
 				<div className="flex items-center gap-2 ml-auto">
-					<button
-						type="button"
-						onClick={() => setIsPaused(!isPaused)}
-						className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border transition-colors ${
-							isPaused
-								? "border-border bg-background hover:bg-muted text-muted-foreground"
-								: "border-primary bg-primary/10 text-primary hover:bg-primary/20"
-						}`}
-						title={isPaused ? "Resume live updates" : "Pause live updates"}
-					>
-						<span
-							className={`size-2 rounded-full ${
-								isPaused ? "bg-muted-foreground" : "bg-primary animate-pulse"
-							}`}
-						/>
-						{isPaused ? "Paused" : "Live"}
-					</button>
 					<Button
 						variant={autoScroll ? "default" : "outline"}
 						size="icon-sm"
@@ -307,51 +269,43 @@ export function RequestsViewer({ serviceId }: RequestsViewerProps) {
 							: "No requests match filters"}
 					</div>
 				) : (
-					<>
-						{!isPaused && (
-							<div className="flex items-center gap-2 py-1 px-2 text-xs font-medium text-primary bg-primary/5 border-y border-primary/20 sticky top-0">
-								<span className="text-primary">▶</span>
-								Live Mode
-							</div>
-						)}
-						<div className="p-4 py-2">
-							{[...filteredLogs].reverse().map((entry) => {
-								const category = getStatusCategory(entry.status);
-								const statusColor = STATUS_COLORS[category] || "";
+					<div className="p-4 py-2">
+						{filteredLogs.map((entry, idx) => {
+							const category = getStatusCategory(entry.status);
+							const statusColor = STATUS_COLORS[category] || "";
 
-								return (
-									<div
-										key={entry.id}
-										className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group"
+							return (
+								<div
+									key={`${entry.id}-${idx}`}
+									className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group"
+								>
+									<span
+										className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+										title={formatDateTime(entry.timestamp)}
 									>
-										<span
-											className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
-											title={formatFullTimestamp(entry.timestamp)}
-										>
-											{formatTimestamp(entry.timestamp)}
-										</span>
-										<span
-											className={`shrink-0 px-1.5 rounded text-[10px] font-medium mr-2 tabular-nums ${statusColor}`}
-										>
-											{entry.status}
-										</span>
-										<span className="shrink-0 w-12 text-zinc-500 dark:text-zinc-400 font-medium">
-											{entry.method}
-										</span>
-										<span className="flex-1 break-all whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
-											{highlightMatches(entry.path, search)}
-										</span>
-										<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums">
-											{Math.round(Number(entry.duration) || 0)}ms
-										</span>
-										<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums hidden group-hover:inline">
-											{entry.clientIp}
-										</span>
-									</div>
-								);
-							})}
-						</div>
-					</>
+										{formatTime(entry.timestamp)}
+									</span>
+									<span
+										className={`shrink-0 px-1.5 rounded text-[10px] font-medium mr-2 tabular-nums ${statusColor}`}
+									>
+										{entry.status}
+									</span>
+									<span className="shrink-0 w-12 text-zinc-500 dark:text-zinc-400 font-medium">
+										{entry.method}
+									</span>
+									<span className="flex-1 break-all whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+										{highlightMatches(entry.path, search)}
+									</span>
+									<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums">
+										{Math.round(Number(entry.duration) || 0)}ms
+									</span>
+									<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums hidden group-hover:inline">
+										{entry.clientIp}
+									</span>
+								</div>
+							);
+						})}
+					</div>
 				)}
 			</div>
 		</div>

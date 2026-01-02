@@ -176,3 +176,221 @@ func (c *Client) ReportStatus(report *StatusReport) error {
 
 	return nil
 }
+
+type PendingBuild struct {
+	ID            string `json:"id"`
+	CommitSha     string `json:"commitSha"`
+	CommitMessage string `json:"commitMessage"`
+	Branch        string `json:"branch"`
+	ServiceID     string `json:"serviceId"`
+	GithubRepoID  string `json:"githubRepoId"`
+}
+
+type ClaimedBuild struct {
+	Build struct {
+		ID            string `json:"id"`
+		CommitSha     string `json:"commitSha"`
+		CommitMessage string `json:"commitMessage"`
+		Branch        string `json:"branch"`
+		ServiceID     string `json:"serviceId"`
+		ProjectID     string `json:"projectId"`
+	} `json:"build"`
+	CloneURL string            `json:"cloneUrl"`
+	ImageURI string            `json:"imageUri"`
+	Secrets  map[string]string `json:"secrets"`
+}
+
+func (c *Client) GetPendingBuild() (*PendingBuild, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/pending-builds", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.signRequest(req, "")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch pending builds: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("pending builds request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Build *PendingBuild `json:"build"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode pending builds: %w", err)
+	}
+
+	return result.Build, nil
+}
+
+func (c *Client) ClaimBuild(buildID string) (*ClaimedBuild, error) {
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID+"/claim", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.signRequest(req, "")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to claim build: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		return nil, fmt.Errorf("build already claimed")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("claim build failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result ClaimedBuild
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode claimed build: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) UpdateBuildStatus(buildID, status, errorMsg string) error {
+	payload := map[string]string{
+		"status": status,
+	}
+	if errorMsg != "" {
+		payload["error"] = errorMsg
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status update: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update build status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("build status update failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+type WorkQueueItem struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
+}
+
+func (c *Client) GetWorkQueue() ([]WorkQueueItem, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/work-queue", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.signRequest(req, "")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch work queue: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("work queue request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Items []WorkQueueItem `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode work queue: %w", err)
+	}
+
+	return result.Items, nil
+}
+
+func (c *Client) CompleteWorkItem(id, status, errorMsg string) error {
+	payload := map[string]string{
+		"id":     id,
+		"status": status,
+	}
+	if errorMsg != "" {
+		payload["error"] = errorMsg
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal work item update: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/work-queue", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to complete work item: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("work item update failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func (c *Client) GetBuildStatus(buildID string) (string, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.signRequest(req, "")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get build status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get build status failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode build status: %w", err)
+	}
+
+	return result.Status, nil
+}

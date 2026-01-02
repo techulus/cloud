@@ -15,6 +15,15 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { GitHubRepoSelector } from "@/components/github-repo-selector";
+
+type SelectedRepo = {
+	id?: number;
+	fullName: string;
+	defaultBranch: string;
+	isPrivate: boolean;
+	installationId?: number;
+};
 
 export function CreateServiceDialog({
 	projectId,
@@ -27,11 +36,13 @@ export function CreateServiceDialog({
 	const [isOpen, setIsOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [image, setImage] = useState("");
+	const [selectedRepo, setSelectedRepo] = useState<SelectedRepo | null>(null);
+	const [branch, setBranch] = useState("main");
 	const [stateful, setStateful] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const handleSubmit = async (e: React.FormEvent) => {
+	const handleDockerSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!name.trim() || !image.trim()) return;
 
@@ -47,11 +58,7 @@ export function CreateServiceDialog({
 			}
 
 			await createService(projectId, name.trim(), image.trim(), [], stateful);
-			setIsOpen(false);
-			setName("");
-			setImage("");
-			setStateful(false);
-			setError(null);
+			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
 		} catch (err) {
@@ -62,11 +69,48 @@ export function CreateServiceDialog({
 		}
 	};
 
+	const handleGitHubSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		if (!name.trim() || !selectedRepo) return;
+
+		setIsLoading(true);
+		setError(null);
+
+		try {
+			await createService(projectId, name.trim(), "", [], stateful, {
+				repoUrl: `https://github.com/${selectedRepo.fullName}`,
+				branch: branch.trim() || selectedRepo.defaultBranch,
+				installationId: selectedRepo.installationId,
+				repoId: selectedRepo.id,
+			});
+			resetAndClose();
+			await mutate(`/api/projects/${projectId}/services`);
+			onSuccess?.();
+		} catch (err) {
+			console.error("Failed to create service:", err);
+			setError(err instanceof Error ? err.message : "Failed to create service");
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
+	const resetAndClose = () => {
+		setIsOpen(false);
+		setName("");
+		setImage("");
+		setSelectedRepo(null);
+		setBranch("main");
+		setStateful(false);
+		setError(null);
+	};
+
 	const handleOpenChange = (open: boolean) => {
 		setIsOpen(open);
 		if (!open) {
 			setName("");
 			setImage("");
+			setSelectedRepo(null);
+			setBranch("main");
 			setStateful(false);
 			setError(null);
 		}
@@ -85,7 +129,7 @@ export function CreateServiceDialog({
 						<TabsTrigger value="github">GitHub Repo</TabsTrigger>
 					</TabsList>
 					<TabsContent value="docker">
-						<form onSubmit={handleSubmit} className="space-y-4 pt-4">
+						<form onSubmit={handleDockerSubmit} className="space-y-4 pt-4">
 							<div className="space-y-2">
 								<Label htmlFor="service-name">Service Name</Label>
 								<Input
@@ -143,9 +187,70 @@ export function CreateServiceDialog({
 						</form>
 					</TabsContent>
 					<TabsContent value="github">
-						<div className="py-8 text-center text-muted-foreground">
-							Planned
-						</div>
+						<form onSubmit={handleGitHubSubmit} className="space-y-4 pt-4">
+							<div className="space-y-2">
+								<Label htmlFor="gh-service-name">Service Name</Label>
+								<Input
+									id="gh-service-name"
+									value={name}
+									onChange={(e) => setName(e.target.value)}
+									placeholder="my-service"
+									autoFocus
+								/>
+							</div>
+							<div className="space-y-2">
+								<Label>Repository</Label>
+								<GitHubRepoSelector
+									value={selectedRepo}
+									onChange={(repo) => {
+										setSelectedRepo(repo);
+										if (repo) {
+											setBranch(repo.defaultBranch);
+										}
+										setError(null);
+									}}
+									disabled={isLoading}
+								/>
+								{error && <p className="text-sm text-red-500">{error}</p>}
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="gh-branch">Branch</Label>
+								<Input
+									id="gh-branch"
+									value={branch}
+									onChange={(e) => setBranch(e.target.value)}
+									placeholder="main"
+								/>
+							</div>
+							<div className="flex items-center justify-between rounded-lg border p-3">
+								<div className="space-y-0.5">
+									<Label htmlFor="gh-stateful-toggle">Stateful Service</Label>
+									<p className="text-xs text-muted-foreground">
+										Enable to add persistent volumes. Limited to 1 replica and locked to a single server.
+									</p>
+								</div>
+								<Switch
+									id="gh-stateful-toggle"
+									checked={stateful}
+									onCheckedChange={setStateful}
+								/>
+							</div>
+							<div className="flex justify-end gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => setIsOpen(false)}
+								>
+									Cancel
+								</Button>
+								<Button
+									type="submit"
+									disabled={isLoading || !name.trim() || !selectedRepo}
+								>
+									{isLoading ? "Creating..." : "Create"}
+								</Button>
+							</div>
+						</form>
 					</TabsContent>
 				</Tabs>
 			</DialogContent>

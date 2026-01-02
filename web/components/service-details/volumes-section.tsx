@@ -2,8 +2,13 @@
 
 import { useState, memo } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+	Item,
+	ItemContent,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import { HardDrive, Trash2, Plus, Lock } from "lucide-react";
 import { addServiceVolume, removeServiceVolume } from "@/actions/projects";
 import type { Service } from "./types";
@@ -61,14 +66,16 @@ export const VolumesSection = memo(function VolumesSection({
 	};
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-base flex items-center gap-2">
-					<HardDrive className="h-4 w-4" />
-					Volumes
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
+		<div className="rounded-lg border">
+			<Item className="border-0 border-b rounded-none">
+				<ItemMedia variant="icon">
+					<HardDrive className="size-5 text-muted-foreground" />
+				</ItemMedia>
+				<ItemContent>
+					<ItemTitle>Volumes</ItemTitle>
+				</ItemContent>
+			</Item>
+			<div className="p-4 space-y-4">
 				{service.lockedServerId && (
 					<div className="flex items-center gap-2 text-sm text-muted-foreground">
 						<Lock className="h-3 w-3" />
@@ -142,7 +149,7 @@ export const VolumesSection = memo(function VolumesSection({
 						</Button>
 					</div>
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 });

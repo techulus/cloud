@@ -139,6 +139,11 @@ export const services = pgTable("services", {
 	name: text("name").notNull(),
 	hostname: text("hostname"),
 	image: text("image").notNull(),
+	sourceType: text("source_type", { enum: ["image", "github"] })
+		.notNull()
+		.default("image"),
+	githubRepoUrl: text("github_repo_url"),
+	githubBranch: text("github_branch").default("main"),
 	replicas: integer("replicas").notNull().default(1),
 	stateful: boolean("stateful").notNull().default(false),
 	lockedServerId: text("locked_server_id").references(() => servers.id, {
@@ -297,6 +302,7 @@ export const workQueue = pgTable("work_queue", {
 		enum: [
 			"deploy",
 			"stop",
+			"restart",
 			"update_wireguard",
 			"sync_caddy",
 			"force_cleanup",
@@ -315,4 +321,88 @@ export const workQueue = pgTable("work_queue", {
 	startedAt: timestamp("started_at", { withTimezone: true }),
 	attempts: integer("attempts").notNull().default(0),
 });
+
+export const githubInstallations = pgTable("github_installations", {
+	id: text("id").primaryKey(),
+	installationId: integer("installation_id").notNull().unique(),
+	accountLogin: text("account_login").notNull(),
+	accountType: text("account_type", { enum: ["User", "Organization"] }).notNull(),
+	userId: text("user_id")
+		.notNull()
+		.references(() => user.id, { onDelete: "cascade" }),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
+});
+
+export const githubRepos = pgTable(
+	"github_repos",
+	{
+		id: text("id").primaryKey(),
+		installationId: integer("installation_id")
+			.notNull()
+			.references(() => githubInstallations.installationId, { onDelete: "cascade" }),
+		repoId: integer("repo_id").notNull().unique(),
+		repoFullName: text("repo_full_name").notNull(),
+		defaultBranch: text("default_branch").notNull().default("main"),
+		serviceId: text("service_id")
+			.unique()
+			.references(() => services.id, { onDelete: "cascade" }),
+		deployBranch: text("deploy_branch"),
+		autoDeploy: boolean("auto_deploy").notNull().default(true),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("github_repos_installation_id_idx").on(table.installationId),
+		index("github_repos_service_id_idx").on(table.serviceId),
+	],
+);
+
+export const builds = pgTable(
+	"builds",
+	{
+		id: text("id").primaryKey(),
+		githubRepoId: text("github_repo_id").references(() => githubRepos.id, {
+			onDelete: "cascade",
+		}),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		commitSha: text("commit_sha").notNull(),
+		commitMessage: text("commit_message"),
+		branch: text("branch").notNull(),
+		author: text("author"),
+		status: text("status", {
+			enum: [
+				"pending",
+				"claimed",
+				"cloning",
+				"building",
+				"pushing",
+				"completed",
+				"failed",
+				"cancelled",
+			],
+		})
+			.notNull()
+			.default("pending"),
+		imageUri: text("image_uri"),
+		error: text("error"),
+		githubDeploymentId: integer("github_deployment_id"),
+		claimedBy: text("claimed_by").references(() => servers.id, { onDelete: "set null" }),
+		claimedAt: timestamp("claimed_at", { withTimezone: true }),
+		startedAt: timestamp("started_at", { withTimezone: true }),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("builds_status_idx").on(table.status),
+		index("builds_service_id_idx").on(table.serviceId),
+		index("builds_github_repo_id_idx").on(table.githubRepoId),
+	],
+);
 

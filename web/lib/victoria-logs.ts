@@ -96,3 +96,39 @@ export async function queryLogsByDeployment(
 
   return { logs, hasMore };
 }
+
+export type BuildLog = {
+  _msg: string;
+  _time: string;
+  build_id: string;
+  service_id: string;
+  project_id: string;
+  log_type: "build";
+};
+
+export async function queryLogsByBuild(
+  buildId: string,
+  limit: number = 1000
+): Promise<{ logs: BuildLog[] }> {
+  if (!VICTORIA_LOGS_URL) {
+    throw new Error("VICTORIA_LOGS_URL is not configured");
+  }
+
+  const query = `build_id:${buildId} log_type:build | sort by (_time)`;
+
+  const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("limit", String(limit));
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Failed to query build logs: ${response.status} ${response.statusText}`);
+  }
+
+  const text = await response.text();
+  const lines = text.trim().split("\n").filter(Boolean);
+  const logs = lines.map((line) => JSON.parse(line) as BuildLog);
+
+  return { logs };
+}

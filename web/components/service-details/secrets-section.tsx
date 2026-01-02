@@ -3,8 +3,13 @@
 import { useState, memo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+	Item,
+	ItemContent,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import { Key, Plus, X, Eye, EyeOff } from "lucide-react";
 import { createSecret, deleteSecret } from "@/actions/secrets";
 import { fetcher } from "@/lib/fetcher";
@@ -58,14 +63,16 @@ export const SecretsSection = memo(function SecretsSection({
 	};
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-base flex items-center gap-2">
-					<Key className="h-4 w-4" />
-					Environment Variables
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-4">
+		<div className="rounded-lg border">
+			<Item className="border-0 border-b rounded-none">
+				<ItemMedia variant="icon">
+					<Key className="size-5 text-muted-foreground" />
+				</ItemMedia>
+				<ItemContent>
+					<ItemTitle>Environment Variables</ItemTitle>
+				</ItemContent>
+			</Item>
+			<div className="p-4 space-y-4">
 				{isLoading ? (
 					<div className="text-sm text-muted-foreground">Loading...</div>
 				) : secrets && secrets.length > 0 ? (
@@ -147,7 +154,7 @@ export const SecretsSection = memo(function SecretsSection({
 						Changes take effect on next deployment
 					</p>
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 });

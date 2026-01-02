@@ -248,6 +248,12 @@ export function ServiceCanvas({
 				backgroundSize: "24px 24px",
 			}}
 		>
+			<div className="absolute top-4 right-4">
+				<CreateServiceDialog
+					projectId={projectId}
+					onSuccess={() => mutate()}
+				/>
+			</div>
 			<div className="flex flex-wrap gap-10 justify-center items-center">
 				{services.map((service) => (
 					<ServiceCard

@@ -6,6 +6,7 @@ import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	githubRepos,
 	projects,
 	rollouts,
 	secrets,
@@ -215,19 +216,53 @@ export async function createService(
 	image: string,
 	ports: number[],
 	stateful: boolean = false,
+	github?: { repoUrl: string; branch: string; installationId?: number; repoId?: number },
 ) {
 	const id = randomUUID();
 	const hostname = slugify(name);
+
+	let finalImage = image;
+	let sourceType: "image" | "github" = "image";
+	let githubRepoUrl: string | null = null;
+	let githubBranch: string | null = null;
+
+	if (github) {
+		const registryHost = process.env.REGISTRY_HOST;
+		if (!registryHost) {
+			throw new Error("REGISTRY_HOST environment variable is required");
+		}
+		finalImage = `${registryHost}/${projectId}/${id}:latest`;
+		sourceType = "github";
+		githubRepoUrl = github.repoUrl;
+		githubBranch = github.branch || "main";
+	}
 
 	await db.insert(services).values({
 		id,
 		projectId,
 		name,
 		hostname,
-		image,
+		image: finalImage,
+		sourceType,
+		githubRepoUrl,
+		githubBranch,
 		replicas: 0,
 		stateful,
 	});
+
+	if (github?.installationId && github?.repoId) {
+		const repoFullName = github.repoUrl.replace("https://github.com/", "");
+		await db.insert(githubRepos).values({
+			id: randomUUID(),
+			installationId: github.installationId,
+			repoId: github.repoId,
+			repoFullName,
+			defaultBranch: github.branch || "main",
+			serviceId: id,
+			deployBranch: github.branch || "main",
+			autoDeploy: true,
+		});
+	}
 
 	for (const port of ports) {
 		await db.insert(servicePorts).values({
@@ -237,7 +272,7 @@ export async function createService(
 		});
 	}
 
-	return { id, name, image, ports, stateful };
+	return { id, name, image: finalImage, ports, stateful, sourceType };
 }
 
 export type ServerPlacement = {
@@ -348,6 +383,48 @@ export async function updateServiceHostname(serviceId: string, hostname: string)
 		.where(eq(services.id, serviceId));
 
 	return { success: true, hostname: sanitized };
+}
+
+export async function updateServiceGithubRepo(
+	serviceId: string,
+	repoUrl: string | null,
+	branch: string
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	let normalizedUrl: string | null = null;
+	if (repoUrl) {
+		normalizedUrl = repoUrl.trim();
+		if (!normalizedUrl.startsWith("https://github.com/")) {
+			throw new Error("Repository URL must be a GitHub URL (https://github.com/...)");
+		}
+	}
+
+	const normalizedBranch = branch.trim() || "main";
+
+	const updateData: Record<string, unknown> = {
+		sourceType: normalizedUrl ? "github" : "image",
+		githubRepoUrl: normalizedUrl,
+		githubBranch: normalizedBranch,
+	};
+
+	if (normalizedUrl) {
+		const registryHost = process.env.REGISTRY_HOST;
+		if (!registryHost) {
+			throw new Error("REGISTRY_HOST environment variable is required");
+		}
+		updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
+	}
+
+	await db
+		.update(services)
+		.set(updateData)
+		.where(eq(services.id, serviceId));
+
+	return { success: true };
 }
 
 type PortChange = {
@@ -913,6 +990,40 @@ export async function stopDeployment(deploymentId: string) {
 	});
 
 	return { success: true };
+}
+
+export async function restartService(serviceId: string) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	const runningDeployments = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.serviceId, serviceId));
+
+	const deploymentsToRestart = runningDeployments.filter(
+		(d) => d.status === "running" && d.containerId
+	);
+
+	if (deploymentsToRestart.length === 0) {
+		throw new Error("No running containers to restart");
+	}
+
+	for (const dep of deploymentsToRestart) {
+		await db.insert(workQueue).values({
+			id: randomUUID(),
+			serverId: dep.serverId,
+			type: "restart",
+			payload: JSON.stringify({
+				deploymentId: dep.id,
+				containerId: dep.containerId,
+			}),
+		});
+	}
+
+	return { success: true, count: deploymentsToRestart.length };
 }
 
 export async function abortRollout(serviceId: string) {
