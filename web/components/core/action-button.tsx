@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 interface ActionButtonProps {
@@ -35,6 +36,19 @@ export function ActionButton({
 			onComplete?.();
 		} catch (error) {
 			console.error("Action failed:", error);
+			// Handle all error types: Error instances, objects with message, strings, or unknown
+			const errorMessage =
+				error instanceof Error
+					? error.message
+					: typeof error === "string"
+						? error
+						: error &&
+								typeof error === "object" &&
+								"message" in error &&
+								typeof error.message === "string"
+							? error.message
+							: "An error occurred";
+			toast.error(errorMessage);
 		} finally {
 			setIsLoading(false);
 		}

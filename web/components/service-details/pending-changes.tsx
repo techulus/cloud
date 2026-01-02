@@ -144,6 +144,9 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 					}),
 				);
 				await deployService(service.id, placements);
+				router.push(
+					`/dashboard/projects/${projectSlug}/services/${service.id}`,
+				);
 			}
 			onUpdate();
 			setShowModal(false);
@@ -163,6 +166,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 
 				{hasChanges && (
 					<button
+						type="button"
 						onClick={() => setShowModal(true)}
 						className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline"
 					>
@@ -171,17 +175,16 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				)}
 
 				<button
+					type="button"
 					onClick={handleDeploy}
 					disabled={isDeploying || totalReplicas === 0}
 					className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-full disabled:opacity-50 transition-colors"
 				>
 					{isDeploying ? (
 						<Loader2 className="h-4 w-4 animate-spin" />
-					) : isGithubWithNoDeployments ? (
-						"Build"
-					) : (
+					) : 
 						"Deploy"
-					)}
+					}
 				</button>
 			</FloatingBar>
 			<PendingChangesModal

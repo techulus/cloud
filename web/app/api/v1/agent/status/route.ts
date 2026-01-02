@@ -181,7 +181,7 @@ async function handleRolloutFailure(
 	for (const dep of newDeployments) {
 		await db
 			.update(deployments)
-			.set({ status: "rolled_back", failedAt: failedStage })
+			.set({ status: "rolled_back", failedStage: failedStage })
 			.where(eq(deployments.id, dep.id));
 	}
 
@@ -418,7 +418,7 @@ export async function POST(request: NextRequest) {
 
 			await db
 				.update(deployments)
-				.set({ status: "failed", failedAt: "health_check" })
+				.set({ status: "failed", failedStage: "health_check" })
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {

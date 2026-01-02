@@ -170,7 +170,7 @@ function ProgressDots({ current, total }: { current: number; total: number }) {
 						i < current
 							? "bg-emerald-500"
 							: i === current
-								? "bg-blue-500 animate-pulse"
+								? "bg-orange-500 animate-pulse"
 								: "bg-zinc-300 dark:bg-zinc-600"
 					}`}
 				/>
@@ -241,7 +241,7 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 
 	return (
 		<FloatingBar visible variant="info">
-			<Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+			<Loader2 className="h-4 w-4 text-orange-500 animate-spin" />
 
 			<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
 				{currentStage?.label || "Deploying"}
@@ -257,7 +257,7 @@ export const RolloutStatusBar = memo(function RolloutStatusBar({
 				{isAborting ? (
 					<Loader2 className="h-3.5 w-3.5 animate-spin" />
 				) : (
-					<X className="h-3.5 w-3.5" />
+					<X className="h-3.5 w-3.5 text-red-500" />
 				)}
 			</button>
 		</FloatingBar>

@@ -16,9 +16,7 @@ type ServerWithStatus = ServerInfo & { status: string };
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	const res = await fetch(url);
 	const servers: ServerWithStatus[] = await res.json();
-	return servers
-		.filter((s) => s.status === "online")
-		.map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
+	return servers.map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
 };
 
 export const ReplicasSection = memo(function ReplicasSection({

@@ -125,7 +125,7 @@ export const servers = pgTable("servers", {
 export const projects = pgTable("projects", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
-	slug: text("slug").notNull(),
+	slug: text("slug").notNull().unique(),
 	createdAt: timestamp("created_at", { withTimezone: true })
 		.defaultNow()
 		.notNull(),
@@ -247,7 +247,7 @@ export const deployments = pgTable(
 		}),
 		rolloutId: text("rollout_id"),
 		previousDeploymentId: text("previous_deployment_id"),
-		failedAt: text("failed_at"),
+		failedStage: text("failed_stage"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -255,6 +255,9 @@ export const deployments = pgTable(
 	(table) => [
 		index("deployments_container_id_idx").on(table.containerId),
 		index("deployments_rollout_id_idx").on(table.rolloutId),
+		index("deployments_service_id_idx").on(table.serviceId),
+		index("deployments_server_id_idx").on(table.serverId),
+		index("deployments_status_idx").on(table.status),
 	],
 );
 
@@ -293,34 +296,40 @@ export const deploymentPorts = pgTable("deployment_ports", {
 		.notNull(),
 });
 
-export const workQueue = pgTable("work_queue", {
-	id: text("id").primaryKey(),
-	serverId: text("server_id")
-		.notNull()
-		.references(() => servers.id, { onDelete: "cascade" }),
-	type: text("type", {
-		enum: [
-			"deploy",
-			"stop",
-			"restart",
-			"update_wireguard",
-			"sync_caddy",
-			"force_cleanup",
-			"cleanup_volumes",
-		],
-	}).notNull(),
-	payload: text("payload").notNull(),
-	status: text("status", {
-		enum: ["pending", "processing", "completed", "failed"],
-	})
-		.notNull()
-		.default("pending"),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-	startedAt: timestamp("started_at", { withTimezone: true }),
-	attempts: integer("attempts").notNull().default(0),
-});
+export const workQueue = pgTable(
+	"work_queue",
+	{
+		id: text("id").primaryKey(),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		type: text("type", {
+			enum: [
+				"deploy",
+				"stop",
+				"restart",
+				"update_wireguard",
+				"sync_caddy",
+				"force_cleanup",
+				"cleanup_volumes",
+			],
+		}).notNull(),
+		payload: text("payload").notNull(),
+		status: text("status", {
+			enum: ["pending", "processing", "completed", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		startedAt: timestamp("started_at", { withTimezone: true }),
+		attempts: integer("attempts").notNull().default(0),
+	},
+	(table) => [
+		index("work_queue_server_status_idx").on(table.serverId, table.status),
+	],
+);
 
 export const githubInstallations = pgTable("github_installations", {
 	id: text("id").primaryKey(),
