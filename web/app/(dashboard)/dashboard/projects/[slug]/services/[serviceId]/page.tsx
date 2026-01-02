@@ -70,16 +70,16 @@ export default function ArchitecturePage() {
 								onComplete={onUpdate}
 							/>
 						)}
-						<ActionButton
-							action={async () => {
-								await deleteDeployments(service.id);
-							}}
-							label="Delete All"
-							loadingLabel="Deleting..."
-							variant="destructive"
-							size="sm"
-							onComplete={onUpdate}
-						/>
+					<ActionButton
+						action={async () => {
+							await deleteDeployments(service.id);
+						}}
+						label="Delete All"
+						loadingLabel="Deleting..."
+						variant="destructive"
+						size="sm"
+						onComplete={onUpdate}
+					/>
 				</div>
 			)}
 			<DeploymentCanvas service={service} />

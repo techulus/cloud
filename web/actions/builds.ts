@@ -148,19 +148,3 @@ export async function triggerBuild(serviceId: string) {
 
 	return { success: true, buildId: newBuildId };
 }
-
-export async function getBuilds(serviceId: string) {
-	const buildsList = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.serviceId, serviceId))
-		.orderBy(desc(builds.createdAt));
-
-	return buildsList;
-}
-
-export async function getBuild(buildId: string) {
-	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
-
-	return build;
-}

@@ -199,34 +199,6 @@ export async function deleteProject(id: string) {
 	await db.delete(projects).where(eq(projects.id, id));
 }
 
-export async function updateProject(id: string, name: string) {
-	const trimmed = name.trim();
-	if (!trimmed) {
-		throw new Error("Project name cannot be empty");
-	}
-
-	const slug = slugify(trimmed);
-	if (!slug) {
-		throw new Error("Invalid project name");
-	}
-
-	const existing = await db
-		.select({ id: projects.id })
-		.from(projects)
-		.where(eq(projects.slug, slug));
-
-	if (existing.some((p) => p.id !== id)) {
-		throw new Error("A project with this name already exists");
-	}
-
-	await db
-		.update(projects)
-		.set({ name: trimmed, slug })
-		.where(eq(projects.id, id));
-
-	return { id, name: trimmed, slug };
-}
-
 export async function createService(
 	projectId: string,
 	name: string,
@@ -1168,11 +1140,4 @@ export async function removeServiceVolume(volumeId: string) {
 	return { success: true };
 }
 
-export async function getServiceVolumes(serviceId: string) {
-	const volumes = await db
-		.select()
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.serviceId, serviceId));
 
-	return volumes;
-}
