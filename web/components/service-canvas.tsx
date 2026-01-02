@@ -148,14 +148,7 @@ export function ServiceCanvas({
 
 	if (isLoading) {
 		return (
-			<div
-				className="
-					relative -mt-6 -mb-6
-					left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-					flex items-center justify-center
-				"
-				style={{ height: "calc(100vh - 5rem)" }}
-			>
+			<div className="min-h-screen flex items-center justify-center">
 				<Spinner />
 			</div>
 		);

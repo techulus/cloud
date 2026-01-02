@@ -1,7 +1,7 @@
 import { db } from "@/db";
-import { servers, deployments, workQueue } from "@/db/schema";
+import { servers, deployments } from "@/db/schema";
 import { eq, isNotNull, and, ne } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { enqueueWork } from "./work-queue";
 import { WIREGUARD_SUBNET_PREFIX, CONTAINER_SUBNET_PREFIX } from "./constants";
 
 export async function assignSubnet(): Promise<{
@@ -88,12 +88,7 @@ export async function broadcastWireGuardUpdate() {
 
 	for (const server of onlineServers) {
 		const peers = await getWireGuardPeers(server.id);
-		await db.insert(workQueue).values({
-			id: randomUUID(),
-			serverId: server.id,
-			type: "update_wireguard",
-			payload: JSON.stringify({ peers }),
-		});
+		await enqueueWork(server.id, "update_wireguard", { peers });
 	}
 
 	return onlineServers.length;

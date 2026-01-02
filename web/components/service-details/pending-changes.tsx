@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { FloatingBar } from "@/components/ui/floating-bar";
 import { ArrowRight, Loader2 } from "lucide-react";
-import { deployService, type ServerPlacement } from "@/actions/projects";
+import { deployService } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
 import type { ConfigChange } from "@/lib/service-config";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -50,12 +50,12 @@ function PendingChangesModal({
 							key={i}
 							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-sm"
 						>
-							<span className="font-medium flex-shrink-0">{change.field}:</span>
+							<span className="font-medium shrink-0">{change.field}:</span>
 							<div className="flex items-center gap-2 min-w-0">
 								<span className="text-muted-foreground truncate">
 									{change.from}
 								</span>
-								<ArrowRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+								<ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
 								<span className="text-foreground truncate">{change.to}</span>
 							</div>
 						</div>
@@ -134,13 +134,7 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 					);
 				}
 			} else {
-				const placements: ServerPlacement[] = service.configuredReplicas.map(
-					(r) => ({
-						serverId: r.serverId,
-						replicas: r.count,
-					}),
-				);
-				await deployService(service.id, placements);
+				await deployService(service.id);
 				router.push(
 					`/dashboard/projects/${projectSlug}/services/${service.id}`,
 				);

@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { servers, workQueue } from "@/db/schema";
+import { servers } from "@/db/schema";
 import { eq, and, isNull, gt, isNotNull, ne } from "drizzle-orm";
 import { assignSubnet, getWireGuardPeers } from "@/lib/wireguard";
-import { randomUUID } from "node:crypto";
+import { enqueueWork } from "@/lib/work-queue";
 
 const TOKEN_EXPIRY_HOURS = 24;
 
@@ -78,11 +78,8 @@ export async function POST(request: NextRequest) {
 
 		for (const existingServer of existingServers) {
 			const existingPeers = await getWireGuardPeers(existingServer.id);
-			await db.insert(workQueue).values({
-				id: randomUUID(),
-				serverId: existingServer.id,
-				type: "update_wireguard",
-				payload: JSON.stringify({ peers: existingPeers }),
+			await enqueueWork(existingServer.id, "update_wireguard", {
+				peers: existingPeers,
 			});
 		}
 

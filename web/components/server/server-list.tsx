@@ -1,10 +1,18 @@
 "use client";
 
+import { Server as ServerIcon } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { CreateServerDialog } from "@/components/create-server-dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Item,
+	ItemContent,
+	ItemDescription,
+	ItemGroup,
+	ItemMedia,
+	ItemTitle,
+} from "@/components/ui/item";
 import type { Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
@@ -37,41 +45,35 @@ export function ServerList({
 			</div>
 
 			{!servers || servers.length === 0 ? (
-				<Card>
-					<CardContent className="py-10 text-center">
-						<p className="text-muted-foreground mb-4">
-							No servers yet. Add your first server to get started.
-						</p>
-						<CreateServerDialog />
-					</CardContent>
-				</Card>
-			) : (
-				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-					{servers.map((server) => (
-						<Link key={server.id} href={`/dashboard/servers/${server.id}`}>
-							<Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-								<CardHeader>
-									<div className="flex items-center justify-between">
-										<CardTitle>{server.name}</CardTitle>
-										<StatusIndicator status={server.status} />
-									</div>
-									<div className="text-sm text-muted-foreground space-y-1 pt-1">
-										<div>
-											<span className="font-medium">WireGuard:</span>{" "}
-											{server.wireguardIp || "Not registered"}
-										</div>
-										{server.publicIp && (
-											<div>
-												<span className="font-medium">Public:</span>{" "}
-												{server.publicIp}
-											</div>
-										)}
-									</div>
-								</CardHeader>
-							</Card>
-						</Link>
-					))}
+				<div className="py-10 text-center border rounded-lg">
+					<p className="text-muted-foreground mb-4">
+						No servers yet. Add your first server to get started.
+					</p>
+					<CreateServerDialog />
 				</div>
+			) : (
+				<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+					{servers.map((server) => (
+						<Item
+							key={server.id}
+							variant="outline"
+							render={<Link href={`/dashboard/servers/${server.id}`} />}
+						>
+							<ItemMedia variant="icon">
+								<ServerIcon className="size-5 text-muted-foreground" />
+							</ItemMedia>
+							<ItemContent>
+								<div className="flex items-center justify-between">
+									<ItemTitle>{server.name}</ItemTitle>
+									<StatusIndicator status={server.status} />
+								</div>
+								<ItemDescription>
+									{server.wireguardIp || "Not registered"}
+								</ItemDescription>
+							</ItemContent>
+						</Item>
+					))}
+				</ItemGroup>
 			)}
 		</div>
 	);

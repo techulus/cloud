@@ -1,10 +1,10 @@
 "use client";
 
 import {
-	deleteDeployment,
+	deleteDeployments,
 	deployService,
 	restartService,
-	stopDeployment,
+	stopService,
 } from "@/actions/projects";
 import { ActionButton } from "@/components/core/action-button";
 import { useService } from "@/components/service-layout-client";
@@ -31,13 +31,7 @@ export default function ArchitecturePage() {
 							/>
 							<ActionButton
 								action={async () => {
-									const placements = (service.configuredReplicas || []).map(
-										(r) => ({
-											serverId: r.serverId,
-											replicas: r.count,
-										}),
-									);
-									await deployService(service.id, placements);
+									await deployService(service.id);
 								}}
 								label="Redeploy"
 								loadingLabel="Redeploying..."
@@ -47,12 +41,7 @@ export default function ArchitecturePage() {
 							/>
 							<ActionButton
 								action={async () => {
-									const running = service.deployments.filter(
-										(d) => d.status === "running",
-									);
-									for (const dep of running) {
-										await stopDeployment(dep.id);
-									}
+									await stopService(service.id);
 								}}
 								label="Stop All"
 								loadingLabel="Stopping..."
@@ -72,13 +61,7 @@ export default function ArchitecturePage() {
 						(service.configuredReplicas || []).length > 0 && (
 							<ActionButton
 								action={async () => {
-									const placements = (service.configuredReplicas || []).map(
-										(r) => ({
-											serverId: r.serverId,
-											replicas: r.count,
-										}),
-									);
-									await deployService(service.id, placements);
+									await deployService(service.id);
 								}}
 								label="Start All"
 								loadingLabel="Starting..."
@@ -87,23 +70,9 @@ export default function ArchitecturePage() {
 								onComplete={onUpdate}
 							/>
 						)}
-					{service.deployments.some(
-						(d) =>
-							d.status === "stopped" ||
-							d.status === "failed" ||
-							d.status === "rolled_back",
-					) && (
 						<ActionButton
 							action={async () => {
-								const deletable = service.deployments.filter(
-									(d) =>
-										d.status === "stopped" ||
-										d.status === "failed" ||
-										d.status === "rolled_back",
-								);
-								for (const dep of deletable) {
-									await deleteDeployment(dep.id);
-								}
+								await deleteDeployments(service.id);
 							}}
 							label="Delete All"
 							loadingLabel="Deleting..."
@@ -111,7 +80,6 @@ export default function ArchitecturePage() {
 							size="sm"
 							onComplete={onUpdate}
 						/>
-					)}
 				</div>
 			)}
 			<DeploymentCanvas service={service} />

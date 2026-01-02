@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -17,6 +17,7 @@ import {
 	serviceVolumes,
 	workQueue,
 } from "@/db/schema";
+import { enqueueWork } from "@/lib/work-queue";
 import {
 	buildCurrentConfig,
 	type HealthCheckConfig as ServiceHealthCheckConfig,
@@ -296,11 +297,6 @@ export async function createService(
 	return { id, name, image: finalImage, ports, stateful, sourceType };
 }
 
-export type ServerPlacement = {
-	serverId: string;
-	replicas: number;
-};
-
 export async function deleteService(serviceId: string) {
 	const service = await getService(serviceId);
 	if (!service) {
@@ -335,13 +331,8 @@ export async function deleteService(serviceId: string) {
 			.where(eq(serviceVolumes.serviceId, serviceId));
 
 		if (volumes.length > 0) {
-			await db.insert(workQueue).values({
-				id: randomUUID(),
-				serverId: service.lockedServerId,
-				type: "cleanup_volumes",
-				payload: JSON.stringify({
-					serviceId,
-				}),
+			await enqueueWork(service.lockedServerId, "cleanup_volumes", {
+				serviceId,
 			});
 		}
 	}
@@ -519,24 +510,18 @@ export async function updateServicePorts(
 		}
 	}
 
-	const existingDeployments = await db
+	const runningDeployments = await db
 		.select()
 		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running",
-	);
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "running"),
+			),
+		);
 
 	if (runningDeployments.length > 0) {
-		const placementMap = new Map<string, number>();
-		for (const dep of runningDeployments) {
-			placementMap.set(dep.serverId, (placementMap.get(dep.serverId) || 0) + 1);
-		}
-		const placements: ServerPlacement[] = Array.from(
-			placementMap.entries(),
-		).map(([serverId, replicas]) => ({ serverId, replicas }));
-		await deployService(serviceId, placements);
+		await deployService(serviceId);
 	}
 
 	return { success: true, redeployed: runningDeployments.length > 0 };
@@ -579,14 +564,21 @@ async function allocateHostPorts(
 	return allocated;
 }
 
-export async function deployService(
-	serviceId: string,
-	placements: ServerPlacement[],
-) {
+export async function deployService(serviceId: string) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
 	}
+
+	const configuredReplicas = await db
+		.select({
+			serverId: serviceReplicas.serverId,
+			replicas: serviceReplicas.count,
+		})
+		.from(serviceReplicas)
+		.where(eq(serviceReplicas.serviceId, serviceId));
+
+	const placements = configuredReplicas.filter((p) => p.replicas > 0);
 
 	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
 	if (totalReplicas < 1) {
@@ -765,23 +757,18 @@ export async function deployService(
 				containerPath: v.containerPath,
 			}));
 
-			await db.insert(workQueue).values({
-				id: randomUUID(),
-				serverId: server.id,
-				type: "deploy",
-				payload: JSON.stringify({
-					deploymentId,
-					serviceId,
-					serviceName: service.name,
-					image: normalizeImage(service.image),
-					portMappings,
-					wireguardIp: server.wireguardIp,
-					ipAddress,
-					name: `${serviceId}-${replicaIndex}`,
-					healthCheck,
-					env,
-					volumeMounts,
-				}),
+			await enqueueWork(server.id, "deploy", {
+				deploymentId,
+				serviceId,
+				serviceName: service.name,
+				image: normalizeImage(service.image),
+				portMappings,
+				wireguardIp: server.wireguardIp,
+				ipAddress,
+				name: `${serviceId}-${replicaIndex}`,
+				healthCheck,
+				env,
+				volumeMounts,
 			});
 		}
 	}
@@ -819,24 +806,8 @@ export async function deployService(
 	return { deploymentIds, replicaCount: totalReplicas, rolloutId };
 }
 
-export async function deleteDeployment(deploymentId: string) {
-	const deployment = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.id, deploymentId));
-
-	if (!deployment[0]) {
-		throw new Error("Deployment not found");
-	}
-
-	const dep = deployment[0];
-
-	if (dep.status === "running" || dep.status === "pulling") {
-		throw new Error("Stop the deployment before deleting");
-	}
-
-	await db.delete(deployments).where(eq(deployments.id, deploymentId));
-
+export async function deleteDeployments(serviceId: string) {
+	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 	return { success: true };
 }
 
@@ -999,38 +970,32 @@ export async function updateServiceConfig(
 	return { success: true };
 }
 
-export async function stopDeployment(deploymentId: string) {
-	const deployment = await db
+export async function stopService(serviceId: string) {
+	const runningDeployments = await db
 		.select()
 		.from(deployments)
-		.where(eq(deployments.id, deploymentId));
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "running"),
+			),
+		);
 
-	if (!deployment[0]) {
-		throw new Error("Deployment not found");
-	}
+	for (const dep of runningDeployments) {
+		if (!dep.containerId) continue;
 
-	const dep = deployment[0];
+		await db
+			.update(deployments)
+			.set({ status: "stopping" })
+			.where(eq(deployments.id, dep.id));
 
-	if (!dep.containerId) {
-		throw new Error("No container to stop");
-	}
-
-	await db
-		.update(deployments)
-		.set({ status: "stopping" })
-		.where(eq(deployments.id, deploymentId));
-
-	await db.insert(workQueue).values({
-		id: randomUUID(),
-		serverId: dep.serverId,
-		type: "stop",
-		payload: JSON.stringify({
+		await enqueueWork(dep.serverId, "stop", {
 			deploymentId: dep.id,
 			containerId: dep.containerId,
-		}),
-	});
+		});
+	}
 
-	return { success: true };
+	return { success: true, count: runningDeployments.length };
 }
 
 export async function restartService(serviceId: string) {
@@ -1053,14 +1018,9 @@ export async function restartService(serviceId: string) {
 	}
 
 	for (const dep of deploymentsToRestart) {
-		await db.insert(workQueue).values({
-			id: randomUUID(),
-			serverId: dep.serverId,
-			type: "restart",
-			payload: JSON.stringify({
-				deploymentId: dep.id,
-				containerId: dep.containerId,
-			}),
+		await enqueueWork(dep.serverId, "restart", {
+			deploymentId: dep.id,
+			containerId: dep.containerId,
 		});
 	}
 
@@ -1102,14 +1062,9 @@ export async function abortRollout(serviceId: string) {
 	}
 
 	for (const [serverId, containerIds] of serverContainers) {
-		await db.insert(workQueue).values({
-			id: randomUUID(),
-			serverId,
-			type: "force_cleanup",
-			payload: JSON.stringify({
-				serviceId,
-				containerIds,
-			}),
+		await enqueueWork(serverId, "force_cleanup", {
+			serviceId,
+			containerIds,
 		});
 	}
 

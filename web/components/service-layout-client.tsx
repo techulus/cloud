@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
 import {
@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { PendingChangesBar } from "./service-details/pending-changes";
 import { RolloutStatusBar } from "./service-details/rollout-status";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { createContext, useContext } from "react";
+import { Spinner } from "./ui/spinner";
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -65,9 +67,9 @@ export function ServiceLayoutClient({
 		return diffConfigs(deployed, current);
 	}, [service]);
 
-	const handleActionComplete = () => {
+	const handleActionComplete = useCallback(() => {
 		mutate();
-	};
+	}, [mutate]);
 
 	const basePath = `/dashboard/projects/${projectSlug}/services/${service?.id}`;
 
@@ -89,7 +91,11 @@ export function ServiceLayoutClient({
 	};
 
 	if (isLoading || !service) {
-		return <div>Loading...</div>;
+		return (
+			<div className="min-h-screen flex items-center justify-center">
+				<Spinner />
+			</div>
+		);
 	}
 
 	return (
@@ -128,8 +134,6 @@ export function ServiceLayoutClient({
 		</div>
 	);
 }
-
-import { createContext, useContext } from "react";
 
 interface ServiceContextType {
 	service: Service;

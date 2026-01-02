@@ -173,17 +173,12 @@ export async function POST(
 			.where(eq(serviceReplicas.serviceId, build.serviceId));
 
 		if (replicas.length > 0) {
-			const placements = replicas.map((r) => ({
-				serverId: r.serverId,
-				replicas: r.count,
-			}));
-
 			console.log(
-				`[build:complete] triggering deployment for service ${build.serviceId} with ${placements.length} placements`,
+				`[build:complete] triggering deployment for service ${build.serviceId}`,
 			);
 
 			try {
-				await deployService(build.serviceId, placements);
+				await deployService(build.serviceId);
 			} catch (error) {
 				console.error("[build:complete] deployment failed:", error);
 				await db

@@ -32,9 +32,9 @@ type Deployment = BaseDeployment & {
 
 const statusLabels: Record<string, string> = {
 	pending: "Queued",
-	pulling: "Pulling image",
-	starting: "Starting",
-	healthy: "Health check passed",
+	pulling: "Creating",
+	starting: "Creating",
+	healthy: "Healthy",
 	running: "Running",
 	stopping: "Stopping",
 	stopped: "Stopped",
