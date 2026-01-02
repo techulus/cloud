@@ -25,6 +25,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Secrets
 - [x] Volumes
 - [x] Deploy Logs
-- [ ] Rolling updates
-- [ ] GitHub deployments
-- [ ] HTTP Logs
+- [x] GitHub deployments
+- [x] HTTP Logs
+- [ ] Rolling updates?
+- [ ] TCP / L4 proxying
