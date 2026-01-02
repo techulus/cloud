@@ -6,7 +6,8 @@ type FloatingBarVariant = "default" | "success" | "error" | "info";
 
 const variantStyles: Record<FloatingBarVariant, string> = {
 	default: "border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800",
-	success: "border-emerald-500 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/50",
+	success:
+		"border-emerald-500 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/50",
 	error: "border-red-500 dark:border-red-600 bg-red-50 dark:bg-red-900/50",
 	info: "border-orange-500 dark:border-orange-600 bg-orange-50 dark:bg-orange-900/50",
 };

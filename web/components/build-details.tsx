@@ -29,12 +29,21 @@ import {
 	ItemMedia,
 	ItemTitle,
 } from "@/components/ui/item";
-import type { Build, BuildStatus, GithubRepo, Project, Service } from "@/db/types";
+import type {
+	Build,
+	BuildStatus,
+	GithubRepo,
+	Project,
+	Service,
+} from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 import { BuildLogsViewer } from "./logging/build-logs-viewer";
 
-type BuildWithDates = Omit<Build, "createdAt" | "startedAt" | "completedAt" | "claimedAt"> & {
+type BuildWithDates = Omit<
+	Build,
+	"createdAt" | "startedAt" | "completedAt" | "claimedAt"
+> & {
 	createdAt: string | Date;
 	startedAt: string | Date | null;
 	completedAt: string | Date | null;

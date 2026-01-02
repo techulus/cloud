@@ -5,7 +5,10 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { FloatingBar } from "@/components/ui/floating-bar";
 import { abortRollout } from "@/actions/projects";
-import type { DeploymentStatus, ServiceWithDetails as Service } from "@/db/types";
+import type {
+	DeploymentStatus,
+	ServiceWithDetails as Service,
+} from "@/db/types";
 
 type StageInfo = {
 	id: string;
@@ -15,8 +18,6 @@ type StageInfo = {
 const STAGES: StageInfo[] = [
 	{ id: "deploying", label: "Starting" },
 	{ id: "health_check", label: "Checking Health" },
-	{ id: "routing", label: "Routing Traffic" },
-	{ id: "cleaning", label: "Cleaning Up" },
 	{ id: "completed", label: "Complete" },
 ];
 
@@ -28,11 +29,6 @@ function mapDeploymentStatusToStage(status: DeploymentStatus): string {
 		case "starting":
 		case "healthy":
 			return "health_check";
-		case "dns_updating":
-		case "caddy_updating":
-			return "routing";
-		case "stopping_old":
-			return "cleaning";
 		case "running":
 			return "completed";
 		default:
@@ -66,12 +62,6 @@ function getRolloutState(service: Service): {
 
 			if (statuses.every((s) => s === "running")) {
 				currentStage = "completed";
-			} else if (statuses.some((s) => s === "stopping_old")) {
-				currentStage = "cleaning";
-			} else if (
-				statuses.some((s) => s === "caddy_updating" || s === "dns_updating")
-			) {
-				currentStage = "routing";
 			} else if (statuses.some((s) => s === "healthy" || s === "starting")) {
 				currentStage = "health_check";
 			} else if (statuses.some((s) => s === "pending" || s === "pulling")) {
@@ -126,16 +116,9 @@ function getRolloutState(service: Service): {
 	}
 
 	const inProgressDeployments = service.deployments.filter((d) =>
-		[
-			"pending",
-			"pulling",
-			"starting",
-			"healthy",
-			"dns_updating",
-			"caddy_updating",
-			"stopping_old",
-			"stopping",
-		].includes(d.status),
+		["pending", "pulling", "starting", "healthy", "stopping"].includes(
+			d.status,
+		),
 	);
 
 	if (inProgressDeployments.length > 0) {

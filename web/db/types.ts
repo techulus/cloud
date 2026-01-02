@@ -41,7 +41,9 @@ export type ServiceWithDetails = Service & {
 	deployments: Array<
 		Deployment & {
 			server: Pick<Server, "name" | "wireguardIp"> | null;
-			ports: Array<Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }>;
+			ports: Array<
+				Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }
+			>;
 		}
 	>;
 	volumes?: ServiceVolume[];

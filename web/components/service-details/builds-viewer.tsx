@@ -31,7 +31,16 @@ import type { Build, BuildStatus } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
-type BuildListItem = Pick<Build, "id" | "commitSha" | "commitMessage" | "branch" | "author" | "status" | "error"> & {
+type BuildListItem = Pick<
+	Build,
+	| "id"
+	| "commitSha"
+	| "commitMessage"
+	| "branch"
+	| "author"
+	| "status"
+	| "error"
+> & {
 	createdAt: string;
 	startedAt: string | null;
 	completedAt: string | null;
@@ -114,7 +123,13 @@ function formatDuration(start: string, end: string | null): string {
 	return `${seconds}s`;
 }
 
-export function BuildsViewer({ serviceId, projectSlug }: { serviceId: string; projectSlug: string }) {
+export function BuildsViewer({
+	serviceId,
+	projectSlug,
+}: {
+	serviceId: string;
+	projectSlug: string;
+}) {
 	const router = useRouter();
 	const [isTriggering, setIsTriggering] = useState(false);
 	const [cancellingId, setCancellingId] = useState<string | null>(null);

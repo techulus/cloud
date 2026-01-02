@@ -20,8 +20,7 @@ export function OfflineServersBanner() {
 					(s) => s.status === "offline" || s.status === "unknown",
 				);
 				setOfflineServers(offline);
-			} catch {
-			}
+			} catch {}
 		}
 
 		fetchServers();
@@ -40,10 +39,7 @@ export function OfflineServersBanner() {
 				{offlineServers.length === 1 ? "Server" : "Servers"} offline:{" "}
 				<strong>{serverNames}</strong>
 			</span>
-			<Link
-				href="/dashboard"
-				className="text-xs underline hover:no-underline"
-			>
+			<Link href="/dashboard" className="text-xs underline hover:no-underline">
 				View
 			</Link>
 		</div>

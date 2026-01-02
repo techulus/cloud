@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { deployments, servers, services, rollouts } from "@/db/schema";
-import { eq, and, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 
 type ContainerStatus = {
@@ -37,126 +37,30 @@ async function checkRolloutProgress(rolloutId: string): Promise<void> {
 	if (newDeployments.length === 0) return;
 
 	const allHealthy = newDeployments.every((d) => d.status === "healthy");
-	const allDnsUpdating = newDeployments.every(
-		(d) => d.status === "dns_updating",
-	);
-	const allCaddyUpdating = newDeployments.every(
-		(d) => d.status === "caddy_updating",
-	);
-	const allStoppingOld = newDeployments.every(
-		(d) => d.status === "stopping_old",
-	);
 
 	if (allHealthy) {
-		console.log(`[rollout:${rolloutId}] all healthy → dns_updating`);
+		console.log(
+			`[rollout:${rolloutId}] all healthy → running, completing rollout`,
+		);
+
 		await db
 			.update(deployments)
-			.set({ status: "dns_updating" })
+			.set({ status: "running" })
 			.where(
 				and(
 					eq(deployments.rolloutId, rolloutId),
 					eq(deployments.status, "healthy"),
 				),
 			);
+
 		await db
 			.update(rollouts)
-			.set({ currentStage: "dns_updating" })
+			.set({
+				status: "completed",
+				currentStage: "completed",
+				completedAt: new Date(),
+			})
 			.where(eq(rollouts.id, rolloutId));
-		return;
-	}
-
-	if (allDnsUpdating) {
-		console.log(`[rollout:${rolloutId}] all dns_updating → caddy_updating`);
-		await db
-			.update(deployments)
-			.set({ status: "caddy_updating" })
-			.where(
-				and(
-					eq(deployments.rolloutId, rolloutId),
-					eq(deployments.status, "dns_updating"),
-				),
-			);
-		await db
-			.update(rollouts)
-			.set({ currentStage: "caddy_updating" })
-			.where(eq(rollouts.id, rolloutId));
-		return;
-	}
-
-	if (allCaddyUpdating) {
-		console.log(`[rollout:${rolloutId}] all caddy_updating → stopping_old`);
-		await db
-			.update(deployments)
-			.set({ status: "stopping_old" })
-			.where(
-				and(
-					eq(deployments.rolloutId, rolloutId),
-					eq(deployments.status, "caddy_updating"),
-				),
-			);
-		await db
-			.update(rollouts)
-			.set({ currentStage: "stopping_old" })
-			.where(eq(rollouts.id, rolloutId));
-		return;
-	}
-
-	if (allStoppingOld) {
-		const [rollout] = await db
-			.select()
-			.from(rollouts)
-			.where(eq(rollouts.id, rolloutId));
-
-		if (!rollout) return;
-
-		const oldRunningDeployments = await db
-			.select()
-			.from(deployments)
-			.where(
-				and(
-					eq(deployments.serviceId, rollout.serviceId),
-					eq(deployments.status, "running"),
-				),
-			);
-
-		const allOldStopped = oldRunningDeployments.length === 0;
-
-		if (allOldStopped) {
-			console.log(
-				`[rollout:${rolloutId}] all old stopped → running, cleaning up old deployments`,
-			);
-
-			await db
-				.delete(deployments)
-				.where(
-					and(
-						eq(deployments.serviceId, rollout.serviceId),
-						or(
-							isNull(deployments.rolloutId),
-							ne(deployments.rolloutId, rolloutId),
-						),
-					),
-				);
-
-			await db
-				.update(deployments)
-				.set({ status: "running" })
-				.where(
-					and(
-						eq(deployments.rolloutId, rolloutId),
-						eq(deployments.status, "stopping_old"),
-					),
-				);
-
-			await db
-				.update(rollouts)
-				.set({
-					status: "completed",
-					currentStage: "completed",
-					completedAt: new Date(),
-				})
-				.where(eq(rollouts.id, rolloutId));
-		}
 	}
 }
 
@@ -245,15 +149,16 @@ export async function POST(request: NextRequest) {
 	const activeStatuses = [
 		"starting",
 		"healthy",
-		"dns_updating",
-		"caddy_updating",
-		"stopping_old",
 		"running",
 		"stopping",
 	] as const;
 
 	const activeDeployments = await db
-		.select({ id: deployments.id, containerId: deployments.containerId })
+		.select({
+			id: deployments.id,
+			containerId: deployments.containerId,
+			status: deployments.status,
+		})
 		.from(deployments)
 		.where(
 			and(
@@ -269,13 +174,23 @@ export async function POST(request: NextRequest) {
 
 	for (const dep of activeDeployments) {
 		if (!reportedDeploymentIds.includes(dep.id)) {
-			console.log(
-				`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,
-			);
-			await db
-				.update(deployments)
-				.set({ status: "unknown", healthStatus: null })
-				.where(eq(deployments.id, dep.id));
+			if (dep.status === "stopping") {
+				console.log(
+					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was stopping and container gone, marking STOPPED`,
+				);
+				await db
+					.update(deployments)
+					.set({ status: "stopped", healthStatus: null, containerId: null })
+					.where(eq(deployments.id, dep.id));
+			} else {
+				console.log(
+					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,
+				);
+				await db
+					.update(deployments)
+					.set({ status: "unknown", healthStatus: null })
+					.where(eq(deployments.id, dep.id));
+			}
 		}
 	}
 

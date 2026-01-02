@@ -28,16 +28,7 @@ export const VolumesSection = memo(function VolumesSection({
 	const volumes = service.volumes || [];
 
 	const hasRunningDeployments = service.deployments?.some((d) =>
-		[
-			"pending",
-			"pulling",
-			"starting",
-			"healthy",
-			"dns_updating",
-			"caddy_updating",
-			"stopping_old",
-			"running",
-		].includes(d.status),
+		["pending", "pulling", "starting", "healthy", "running"].includes(d.status),
 	);
 
 	const handleAdd = async () => {

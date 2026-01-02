@@ -8,9 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
-type ServerWithIp = Pick<Server, "id" | "name" | "publicIp" | "wireguardIp" | "status">;
+type ServerWithIp = Pick<
+	Server,
+	"id" | "name" | "publicIp" | "wireguardIp" | "status"
+>;
 
-export function ServerList({ initialServers }: { initialServers: ServerWithIp[] }) {
+export function ServerList({
+	initialServers,
+}: {
+	initialServers: ServerWithIp[];
+}) {
 	const { data: servers } = useSWR<ServerWithIp[]>("/api/servers", fetcher, {
 		fallbackData: initialServers,
 		refreshInterval: 10000,

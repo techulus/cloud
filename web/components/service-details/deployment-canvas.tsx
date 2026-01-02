@@ -15,11 +15,19 @@ import {
 	getHealthColor,
 } from "@/components/ui/canvas-wrapper";
 import { Spinner } from "@/components/ui/spinner";
-import type { Deployment as BaseDeployment, DeploymentPort, Server as ServerType, ServiceVolume, ServiceWithDetails as Service } from "@/db/types";
+import type {
+	Deployment as BaseDeployment,
+	DeploymentPort,
+	Server as ServerType,
+	ServiceVolume,
+	ServiceWithDetails as Service,
+} from "@/db/types";
 
 type Deployment = BaseDeployment & {
 	server: Pick<ServerType, "name" | "wireguardIp"> | null;
-	ports: Array<Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }>;
+	ports: Array<
+		Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }
+	>;
 };
 
 const statusLabels: Record<string, string> = {
@@ -27,9 +35,6 @@ const statusLabels: Record<string, string> = {
 	pulling: "Pulling image",
 	starting: "Starting",
 	healthy: "Health check passed",
-	dns_updating: "Updating DNS",
-	caddy_updating: "Updating routes",
-	stopping_old: "Activating",
 	running: "Running",
 	stopping: "Stopping",
 	stopped: "Stopped",
@@ -52,9 +57,6 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 		deployment.status === "pending" ||
 		deployment.status === "pulling" ||
 		deployment.status === "starting" ||
-		deployment.status === "dns_updating" ||
-		deployment.status === "caddy_updating" ||
-		deployment.status === "stopping_old" ||
 		deployment.status === "stopping";
 
 	return (

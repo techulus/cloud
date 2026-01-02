@@ -8,7 +8,10 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Server, Lock } from "lucide-react";
 import { updateServiceConfig } from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
-import type { Server as ServerType, ServiceWithDetails as Service } from "@/db/types";
+import type {
+	Server as ServerType,
+	ServiceWithDetails as Service,
+} from "@/db/types";
 
 type ServerInfo = Pick<ServerType, "id" | "name" | "wireguardIp">;
 type ServerWithStatus = ServerInfo & { status: string };
@@ -16,7 +19,11 @@ type ServerWithStatus = ServerInfo & { status: string };
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	const res = await fetch(url);
 	const servers: ServerWithStatus[] = await res.json();
-	return servers.map(({ id, name, wireguardIp }) => ({ id, name, wireguardIp }));
+	return servers.map(({ id, name, wireguardIp }) => ({
+		id,
+		name,
+		wireguardIp,
+	}));
 };
 
 export const ReplicasSection = memo(function ReplicasSection({

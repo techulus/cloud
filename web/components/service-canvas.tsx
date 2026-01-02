@@ -137,10 +137,14 @@ export function ServiceCanvas({
 		data: services,
 		mutate,
 		isLoading,
-	} = useSWR<ServiceWithDetails[]>(`/api/projects/${projectId}/services`, fetcher, {
-		refreshInterval: 5000,
-		revalidateOnFocus: true,
-	});
+	} = useSWR<ServiceWithDetails[]>(
+		`/api/projects/${projectId}/services`,
+		fetcher,
+		{
+			refreshInterval: 5000,
+			revalidateOnFocus: true,
+		},
+	);
 
 	if (isLoading) {
 		return (

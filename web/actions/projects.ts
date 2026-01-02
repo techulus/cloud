@@ -317,9 +317,6 @@ export async function deleteService(serviceId: string) {
 		"pulling",
 		"starting",
 		"healthy",
-		"dns_updating",
-		"caddy_updating",
-		"stopping_old",
 		"running",
 		"stopping",
 	];
@@ -657,9 +654,6 @@ export async function deployService(
 		"pulling",
 		"starting",
 		"healthy",
-		"dns_updating",
-		"caddy_updating",
-		"stopping_old",
 		"stopping",
 	];
 
@@ -681,12 +675,10 @@ export async function deployService(
 	});
 
 	for (const dep of existingDeployments) {
-		if (dep.status !== "running") {
-			await db
-				.delete(deploymentPorts)
-				.where(eq(deploymentPorts.deploymentId, dep.id));
-			await db.delete(deployments).where(eq(deployments.id, dep.id));
-		}
+		await db
+			.delete(deploymentPorts)
+			.where(eq(deploymentPorts.deploymentId, dep.id));
+		await db.delete(deployments).where(eq(deployments.id, dep.id));
 	}
 
 	const servicePortsList = await db
@@ -1207,9 +1199,6 @@ export async function removeServiceVolume(volumeId: string) {
 		"pulling",
 		"starting",
 		"healthy",
-		"dns_updating",
-		"caddy_updating",
-		"stopping_old",
 		"running",
 	];
 	const hasRunning = activeDeployments.some((d) =>

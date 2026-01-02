@@ -89,9 +89,6 @@ function hasActiveRollout(service: Service): boolean {
 		"pulling",
 		"starting",
 		"healthy",
-		"dns_updating",
-		"caddy_updating",
-		"stopping_old",
 		"stopping",
 	];
 	return service.deployments.some((d) => inProgressStatuses.includes(d.status));
@@ -182,9 +179,9 @@ export const PendingChangesBar = memo(function PendingChangesBar({
 				>
 					{isDeploying ? (
 						<Loader2 className="h-4 w-4 animate-spin" />
-					) : 
+					) : (
 						"Deploy"
-					}
+					)}
 				</button>
 			</FloatingBar>
 			<PendingChangesModal

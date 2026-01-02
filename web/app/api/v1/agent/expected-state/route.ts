@@ -19,21 +19,12 @@ const EXPECTED_STATUSES = [
 	"pulling",
 	"starting",
 	"healthy",
-	"dns_updating",
-	"caddy_updating",
-	"stopping_old",
 	"running",
 	"unknown",
 ] as const;
 
-const ROUTABLE_STATUSES = ["caddy_updating", "running", "unknown"] as const;
-const DNS_STATUSES = [
-	"dns_updating",
-	"caddy_updating",
-	"stopping_old",
-	"running",
-	"unknown",
-] as const;
+const ROUTABLE_STATUSES = ["healthy", "running", "unknown"] as const;
+const DNS_STATUSES = ["healthy", "running", "unknown"] as const;
 
 export async function GET(request: NextRequest) {
 	const auth = await verifyAgentRequest(request);
@@ -63,22 +54,9 @@ export async function GET(request: NextRequest) {
 			),
 		);
 
-	const stoppingOldServices = new Set(
-		serverDeployments
-			.filter((d) => d.status === "stopping_old")
-			.map((d) => d.serviceId),
-	);
-
-	const filteredDeployments = serverDeployments.filter((dep) => {
-		if (dep.status === "running" && stoppingOldServices.has(dep.serviceId)) {
-			return false;
-		}
-		return true;
-	});
-
 	const containers = [];
 
-	for (const dep of filteredDeployments) {
+	for (const dep of serverDeployments) {
 		const service = await db
 			.select()
 			.from(services)

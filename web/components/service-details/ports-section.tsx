@@ -27,7 +27,11 @@ type StagedPort = {
 	isNew?: boolean;
 };
 
-function DnsInstructionsModal({ servers }: { servers: Pick<Server, "id" | "name" | "publicIp">[] }) {
+function DnsInstructionsModal({
+	servers,
+}: {
+	servers: Pick<Server, "id" | "name" | "publicIp">[];
+}) {
 	const serversWithIp = servers.filter((s) => s.publicIp);
 
 	return (
@@ -90,7 +94,9 @@ export const PortsSection = memo(function PortsSection({
 	const [newPort, setNewPort] = useState("");
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
-	const [servers, setServers] = useState<Pick<Server, "id" | "name" | "publicIp">[]>([]);
+	const [servers, setServers] = useState<
+		Pick<Server, "id" | "name" | "publicIp">[]
+	>([]);
 
 	const hostname = service.hostname || slugify(service.name);
 

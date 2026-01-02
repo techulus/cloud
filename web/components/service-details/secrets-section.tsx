@@ -21,7 +21,10 @@ export const SecretsSection = memo(function SecretsSection({
 		data: secrets,
 		isLoading,
 		mutate,
-	} = useSWR<Pick<Secret, "id" | "key" | "createdAt">[]>(`/api/services/${service.id}/secrets`, fetcher);
+	} = useSWR<Pick<Secret, "id" | "key" | "createdAt">[]>(
+		`/api/services/${service.id}/secrets`,
+		fetcher,
+	);
 	const [newKey, setNewKey] = useState("");
 	const [newValue, setNewValue] = useState("");
 	const [showValue, setShowValue] = useState(false);
