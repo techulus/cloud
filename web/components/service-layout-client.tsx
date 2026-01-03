@@ -99,13 +99,13 @@ export function ServiceLayoutClient({
 
 	return (
 		<div className="space-y-6">
-			<nav className="flex gap-1 border-b -mt-2">
+			<nav className="flex gap-1 border-b -mt-2 overflow-x-auto overflow-y-hidden scrollbar-none">
 				{tabs.map((tab) => (
 					<Link
 						key={tab.href}
 						href={tab.href}
 						className={cn(
-							"px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+							"px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0",
 							isActiveTab(tab.href)
 								? "border-primary text-foreground"
 								: "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50",
