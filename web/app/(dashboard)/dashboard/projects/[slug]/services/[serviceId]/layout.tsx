@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { PageHeader } from "@/components/core/page-header";
+import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
 import { ServiceLayoutClient } from "@/components/service-layout-client";
 import { getProjectBySlug, getService } from "@/db/queries";
 
@@ -19,13 +19,12 @@ export default async function ServiceLayout({
 	}
 
 	return (
-		<div className="space-y-6">
-			<PageHeader
-				breadcrumbs={[
-					{ label: "Projects", href: "/dashboard" },
-					{ label: project.name, href: `/dashboard/projects/${slug}` },
-				]}
-				title={service.name}
+		<>
+			<SetBreadcrumbData
+				data={{
+					project: project.name,
+					service: service.name,
+				}}
 			/>
 			<ServiceLayoutClient
 				projectSlug={slug}
@@ -34,6 +33,6 @@ export default async function ServiceLayout({
 			>
 				{children}
 			</ServiceLayoutClient>
-		</div>
+		</>
 	);
 }

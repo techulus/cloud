@@ -1,10 +1,10 @@
 "use client";
 
 import { useService } from "@/components/service-layout-client";
-import { RequestsViewer } from "@/components/service-details/requests-viewer";
+import { LogViewer } from "@/components/log-viewer";
 
 export default function RequestsPage() {
 	const { service } = useService();
 
-	return <RequestsViewer serviceId={service.id} />;
+	return <LogViewer variant="requests" serviceId={service.id} />;
 }

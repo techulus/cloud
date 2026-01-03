@@ -15,11 +15,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild } from "@/actions/builds";
-import { useBreadcrumbs } from "@/components/core/breadcrumb-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -38,7 +37,7 @@ import type {
 } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
-import { BuildLogsViewer } from "./logging/build-logs-viewer";
+import { LogViewer } from "./log-viewer";
 
 type BuildWithDates = Omit<
 	Build,
@@ -138,7 +137,6 @@ export function BuildDetails({
 	githubRepo: Pick<GithubRepo, "id" | "repoFullName"> | null;
 }) {
 	const router = useRouter();
-	const { setBreadcrumbs, clearBreadcrumbs } = useBreadcrumbs();
 	const [isCancelling, setIsCancelling] = useState(false);
 	const [isRetrying, setIsRetrying] = useState(false);
 
@@ -155,24 +153,6 @@ export function BuildDetails({
 	const config = STATUS_CONFIG[build.status];
 	const Icon = config.icon;
 	const isAnimated = ["cloning", "building", "pushing"].includes(build.status);
-
-	useEffect(() => {
-		setBreadcrumbs(
-			[
-				{ label: "Projects", href: "/dashboard" },
-				{ label: project.name, href: `/dashboard/projects/${projectSlug}` },
-				{
-					label: service.name,
-					href: `/dashboard/projects/${projectSlug}/services/${service.id}`,
-				},
-				{ label: "Builds" },
-			],
-			<span className="text-sm font-semibold">
-				Build {build.commitSha.slice(0, 7)}
-			</span>,
-		);
-		return () => clearBreadcrumbs();
-	}, [projectSlug, project.name, service.name, service.id, build.commitSha]);
 
 	const handleCancel = async () => {
 		setIsCancelling(true);
@@ -358,9 +338,9 @@ export function BuildDetails({
 					<CardTitle className="text-sm font-medium">Build Logs</CardTitle>
 				</CardHeader>
 				<CardContent className="p-0">
-					<BuildLogsViewer
+					<LogViewer
+						variant="build-logs"
 						buildId={build.id}
-						serviceId={build.serviceId}
 						isLive={isActiveBuild(build.status)}
 					/>
 				</CardContent>

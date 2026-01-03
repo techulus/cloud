@@ -2,21 +2,71 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import {
-	BreadcrumbProvider,
-	useBreadcrumbs,
-} from "@/components/core/breadcrumb-context";
+	BreadcrumbDataProvider,
+	useBreadcrumbData,
+	type BreadcrumbKey,
+} from "@/components/core/breadcrumb-data";
 import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { signOut, useSession } from "@/lib/auth-client";
 
+type Breadcrumb = { label: string; href: string };
+
+const BREADCRUMB_RULES: Array<{
+	parent: string;
+	key: BreadcrumbKey;
+	format?: (value: string) => string;
+}> = [
+	{ parent: "projects", key: "project" },
+	{ parent: "services", key: "service" },
+	{ parent: "servers", key: "server" },
+	{
+		parent: "builds",
+		key: "build",
+		format: (value) => `Build ${value.slice(0, 7)}`,
+	},
+];
+
+function generateBreadcrumbs(
+	pathname: string,
+	data: ReturnType<typeof useBreadcrumbData>,
+): Breadcrumb[] {
+	const segments = pathname.split("/").filter(Boolean);
+	const crumbs: Breadcrumb[] = [];
+	let href = "";
+
+	for (let i = 0; i < segments.length; i++) {
+		const seg = segments[i];
+		const prev = segments[i - 1];
+		href += `/${seg}`;
+
+		if (!prev) continue;
+
+		const rule = BREADCRUMB_RULES.find(({ parent }) => parent === prev);
+		if (!rule) continue;
+
+		const rawLabel = data[rule.key] ?? seg;
+		const label = rule.format ? rule.format(rawLabel) : rawLabel;
+
+		crumbs.push({ label, href });
+	}
+
+	return crumbs;
+}
+
 function DashboardHeader({ email }: { email: string }) {
 	const router = useRouter();
-	const { breadcrumbs, title } = useBreadcrumbs();
+	const pathname = usePathname();
+	const data = useBreadcrumbData();
+	const breadcrumbs = useMemo(
+		() => generateBreadcrumbs(pathname, data),
+		[pathname, data],
+	);
 
 	return (
 		<header className="border-b">
@@ -31,32 +81,28 @@ function DashboardHeader({ email }: { email: string }) {
 							height={24}
 						/>
 					</Link>
-					{breadcrumbs.length > 0 && (
-						<>
-							<nav className="flex items-center gap-2 text-sm">
-								{breadcrumbs.map((crumb, index) => (
-									<span
-										key={crumb.href || `crumb-${index}`}
-										className="flex items-center gap-2"
+					{breadcrumbs.length > 0 ? (
+						<nav className="flex items-center gap-2 text-sm">
+							{breadcrumbs.map((crumb, index) => (
+								<span key={crumb.href} className="flex items-center gap-2">
+									<Link
+										href={crumb.href}
+										className={
+											index === breadcrumbs.length - 1
+												? "font-semibold text-foreground"
+												: "text-muted-foreground hover:text-foreground transition-colors"
+										}
 									>
-										{crumb.href ? (
-											<Link
-												href={crumb.href}
-												className="text-muted-foreground hover:text-foreground transition-colors"
-											>
-												{crumb.label}
-											</Link>
-										) : (
-											<span className="text-muted-foreground">
-												{crumb.label}
-											</span>
-										)}
+										{crumb.label}
+									</Link>
+									{index < breadcrumbs.length - 1 && (
 										<span className="text-muted-foreground">/</span>
-									</span>
-								))}
-							</nav>
-							{title && <span className="text-sm font-semibold">{title}</span>}
-						</>
+									)}
+								</span>
+							))}
+						</nav>
+					) : (
+						<span className="text-sm font-semibold">techulus.cloud</span>
 					)}
 				</div>
 				<div className="flex items-center gap-4">
@@ -103,7 +149,7 @@ export function DashboardLayoutClient({
 	}
 
 	return (
-		<BreadcrumbProvider>
+		<BreadcrumbDataProvider>
 			<div className="min-h-screen">
 				<DashboardHeader email={session.user.email} />
 				<OfflineServersBanner />
@@ -112,6 +158,6 @@ export function DashboardLayoutClient({
 				</main>
 				<Toaster />
 			</div>
-		</BreadcrumbProvider>
+		</BreadcrumbDataProvider>
 	);
 }

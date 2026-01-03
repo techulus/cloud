@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
 import { builds, projects, services, githubRepos } from "@/db/schema";
 import { BuildDetails } from "@/components/build-details";
@@ -63,12 +64,21 @@ export default async function BuildPage({
 	}
 
 	return (
-		<BuildDetails
-			projectSlug={slug}
-			project={data.project}
-			service={data.service}
-			build={data.build}
-			githubRepo={data.githubRepo}
-		/>
+		<>
+			<SetBreadcrumbData
+				data={{
+					project: data.project.name,
+					service: data.service.name,
+					build: data.build.commitSha,
+				}}
+			/>
+			<BuildDetails
+				projectSlug={slug}
+				project={data.project}
+				service={data.service}
+				build={data.build}
+				githubRepo={data.githubRepo}
+			/>
+		</>
 	);
 }
