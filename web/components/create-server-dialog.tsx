@@ -89,8 +89,9 @@ export function CreateServerDialog() {
 							<div className="space-y-2">
 								<Label>Install Command</Label>
 								<code className="block p-3 bg-muted rounded-lg text-sm break-all font-mono">
-									curl -fsSL https://your-domain/install.sh | bash -s -- --token{" "}
-									{result.agentToken}
+									sudo CONTROL_PLANE_URL={process.env.NEXT_PUBLIC_APP_URL}{" "}
+									REGISTRATION_TOKEN={result.agentToken} bash -c &quot;$(curl
+									-fsSL {process.env.NEXT_PUBLIC_APP_URL}/install.sh)&quot;
 								</code>
 							</div>
 							<div className="flex justify-end">

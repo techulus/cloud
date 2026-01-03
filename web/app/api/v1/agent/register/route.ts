@@ -10,7 +10,8 @@ const TOKEN_EXPIRY_HOURS = 24;
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
-		const { token, wireguardPublicKey, signingPublicKey, publicIp } = body;
+		const { token, wireguardPublicKey, signingPublicKey, publicIp, isProxy } =
+			body;
 
 		if (!token || !wireguardPublicKey || !signingPublicKey) {
 			return NextResponse.json(
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
 				subnetId,
 				wireguardIp,
 				publicIp: publicIp || null,
+				isProxy: isProxy === true,
 				tokenUsedAt: now,
 				status: "online",
 				lastHeartbeat: now,

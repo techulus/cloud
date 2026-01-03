@@ -159,35 +159,37 @@ export async function GET(request: NextRequest) {
 
 	const caddyRoutes = [];
 
-	for (const service of allServices) {
-		const ports = await db
-			.select()
-			.from(servicePorts)
-			.where(eq(servicePorts.serviceId, service.id));
+	if (server.isProxy) {
+		for (const service of allServices) {
+			const ports = await db
+				.select()
+				.from(servicePorts)
+				.where(eq(servicePorts.serviceId, service.id));
 
-		for (const port of ports) {
-			if (port.isPublic && port.domain) {
-				const routableDeployments = await db
-					.select({ ipAddress: deployments.ipAddress })
-					.from(deployments)
-					.where(
-						and(
-							eq(deployments.serviceId, service.id),
-							inArray(deployments.status, [...ROUTABLE_STATUSES]),
-						),
-					);
+			for (const port of ports) {
+				if (port.isPublic && port.domain) {
+					const routableDeployments = await db
+						.select({ ipAddress: deployments.ipAddress })
+						.from(deployments)
+						.where(
+							and(
+								eq(deployments.serviceId, service.id),
+								inArray(deployments.status, [...ROUTABLE_STATUSES]),
+							),
+						);
 
-				const upstreams = routableDeployments
-					.filter((d) => d.ipAddress)
-					.map((d) => `${d.ipAddress}:${port.port}`);
+					const upstreams = routableDeployments
+						.filter((d) => d.ipAddress)
+						.map((d) => `${d.ipAddress}:${port.port}`);
 
-				if (upstreams.length > 0) {
-					caddyRoutes.push({
-						id: port.domain,
-						domain: port.domain,
-						upstreams,
-						serviceId: service.id,
-					});
+					if (upstreams.length > 0) {
+						caddyRoutes.push({
+							id: port.domain,
+							domain: port.domain,
+							upstreams,
+							serviceId: service.id,
+						});
+					}
 				}
 			}
 		}

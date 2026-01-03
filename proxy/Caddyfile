@@ -12,9 +12,6 @@
 :443 {
   tls {
     on_demand
-    issuer acme {
-      dns cloudflare {$CF_API_TOKEN}
-    }
   }
 
   log {

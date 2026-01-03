@@ -71,6 +71,7 @@ type Config struct {
 	SubnetID      int    `json:"subnetId"`
 	WireGuardIP   string `json:"wireguardIp"`
 	EncryptionKey string `json:"encryptionKey"`
+	IsProxy       bool   `json:"isProxy"`
 }
 
 type ActualState struct {
@@ -95,9 +96,10 @@ type Agent struct {
 	isBuilding         bool
 	buildMutex         sync.Mutex
 	currentBuildID     string
+	isProxy            bool
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder, isProxy bool) *Agent {
 	return &Agent{
 		state:             StateIdle,
 		client:            client,
@@ -108,6 +110,7 @@ func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config
 		logCollector:      logCollector,
 		caddyLogCollector: caddyLogCollector,
 		builder:           builder,
+		isProxy:           isProxy,
 	}
 }
 
@@ -123,7 +126,7 @@ func (a *Agent) Run(ctx context.Context) {
 		logTickerC = logTicker.C
 	}
 
-	if a.caddyLogCollector != nil {
+	if a.isProxy && a.caddyLogCollector != nil {
 		a.caddyLogCollector.Start()
 	}
 
@@ -150,7 +153,7 @@ func (a *Agent) Run(ctx context.Context) {
 			if a.logCollector != nil {
 				a.logCollector.Stop()
 			}
-			if a.caddyLogCollector != nil {
+			if a.isProxy && a.caddyLogCollector != nil {
 				a.caddyLogCollector.Stop()
 			}
 			return
@@ -290,13 +293,15 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
 	}
 
-	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
-	for i, r := range expected.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-	}
-	expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
-	if expectedCaddyHash != actual.CaddyConfigHash {
-		changes = append(changes, fmt.Sprintf("UPDATE Caddy (%d routes)", len(expected.Caddy.Routes)))
+	if a.isProxy {
+		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
+		for i, r := range expected.Caddy.Routes {
+			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
+		}
+		expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
+		if expectedCaddyHash != actual.CaddyConfigHash {
+			changes = append(changes, fmt.Sprintf("UPDATE Caddy (%d routes)", len(expected.Caddy.Routes)))
+		}
 	}
 
 	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
@@ -354,12 +359,15 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
-	return &ActualState{
-		Containers:      containers,
-		DnsConfigHash:   dns.GetCurrentConfigHash(),
-		CaddyConfigHash: caddy.GetCurrentConfigHash(),
-		WireguardHash:   wireguard.GetCurrentPeersHash(),
-	}, nil
+	state := &ActualState{
+		Containers:    containers,
+		DnsConfigHash: dns.GetCurrentConfigHash(),
+		WireguardHash: wireguard.GetCurrentPeersHash(),
+	}
+	if a.isProxy {
+		state.CaddyConfigHash = caddy.GetCurrentConfigHash()
+	}
+	return state, nil
 }
 
 func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState) bool {
@@ -375,12 +383,14 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 		return true
 	}
 
-	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
-	for i, r := range expected.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-	}
-	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
-		return true
+	if a.isProxy {
+		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
+		for i, r := range expected.Caddy.Routes {
+			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
+		}
+		if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
+			return true
+		}
 	}
 
 	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
@@ -558,16 +568,18 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		return nil
 	}
 
-	expectedCaddyRoutes := make([]caddy.CaddyRoute, len(a.expectedState.Caddy.Routes))
-	for i, r := range a.expectedState.Caddy.Routes {
-		expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-	}
-	if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
-		log.Printf("[reconcile] updating Caddy routes")
-		if err := caddy.UpdateCaddyRoutes(expectedCaddyRoutes); err != nil {
-			return fmt.Errorf("failed to update Caddy: %w", err)
+	if a.isProxy {
+		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(a.expectedState.Caddy.Routes))
+		for i, r := range a.expectedState.Caddy.Routes {
+			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 		}
-		return nil
+		if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
+			log.Printf("[reconcile] updating Caddy routes")
+			if err := caddy.UpdateCaddyRoutes(expectedCaddyRoutes); err != nil {
+				return fmt.Errorf("failed to update Caddy: %w", err)
+			}
+			return nil
+		}
 	}
 
 	expectedWgPeers := make([]wireguard.Peer, len(a.expectedState.Wireguard.Peers))
@@ -896,12 +908,14 @@ func main() {
 		controlPlaneURL string
 		token           string
 		logsEndpoint    string
+		isProxy         bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
 	flag.StringVar(&logsEndpoint, "logs-endpoint", "", "VictoriaLogs endpoint URL (enables logging)")
+	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -916,8 +930,13 @@ func main() {
 		log.Fatalf("Podman prerequisites check failed: %v", err)
 	}
 
-	if err := caddy.CheckPrerequisites(); err != nil {
-		log.Fatalf("Caddy prerequisites check failed: %v", err)
+	if isProxy {
+		if err := caddy.CheckPrerequisites(); err != nil {
+			log.Fatalf("Caddy prerequisites check failed: %v", err)
+		}
+		log.Println("Running as proxy node - Caddy will handle public traffic")
+	} else {
+		log.Println("Running as worker node - Caddy disabled")
 	}
 
 	if err := build.CheckPrerequisites(); err != nil {
@@ -985,7 +1004,7 @@ func main() {
 
 		log.Println("Registering with control plane...")
 		publicIP := getPublicIP()
-		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP)
+		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP, isProxy)
 		if err != nil {
 			log.Fatalf("Failed to register: %v", err)
 		}
@@ -995,6 +1014,7 @@ func main() {
 			SubnetID:      resp.SubnetID,
 			WireGuardIP:   resp.WireGuardIP,
 			EncryptionKey: resp.EncryptionKey,
+			IsProxy:       isProxy,
 		}
 
 		if err := saveConfig(configPath, config); err != nil {
@@ -1084,7 +1104,7 @@ func main() {
 	publicIP := getPublicIP()
 	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector, builder)
+	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector, builder, config.IsProxy)
 	agent.Run(ctx)
 
 	if agentLogFlusherDone != nil {

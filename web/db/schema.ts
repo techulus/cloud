@@ -108,6 +108,7 @@ export const servers = pgTable("servers", {
 	wireguardIp: text("wireguard_ip"),
 	wireguardPublicKey: text("wireguard_public_key"),
 	signingPublicKey: text("signing_public_key"),
+	isProxy: boolean("is_proxy").default(false).notNull(),
 	status: text("status", { enum: ["pending", "online", "offline", "unknown"] })
 		.notNull()
 		.default("pending"),

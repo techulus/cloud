@@ -28,6 +28,7 @@ type RegisterRequest struct {
 	WireGuardPublicKey string `json:"wireguardPublicKey"`
 	SigningPublicKey   string `json:"signingPublicKey"`
 	PublicIP           string `json:"publicIp,omitempty"`
+	IsProxy            bool   `json:"isProxy"`
 }
 
 type RegisterResponse struct {
@@ -44,12 +45,13 @@ type Peer struct {
 	Endpoint   *string `json:"endpoint"`
 }
 
-func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP string) (*RegisterResponse, error) {
+func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP string, isProxy bool) (*RegisterResponse, error) {
 	req := RegisterRequest{
 		Token:              token,
 		WireGuardPublicKey: wireguardPublicKey,
 		SigningPublicKey:   signingPublicKey,
 		PublicIP:           publicIP,
+		IsProxy:            isProxy,
 	}
 
 	body, err := json.Marshal(req)

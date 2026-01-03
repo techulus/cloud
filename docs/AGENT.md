@@ -1,6 +1,15 @@
 # Agent Architecture
 
-The agent runs on worker servers and reconciles expected state from the control plane.
+The agent runs on servers and reconciles expected state from the control plane.
+
+## Node Types
+
+The agent supports two modes:
+
+| Type | Flag | Caddy | Description |
+|------|------|-------|-------------|
+| Worker | (default) | ✗ | Runs containers only |
+| Proxy | `--proxy` | ✓ | Handles TLS and public traffic |
 
 ## State Machine
 
@@ -26,7 +35,7 @@ Two-state machine for reconciliation:
   3. Deploy missing containers
   4. Redeploy containers with wrong image
   5. Update DNS records
-  6. Update Caddy routes
+  6. Update Caddy routes (proxy nodes only)
   7. Update WireGuard peers
 - Timeout: 5 minutes max
 - Always reports status before returning to IDLE
@@ -36,7 +45,7 @@ Two-state machine for reconciliation:
 Uses hash comparisons for deterministic drift detection:
 - Containers: Missing, orphaned, wrong state, or image mismatch
 - DNS: Hash of sorted records
-- Caddy: Hash of sorted routes
+- Caddy: Hash of sorted routes (proxy nodes only)
 - WireGuard: Hash of sorted peers
 
 ## Container Labels
@@ -50,6 +59,16 @@ The agent tracks containers using Podman labels:
 | `techulus.service.name` | Human-readable service name |
 
 Containers without `techulus.deployment.id` are considered orphans and will be cleaned up.
+
+## Command Line Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | (required) | Control plane URL |
+| `--token` | | Registration token (required for first run) |
+| `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
+| `--logs-endpoint` | | VictoriaLogs endpoint for log shipping |
+| `--proxy` | `false` | Run as proxy node (handles TLS/public traffic) |
 
 ## Build System
 
@@ -76,3 +95,17 @@ Agents process work queue items for operations that can't be expressed via expec
 | `force_cleanup` | Force remove containers for a service |
 | `cleanup_volumes` | Remove volume directories for a service |
 | `deploy` | Handled via expected state reconciliation |
+
+## Proxy vs Worker Behavior
+
+### Proxy Node (`--proxy`)
+- Runs Caddy for TLS termination
+- Receives Caddy routes from control plane
+- Handles public traffic and routes to containers via WireGuard
+- Collects and ships Caddy access logs
+
+### Worker Node (default)
+- Does not run Caddy
+- Receives empty Caddy routes from control plane
+- Skips all Caddy-related drift detection and reconciliation
+- Lighter footprint, focused on running containers

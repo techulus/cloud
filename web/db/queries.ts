@@ -149,6 +149,7 @@ export async function getServerDetails(id: string) {
 			resourcesMemory: servers.resourcesMemory,
 			resourcesDisk: servers.resourcesDisk,
 			createdAt: servers.createdAt,
+			agentToken: servers.agentToken,
 		})
 		.from(servers)
 		.where(eq(servers.id, id));

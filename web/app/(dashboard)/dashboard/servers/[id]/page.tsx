@@ -1,10 +1,17 @@
 import { notFound } from "next/navigation";
 import { getServerDetails } from "@/db/queries";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
 import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { formatRelativeTime } from "@/lib/date";
 import { LogViewer } from "@/components/log-viewer";
+import { Label } from "@/components/ui/label";
 
 export default async function ServerDetailPage({
 	params,
@@ -18,6 +25,8 @@ export default async function ServerDetailPage({
 		notFound();
 	}
 
+	const isUnregistered = !server.wireguardIp && server.agentToken;
+
 	return (
 		<>
 			<SetBreadcrumbData data={{ server: server.name }} />
@@ -26,6 +35,37 @@ export default async function ServerDetailPage({
 					<h1 className="text-lg font-semibold">{server.name}</h1>
 					<StatusIndicator status={server.status} />
 				</div>
+
+				{isUnregistered && (
+					<Card className="border-amber-500/50 bg-amber-500/5">
+						<CardHeader>
+							<CardTitle>Complete Server Setup</CardTitle>
+							<CardDescription>
+								Run the following command on your server to install and register
+								the agent
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-4">
+							<div className="space-y-2">
+								<Label>Agent Token</Label>
+								<code className="block p-3 bg-muted rounded-lg text-sm break-all font-mono">
+									{server.agentToken}
+								</code>
+								<p className="text-xs text-muted-foreground">
+									This token expires in 24 hours and can only be used once.
+								</p>
+							</div>
+							<div className="space-y-2">
+								<Label>Install Command</Label>
+								<code className="block p-3 bg-muted rounded-lg text-sm break-all font-mono">
+									sudo CONTROL_PLANE_URL={process.env.NEXT_PUBLIC_APP_URL}{" "}
+									REGISTRATION_TOKEN={server.agentToken} bash -c &quot;$(curl
+									-fsSL {process.env.NEXT_PUBLIC_APP_URL}/install.sh)&quot;
+								</code>
+							</div>
+						</CardContent>
+					</Card>
+				)}
 
 				<Card>
 					<CardHeader>

@@ -4,8 +4,8 @@
 
 A stateless container deployment platform with three core principles:
 1. **Workloads are disposable** - containers can be killed and recreated at any time
-2. **Machines are peers** - all servers are equal, no special roles
-3. **Networking is private-first** - services communicate over WireGuard mesh, public exposure via Caddy
+2. **Two node types** - proxy nodes handle public traffic, worker nodes run containers
+3. **Networking is private-first** - services communicate over WireGuard mesh, public exposure via proxy nodes
 
 ## Tech Stack
 
@@ -15,10 +15,20 @@ A stateless container deployment platform with three core principles:
 | Database | Postgres + Drizzle | Simple, no external deps, single file, easy backup |
 | Server Agent | Go | Single binary, shells out to Podman |
 | Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
-| Reverse Proxy | Caddy | Automatic HTTPS, runs on every server |
+| Reverse Proxy | Caddy | Automatic HTTPS, runs on proxy nodes only |
 | Private Network | WireGuard (self-managed) | Full mesh, control plane coordinates |
 | Service Discovery | dnsmasq | Local DNS on each server for .internal domains |
 | Agent Communication | Pull-based HTTP | Agent polls for expected state, reports status |
+
+## Node Types
+
+| Type | Caddy | Public Traffic | Containers |
+|------|-------|----------------|------------|
+| Proxy | ✓ | Handles TLS termination | ✓ |
+| Worker | ✗ | None | ✓ |
+
+- **Proxy nodes**: Handle incoming public traffic, TLS termination via HTTP-01 ACME, route to containers via WireGuard
+- **Worker nodes**: Run containers only, no public exposure, lighter footprint
 
 ## Architecture Diagram
 
@@ -36,11 +46,10 @@ A stateless container deployment platform with three core principles:
                               │ HTTPS (poll every 10s)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        WORKER SERVERS                           │
-│  (All servers are equal - each runs Caddy, dnsmasq, Podman)    │
+│                          SERVERS                                 │
 │                                                                 │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │    Server 1     │  │    Server 2     │  │    Server 3     │ │
+│  │  Proxy Node 1   │  │  Worker Node 1  │  │  Worker Node 2  │ │
 │  │                 │  │                 │  │                 │ │
 │  │ WG: 10.100.1.1  │  │ WG: 10.100.2.1  │  │ WG: 10.100.3.1  │ │
 │  │ Containers:     │  │ Containers:     │  │ Containers:     │ │
@@ -51,7 +60,7 @@ A stateless container deployment platform with three core principles:
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
 │  │ │   Podman    │ │  │ │   Podman    │ │  │ │   Podman    │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
-│  │ │    Caddy    │ │  │ │    Caddy    │ │  │ │    Caddy    │ │ │
+│  │ │    Caddy    │ │  │ │      -      │ │  │ │      -      │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
 │  │ │   dnsmasq   │ │  │ │   dnsmasq   │ │  │ │   dnsmasq   │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
@@ -62,6 +71,9 @@ A stateless container deployment platform with three core principles:
 │           └────────────────────┴────────────────────┘          │
 │                      WireGuard Full Mesh                       │
 └─────────────────────────────────────────────────────────────────┘
+
+Public Traffic Flow:
+  Internet → DNS → Proxy Node → Caddy (TLS) → WireGuard → Container
 ```
 
 ## Agent State Machine
@@ -81,9 +93,11 @@ The agent uses a two-state machine to prevent race conditions during reconciliat
 
 ### IDLE State
 - Poll control plane every 10 seconds for expected state
-- Compare expected state vs actual state (containers, DNS, Caddy, WireGuard)
+- Compare expected state vs actual state (containers, DNS, Caddy*, WireGuard)
 - If no drift: send status report, stay in IDLE
 - If drift detected: snapshot expected state, transition to PROCESSING
+
+*Caddy drift detection only on proxy nodes
 
 ### PROCESSING State
 - Stop polling (use the expected state snapshot)
@@ -98,7 +112,7 @@ The agent uses a two-state machine to prevent race conditions during reconciliat
 The agent detects drift using hash comparisons:
 - **Containers**: Missing, orphaned, wrong state, or image mismatch
 - **DNS**: Hash of sorted records vs current dnsmasq config
-- **Caddy**: Hash of sorted routes vs current Caddy config
+- **Caddy**: Hash of sorted routes vs current Caddy config (proxy nodes only)
 - **WireGuard**: Hash of sorted peers vs current wg0.conf
 
 ### Container Reconciliation
@@ -109,7 +123,7 @@ Order of operations:
 3. Deploy missing containers
 4. Redeploy containers with wrong state or image mismatch
 5. Update DNS records
-6. Update Caddy routes
+6. Update Caddy routes (proxy nodes only)
 7. Update WireGuard peers
 
 ## Rollout Stages
@@ -194,12 +208,14 @@ address=/redis.internal/10.200.1.3
 
 Services resolve via `.internal` domain with round-robin across replicas.
 
-### Caddy (Distributed Reverse Proxy)
+### Caddy (Proxy Nodes Only)
 
-Every server runs Caddy with identical routes pushed from control plane:
-- Public routes: `subdomain.example.com` → container IPs
+Proxy nodes run Caddy with routes pushed from control plane:
+- Uses on-demand TLS with HTTP-01 ACME challenge
+- Routes: `subdomain.example.com` → container IPs (via WireGuard mesh)
+- Control plane only sends routes to proxy nodes
 
-Any server can handle any request - if the container is remote, traffic routes via WireGuard.
+Worker nodes do not run Caddy.
 
 ### Traffic Flows
 
@@ -214,9 +230,9 @@ Container A (10.200.1.2)
 
 **External (public):**
 ```
-Internet → DNS round-robin → Server 2 public IP
+Internet → DNS → Proxy Node public IP
   → Caddy: app.example.com → 10.200.1.2:80
-  → WireGuard tunnel to Server 1
+  → WireGuard tunnel to Worker Node
   → Container (10.200.1.2)
 ```
 
@@ -234,7 +250,7 @@ Internet → DNS round-robin → Server 2 public IP
 - Advances rollout stages based on deployment status
 
 **API Endpoints:**
-- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Caddy, WireGuard config
+- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Caddy (proxy only), WireGuard config
 - `POST /api/v1/agent/status` - Receives container status, advances rollout stages
 
 ### 2. Server Agent (Go)
@@ -243,18 +259,18 @@ Internet → DNS round-robin → Server 2 public IP
 - Polls control plane for expected state
 - Manages containers via Podman with static IPs
 - Manages local WireGuard interface
-- Updates Caddy routes via admin API
+- Updates Caddy routes via admin API (proxy nodes only)
 - Updates dnsmasq records
 - Reports status (resources, public IP, container health)
 
 **Agent Lifecycle:**
 1. User creates server in control plane, receives agent token
-2. User runs install script for dependencies (WireGuard, Podman, Caddy, dnsmasq)
-3. User starts agent with token
+2. User runs install script (specifies if proxy node)
+3. User starts agent with token (and `--proxy` flag if proxy node)
 4. Agent generates WireGuard and signing keypairs
-5. Agent registers with control plane via HTTP
+5. Agent registers with control plane via HTTP (includes isProxy flag)
 6. Control plane assigns subnet, returns WireGuard peers
-7. Agent configures WireGuard, container network, dnsmasq
+7. Agent configures WireGuard, container network, dnsmasq, and Caddy (if proxy)
 8. Agent enters IDLE state, begins polling
 
 ### 3. Container Labels
@@ -270,7 +286,7 @@ Containers are tracked via Podman labels:
 2. **Request Signing**: Body + timestamp signed with server-specific secret
 3. **WireGuard**: All inter-server traffic encrypted
 4. **No Public Ports on Containers**: Only reachable via WireGuard mesh
-5. **Caddy**: Only entry point for public traffic
+5. **Caddy**: Only entry point for public traffic (proxy nodes only)
 
 **Registration Token:**
 - One-time-use token for initial registration

@@ -4,23 +4,51 @@ Agent that runs on worker servers and communicates with the control plane.
 
 See [docs/AGENT.md](../docs/AGENT.md) for architecture details.
 
+## Node Types
+
+The agent supports two modes:
+
+- **Worker Node** (default): Runs containers only, no public traffic handling
+- **Proxy Node** (`--proxy`): Handles TLS termination and routes public traffic to containers via WireGuard mesh
+
 ## Prerequisites
 
+### All Nodes
 - WireGuard (`wg` and `wg-quick` commands)
 - Podman
-- Caddy (with cloudflare DNS plugin)
 - dnsmasq
 - BuildKit + buildctl
 - Railpack
 
-### Manual Ubuntu Setup
+### Proxy Nodes Only
+- Caddy
+
+## Automated Installation
+
+Use the install script for automated setup:
+
+```bash
+curl -sSL https://your-control-plane.com/install.sh | sudo bash
+```
+
+The script will ask if this is a proxy node and configure accordingly.
+
+For non-interactive installation:
+
+```bash
+export CONTROL_PLANE_URL=https://your-control-plane.com
+export REGISTRATION_TOKEN=your-token
+export IS_PROXY=true  # or false for worker nodes
+curl -sSL $CONTROL_PLANE_URL/install.sh | sudo bash
+```
+
+## Manual Setup
+
+### Worker Node
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install wireguard wireguard-tools podman dnsmasq golang-go -y
-
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-xcaddy build --with github.com/caddy-dns/cloudflare --output /usr/bin/caddy
+sudo apt install wireguard wireguard-tools podman dnsmasq -y
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
@@ -28,7 +56,17 @@ sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
 curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0.26.3.linux-amd64.tar.gz | sudo tar -xz -C /usr/local
 ```
 
-This installs both `buildkitd` (daemon) and `buildctl` (CLI) to `/usr/local/bin/`.
+### Proxy Node
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install wireguard wireguard-tools podman dnsmasq caddy -y
+
+curl -sSL https://railpack.com/install.sh | sh
+sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
+
+curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0.26.3.linux-amd64.tar.gz | sudo tar -xz -C /usr/local
+```
 
 ## BuildKit Setup
 
@@ -69,14 +107,26 @@ GOOS=linux GOARCH=amd64 go build -o bin/agent-linux-amd64 ./cmd/agent
 
 ### First Run (Registration)
 
+Worker node:
 ```bash
 sudo ./agent --url <control-plane-url> --token <registration-token> --data-dir /var/lib/techulus-agent
 ```
 
+Proxy node:
+```bash
+sudo ./agent --url <control-plane-url> --token <registration-token> --data-dir /var/lib/techulus-agent --proxy
+```
+
 ### Subsequent Runs
 
+Worker node:
 ```bash
 sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+```
+
+Proxy node:
+```bash
+sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --proxy
 ```
 
 ### Run as systemd Service
@@ -85,14 +135,32 @@ sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
 sudo nano /etc/systemd/system/techulus-agent.service
 ```
 
+Worker node:
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target
+After=network.target buildkitd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --logs-endpoint http://athena:9428
+ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+Restart=always
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Proxy node:
+```ini
+[Unit]
+Description=Techulus Cloud Agent
+After=network.target caddy.service buildkitd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --proxy
 Restart=always
 RestartSec=5
 KillMode=process
@@ -117,6 +185,7 @@ sudo systemctl start techulus-agent
 | `--token` | | Registration token (required for first run) |
 | `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
 | `--logs-endpoint` | | VictoriaLogs endpoint (e.g., `http://athena:9428`) |
+| `--proxy` | `false` | Run as proxy node (handles TLS and public traffic) |
 
 ## Troubleshooting
 
