@@ -1038,12 +1038,16 @@ func main() {
 	var logCollector *logs.Collector
 	var caddyLogCollector *logs.CaddyCollector
 	var logsSender *logs.VictoriaLogsSender
+	var agentLogWriter *logs.AgentLogWriter
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint)
 		logCollector = logs.NewCollector(logsSender, dataDir)
 		caddyLogCollector = logs.NewCaddyCollector(logsSender)
 		log.Println("[caddy-logs] Caddy HTTP log collection enabled")
+		agentLogWriter = logs.NewAgentLogWriter(config.ServerID, logsSender)
+		log.SetOutput(agentLogWriter)
+		log.Println("[agent-logs] Agent log collection enabled")
 	}
 
 	var builder *build.Builder
@@ -1066,11 +1070,20 @@ func main() {
 		cancel()
 	}()
 
+	var agentLogFlusherDone <-chan struct{}
+	if agentLogWriter != nil {
+		agentLogFlusherDone = agentLogWriter.StartFlusher(ctx)
+	}
+
 	publicIP := getPublicIP()
 	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
 
 	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector, builder)
 	agent.Run(ctx)
+
+	if agentLogFlusherDone != nil {
+		<-agentLogFlusherDone
+	}
 
 	log.Println("Agent stopped")
 }

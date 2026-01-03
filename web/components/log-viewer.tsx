@@ -51,12 +51,23 @@ interface BuildLogEntry extends BaseEntry {
 	message: string;
 }
 
-type LogViewerVariant = "service-logs" | "requests" | "build-logs";
+interface ServerLogEntry extends BaseEntry {
+	id: string;
+	message: string;
+	level: string;
+}
+
+type LogViewerVariant =
+	| "service-logs"
+	| "requests"
+	| "build-logs"
+	| "server-logs";
 
 type LogViewerProps =
 	| { variant: "service-logs"; serviceId: string }
 	| { variant: "requests"; serviceId: string }
-	| { variant: "build-logs"; buildId: string; isLive: boolean };
+	| { variant: "build-logs"; buildId: string; isLive: boolean }
+	| { variant: "server-logs"; serverId: string };
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
 	error: "text-red-500 bg-red-500/10",
@@ -121,12 +132,17 @@ function useLogData(props: LogViewerProps) {
 				return `/api/services/${props.serviceId}/requests?limit=500`;
 			case "build-logs":
 				return `/api/builds/${props.buildId}/logs`;
+			case "server-logs":
+				return `/api/servers/${props.serverId}/logs?limit=500`;
 		}
 	}, [props]);
 
 	const pollingInterval = useMemo(() => {
 		if (props.variant === "build-logs") {
 			return props.isLive ? 2000 : 0;
+		}
+		if (props.variant === "server-logs") {
+			return 5000;
 		}
 		return 2000;
 	}, [props]);
@@ -234,6 +250,78 @@ function ServiceLogsFilters({
 				</Button>
 			</div>
 		</>
+	);
+}
+
+function ServerLogFilters({
+	levels,
+	onLevelsChange,
+}: {
+	levels: Set<LogLevel>;
+	onLevelsChange: (levels: Set<LogLevel>) => void;
+}) {
+	const toggleLevel = (level: LogLevel) => {
+		const newLevels = new Set(levels);
+		if (newLevels.has(level)) {
+			newLevels.delete(level);
+		} else {
+			newLevels.add(level);
+		}
+		onLevelsChange(newLevels);
+	};
+
+	const levelLabel = useMemo(() => {
+		if (levels.size === 3) return "All levels";
+		if (levels.size === 0) return "No levels";
+		return Array.from(levels).join(", ");
+	}, [levels]);
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 h-7 px-2.5 text-[0.8rem] font-medium rounded-[min(var(--radius-md),12px)] border border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50">
+				{levelLabel}
+				<ChevronDown className="size-3" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start">
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>Log Levels</DropdownMenuLabel>
+					<DropdownMenuSeparator />
+					{(["error", "warn", "info"] as LogLevel[]).map((level) => (
+						<DropdownMenuCheckboxItem
+							key={level}
+							checked={levels.has(level)}
+							onCheckedChange={() => toggleLevel(level)}
+						>
+							<span className="flex items-center gap-2">
+								<span
+									className={`size-2 rounded-full ${
+										level === "error"
+											? "bg-red-500"
+											: level === "warn"
+												? "bg-yellow-500"
+												: "bg-blue-500"
+									}`}
+								/>
+								{level.charAt(0).toUpperCase() + level.slice(1)}
+							</span>
+						</DropdownMenuCheckboxItem>
+					))}
+					<DropdownMenuSeparator />
+					<DropdownMenuCheckboxItem
+						checked={levels.size === 3}
+						onCheckedChange={() =>
+							onLevelsChange(
+								levels.size === 3
+									? new Set()
+									: new Set(["error", "warn", "info"]),
+							)
+						}
+					>
+						Select all
+					</DropdownMenuCheckboxItem>
+				</DropdownMenuGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -418,13 +506,48 @@ function BuildLogRow({
 	);
 }
 
+function ServerLogRow({
+	entry,
+	search,
+}: {
+	entry: ServerLogEntry;
+	search: string;
+}) {
+	const levelColors: Record<string, string> = {
+		error: "text-red-500 bg-red-500/10",
+		warn: "text-yellow-500 bg-yellow-500/10",
+		info: "text-blue-500 bg-blue-500/10",
+	};
+
+	return (
+		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
+			<span
+				className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+				title={formatDateTime(entry.timestamp)}
+			>
+				{formatTime(entry.timestamp)}
+			</span>
+			<span
+				className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${levelColors[entry.level] || levelColors.info}`}
+			>
+				{entry.level}
+			</span>
+			<span className="text-zinc-800 dark:text-zinc-200 break-all whitespace-pre-wrap">
+				{highlightMatches(entry.message, search)}
+			</span>
+		</div>
+	);
+}
+
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [search, setSearch] = useState("");
 	const [autoScroll, setAutoScroll] = useState(true);
 
-	const [levels, setLevels] = useState<Set<LogLevel>>(
-		new Set(["error", "warn", "info", "debug"]),
+	const [levels, setLevels] = useState<Set<LogLevel>>(() =>
+		props.variant === "server-logs"
+			? new Set(["error", "warn", "info"])
+			: new Set(["error", "warn", "info", "debug"]),
 	);
 	const [showStdout, setShowStdout] = useState(true);
 	const [showStderr, setShowStderr] = useState(true);
@@ -475,6 +598,14 @@ export function LogViewer(props: LogViewerProps) {
 					!entry.message.toLowerCase().includes(search.toLowerCase())
 				)
 					return false;
+			} else if (props.variant === "server-logs") {
+				const entry = log as ServerLogEntry;
+				if (!levels.has(entry.level as LogLevel)) return false;
+				if (
+					search &&
+					!entry.message.toLowerCase().includes(search.toLowerCase())
+				)
+					return false;
 			}
 
 			return true;
@@ -519,7 +650,15 @@ export function LogViewer(props: LogViewerProps) {
 					emptyMessage: "Waiting for build logs...",
 					noMatchMessage: "No logs match your search",
 					loadMoreLabel: "",
-					height: "h-full",
+					height: "h-[84vh]",
+				};
+			case "server-logs":
+				return {
+					searchPlaceholder: "Search logs...",
+					emptyMessage: "No agent logs available",
+					noMatchMessage: "No logs match filters",
+					loadMoreLabel: "Load older logs",
+					height: "h-[84vh]",
 				};
 		}
 	}, [props.variant]);
@@ -564,6 +703,10 @@ export function LogViewer(props: LogViewerProps) {
 						statusFilter={statusFilter}
 						onStatusFilterChange={setStatusFilter}
 					/>
+				)}
+
+				{props.variant === "server-logs" && (
+					<ServerLogFilters levels={levels} onLevelsChange={setLevels} />
 				)}
 
 				<div className="flex items-center gap-2 ml-auto">
@@ -621,6 +764,16 @@ export function LogViewer(props: LogViewerProps) {
 								const e = entry as RequestEntry;
 								return (
 									<RequestRow
+										key={`${e.id}-${idx}`}
+										entry={e}
+										search={search}
+									/>
+								);
+							}
+							if (props.variant === "server-logs") {
+								const e = entry as ServerLogEntry;
+								return (
+									<ServerLogRow
 										key={`${e.id}-${idx}`}
 										entry={e}
 										search={search}

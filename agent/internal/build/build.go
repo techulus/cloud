@@ -162,7 +162,6 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	if buildkitAddr == "" {
 		buildkitAddr = "tcp://127.0.0.1:1234"
 	}
-	log.Printf("[build:%s] BUILDKIT_HOST=%s", truncateStr(config.BuildID, 8), buildkitAddr)
 
 	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", config.ImageURI)
 

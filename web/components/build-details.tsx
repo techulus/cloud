@@ -8,7 +8,6 @@ import {
 	Clock,
 	ExternalLink,
 	GitBranch,
-	GitCommit,
 	Loader2,
 	RotateCcw,
 	XCircle,
@@ -20,7 +19,6 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild } from "@/actions/builds";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Item,
 	ItemContent,
@@ -28,13 +26,7 @@ import {
 	ItemMedia,
 	ItemTitle,
 } from "@/components/ui/item";
-import type {
-	Build,
-	BuildStatus,
-	GithubRepo,
-	Project,
-	Service,
-} from "@/db/types";
+import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 import { LogViewer } from "./log-viewer";
@@ -125,13 +117,11 @@ function formatDuration(
 
 export function BuildDetails({
 	projectSlug,
-	project,
 	service,
 	build: initialBuild,
 	githubRepo,
 }: {
 	projectSlug: string;
-	project: Pick<Project, "id" | "name">;
 	service: Pick<Service, "id" | "name">;
 	build: BuildWithDates;
 	githubRepo: Pick<GithubRepo, "id" | "repoFullName"> | null;
@@ -258,9 +248,6 @@ export function BuildDetails({
 
 			<div className="grid gap-4 md:grid-cols-2">
 				<Item variant="outline">
-					<ItemMedia variant="icon">
-						<GitCommit className="size-5 text-muted-foreground" />
-					</ItemMedia>
 					<ItemContent>
 						<ItemTitle>
 							<code className="font-mono text-sm">
@@ -290,9 +277,6 @@ export function BuildDetails({
 				</Item>
 
 				<Item variant="outline">
-					<ItemMedia variant="icon">
-						<Clock className="size-5 text-muted-foreground" />
-					</ItemMedia>
 					<ItemContent>
 						<ItemTitle>Timing</ItemTitle>
 						<ItemDescription as="div" className="space-y-1">
@@ -333,18 +317,14 @@ export function BuildDetails({
 				</Item>
 			)}
 
-			<Card className="p-0 pt-4">
-				<CardHeader>
-					<CardTitle className="text-sm font-medium">Build Logs</CardTitle>
-				</CardHeader>
-				<CardContent className="p-0">
-					<LogViewer
-						variant="build-logs"
-						buildId={build.id}
-						isLive={isActiveBuild(build.status)}
-					/>
-				</CardContent>
-			</Card>
+			<div className="space-y-2">
+				<h3 className="text-sm font-medium">Build Logs</h3>
+				<LogViewer
+					variant="build-logs"
+					buildId={build.id}
+					isLive={isActiveBuild(build.status)}
+				/>
+			</div>
 		</div>
 	);
 }

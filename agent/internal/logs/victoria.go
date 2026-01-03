@@ -150,6 +150,14 @@ type victoriaBuildLogEntry struct {
 	LogType   string `json:"log_type"`
 }
 
+type AgentLog struct {
+	ServerID  string `json:"server_id"`
+	Message   string `json:"_msg"`
+	Timestamp string `json:"_time"`
+	Level     string `json:"level"`
+	LogType   string `json:"log_type"`
+}
+
 func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string, logs []string) error {
 	if len(logs) == 0 {
 		return nil
@@ -193,6 +201,49 @@ func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string,
 	resp, err := v.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send build logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (v *VictoriaLogsSender) SendAgentLogs(logs []AgentLog) error {
+	if len(logs) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	for _, l := range logs {
+		if strings.TrimSpace(l.Message) == "" {
+			continue
+		}
+		data, err := json.Marshal(l)
+		if err != nil {
+			continue
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+
+	if buf.Len() == 0 {
+		return nil
+	}
+
+	url := v.endpoint + "/insert/jsonline"
+
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send agent logs: %w", err)
 	}
 	defer resp.Body.Close()
 
