@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+	bigint,
 	boolean,
 	index,
 	integer,
@@ -400,7 +401,7 @@ export const builds = pgTable(
 			.default("pending"),
 		imageUri: text("image_uri"),
 		error: text("error"),
-		githubDeploymentId: integer("github_deployment_id"),
+		githubDeploymentId: bigint("github_deployment_id", { mode: "number" }),
 		claimedBy: text("claimed_by").references(() => servers.id, {
 			onDelete: "set null",
 		}),
