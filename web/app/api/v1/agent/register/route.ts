@@ -1,9 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { eq, and, isNull, gt, isNotNull, ne } from "drizzle-orm";
+import { eq, and, isNull, gt } from "drizzle-orm";
 import { assignSubnet, getWireGuardPeers } from "@/lib/wireguard";
-import { enqueueWork } from "@/lib/work-queue";
 
 const TOKEN_EXPIRY_HOURS = 24;
 
@@ -66,24 +65,6 @@ export async function POST(request: NextRequest) {
 			.where(eq(servers.id, server.id));
 
 		const peers = await getWireGuardPeers(server.id);
-
-		const existingServers = await db
-			.select({ id: servers.id })
-			.from(servers)
-			.where(
-				and(
-					eq(servers.status, "online"),
-					isNotNull(servers.subnetId),
-					ne(servers.id, server.id),
-				),
-			);
-
-		for (const existingServer of existingServers) {
-			const existingPeers = await getWireGuardPeers(existingServer.id);
-			await enqueueWork(existingServer.id, "update_wireguard", {
-				peers: existingPeers,
-			});
-		}
 
 		return NextResponse.json({
 			serverId: server.id,

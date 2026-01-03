@@ -1,7 +1,6 @@
 import { db } from "@/db";
 import { servers, deployments } from "@/db/schema";
 import { eq, isNotNull, and, ne } from "drizzle-orm";
-import { enqueueWork } from "./work-queue";
 import { WIREGUARD_SUBNET_PREFIX, CONTAINER_SUBNET_PREFIX } from "./constants";
 
 export async function assignSubnet(): Promise<{
@@ -78,18 +77,4 @@ export async function getWireGuardPeers(excludeServerId: string) {
 		allowedIps: `${WIREGUARD_SUBNET_PREFIX}.${s.subnetId}.0/24,${CONTAINER_SUBNET_PREFIX}.${s.subnetId}.0/24`,
 		endpoint: s.publicIp ? `${s.publicIp}:51820` : null,
 	}));
-}
-
-export async function broadcastWireGuardUpdate() {
-	const onlineServers = await db
-		.select({ id: servers.id })
-		.from(servers)
-		.where(and(eq(servers.status, "online"), isNotNull(servers.subnetId)));
-
-	for (const server of onlineServers) {
-		const peers = await getWireGuardPeers(server.id);
-		await enqueueWork(server.id, "update_wireguard", { peers });
-	}
-
-	return onlineServers.length;
 }
