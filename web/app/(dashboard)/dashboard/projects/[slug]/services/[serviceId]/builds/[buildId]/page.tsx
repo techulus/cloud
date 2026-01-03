@@ -74,7 +74,6 @@ export default async function BuildPage({
 			/>
 			<BuildDetails
 				projectSlug={slug}
-				project={data.project}
 				service={data.service}
 				build={data.build}
 				githubRepo={data.githubRepo}
