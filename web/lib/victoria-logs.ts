@@ -131,7 +131,7 @@ export async function queryLogsByServer(
 	if (after) {
 		query += ` _time:>${after}`;
 	}
-	query += " | sort by (_time)";
+	query += " | sort by (_time desc)";
 
 	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
 	url.searchParams.set("query", query);

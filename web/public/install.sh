@@ -321,6 +321,15 @@ EOF
   tls {
     on_demand
   }
+
+  log {
+    output file /var/log/caddy/techulus.log {
+      roll_size 50mb
+      roll_keep 3
+    }
+    format json
+  }
+
   respond /__caddy_health__ "ok" 200
 }
 EOF

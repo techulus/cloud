@@ -37,7 +37,7 @@ export async function GET(
 		}));
 
 		return Response.json({
-			logs,
+			logs: logs.reverse(),
 			hasMore: result.hasMore,
 		});
 	} catch (error) {
