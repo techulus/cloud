@@ -43,7 +43,7 @@ func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	}
 }
 
-func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func() bool) error {
+func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func() bool, onStatusChange func(status string)) error {
 	buildDir := filepath.Join(b.dataDir, "builds", config.BuildID)
 
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
@@ -65,6 +65,10 @@ func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func
 
 	if checkCancelled() {
 		return fmt.Errorf("build cancelled")
+	}
+
+	if onStatusChange != nil {
+		onStatusChange("building")
 	}
 
 	if err := b.buildAndPush(ctx, config, buildDir); err != nil {
@@ -160,7 +164,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 	buildkitAddr := os.Getenv("BUILDKIT_HOST")
 	if buildkitAddr == "" {
-		buildkitAddr = "tcp://127.0.0.1:1234"
+		buildkitAddr = "unix:///run/buildkit/buildkitd.sock"
 	}
 
 	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", config.ImageURI)

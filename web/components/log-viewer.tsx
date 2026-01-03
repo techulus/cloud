@@ -57,12 +57,6 @@ interface ServerLogEntry extends BaseEntry {
 	level: string;
 }
 
-type LogViewerVariant =
-	| "service-logs"
-	| "requests"
-	| "build-logs"
-	| "server-logs";
-
 type LogViewerProps =
 	| { variant: "service-logs"; serviceId: string }
 	| { variant: "requests"; serviceId: string }
@@ -665,9 +659,9 @@ export function LogViewer(props: LogViewerProps) {
 
 	return (
 		<div
-			className={`flex flex-col ${config.height} bg-zinc-100 dark:bg-zinc-950 rounded-lg border`}
+			className={`flex flex-col ${config.height} bg-zinc-100 dark:bg-zinc-950 rounded-md border`}
 		>
-			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900">
+			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900 rounded-t-md">
 				<div className="relative flex-1 min-w-50">
 					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
 					<Input

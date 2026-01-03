@@ -25,8 +25,10 @@ xcaddy build --with github.com/caddy-dns/cloudflare --output /usr/bin/caddy
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
 
-curl -sSL https://github.com/moby/buildkit/releases/download/v0.19.0/buildkit-v0.19.0.linux-amd64.tar.gz | sudo tar -xz -C /usr/local
+curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0.26.3.linux-amd64.tar.gz | sudo tar -xz -C /usr/local
 ```
+
+This installs both `buildkitd` (daemon) and `buildctl` (CLI) to `/usr/local/bin/`.
 
 ## BuildKit Setup
 
@@ -36,14 +38,12 @@ sudo nano /etc/systemd/system/buildkit.service
 
 ```ini
 [Unit]
-Description=BuildKit Container
+Description=BuildKit Daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStartPre=-/usr/bin/podman rm -f buildkit
-ExecStart=/usr/bin/podman run --rm --privileged --name buildkit -p 127.0.0.1:1234:1234 -v /etc/buildkit/buildkitd.toml:/etc/buildkit/buildkitd.toml docker.io/moby/buildkit --addr tcp://0.0.0.0:1234
-ExecStop=/usr/bin/podman stop buildkit
+ExecStart=/usr/local/bin/buildkitd
 Restart=always
 RestartSec=5
 
@@ -93,7 +93,6 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --logs-endpoint http://athena:9428
-Environment=BUILDKIT_HOST=tcp://127.0.0.1:1234
 Restart=always
 RestartSec=5
 KillMode=process

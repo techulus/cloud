@@ -856,7 +856,13 @@ func (a *Agent) checkForBuilds(ctx context.Context) {
 		Secrets:   decryptedSecrets,
 	}
 
-	err = a.builder.Build(ctx, buildConfig, checkCancelled)
+	onStatusChange := func(status string) {
+		if err := a.client.UpdateBuildStatus(pending.ID, status, ""); err != nil {
+			log.Printf("[build] failed to update status to %s: %v", status, err)
+		}
+	}
+
+	err = a.builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
 		log.Printf("[build] build %s failed: %v", truncate(pending.ID, 8), err)
 		if err := a.client.UpdateBuildStatus(pending.ID, "failed", err.Error()); err != nil {
