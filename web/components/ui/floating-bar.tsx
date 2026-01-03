@@ -34,7 +34,7 @@ export function FloatingBar({
 		>
 			<div
 				className={cn(
-					"flex items-center justify-between gap-4 px-5 h-12 bg-zinc-100 dark:bg-zinc-800 border rounded-xl shadow-lg",
+					"flex items-center justify-between gap-4 px-3 h-12 bg-zinc-100 dark:bg-zinc-800 border rounded-xl shadow-lg",
 					variantStyles[variant],
 					className,
 				)}

@@ -74,7 +74,19 @@ export async function triggerBuild(serviceId: string) {
 
 	const newBuildId = randomUUID();
 
-	if (service.githubRepoUrl) {
+	const [githubRepo] = await db
+		.select()
+		.from(githubRepos)
+		.where(eq(githubRepos.serviceId, serviceId));
+
+	if (githubRepo) {
+		const [latestBuild] = await db
+			.select()
+			.from(builds)
+			.where(eq(builds.serviceId, serviceId))
+			.orderBy(desc(builds.createdAt))
+			.limit(1);
+
 		const pendingBuild = await db
 			.select()
 			.from(builds)
@@ -87,62 +99,38 @@ export async function triggerBuild(serviceId: string) {
 
 		await db.insert(builds).values({
 			id: newBuildId,
+			githubRepoId: githubRepo.id,
 			serviceId,
-			commitSha: "HEAD",
-			commitMessage: "Manual build trigger",
-			branch: service.githubBranch || "main",
+			commitSha: latestBuild?.commitSha || "HEAD",
+			commitMessage: latestBuild?.commitMessage || "Manual build trigger",
+			branch: latestBuild?.branch || githubRepo.deployBranch || "main",
+			author: latestBuild?.author,
 			status: "pending",
 		});
 
 		return { success: true, buildId: newBuildId };
 	}
 
-	const [githubRepo] = await db
-		.select()
-		.from(githubRepos)
-		.where(eq(githubRepos.serviceId, serviceId));
-
-	if (!githubRepo) {
+	if (!service.githubRepoUrl) {
 		throw new Error("No GitHub repository linked to this service");
-	}
-
-	const [latestBuild] = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.serviceId, serviceId))
-		.orderBy(desc(builds.createdAt))
-		.limit(1);
-
-	if (!latestBuild) {
-		throw new Error(
-			"No previous builds found. Push to the repository to trigger a build.",
-		);
 	}
 
 	const pendingBuild = await db
 		.select()
 		.from(builds)
-		.where(
-			and(
-				eq(builds.serviceId, serviceId),
-				eq(builds.commitSha, latestBuild.commitSha),
-				eq(builds.status, "pending"),
-			),
-		)
+		.where(and(eq(builds.serviceId, serviceId), eq(builds.status, "pending")))
 		.then((r) => r[0]);
 
 	if (pendingBuild) {
-		throw new Error("A build for this commit is already pending");
+		throw new Error("A build is already pending");
 	}
 
 	await db.insert(builds).values({
 		id: newBuildId,
-		githubRepoId: githubRepo.id,
 		serviceId,
-		commitSha: latestBuild.commitSha,
-		commitMessage: latestBuild.commitMessage,
-		branch: latestBuild.branch,
-		author: latestBuild.author,
+		commitSha: "HEAD",
+		commitMessage: "Manual build trigger",
+		branch: service.githubBranch || "main",
 		status: "pending",
 	});
 

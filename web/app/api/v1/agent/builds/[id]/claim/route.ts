@@ -75,12 +75,7 @@ export async function POST(
 
 	let cloneUrl: string;
 
-	if (service.githubRepoUrl) {
-		cloneUrl = service.githubRepoUrl;
-		if (!cloneUrl.endsWith(".git")) {
-			cloneUrl = cloneUrl + ".git";
-		}
-	} else if (build.githubRepoId) {
+	if (build.githubRepoId) {
 		const githubRepo = await db
 			.select()
 			.from(githubRepos)
@@ -128,6 +123,11 @@ export async function POST(
 		}
 
 		cloneUrl = buildCloneUrl(installationToken, githubRepo.repoFullName);
+	} else if (service.githubRepoUrl) {
+		cloneUrl = service.githubRepoUrl;
+		if (!cloneUrl.endsWith(".git")) {
+			cloneUrl = cloneUrl + ".git";
+		}
 	} else {
 		return NextResponse.json(
 			{ error: "No repository configured" },

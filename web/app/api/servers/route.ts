@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { and, eq, lt } from "drizzle-orm";
 
-const HEARTBEAT_STALE_THRESHOLD_MS = 30 * 1000;
+const HEARTBEAT_STALE_THRESHOLD_MS = 300 * 1000;
 
 export async function GET() {
 	const session = await auth.api.getSession({

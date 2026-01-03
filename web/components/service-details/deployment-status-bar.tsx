@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Hammer, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,11 +51,31 @@ function getStageIndex(stageId: string): number {
 }
 
 type BarState =
+	| { mode: "building"; buildId: string; buildStatus: string }
 	| { mode: "deploying"; stage: string; stageIndex: number; rolloutId: string }
 	| { mode: "ready"; hasChanges: boolean; changesCount: number }
 	| { mode: "hidden" };
 
+const ACTIVE_BUILD_STATUSES = [
+	"pending",
+	"claimed",
+	"cloning",
+	"building",
+	"pushing",
+];
+
 function getBarState(service: Service, changes: ConfigChange[]): BarState {
+	if (
+		service.latestBuild &&
+		ACTIVE_BUILD_STATUSES.includes(service.latestBuild.status)
+	) {
+		return {
+			mode: "building",
+			buildId: service.latestBuild.id,
+			buildStatus: service.latestBuild.status,
+		};
+	}
+
 	const activeRollout = service.rollouts?.find(
 		(r) => r.status === "in_progress",
 	);
@@ -156,7 +176,6 @@ function PendingChangesModal({
 	onDeploy,
 	isDeploying,
 	canDeploy,
-	isBuild,
 }: {
 	changes: ConfigChange[];
 	isOpen: boolean;
@@ -164,12 +183,8 @@ function PendingChangesModal({
 	onDeploy: () => void;
 	isDeploying: boolean;
 	canDeploy: boolean;
-	isBuild?: boolean;
 }) {
 	if (!isOpen) return null;
-
-	const actionLabel = isBuild ? "Build" : "Deploy";
-	const actioningLabel = isBuild ? "Building..." : "Deploying...";
 
 	return (
 		<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -203,7 +218,7 @@ function PendingChangesModal({
 						disabled={isDeploying || !canDeploy}
 						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white"
 					>
-						{isDeploying ? actioningLabel : `${actionLabel} Now`}
+						{isDeploying ? "Deploying..." : `Deploy Now`}
 					</Button>
 				</div>
 			</DialogContent>
@@ -296,6 +311,40 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		return null;
 	}
 
+	if (barState.mode === "building") {
+		const statusLabels: Record<string, string> = {
+			pending: "Queued",
+			claimed: "Starting",
+			cloning: "Cloning",
+			building: "Building",
+			pushing: "Pushing",
+		};
+
+		return (
+			<FloatingBar visible variant="info">
+				<Hammer className="h-4 w-4 text-blue-500" />
+
+				<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+					{statusLabels[barState.buildStatus] || "Building"}
+				</span>
+
+				<Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+
+				<button
+					type="button"
+					onClick={() =>
+						router.push(
+							`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${barState.buildId}`,
+						)
+					}
+					className="ml-1 px-3 py-1 rounded-full text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors text-sm font-medium"
+				>
+					View Logs
+				</button>
+			</FloatingBar>
+		);
+	}
+
 	if (barState.mode === "deploying") {
 		const currentStage = STAGES[barState.stageIndex];
 
@@ -343,7 +392,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 					type="button"
 					onClick={handleDeploy}
 					disabled={isDeploying || totalReplicas === 0}
-					className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-full disabled:opacity-50 transition-colors"
+					className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors"
 				>
 					{isDeploying ? (
 						<Loader2 className="h-4 w-4 animate-spin" />
@@ -359,7 +408,6 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 				onDeploy={handleDeploy}
 				isDeploying={isDeploying}
 				canDeploy={totalReplicas > 0}
-				isBuild={isGithubWithNoDeployments}
 			/>
 		</>
 	);

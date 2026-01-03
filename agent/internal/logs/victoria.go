@@ -164,15 +164,16 @@ func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string,
 	}
 
 	var buf bytes.Buffer
-	now := time.Now().Format(time.RFC3339Nano)
+	baseTime := time.Now()
 
-	for _, msg := range logs {
+	for i, msg := range logs {
 		if strings.TrimSpace(msg) == "" {
 			continue
 		}
+		logTime := baseTime.Add(time.Duration(i) * time.Microsecond)
 		entry := victoriaBuildLogEntry{
 			Msg:       msg,
-			Time:      now,
+			Time:      logTime.Format(time.RFC3339Nano),
 			BuildID:   buildID,
 			ServiceID: serviceID,
 			ProjectID: projectID,

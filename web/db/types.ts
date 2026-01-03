@@ -50,4 +50,5 @@ export type ServiceWithDetails = Service & {
 	secrets?: Array<Pick<Secret, "key"> & { updatedAt: Date | string }>;
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
+	latestBuild?: Pick<Build, "id" | "status"> | null;
 };

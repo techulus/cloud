@@ -13,6 +13,7 @@ import {
 	servers,
 	secrets,
 	rollouts,
+	builds,
 } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -46,6 +47,7 @@ export async function GET(
 				serviceRollouts,
 				volumes,
 				lockedServer,
+				latestBuild,
 			] = await Promise.all([
 				db
 					.select()
@@ -86,6 +88,15 @@ export async function GET(
 							.from(servers)
 							.where(eq(servers.id, service.lockedServerId))
 							.then((r) => r[0])
+					: Promise.resolve(null),
+				service.sourceType === "github"
+					? db
+							.select({ id: builds.id, status: builds.status })
+							.from(builds)
+							.where(eq(builds.serviceId, service.id))
+							.orderBy(desc(builds.createdAt))
+							.limit(1)
+							.then((r) => r[0] || null)
 					: Promise.resolve(null),
 			]);
 
@@ -128,6 +139,7 @@ export async function GET(
 				rollouts: serviceRollouts,
 				volumes,
 				lockedServer,
+				latestBuild,
 			};
 		}),
 	);
