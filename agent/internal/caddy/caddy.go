@@ -23,18 +23,11 @@ const (
 	routesPath    = "/config/apps/http/servers/srv0/routes"
 )
 
-var lastConfigHash string
-
 func CheckPrerequisites() error {
 	if _, err := exec.LookPath("caddy"); err != nil {
 		return fmt.Errorf("caddy command not found: %w", err)
 	}
 	return nil
-}
-
-func hashConfig(data []byte) string {
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
 }
 
 func getExistingRoutes() ([]map[string]any, error) {
@@ -141,13 +134,6 @@ func UpdateCaddyRoutes(routes []CaddyRoute) error {
 		managedRoutes = append(managedRoutes, caddyRoute)
 	}
 
-	managedJSON, _ := json.Marshal(managedRoutes)
-	configHash := hashConfig(managedJSON)
-
-	if configHash == lastConfigHash {
-		return nil
-	}
-
 	log.Printf("[caddy] updating %d routes", len(routes))
 
 	existingRoutes, err := getExistingRoutes()
@@ -179,7 +165,6 @@ func UpdateCaddyRoutes(routes []CaddyRoute) error {
 	}
 
 	if len(routes) == 0 {
-		lastConfigHash = configHash
 		return nil
 	}
 
@@ -215,7 +200,6 @@ func UpdateCaddyRoutes(routes []CaddyRoute) error {
 		return fmt.Errorf("failed to verify routes: %v", failedRoutes)
 	}
 
-	lastConfigHash = configHash
 	log.Printf("[caddy] all routes verified successfully")
 	return nil
 }

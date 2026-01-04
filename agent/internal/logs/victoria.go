@@ -36,6 +36,9 @@ type victoriaLogEntry struct {
 func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 	var buf bytes.Buffer
 	for _, l := range batch.Logs {
+		if strings.TrimSpace(l.Message) == "" {
+			continue
+		}
 		entry := victoriaLogEntry{
 			Msg:          l.Message,
 			Time:         l.Timestamp,
@@ -50,6 +53,10 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 		}
 		buf.Write(data)
 		buf.WriteByte('\n')
+	}
+
+	if buf.Len() == 0 {
+		return nil
 	}
 
 	url := v.endpoint + "/insert/jsonline"

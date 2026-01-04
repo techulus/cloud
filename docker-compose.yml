@@ -1,0 +1,44 @@
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+        - BETTER_AUTH_URL=${BETTER_AUTH_URL}
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./web/.env
+    environment:
+      - VICTORIA_LOGS_URL=http://victoria-logs:9428
+      - REGISTRY_URL=registry:5000
+    depends_on:
+      - victoria-logs
+      - registry
+    restart: unless-stopped
+
+  registry:
+    build:
+      context: ./registry
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+    restart: unless-stopped
+
+  victoria-logs:
+    image: victoriametrics/victoria-logs:latest
+    ports:
+      - "9428:9428"
+    volumes:
+      - victoria-logs-data:/vlogs
+    command:
+      - "-storageDataPath=/vlogs"
+      - "-retentionPeriod=7d"
+    restart: unless-stopped
+
+volumes:
+  registry-data:
+  victoria-logs-data:

@@ -133,6 +133,23 @@ else
   echo "✓ Logs Endpoint: (disabled)"
 fi
 
+step "Verifying connectivity..."
+
+HEALTH_URL="${CONTROL_PLANE_URL}/api/health"
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+if [ "$HTTP_STATUS" != "200" ]; then
+  error "Cannot reach control plane at $HEALTH_URL (HTTP status: $HTTP_STATUS). Please check the URL and your network connection."
+fi
+echo "✓ Control plane is reachable"
+
+if [ -n "$LOGS_ENDPOINT" ]; then
+  LOGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$LOGS_ENDPOINT" 2>/dev/null || echo "000")
+  if [ "$LOGS_STATUS" = "000" ]; then
+    error "Cannot reach logs endpoint at $LOGS_ENDPOINT. Please check the URL and your network connection."
+  fi
+  echo "✓ Logs endpoint is reachable"
+fi
+
 echo ""
 echo "Configuration summary:"
 echo "  Control Plane URL: $CONTROL_PLANE_URL"
