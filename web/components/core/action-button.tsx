@@ -14,7 +14,8 @@ interface ActionButtonProps {
 		| "outline"
 		| "secondary"
 		| "ghost"
-		| "link";
+		| "link"
+		| "warning";
 	size?: "default" | "sm" | "lg" | "icon";
 	onComplete?: () => void;
 }
