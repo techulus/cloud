@@ -28,7 +28,7 @@ The agent supports two modes:
 Use the install script for automated setup:
 
 ```bash
-curl -sSL https://your-control-plane.com/install.sh | sudo bash
+curl -sSL https://your-control-plane.com/setup.sh | sudo bash
 ```
 
 The script will ask if this is a proxy node and configure accordingly.
@@ -39,7 +39,7 @@ For non-interactive installation:
 export CONTROL_PLANE_URL=https://your-control-plane.com
 export REGISTRATION_TOKEN=your-token
 export IS_PROXY=true  # or false for worker nodes
-curl -sSL $CONTROL_PLANE_URL/install.sh | sudo bash
+curl -sSL $CONTROL_PLANE_URL/setup.sh | sudo bash
 ```
 
 ## Manual Setup

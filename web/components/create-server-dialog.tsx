@@ -91,7 +91,7 @@ export function CreateServerDialog() {
 								<code className="block p-3 bg-muted rounded-lg text-sm break-all font-mono">
 									sudo CONTROL_PLANE_URL={process.env.NEXT_PUBLIC_APP_URL}{" "}
 									REGISTRATION_TOKEN={result.agentToken} bash -c &quot;$(curl
-									-fsSL {process.env.NEXT_PUBLIC_APP_URL}/install.sh)&quot;
+									-fsSL {process.env.NEXT_PUBLIC_APP_URL}/setup.sh)&quot;
 								</code>
 							</div>
 							<div className="flex justify-end">
