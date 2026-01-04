@@ -1,13 +1,58 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { Box, Globe, HardDrive, Lock } from "lucide-react";
-import type { ServiceWithDetails } from "@/db/types";
+import { Box, Globe, HardDrive, Lock, Settings } from "lucide-react";
+import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 import { Spinner } from "./ui/spinner";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "./ui/select";
+import { Button } from "./ui/button";
+
+function EnvironmentSelector({
+	environments,
+	selectedEnvId,
+	selectedEnvName,
+	onValueChange,
+	projectSlug,
+}: {
+	environments: Environment[];
+	selectedEnvId: string;
+	selectedEnvName?: string;
+	onValueChange: (value: string | null) => void;
+	projectSlug: string;
+}) {
+	return (
+		<div className="absolute top-4 left-4 flex items-center gap-2">
+			<Select value={selectedEnvId} onValueChange={onValueChange}>
+				<SelectTrigger>
+					<SelectValue>{selectedEnvName}</SelectValue>
+				</SelectTrigger>
+				<SelectContent>
+					{environments.map((env) => (
+						<SelectItem key={env.id} value={env.id}>
+							{env.name}
+						</SelectItem>
+					))}
+				</SelectContent>
+			</Select>
+			<Link href={`/dashboard/projects/${projectSlug}/settings`}>
+				<Button variant="ghost" size="icon">
+					<Settings className="h-4 w-4" />
+				</Button>
+			</Link>
+		</div>
+	);
+}
 
 function ServiceCard({
 	service,
@@ -133,12 +178,28 @@ export function ServiceCanvas({
 	projectId: string;
 	projectSlug: string;
 }) {
+	const [selectedEnvId, setSelectedEnvId] = useState<string | null>(null);
+
+	const { data: environments } = useSWR<Environment[]>(
+		`/api/projects/${projectId}/environments`,
+		fetcher,
+	);
+
+	useEffect(() => {
+		if (environments && environments.length > 0 && !selectedEnvId) {
+			const production = environments.find((e) => e.name === "production");
+			setSelectedEnvId(production?.id || environments[0].id);
+		}
+	}, [environments, selectedEnvId]);
+
 	const {
 		data: services,
 		mutate,
 		isLoading,
 	} = useSWR<ServiceWithDetails[]>(
-		`/api/projects/${projectId}/services`,
+		selectedEnvId
+			? `/api/projects/${projectId}/services?environmentId=${selectedEnvId}`
+			: null,
 		fetcher,
 		{
 			refreshInterval: 5000,
@@ -146,7 +207,17 @@ export function ServiceCanvas({
 		},
 	);
 
-	if (isLoading) {
+	if (!environments) {
+		return (
+			<div className="min-h-screen flex items-center justify-center">
+				<Spinner />
+			</div>
+		);
+	}
+
+	const selectedEnv = environments.find((e) => e.id === selectedEnvId);
+
+	if (!selectedEnvId || isLoading) {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
 				<Spinner />
@@ -169,6 +240,13 @@ export function ServiceCanvas({
 					backgroundSize: "20px 20px",
 				}}
 			>
+				<EnvironmentSelector
+					environments={environments}
+					selectedEnvId={selectedEnvId}
+					selectedEnvName={selectedEnv?.name}
+					onValueChange={setSelectedEnvId}
+					projectSlug={projectSlug}
+				/>
 				<div className="text-center space-y-4">
 					<div className="w-16 h-16 mx-auto rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
 						<Box className="h-8 w-8 text-zinc-400" />
@@ -179,6 +257,7 @@ export function ServiceCanvas({
 						</p>
 						<CreateServiceDialog
 							projectId={projectId}
+							environmentId={selectedEnvId}
 							onSuccess={() => mutate()}
 						/>
 					</div>
@@ -201,8 +280,19 @@ export function ServiceCanvas({
 				backgroundSize: "24px 24px",
 			}}
 		>
+			<EnvironmentSelector
+				environments={environments}
+				selectedEnvId={selectedEnvId}
+				selectedEnvName={selectedEnv?.name}
+				onValueChange={setSelectedEnvId}
+				projectSlug={projectSlug}
+			/>
 			<div className="absolute top-4 right-4">
-				<CreateServiceDialog projectId={projectId} onSuccess={() => mutate()} />
+				<CreateServiceDialog
+					projectId={projectId}
+					environmentId={selectedEnvId}
+					onSuccess={() => mutate()}
+				/>
 			</div>
 			<div className="flex flex-wrap gap-10 justify-center items-center">
 				{services.map((service) => (

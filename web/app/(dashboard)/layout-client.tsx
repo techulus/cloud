@@ -40,12 +40,17 @@ function generateBreadcrumbs(
 	const crumbs: Breadcrumb[] = [];
 	let href = "";
 
+	const hasDeeperPath = segments.length > 2;
+	if (hasDeeperPath) {
+		crumbs.push({ label: "Dashboard", href: "/dashboard" });
+	}
+
 	for (let i = 0; i < segments.length; i++) {
 		const seg = segments[i];
 		const prev = segments[i - 1];
 		href += `/${seg}`;
 
-		if (!prev) continue;
+		if (!prev || prev === "dashboard") continue;
 
 		const rule = BREADCRUMB_RULES.find(({ parent }) => parent === prev);
 		if (!rule) continue;

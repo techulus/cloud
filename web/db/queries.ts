@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	environments,
 	projects,
 	secrets,
 	servers,
@@ -155,4 +156,30 @@ export async function getServerDetails(id: string) {
 		.where(eq(servers.id, id));
 
 	return serverResults[0] || null;
+}
+
+export async function listEnvironments(projectId: string) {
+	return db
+		.select()
+		.from(environments)
+		.where(eq(environments.projectId, projectId))
+		.orderBy(environments.createdAt);
+}
+
+export async function getEnvironment(id: string) {
+	const results = await db
+		.select()
+		.from(environments)
+		.where(eq(environments.id, id));
+	return results[0] || null;
+}
+
+export async function getEnvironmentByName(projectId: string, name: string) {
+	const results = await db
+		.select()
+		.from(environments)
+		.where(
+			and(eq(environments.projectId, projectId), eq(environments.name, name)),
+		);
+	return results[0] || null;
 }

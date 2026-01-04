@@ -252,7 +252,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					</>
 				)}
 
-				<div className="flex flex-wrap gap-6 justify-center items-start">
+				<div className="flex flex-wrap gap-6 justify-center max-w-[900px]">
 					{serverGroups.map((group) => (
 						<div
 							key={group.serverName}

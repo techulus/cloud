@@ -6,6 +6,7 @@ import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	environments,
 	githubRepos,
 	projects,
 	rollouts,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
-import { getService } from "@/db/queries";
+import { getEnvironment, getService } from "@/db/queries";
 
 function parseImageReference(image: string): {
 	registry: string;
@@ -186,10 +187,18 @@ export async function createProject(name: string) {
 	const id = randomUUID();
 	const slug = slugify(name);
 
-	await db.insert(projects).values({
-		id,
-		name,
-		slug,
+	await db.transaction(async (tx) => {
+		await tx.insert(projects).values({
+			id,
+			name,
+			slug,
+		});
+
+		await tx.insert(environments).values({
+			id: randomUUID(),
+			projectId: id,
+			name: "production",
+		});
 	});
 
 	return { id, name, slug };
@@ -199,21 +208,82 @@ export async function deleteProject(id: string) {
 	await db.delete(projects).where(eq(projects.id, id));
 }
 
-export async function createService(
-	projectId: string,
-	name: string,
-	image: string,
-	ports: number[],
-	stateful: boolean = false,
+export async function createEnvironment(projectId: string, name: string) {
+	const sanitizedName = slugify(name);
+	if (!sanitizedName) {
+		throw new Error("Invalid environment name");
+	}
+
+	const existing = await db
+		.select()
+		.from(environments)
+		.where(
+			and(
+				eq(environments.projectId, projectId),
+				eq(environments.name, sanitizedName),
+			),
+		);
+
+	if (existing.length > 0) {
+		throw new Error("Environment with this name already exists");
+	}
+
+	const id = randomUUID();
+	await db.insert(environments).values({
+		id,
+		projectId,
+		name: sanitizedName,
+	});
+
+	return { id, name: sanitizedName };
+}
+
+export async function deleteEnvironment(environmentId: string) {
+	const env = await getEnvironment(environmentId);
+
+	if (!env) {
+		throw new Error("Environment not found");
+	}
+
+	if (env.name === "production") {
+		throw new Error("Cannot delete the production environment");
+	}
+
+	await db.delete(environments).where(eq(environments.id, environmentId));
+	return { success: true };
+}
+
+type CreateServiceInput = {
+	projectId: string;
+	environmentId: string;
+	name: string;
+	image: string;
+	stateful?: boolean;
 	github?: {
 		repoUrl: string;
 		branch: string;
 		installationId?: number;
 		repoId?: number;
-	},
-) {
+	};
+};
+
+export async function createService(input: CreateServiceInput) {
+	const {
+		projectId,
+		environmentId,
+		name,
+		image,
+		stateful = false,
+		github,
+	} = input;
+	const env = await getEnvironment(environmentId);
+
+	if (!env) {
+		throw new Error("Environment not found");
+	}
+
 	const id = randomUUID();
-	const hostname = slugify(name);
+	const hostname = `${slugify(name)}-${env.name}`;
 
 	let finalImage = image;
 	let sourceType: "image" | "github" = "image";
@@ -234,6 +304,7 @@ export async function createService(
 	await db.insert(services).values({
 		id,
 		projectId,
+		environmentId,
 		name,
 		hostname,
 		image: finalImage,
@@ -258,15 +329,7 @@ export async function createService(
 		});
 	}
 
-	for (const port of ports) {
-		await db.insert(servicePorts).values({
-			id: randomUUID(),
-			serviceId: id,
-			port,
-		});
-	}
-
-	return { id, name, image: finalImage, ports, stateful, sourceType };
+	return { id, name, image: finalImage, stateful, sourceType };
 }
 
 export async function deleteService(serviceId: string) {

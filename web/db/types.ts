@@ -2,6 +2,7 @@ import type {
 	builds,
 	deploymentPorts,
 	deployments,
+	environments,
 	githubInstallations,
 	githubRepos,
 	projects,
@@ -17,6 +18,7 @@ import type {
 
 export type Server = typeof servers.$inferSelect;
 export type Project = typeof projects.$inferSelect;
+export type Environment = typeof environments.$inferSelect;
 export type Service = typeof services.$inferSelect;
 export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;

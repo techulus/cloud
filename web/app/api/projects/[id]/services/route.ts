@@ -15,10 +15,10 @@ import {
 	rollouts,
 	builds,
 } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 
 export async function GET(
-	_: Request,
+	request: Request,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const session = await auth.api.getSession({
@@ -30,11 +30,20 @@ export async function GET(
 	}
 
 	const { id: projectId } = await params;
+	const { searchParams } = new URL(request.url);
+	const environmentId = searchParams.get("environmentId");
 
 	const servicesList = await db
 		.select()
 		.from(services)
-		.where(eq(services.projectId, projectId))
+		.where(
+			environmentId
+				? and(
+						eq(services.projectId, projectId),
+						eq(services.environmentId, environmentId),
+					)
+				: eq(services.projectId, projectId),
+		)
 		.orderBy(services.createdAt);
 
 	const result = await Promise.all(

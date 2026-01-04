@@ -7,6 +7,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -133,13 +134,36 @@ export const projects = pgTable("projects", {
 		.notNull(),
 });
 
+export const environments = pgTable(
+	"environments",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		uniqueIndex("environments_project_id_name_idx").on(
+			table.projectId,
+			table.name,
+		),
+	],
+);
+
 export const services = pgTable("services", {
 	id: text("id").primaryKey(),
 	projectId: text("project_id")
 		.notNull()
 		.references(() => projects.id, { onDelete: "cascade" }),
+	environmentId: text("environment_id")
+		.notNull()
+		.references(() => environments.id, { onDelete: "cascade" }),
 	name: text("name").notNull(),
-	hostname: text("hostname"),
+	hostname: text("hostname").unique(),
 	image: text("image").notNull(),
 	sourceType: text("source_type", { enum: ["image", "github"] })
 		.notNull()

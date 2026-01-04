@@ -27,9 +27,11 @@ type SelectedRepo = {
 
 export function CreateServiceDialog({
 	projectId,
+	environmentId,
 	onSuccess,
 }: {
 	projectId: string;
+	environmentId: string;
 	onSuccess?: () => void;
 }) {
 	const { mutate } = useSWRConfig();
@@ -57,7 +59,13 @@ export function CreateServiceDialog({
 				return;
 			}
 
-			await createService(projectId, name.trim(), image.trim(), [], stateful);
+			await createService({
+				projectId,
+				environmentId,
+				name: name.trim(),
+				image: image.trim(),
+				stateful,
+			});
 			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
@@ -77,11 +85,18 @@ export function CreateServiceDialog({
 		setError(null);
 
 		try {
-			await createService(projectId, name.trim(), "", [], stateful, {
-				repoUrl: `https://github.com/${selectedRepo.fullName}`,
-				branch: branch.trim() || selectedRepo.defaultBranch,
-				installationId: selectedRepo.installationId,
-				repoId: selectedRepo.id,
+			await createService({
+				projectId,
+				environmentId,
+				name: name.trim(),
+				image: "",
+				stateful,
+				github: {
+					repoUrl: `https://github.com/${selectedRepo.fullName}`,
+					branch: branch.trim() || selectedRepo.defaultBranch,
+					installationId: selectedRepo.installationId,
+					repoId: selectedRepo.id,
+				},
 			});
 			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
