@@ -221,7 +221,7 @@ export function BuildsViewer({
 					) : (
 						<Play className="size-4 mr-1.5" />
 					)}
-					Trigger Build
+					Build
 				</Button>
 			</div>
 

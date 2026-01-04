@@ -329,7 +329,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		};
 
 		return (
-			<FloatingBar visible>
+			<FloatingBar visible progress>
 				<div className="flex items-center gap-3">
 					<Hammer className="size-4 text-blue-500" />
 					<span className="text-sm font-medium">
@@ -356,7 +356,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		const currentStage = STAGES[barState.stageIndex];
 
 		return (
-			<FloatingBar visible>
+			<FloatingBar visible progress>
 				<div className="flex items-center gap-3">
 					<Loader2 className="size-4 text-orange-500 animate-spin" />
 					<span className="text-sm font-medium">
@@ -401,7 +401,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 						type="button"
 						onClick={handleDeploy}
 						disabled={isDeploying || totalReplicas === 0}
-						className="px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors"
+						className="h-8 min-w-[70px] px-3 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors flex items-center justify-center"
 					>
 						{isDeploying ? (
 							<Loader2 className="size-4 animate-spin" />
