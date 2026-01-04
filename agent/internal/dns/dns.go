@@ -33,8 +33,8 @@ func SetupLocalDNS(wireguardIP string) error {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
-	mainConfig := `port=53
-listen-address=127.0.0.1,` + wireguardIP + `
+	mainConfig := `port=5353
+listen-address=127.0.0.1
 bind-interfaces
 conf-dir=/etc/dnsmasq.d
 `
@@ -53,22 +53,22 @@ conf-dir=/etc/dnsmasq.d
 		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
 
-	if err := ConfigureClientDNS("127.0.0.1"); err != nil {
+	if err := ConfigureClientDNS(); err != nil {
 		return fmt.Errorf("failed to configure local DNS: %w", err)
 	}
 
 	return nil
 }
 
-func ConfigureClientDNS(dnsServer string) error {
+func ConfigureClientDNS() error {
 	if err := os.MkdirAll("/etc/systemd/resolved.conf.d", 0o755); err != nil {
 		return fmt.Errorf("failed to create resolved.conf.d: %w", err)
 	}
 
-	config := fmt.Sprintf(`[Resolve]
-DNS=%s
+	config := `[Resolve]
+DNS=127.0.0.1:5353
 Domains=~internal
-`, dnsServer)
+`
 
 	if err := os.WriteFile(resolvedDropInPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write resolved config: %w", err)
@@ -87,7 +87,7 @@ func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, "udp", "127.0.0.1:53")
+			return d.DialContext(ctx, "udp", "127.0.0.1:5353")
 		},
 	}
 

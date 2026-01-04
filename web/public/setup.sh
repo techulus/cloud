@@ -224,23 +224,6 @@ else
   echo "Skipping Caddy installation (worker node)"
 fi
 
-step "Checking for systemd-resolved conflict..."
-if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
-  if ss -tulnp 2>/dev/null | grep -q ':53 .*systemd-resolve'; then
-    mkdir -p /etc/systemd/resolved.conf.d
-    cat > /etc/systemd/resolved.conf.d/no-stub.conf << 'EOF'
-[Resolve]
-DNSStubListener=no
-EOF
-    systemctl restart systemd-resolved
-    echo "✓ Disabled systemd-resolved stub listener (port 53 conflict)"
-  else
-    echo "✓ systemd-resolved not using port 53"
-  fi
-else
-  echo "✓ systemd-resolved not active"
-fi
-
 step "Installing dnsmasq..."
 if command -v dnsmasq &>/dev/null; then
   echo "dnsmasq already installed, skipping"
