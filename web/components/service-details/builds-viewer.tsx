@@ -126,9 +126,11 @@ function formatDuration(start: string, end: string | null): string {
 export function BuildsViewer({
 	serviceId,
 	projectSlug,
+	envName,
 }: {
 	serviceId: string;
 	projectSlug: string;
+	envName: string;
 }) {
 	const router = useRouter();
 	const [isTriggering, setIsTriggering] = useState(false);
@@ -236,7 +238,7 @@ export function BuildsViewer({
 							className="cursor-pointer hover:bg-muted/50"
 							onClick={() =>
 								router.push(
-									`/dashboard/projects/${projectSlug}/services/${serviceId}/builds/${build.id}`,
+									`/dashboard/projects/${projectSlug}/${envName}/services/${serviceId}/builds/${build.id}`,
 								)
 							}
 						>

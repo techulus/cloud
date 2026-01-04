@@ -7,7 +7,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
+import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { formatRelativeTime } from "@/lib/date";
 import { LogViewer } from "@/components/log-viewer";
@@ -29,7 +29,12 @@ export default async function ServerDetailPage({
 
 	return (
 		<>
-			<SetBreadcrumbData data={{ server: server.name }} />
+			<SetBreadcrumbs
+				items={[
+					{ label: "Dashboard", href: "/dashboard" },
+					{ label: server.name, href: `/dashboard/servers/${id}` },
+				]}
+			/>
 			<div className="space-y-6">
 				<div className="flex items-center gap-3">
 					<h1 className="text-lg font-semibold">{server.name}</h1>

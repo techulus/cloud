@@ -29,7 +29,7 @@ import { Trash2 } from "lucide-react";
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
-	const { service, projectSlug, onUpdate } = useService();
+	const { service, projectSlug, envName, onUpdate } = useService();
 	const [isDeleting, setIsDeleting] = useState(false);
 
 	const handleDelete = async () => {
@@ -37,7 +37,7 @@ export default function ConfigurationPage() {
 		try {
 			await deleteService(service.id);
 			await globalMutate(`/api/projects/${service.projectId}/services`);
-			router.push(`/dashboard/projects/${projectSlug}`);
+			router.push(`/dashboard/projects/${projectSlug}/${envName}`);
 		} finally {
 			setIsDeleting(false);
 		}

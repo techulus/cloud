@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
+import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { EnvironmentManagement } from "@/components/environment-management";
 import { getProjectBySlug, listEnvironments } from "@/db/queries";
 
@@ -19,7 +19,16 @@ export default async function ProjectSettingsPage({
 
 	return (
 		<>
-			<SetBreadcrumbData data={{ project: project.name }} />
+			<SetBreadcrumbs
+				items={[
+					{ label: "Dashboard", href: "/dashboard" },
+					{
+						label: project.name,
+						href: `/dashboard/projects/${slug}/production`,
+					},
+					{ label: "Settings", href: `/dashboard/projects/${slug}/settings` },
+				]}
+			/>
 			<div className="space-y-6">
 				<div>
 					<h1 className="text-2xl font-bold">Project Settings</h1>

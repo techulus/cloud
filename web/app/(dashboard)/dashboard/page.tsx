@@ -44,7 +44,11 @@ export default async function DashboardPage() {
 							<Item
 								key={project.id}
 								variant="outline"
-								render={<Link href={`/dashboard/projects/${project.slug}`} />}
+								render={
+									<Link
+										href={`/dashboard/projects/${project.slug}/production`}
+									/>
+								}
 							>
 								<ItemMedia variant="icon">
 									<Box className="size-5 text-muted-foreground" />

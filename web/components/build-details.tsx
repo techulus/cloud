@@ -117,11 +117,13 @@ function formatDuration(
 
 export function BuildDetails({
 	projectSlug,
+	envName,
 	service,
 	build: initialBuild,
 	githubRepo,
 }: {
 	projectSlug: string;
+	envName: string;
 	service: Pick<Service, "id" | "name">;
 	build: BuildWithDates;
 	githubRepo: Pick<GithubRepo, "id" | "repoFullName"> | null;
@@ -165,7 +167,7 @@ export function BuildDetails({
 			const result = await retryBuild(build.id);
 			toast.success("Build queued");
 			router.push(
-				`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${result.buildId}`,
+				`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${result.buildId}`,
 			);
 		} catch (error) {
 			toast.error(
@@ -193,7 +195,7 @@ export function BuildDetails({
 					size="icon-sm"
 					onClick={() =>
 						router.push(
-							`/dashboard/projects/${projectSlug}/services/${service.id}?tab=builds`,
+							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}?tab=builds`,
 						)
 					}
 				>

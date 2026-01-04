@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
 import { Box, Globe, HardDrive, Lock, Settings } from "lucide-react";
@@ -20,26 +20,29 @@ import { Button } from "./ui/button";
 
 function EnvironmentSelector({
 	environments,
-	selectedEnvId,
 	selectedEnvName,
-	onValueChange,
 	projectSlug,
 }: {
 	environments: Environment[];
-	selectedEnvId: string;
-	selectedEnvName?: string;
-	onValueChange: (value: string | null) => void;
+	selectedEnvName: string;
 	projectSlug: string;
 }) {
+	const router = useRouter();
+
 	return (
 		<div className="absolute top-4 left-4 flex items-center gap-2">
-			<Select value={selectedEnvId} onValueChange={onValueChange}>
+			<Select
+				value={selectedEnvName}
+				onValueChange={(name) =>
+					router.push(`/dashboard/projects/${projectSlug}/${name}`)
+				}
+			>
 				<SelectTrigger>
 					<SelectValue>{selectedEnvName}</SelectValue>
 				</SelectTrigger>
 				<SelectContent>
 					{environments.map((env) => (
-						<SelectItem key={env.id} value={env.id}>
+						<SelectItem key={env.id} value={env.name}>
 							{env.name}
 						</SelectItem>
 					))}
@@ -57,9 +60,11 @@ function EnvironmentSelector({
 function ServiceCard({
 	service,
 	projectSlug,
+	envName,
 }: {
 	service: ServiceWithDetails;
 	projectSlug: string;
+	envName: string;
 }) {
 	const colors = getStatusColorFromDeployments(service.deployments);
 	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
@@ -75,7 +80,7 @@ function ServiceCard({
 	return (
 		<div className="flex flex-col items-center gap-2 w-70">
 			<Link
-				href={`/dashboard/projects/${projectSlug}/services/${service.id}`}
+				href={`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`}
 				className={`
           group relative w-full
           p-3 rounded-xl border-2 ${colors.border} ${colors.bg}
@@ -174,32 +179,25 @@ function ServiceCard({
 export function ServiceCanvas({
 	projectId,
 	projectSlug,
+	envId,
+	envName,
 }: {
 	projectId: string;
 	projectSlug: string;
+	envId: string;
+	envName: string;
 }) {
-	const [selectedEnvId, setSelectedEnvId] = useState<string | null>(null);
-
 	const { data: environments } = useSWR<Environment[]>(
 		`/api/projects/${projectId}/environments`,
 		fetcher,
 	);
-
-	useEffect(() => {
-		if (environments && environments.length > 0 && !selectedEnvId) {
-			const production = environments.find((e) => e.name === "production");
-			setSelectedEnvId(production?.id || environments[0].id);
-		}
-	}, [environments, selectedEnvId]);
 
 	const {
 		data: services,
 		mutate,
 		isLoading,
 	} = useSWR<ServiceWithDetails[]>(
-		selectedEnvId
-			? `/api/projects/${projectId}/services?environmentId=${selectedEnvId}`
-			: null,
+		`/api/projects/${projectId}/services?environmentId=${envId}`,
 		fetcher,
 		{
 			refreshInterval: 5000,
@@ -207,17 +205,7 @@ export function ServiceCanvas({
 		},
 	);
 
-	if (!environments) {
-		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<Spinner />
-			</div>
-		);
-	}
-
-	const selectedEnv = environments.find((e) => e.id === selectedEnvId);
-
-	if (!selectedEnvId || isLoading) {
+	if (!environments || isLoading) {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
 				<Spinner />
@@ -242,9 +230,7 @@ export function ServiceCanvas({
 			>
 				<EnvironmentSelector
 					environments={environments}
-					selectedEnvId={selectedEnvId}
-					selectedEnvName={selectedEnv?.name}
-					onValueChange={setSelectedEnvId}
+					selectedEnvName={envName}
 					projectSlug={projectSlug}
 				/>
 				<div className="text-center space-y-4">
@@ -257,7 +243,7 @@ export function ServiceCanvas({
 						</p>
 						<CreateServiceDialog
 							projectId={projectId}
-							environmentId={selectedEnvId}
+							environmentId={envId}
 							onSuccess={() => mutate()}
 						/>
 					</div>
@@ -282,15 +268,13 @@ export function ServiceCanvas({
 		>
 			<EnvironmentSelector
 				environments={environments}
-				selectedEnvId={selectedEnvId}
-				selectedEnvName={selectedEnv?.name}
-				onValueChange={setSelectedEnvId}
+				selectedEnvName={envName}
 				projectSlug={projectSlug}
 			/>
 			<div className="absolute top-4 right-4">
 				<CreateServiceDialog
 					projectId={projectId}
-					environmentId={selectedEnvId}
+					environmentId={envId}
 					onSuccess={() => mutate()}
 				/>
 			</div>
@@ -300,6 +284,7 @@ export function ServiceCanvas({
 						key={service.id}
 						service={service}
 						projectSlug={projectSlug}
+						envName={envName}
 					/>
 				))}
 			</div>

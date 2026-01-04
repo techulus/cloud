@@ -20,6 +20,7 @@ interface ServiceLayoutClientProps {
 	serviceId: string;
 	projectId: string;
 	projectSlug: string;
+	envName: string;
 	children: React.ReactNode;
 }
 
@@ -27,6 +28,7 @@ export function ServiceLayoutClient({
 	serviceId,
 	projectId,
 	projectSlug,
+	envName,
 	children,
 }: ServiceLayoutClientProps) {
 	const pathname = usePathname();
@@ -70,7 +72,7 @@ export function ServiceLayoutClient({
 		mutate();
 	}, [mutate]);
 
-	const basePath = `/dashboard/projects/${projectSlug}/services/${service?.id}`;
+	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service?.id}`;
 
 	const tabs = [
 		{ name: "Architecture", href: basePath },
@@ -117,7 +119,12 @@ export function ServiceLayoutClient({
 			</nav>
 
 			<ServiceContext.Provider
-				value={{ service, projectSlug, onUpdate: handleActionComplete }}
+				value={{
+					service,
+					projectSlug,
+					envName,
+					onUpdate: handleActionComplete,
+				}}
 			>
 				{children}
 			</ServiceContext.Provider>
@@ -126,6 +133,7 @@ export function ServiceLayoutClient({
 				changes={pendingChanges}
 				service={service}
 				projectSlug={projectSlug}
+				envName={envName}
 				onUpdate={handleActionComplete}
 			/>
 		</div>
@@ -135,6 +143,7 @@ export function ServiceLayoutClient({
 interface ServiceContextType {
 	service: Service;
 	projectSlug: string;
+	envName: string;
 	onUpdate: () => void;
 }
 

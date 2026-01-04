@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { SetBreadcrumbData } from "@/components/core/breadcrumb-data";
+import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
 import { builds, projects, services, githubRepos } from "@/db/schema";
 import { BuildDetails } from "@/components/build-details";
@@ -54,9 +54,14 @@ async function getBuild(
 export default async function BuildPage({
 	params,
 }: {
-	params: Promise<{ slug: string; serviceId: string; buildId: string }>;
+	params: Promise<{
+		slug: string;
+		env: string;
+		serviceId: string;
+		buildId: string;
+	}>;
 }) {
-	const { slug, serviceId, buildId } = await params;
+	const { slug, env, serviceId, buildId } = await params;
 	const data = await getBuild(slug, serviceId, buildId);
 
 	if (!data) {
@@ -65,15 +70,26 @@ export default async function BuildPage({
 
 	return (
 		<>
-			<SetBreadcrumbData
-				data={{
-					project: data.project.name,
-					service: data.service.name,
-					build: data.build.commitSha,
-				}}
+			<SetBreadcrumbs
+				items={[
+					{ label: "Dashboard", href: "/dashboard" },
+					{
+						label: data.project.name,
+						href: `/dashboard/projects/${slug}/${env}`,
+					},
+					{
+						label: data.service.name,
+						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}`,
+					},
+					{
+						label: `Build ${data.build.commitSha.slice(0, 7)}`,
+						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}/builds/${buildId}`,
+					},
+				]}
 			/>
 			<BuildDetails
 				projectSlug={slug}
+				envName={env}
 				service={data.service}
 				build={data.build}
 				githubRepo={data.githubRepo}

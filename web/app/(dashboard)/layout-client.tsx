@@ -2,12 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import {
 	BreadcrumbDataProvider,
-	useBreadcrumbData,
-	type BreadcrumbKey,
+	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
 import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { Button } from "@/components/ui/button";
@@ -15,63 +14,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { signOut, useSession } from "@/lib/auth-client";
 
-type Breadcrumb = { label: string; href: string };
-
-const BREADCRUMB_RULES: Array<{
-	parent: string;
-	key: BreadcrumbKey;
-	format?: (value: string) => string;
-}> = [
-	{ parent: "projects", key: "project" },
-	{ parent: "services", key: "service" },
-	{ parent: "servers", key: "server" },
-	{
-		parent: "builds",
-		key: "build",
-		format: (value) => `Build ${value.slice(0, 7)}`,
-	},
-];
-
-function generateBreadcrumbs(
-	pathname: string,
-	data: ReturnType<typeof useBreadcrumbData>,
-): Breadcrumb[] {
-	const segments = pathname.split("/").filter(Boolean);
-	const crumbs: Breadcrumb[] = [];
-	let href = "";
-
-	const hasDeeperPath = segments.length > 2;
-	if (hasDeeperPath) {
-		crumbs.push({ label: "Dashboard", href: "/dashboard" });
-	}
-
-	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i];
-		const prev = segments[i - 1];
-		href += `/${seg}`;
-
-		if (!prev || prev === "dashboard") continue;
-
-		const rule = BREADCRUMB_RULES.find(({ parent }) => parent === prev);
-		if (!rule) continue;
-
-		const rawLabel = data[rule.key] ?? seg;
-		const label = rule.format ? rule.format(rawLabel) : rawLabel;
-
-		crumbs.push({ label, href });
-	}
-
-	return crumbs;
-}
-
 function DashboardHeader({ email }: { email: string }) {
 	const router = useRouter();
-	const pathname = usePathname();
-	const data = useBreadcrumbData();
-	const breadcrumbs = useMemo(
-		() => generateBreadcrumbs(pathname, data),
-		[pathname, data],
-	);
+	const breadcrumbs = useBreadcrumbs();
 
 	return (
 		<header className="border-b">

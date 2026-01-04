@@ -230,11 +230,13 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 	service,
 	changes,
 	projectSlug,
+	envName,
 	onUpdate,
 }: {
 	service: Service;
 	changes: ConfigChange[];
 	projectSlug: string;
+	envName: string;
 	onUpdate: () => void;
 }) {
 	const router = useRouter();
@@ -281,13 +283,13 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 				const result = await triggerBuild(service.id);
 				if (result.buildId) {
 					router.push(
-						`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${result.buildId}`,
+						`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${result.buildId}`,
 					);
 				}
 			} else {
 				await deployService(service.id);
 				router.push(
-					`/dashboard/projects/${projectSlug}/services/${service.id}`,
+					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`,
 				);
 			}
 			onUpdate();
@@ -334,7 +336,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 					type="button"
 					onClick={() =>
 						router.push(
-							`/dashboard/projects/${projectSlug}/services/${service.id}/builds/${barState.buildId}`,
+							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
 						)
 					}
 					className="ml-1 px-3 py-1 rounded-full text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors text-sm font-medium"
