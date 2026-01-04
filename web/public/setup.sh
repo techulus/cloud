@@ -143,8 +143,7 @@ fi
 echo "✓ Control plane is reachable"
 
 if [ -n "$LOGS_ENDPOINT" ]; then
-  LOGS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$LOGS_ENDPOINT" 2>/dev/null || echo "000")
-  if [ "$LOGS_STATUS" = "000" ]; then
+  if ! curl -s -o /dev/null --connect-timeout 10 "$LOGS_ENDPOINT" 2>/dev/null; then
     error "Cannot reach logs endpoint at $LOGS_ENDPOINT. Please check the URL and your network connection."
   fi
   echo "✓ Logs endpoint is reachable"
