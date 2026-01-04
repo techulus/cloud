@@ -728,10 +728,15 @@ export async function deployService(serviceId: string) {
 		env[secret.key] = secret.encryptedValue;
 	}
 
-	await db
-		.update(services)
-		.set({ replicas: totalReplicas })
-		.where(eq(services.id, serviceId));
+	const updateData: { replicas: number; lockedServerId?: string } = {
+		replicas: totalReplicas,
+	};
+
+	if (service.stateful && !service.lockedServerId) {
+		updateData.lockedServerId = serverIds[0];
+	}
+
+	await db.update(services).set(updateData).where(eq(services.id, serviceId));
 
 	const deploymentIds: string[] = [];
 	let replicaIndex = 0;

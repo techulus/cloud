@@ -48,10 +48,8 @@ function EnvironmentSelector({
 					))}
 				</SelectContent>
 			</Select>
-			<Link href={`/dashboard/projects/${projectSlug}/settings`}>
-				<Button variant="ghost" size="icon">
-					<Settings className="h-4 w-4" />
-				</Button>
+			<Link href={`/dashboard/projects/${projectSlug}/settings`} className="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-2">
+				<Settings className="h-4 w-4 text-muted-foreground" />
 			</Link>
 		</div>
 	);

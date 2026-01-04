@@ -87,13 +87,15 @@ export default async function BuildPage({
 					},
 				]}
 			/>
-			<BuildDetails
-				projectSlug={slug}
-				envName={env}
-				service={data.service}
-				build={data.build}
-				githubRepo={data.githubRepo}
-			/>
+			<div className="container max-w-7xl mx-auto px-4 py-6">
+				<BuildDetails
+					projectSlug={slug}
+					envName={env}
+					service={data.service}
+					build={data.build}
+					githubRepo={data.githubRepo}
+				/>
+			</div>
 		</>
 	);
 }

@@ -100,8 +100,8 @@ export function ServiceLayoutClient({
 	}
 
 	return (
-		<div className="space-y-6">
-			<nav className="flex gap-1 border-b -mt-2 overflow-x-auto overflow-y-hidden scrollbar-none">
+		<>
+			<nav className="flex gap-1 border-b overflow-x-auto overflow-y-hidden scrollbar-none px-4 pt-1.5">
 				{tabs.map((tab) => (
 					<Link
 						key={tab.href}
@@ -118,16 +118,18 @@ export function ServiceLayoutClient({
 				))}
 			</nav>
 
-			<ServiceContext.Provider
-				value={{
-					service,
-					projectSlug,
-					envName,
-					onUpdate: handleActionComplete,
-				}}
-			>
-				{children}
-			</ServiceContext.Provider>
+			<div className="container max-w-7xl mx-auto px-4 py-6">
+				<ServiceContext.Provider
+					value={{
+						service,
+						projectSlug,
+						envName,
+						onUpdate: handleActionComplete,
+					}}
+				>
+					{children}
+				</ServiceContext.Provider>
+			</div>
 
 			<DeploymentStatusBar
 				changes={pendingChanges}
@@ -136,7 +138,7 @@ export function ServiceLayoutClient({
 				envName={envName}
 				onUpdate={handleActionComplete}
 			/>
-		</div>
+		</>
 	);
 }
 

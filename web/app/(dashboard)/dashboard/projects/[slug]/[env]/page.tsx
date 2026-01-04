@@ -32,12 +32,14 @@ export default async function ProjectEnvironmentPage({
 					},
 				]}
 			/>
-			<ServiceCanvas
-				projectId={project.id}
-				projectSlug={slug}
-				envId={environment.id}
-				envName={environment.name}
-			/>
+			<div className="container max-w-7xl mx-auto px-4 py-6">
+				<ServiceCanvas
+					projectId={project.id}
+					projectSlug={slug}
+					envId={environment.id}
+					envName={environment.name}
+				/>
+			</div>
 		</>
 	);
 }

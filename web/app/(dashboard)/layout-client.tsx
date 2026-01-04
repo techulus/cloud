@@ -103,7 +103,7 @@ export function DashboardLayoutClient({
 			<div className="min-h-screen">
 				<DashboardHeader email={session.user.email} />
 				<OfflineServersBanner />
-				<main className="container max-w-7xl mx-auto px-4 py-6">
+				<main>
 					{children}
 				</main>
 				<Toaster />

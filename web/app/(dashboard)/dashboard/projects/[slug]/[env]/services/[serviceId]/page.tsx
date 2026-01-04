@@ -45,7 +45,7 @@ export default function ArchitecturePage() {
 								}}
 								label="Stop All"
 								loadingLabel="Stopping..."
-								variant="destructive"
+								variant="warning"
 								size="sm"
 								onComplete={onUpdate}
 							/>

@@ -19,7 +19,7 @@ export default async function DashboardPage() {
 	]);
 
 	return (
-		<div className="pt-4 space-y-12">
+		<div className="container max-w-7xl mx-auto px-4 py-6 space-y-12">
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">
 					<div>

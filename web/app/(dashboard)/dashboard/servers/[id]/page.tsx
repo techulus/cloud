@@ -35,7 +35,7 @@ export default async function ServerDetailPage({
 					{ label: server.name, href: `/dashboard/servers/${id}` },
 				]}
 			/>
-			<div className="space-y-6">
+			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
 				<div className="flex items-center gap-3">
 					<h1 className="text-lg font-semibold">{server.name}</h1>
 					<StatusIndicator status={server.status} />

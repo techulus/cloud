@@ -2,7 +2,13 @@
 
 import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Hammer, Loader2 } from "lucide-react";
+import {
+	ArrowRight,
+	CircleCheckIcon,
+	Hammer,
+	InfoIcon,
+	Loader2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -153,9 +159,9 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 function ProgressDots({ current, total }: { current: number; total: number }) {
 	return (
 		<div className="flex items-center gap-1">
-			{Array.from({ length: total }).map((_, i) => (
+			{STAGES.map((stage, i) => (
 				<div
-					key={i}
+					key={stage.id}
 					className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
 						i < current
 							? "bg-emerald-500"
@@ -195,7 +201,7 @@ function PendingChangesModal({
 				<div className="space-y-3 max-h-[60vh] overflow-y-auto">
 					{changes.map((change, i) => (
 						<div
-							key={i}
+							key={`change-${change.field}-${i}`}
 							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-sm"
 						>
 							<span className="font-medium shrink-0">{change.field}:</span>
@@ -323,15 +329,14 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		};
 
 		return (
-			<FloatingBar visible variant="info">
-				<Hammer className="h-4 w-4 text-blue-500" />
-
-				<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-					{statusLabels[barState.buildStatus] || "Building"}
-				</span>
-
-				<Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-
+			<FloatingBar visible>
+				<div className="flex items-center gap-3">
+					<Hammer className="size-4 text-blue-500" />
+					<span className="text-sm font-medium">
+						{statusLabels[barState.buildStatus] || "Building"}
+					</span>
+					<Loader2 className="size-4 text-blue-500 animate-spin" />
+				</div>
 				<button
 					type="button"
 					onClick={() =>
@@ -339,7 +344,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
 						)
 					}
-					className="ml-1 px-3 py-1 rounded-full text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors text-sm font-medium"
+					className="px-2.5 py-1 rounded-md text-sm font-medium text-blue-600 hover:bg-blue-500/10 dark:text-blue-400 transition-colors"
 				>
 					View Logs
 				</button>
@@ -351,21 +356,21 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		const currentStage = STAGES[barState.stageIndex];
 
 		return (
-			<FloatingBar visible variant="info">
-				<Loader2 className="h-4 w-4 text-orange-500 animate-spin" />
-
-				<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-					{currentStage?.label || "Deploying"}
-				</span>
-
-				<ProgressDots current={barState.stageIndex} total={STAGES.length} />
-
+			<FloatingBar visible>
+				<div className="flex items-center gap-3">
+					<Loader2 className="size-4 text-orange-500 animate-spin" />
+					<span className="text-sm font-medium">
+						{currentStage?.label || "Deploying"}
+					</span>
+					<ProgressDots current={barState.stageIndex} total={STAGES.length} />
+				</div>
 				<button
+					type="button"
 					onClick={handleAbort}
 					disabled={isAborting}
-					className="ml-1 px-3 py-1 rounded-full text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors text-sm font-medium"
+					className="px-2.5 py-1 rounded-md text-sm font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400 transition-colors disabled:opacity-50"
 				>
-					{isAborting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Abort"}
+					{isAborting ? <Loader2 className="size-4 animate-spin" /> : "Abort"}
 				</button>
 			</FloatingBar>
 		);
@@ -373,35 +378,38 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 
 	return (
 		<>
-			<FloatingBar visible variant="success">
-				<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-					{barState.hasChanges
-						? `${barState.changesCount} change${barState.changesCount !== 1 ? "s" : ""}`
-						: "Ready to deploy"}
-				</span>
-
-				{barState.hasChanges && (
+			<FloatingBar visible>
+				<div className="flex items-center gap-3">
+					<CircleCheckIcon className="size-4 text-emerald-500" />
+					<span className="text-sm font-medium">
+						{barState.hasChanges
+							? `${barState.changesCount} change${barState.changesCount !== 1 ? "s" : ""}`
+							: "Ready to deploy"}
+					</span>
+				</div>
+				<div className="flex items-center gap-2">
+					{barState.hasChanges && (
+						<button
+							type="button"
+							onClick={() => setShowModal(true)}
+							className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
+						>
+							View
+						</button>
+					)}
 					<button
 						type="button"
-						onClick={() => setShowModal(true)}
-						className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline"
+						onClick={handleDeploy}
+						disabled={isDeploying || totalReplicas === 0}
+						className="px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors"
 					>
-						View
+						{isDeploying ? (
+							<Loader2 className="size-4 animate-spin" />
+						) : (
+							"Deploy"
+						)}
 					</button>
-				)}
-
-				<button
-					type="button"
-					onClick={handleDeploy}
-					disabled={isDeploying || totalReplicas === 0}
-					className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors"
-				>
-					{isDeploying ? (
-						<Loader2 className="h-4 w-4 animate-spin" />
-					) : (
-						"Deploy"
-					)}
-				</button>
+				</div>
 			</FloatingBar>
 			<PendingChangesModal
 				changes={changes}
