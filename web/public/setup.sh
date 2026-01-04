@@ -34,7 +34,7 @@ prompt() {
   fi
 
   read -p "$prompt_text" value
-  eval "$var_name=\"\$value\""
+  printf -v "$var_name" '%s' "$value"
 }
 
 echo ""
@@ -166,6 +166,7 @@ if [ -t 0 ]; then
 fi
 
 step "Updating package lists..."
+apt-mark hold sudo sudo-rs 2>/dev/null || true
 apt-get update -qq
 echo "✓ Package lists updated"
 
@@ -221,6 +222,23 @@ if [ "$IS_PROXY" = "true" ]; then
   echo "✓ Caddy verified"
 else
   echo "Skipping Caddy installation (worker node)"
+fi
+
+step "Checking for systemd-resolved conflict..."
+if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+  if ss -tulnp 2>/dev/null | grep -q ':53 .*systemd-resolve'; then
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/no-stub.conf << 'EOF'
+[Resolve]
+DNSStubListener=no
+EOF
+    systemctl restart systemd-resolved
+    echo "✓ Disabled systemd-resolved stub listener (port 53 conflict)"
+  else
+    echo "✓ systemd-resolved not using port 53"
+  fi
+else
+  echo "✓ systemd-resolved not active"
 fi
 
 step "Installing dnsmasq..."
