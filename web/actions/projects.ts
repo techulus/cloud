@@ -205,7 +205,76 @@ export async function createProject(name: string) {
 }
 
 export async function deleteProject(id: string) {
+	const projectServices = await db
+		.select()
+		.from(services)
+		.where(eq(services.projectId, id));
+
+	const activeStatuses = [
+		"pending",
+		"pulling",
+		"starting",
+		"healthy",
+		"running",
+		"stopping",
+	];
+
+	for (const service of projectServices) {
+		const activeDeployments = await db
+			.select()
+			.from(deployments)
+			.where(eq(deployments.serviceId, service.id));
+
+		const hasActiveDeployments = activeDeployments.some((d) =>
+			activeStatuses.includes(d.status),
+		);
+
+		if (hasActiveDeployments) {
+			throw new Error(
+				`Stop all services before deleting the project. Service "${service.name}" has active deployments.`,
+			);
+		}
+	}
+
 	await db.delete(projects).where(eq(projects.id, id));
+	return { success: true };
+}
+
+export async function updateProjectName(projectId: string, name: string) {
+	const trimmed = name.trim();
+	if (!trimmed) {
+		throw new Error("Project name cannot be empty");
+	}
+
+	await db
+		.update(projects)
+		.set({ name: trimmed })
+		.where(eq(projects.id, projectId));
+
+	return { success: true };
+}
+
+export async function updateProjectSlug(projectId: string, slug: string) {
+	const sanitized = slugify(slug);
+	if (!sanitized) {
+		throw new Error("Invalid slug");
+	}
+
+	const existing = await db
+		.select({ id: projects.id })
+		.from(projects)
+		.where(eq(projects.slug, sanitized));
+
+	if (existing.some((p) => p.id !== projectId)) {
+		throw new Error("This slug is already in use");
+	}
+
+	await db
+		.update(projects)
+		.set({ slug: sanitized })
+		.where(eq(projects.id, projectId));
+
+	return { success: true, slug: sanitized };
 }
 
 export async function createEnvironment(projectId: string, name: string) {

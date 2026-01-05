@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import { DeploymentStatusBar } from "./service-details/deployment-status-bar";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { createContext, useContext } from "react";
-import { Spinner } from "./ui/spinner";
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -93,9 +92,25 @@ export function ServiceLayoutClient({
 
 	if (isLoading || !service) {
 		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<Spinner />
-			</div>
+			<>
+				<nav className="flex gap-1 border-b px-4 pt-1.5">
+					{[1, 2, 3, 4].map((i) => (
+						<div
+							key={i}
+							className="h-8 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse mb-1.5"
+						/>
+					))}
+				</nav>
+				<div className="container max-w-7xl mx-auto px-4 py-6">
+					<div className="space-y-6">
+						<div className="h-6 w-48 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="grid gap-4">
+							<div className="h-32 bg-zinc-200 dark:bg-zinc-700 rounded-lg animate-pulse" />
+							<div className="h-32 bg-zinc-200 dark:bg-zinc-700 rounded-lg animate-pulse" />
+						</div>
+					</div>
+				</div>
+			</>
 		);
 	}
 

@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { EnvironmentManagement } from "@/components/environment-management";
+import {
+	ProjectSettingsPanel,
+	ProjectDangerZone,
+} from "@/components/project-settings-panel";
 import { getProjectBySlug, listEnvironments } from "@/db/queries";
 
 export default async function ProjectSettingsPage({
@@ -37,10 +41,14 @@ export default async function ProjectSettingsPage({
 					</p>
 				</div>
 
+				<ProjectSettingsPanel project={project} />
+
 				<EnvironmentManagement
 					projectId={project.id}
 					initialEnvironments={environments}
 				/>
+
+				<ProjectDangerZone project={project} />
 			</div>
 		</>
 	);

@@ -11,7 +11,6 @@ import {
 import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
-import { Spinner } from "@/components/ui/spinner";
 import { signOut, useSession } from "@/lib/auth-client";
 
 function DashboardHeader({ email }: { email: string }) {
@@ -88,8 +87,25 @@ export function DashboardLayoutClient({
 
 	if (isPending) {
 		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<Spinner />
+			<div className="min-h-screen">
+				<header className="border-b">
+					<div className="container max-w-full mx-auto px-4 h-14 flex items-center justify-between">
+						<div className="flex items-center gap-3">
+							<div className="h-6 w-6 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+							<div className="h-4 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						</div>
+						<div className="flex items-center gap-4">
+							<div className="hidden sm:block h-4 w-32 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+							<div className="h-8 w-20 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						</div>
+					</div>
+				</header>
+				<main className="container max-w-7xl mx-auto px-4 py-6">
+					<div className="space-y-4">
+						<div className="h-8 w-48 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="h-4 w-64 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+					</div>
+				</main>
 			</div>
 		);
 	}
@@ -103,9 +119,7 @@ export function DashboardLayoutClient({
 			<div className="min-h-screen">
 				<DashboardHeader email={session.user.email} />
 				<OfflineServersBanner />
-				<main>
-					{children}
-				</main>
+				<main>{children}</main>
 				<Toaster />
 			</div>
 		</BreadcrumbDataProvider>

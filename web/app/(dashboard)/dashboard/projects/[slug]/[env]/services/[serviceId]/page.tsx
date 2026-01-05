@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import {
 	deleteDeployments,
 	deployService,
@@ -22,6 +23,7 @@ export default function ArchitecturePage() {
 							<ActionButton
 								action={async () => {
 									await restartService(service.id);
+									toast.success("Restart queued");
 								}}
 								label="Restart"
 								loadingLabel="Restarting..."

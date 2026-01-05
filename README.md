@@ -27,5 +27,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Deploy Logs
 - [x] GitHub deployments
 - [x] HTTP Logs
-- [ ] Rolling updates?
+- [ ] Rolling updates
+- [ ] Volume backups
 - [ ] TCP / L4 proxying
