@@ -16,7 +16,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "./ui/select";
-import { Button } from "./ui/button";
 
 function EnvironmentSelector({
 	environments,
@@ -48,7 +47,10 @@ function EnvironmentSelector({
 					))}
 				</SelectContent>
 			</Select>
-			<Link href={`/dashboard/projects/${projectSlug}/settings`} className="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-2">
+			<Link
+				href={`/dashboard/projects/${projectSlug}/settings`}
+				className="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-2"
+			>
 				<Settings className="h-4 w-4 text-muted-foreground" />
 			</Link>
 		</div>
@@ -88,19 +90,6 @@ function ServiceCard({
         `}
 			>
 				<div className="flex items-center gap-2">
-					<div
-						className={`
-            flex items-center justify-center
-            w-5 h-5 rounded
-            bg-zinc-100 dark:bg-zinc-800
-            border border-zinc-200 dark:border-zinc-700
-            group-hover:border-zinc-300 dark:group-hover:border-zinc-600
-            transition-colors
-          `}
-					>
-						<Box className="h-3 w-3 text-zinc-500" />
-					</div>
-
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-1.5">
 							<h3 className="font-semibold text-sm text-foreground truncate">

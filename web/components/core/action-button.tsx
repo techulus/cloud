@@ -10,6 +10,7 @@ interface ActionButtonProps {
 	loadingLabel: string;
 	variant?:
 		| "default"
+		| "positive"
 		| "destructive"
 		| "outline"
 		| "secondary"

@@ -2,13 +2,7 @@
 
 import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import {
-	ArrowRight,
-	CircleCheckIcon,
-	Hammer,
-	InfoIcon,
-	Loader2,
-} from "lucide-react";
+import { ArrowRight, CircleCheckIcon, Hammer, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -220,9 +214,9 @@ function PendingChangesModal({
 						Cancel
 					</Button>
 					<Button
+						variant="positive"
 						onClick={onDeploy}
 						disabled={isDeploying || !canDeploy}
-						className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white"
 					>
 						{isDeploying ? "Deploying..." : `Deploy Now`}
 					</Button>
@@ -335,7 +329,6 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 					<span className="text-sm font-medium">
 						{statusLabels[barState.buildStatus] || "Building"}
 					</span>
-					<Loader2 className="size-4 text-blue-500 animate-spin" />
 				</div>
 				<button
 					type="button"
@@ -358,7 +351,6 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		return (
 			<FloatingBar visible progress>
 				<div className="flex items-center gap-3">
-					<Loader2 className="size-4 text-orange-500 animate-spin" />
 					<span className="text-sm font-medium">
 						{currentStage?.label || "Deploying"}
 					</span>
@@ -397,18 +389,17 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							View
 						</button>
 					)}
-					<button
-						type="button"
+					<Button
+						variant="positive"
 						onClick={handleDeploy}
 						disabled={isDeploying || totalReplicas === 0}
-						className="h-8 min-w-[70px] px-3 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-md disabled:opacity-50 transition-colors flex items-center justify-center"
 					>
 						{isDeploying ? (
 							<Loader2 className="size-4 animate-spin" />
 						) : (
 							"Deploy"
 						)}
-					</button>
+					</Button>
 				</div>
 			</FloatingBar>
 			<PendingChangesModal

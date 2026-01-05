@@ -28,7 +28,7 @@ export function FloatingBar({
 						className="absolute inset-0 animate-spin-slow"
 						style={{
 							background:
-								"conic-gradient(from 0deg, transparent, #f97316, transparent 40%)",
+								"conic-gradient(from 0deg, transparent, #3b82f6, transparent 40%)",
 						}}
 					/>
 					<div

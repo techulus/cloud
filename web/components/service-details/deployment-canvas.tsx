@@ -2,7 +2,6 @@
 
 import {
 	Globe,
-	Server,
 	Box,
 	HeartPulse,
 	Lock,
@@ -61,7 +60,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 
 	return (
 		<div
-			className={`p-2 rounded-lg border ${colors.border} ${colors.bg} space-y-1 transition-all duration-300 ease-in-out`}
+			className={`p-2 rounded-lg border ${colors.border} ${colors.bg} space-y-1 transition-all duration-300 ease-in-out -mx-1`}
 		>
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-1">
@@ -126,21 +125,31 @@ function ServerBox({
 	return (
 		<div
 			className={`
-				w-[280px] p-3 rounded-xl border-2 ${borderClass}
+				w-[280px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
 				bg-white/50 dark:bg-zinc-900/50
 				backdrop-blur-sm
 				transition-all duration-300 ease-in-out
+				space-y-2
 			`}
 		>
 			<div className="flex items-center gap-2 mb-2">
-				<div className="flex items-center justify-center w-5 h-5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-					<Server className="h-3 w-3 text-zinc-500" />
-				</div>
-				<div className="flex-1 min-w-0">
-					<h3 className="font-semibold text-sm text-foreground truncate">
-						{serverName}
-					</h3>
-				</div>
+				<h3 className="font-semibold text-sm text-foreground truncate">
+					{serverName}
+				</h3>
+
+				{hasVolumes && (
+					<div className="ml-auto">
+						{volumes?.map((volume) => (
+							<div
+								key={volume.id}
+								className="flex items-center gap-2 text-xs text-muted-foreground"
+							>
+								<HardDrive className="h-3.5 w-3.5" />
+								<span>{volume.name}</span>
+							</div>
+						))}
+					</div>
+				)}
 			</div>
 
 			<div className="space-y-1.5">
@@ -148,20 +157,6 @@ function ServerBox({
 					<DeploymentCard key={deployment.id} deployment={deployment} />
 				))}
 			</div>
-
-			{hasVolumes && (
-				<div className="mt-2 space-y-1">
-					{volumes!.map((volume) => (
-						<div
-							key={volume.id}
-							className="flex items-center gap-2 text-xs text-muted-foreground"
-						>
-							<HardDrive className="h-3.5 w-3.5" />
-							<span>{volume.name}</span>
-						</div>
-					))}
-				</div>
-			)}
 		</div>
 	);
 }
@@ -221,7 +216,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			<div className="flex flex-col items-center gap-4">
 				{hasEndpoints && (
 					<>
-						<div className="flex flex-wrap gap-2 justify-center px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
+						<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
 							{publicPorts.map((port) => (
 								<a
 									key={port.id}
@@ -236,9 +231,6 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 									</span>
 								</a>
 							))}
-							{hasPublicIngress && hasRunningDeployments && (
-								<span className="text-zinc-300 dark:text-zinc-600">|</span>
-							)}
 							{hasRunningDeployments && (
 								<div className="flex items-center gap-1.5 text-xs">
 									<Lock className="h-3 w-3 text-zinc-500" />

@@ -107,7 +107,7 @@ export function EnvironmentManagement({
 				<Dialog open={isOpen} onOpenChange={setIsOpen}>
 					<DialogTrigger render={<Button size="sm" />}>
 						<Plus className="h-4 w-4 mr-1" />
-						Add Environment
+						Add
 					</DialogTrigger>
 					<DialogContent className="sm:max-w-md">
 						<DialogHeader>
