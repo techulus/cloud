@@ -218,3 +218,80 @@ sudo journalctl -u techulus-agent -f
 ```bash
 podman ps -a --format "table {{.Names}}\t{{.State}}\t{{.Labels}}"
 ```
+
+## macOS Troubleshooting
+
+On macOS, containers run inside OrbStack/Docker which has isolated networking. Additional setup is required for WireGuard traffic to reach containers.
+
+### Enable IP Forwarding
+
+```bash
+sudo sysctl -w net.inet.ip.forwarding=1
+```
+
+To persist across reboots:
+```bash
+echo "net.inet.ip.forwarding=1" | sudo tee /etc/sysctl.conf
+```
+
+### NAT Setup for Container Traffic
+
+Containers only respond to IPs on their local subnet. Traffic from other servers via WireGuard needs NAT.
+
+**1. Create NAT rule file:**
+
+Replace `X` with your subnet ID (check your WireGuard IP - if it's 10.100.5.1, your subnet ID is 5):
+
+```bash
+echo 'nat on bridge101 from 10.100.0.0/16 to 10.200.X.0/24 -> 10.200.X.0' | sudo tee /etc/pf.anchors/wireguard-nat
+```
+
+**2. Backup pf.conf:**
+
+```bash
+sudo cp /etc/pf.conf /etc/pf.conf.backup
+```
+
+**3. Add anchor to pf.conf:**
+
+```bash
+sudo nano /etc/pf.conf
+```
+
+Add these lines near the top (after existing `nat-anchor` lines):
+
+```
+nat-anchor "wireguard-nat"
+load anchor "wireguard-nat" from "/etc/pf.anchors/wireguard-nat"
+```
+
+**4. Load the config:**
+
+```bash
+sudo pfctl -f /etc/pf.conf
+```
+
+**5. Verify:**
+
+```bash
+sudo pfctl -a wireguard-nat -s nat
+```
+
+### WireGuard Commands (macOS)
+
+```bash
+sudo wg show
+wg-quick down wg0 && wg-quick up wg0
+```
+
+### Debugging Network Issues
+
+Check if packets arrive on WireGuard interface:
+```bash
+sudo tcpdump -i utun9 icmp -n
+```
+
+Check if packets reach Docker bridge:
+```bash
+sudo tcpdump -i bridge101 icmp -n
+```

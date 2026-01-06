@@ -458,6 +458,7 @@ EnvironmentFile=/var/lib/techulus-agent/environment
 ExecStart=/usr/local/bin/techulus-agent --url \${AGENT_URL} --data-dir \${AGENT_DATA_DIR} ${LOGS_ARG} ${PROXY_ARG}
 Restart=always
 RestartSec=10
+KillMode=process
 Environment=HOME=/root
 
 [Install]
