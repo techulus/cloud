@@ -37,6 +37,30 @@ prompt() {
   printf -v "$var_name" '%s' "$value"
 }
 
+pkg_update() {
+  if [ "$OS_FAMILY" = "debian" ]; then
+    apt-get update -qq
+  else
+    dnf check-update || true
+  fi
+}
+
+pkg_install() {
+  if [ "$OS_FAMILY" = "debian" ]; then
+    apt-get install -y "$@"
+  else
+    dnf install -y "$@"
+  fi
+}
+
+pkg_hold() {
+  if [ "$OS_FAMILY" = "debian" ]; then
+    apt-mark hold "$@" 2>/dev/null || true
+  else
+    dnf versionlock add "$@" 2>/dev/null || true
+  fi
+}
+
 echo ""
 echo "=========================================="
 echo "  Techulus Cloud Agent Installer"
@@ -68,10 +92,16 @@ if [ ! -f /etc/os-release ]; then
 fi
 
 . /etc/os-release
-if [[ "$ID" != "debian" && "$ID" != "ubuntu" && "$ID_LIKE" != *"debian"* ]]; then
-  error "This script requires a Debian-based distribution (Debian, Ubuntu, etc.)"
+
+OS_FAMILY=""
+if [[ "$ID" == "debian" || "$ID" == "ubuntu" || "$ID_LIKE" == *"debian"* ]]; then
+  OS_FAMILY="debian"
+elif [[ "$ID" == "rhel" || "$ID" == "fedora" || "$ID" == "oracle" || "$ID" == "rocky" || "$ID" == "almalinux" || "$ID" == "centos" || "$ID_LIKE" == *"rhel"* || "$ID_LIKE" == *"fedora"* ]]; then
+  OS_FAMILY="rhel"
+else
+  error "Unsupported distribution: $ID. Supported: Debian, Ubuntu, RHEL, Oracle Linux, Fedora, Rocky, AlmaLinux, CentOS"
 fi
-echo "✓ Detected $PRETTY_NAME"
+echo "✓ Detected $PRETTY_NAME ($OS_FAMILY family)"
 
 ARCH=$(uname -m)
 case $ARCH in
@@ -166,15 +196,15 @@ if [ -t 0 ]; then
 fi
 
 step "Updating package lists..."
-apt-mark hold sudo sudo-rs 2>/dev/null || true
-apt-get update -qq
+pkg_hold sudo sudo-rs
+pkg_update
 echo "✓ Package lists updated"
 
 step "Installing git..."
 if command -v git &>/dev/null; then
   echo "git already installed, skipping"
 else
-  apt-get install -y git
+  pkg_install git
 fi
 if ! git --version &>/dev/null; then
   error "Failed to install git"
@@ -185,7 +215,11 @@ step "Installing WireGuard..."
 if command -v wg &>/dev/null; then
   echo "WireGuard already installed, skipping"
 else
-  apt-get install -y wireguard wireguard-tools
+  if [ "$OS_FAMILY" = "debian" ]; then
+    pkg_install wireguard wireguard-tools
+  else
+    pkg_install wireguard-tools
+  fi
 fi
 if ! wg --version &>/dev/null; then
   error "Failed to install WireGuard"
@@ -196,7 +230,7 @@ step "Installing Podman..."
 if command -v podman &>/dev/null; then
   echo "Podman already installed, skipping"
 else
-  apt-get install -y podman
+  pkg_install podman
 fi
 if ! podman --version &>/dev/null; then
   error "Failed to install Podman"
@@ -208,13 +242,19 @@ if [ "$IS_PROXY" = "true" ]; then
   if command -v caddy &>/dev/null; then
     echo "Caddy already installed, skipping"
   else
-    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-    chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    chmod o+r /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -qq
-    apt-get install -y caddy
+    if [ "$OS_FAMILY" = "debian" ]; then
+      pkg_install debian-keyring debian-archive-keyring apt-transport-https curl
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+      chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      chmod o+r /etc/apt/sources.list.d/caddy-stable.list
+      pkg_update
+      pkg_install caddy
+    else
+      dnf install -y 'dnf-command(copr)'
+      dnf copr enable -y @caddy/caddy
+      pkg_install caddy
+    fi
   fi
   if ! caddy version &>/dev/null; then
     error "Failed to install Caddy"
@@ -228,7 +268,7 @@ step "Installing dnsmasq..."
 if command -v dnsmasq &>/dev/null; then
   echo "dnsmasq already installed, skipping"
 else
-  apt-get install -y dnsmasq
+  pkg_install dnsmasq
 fi
 if ! dnsmasq --version &>/dev/null; then
   error "Failed to install dnsmasq"

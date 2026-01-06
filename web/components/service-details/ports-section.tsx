@@ -3,7 +3,6 @@
 import { useState, memo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
 	Dialog,
@@ -18,14 +17,6 @@ import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
 import { EditableText } from "@/components/editable-text";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
-
-type StagedPort = {
-	id: string;
-	port: number;
-	isPublic: boolean;
-	domain: string | null;
-	isNew?: boolean;
-};
 
 function DnsInstructionsModal() {
 	return (
@@ -62,10 +53,6 @@ export const PortsSection = memo(function PortsSection({
 	onUpdate: () => void;
 }) {
 	const router = useRouter();
-	const [pendingAdds, setPendingAdds] = useState<StagedPort[]>([]);
-	const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(
-		new Set(),
-	);
 	const [newPort, setNewPort] = useState("");
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
@@ -77,70 +64,52 @@ export const PortsSection = memo(function PortsSection({
 		router.refresh();
 	};
 
-	const existingPorts: StagedPort[] = service.ports
-		.filter((p) => !pendingRemoveIds.has(p.id))
-		.map((p) => ({
-			id: p.id,
-			port: p.port,
-			isPublic: p.isPublic,
-			domain: p.domain,
-		}));
-	const stagedPorts = [...existingPorts, ...pendingAdds];
-	const hasChanges = pendingAdds.length > 0 || pendingRemoveIds.size > 0;
-
 	const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 	const isValidDomain = domain.trim() && domainRegex.test(domain.trim());
 	const canAdd =
 		newPort &&
-		!stagedPorts.some((p) => p.port === parseInt(newPort)) &&
-		isValidDomain;
+		!service.ports.some((p) => p.port === parseInt(newPort, 10)) &&
+		isValidDomain &&
+		!isSaving;
 
-	const handleAdd = () => {
-		const port = parseInt(newPort);
-		if (isNaN(port) || port <= 0 || port > 65535) return;
-
-		setPendingAdds([
-			...pendingAdds,
-			{
-				id: `new-${Date.now()}`,
-				port,
-				isPublic: true,
-				domain: domain.trim().toLowerCase(),
-				isNew: true,
-			},
-		]);
-		setNewPort("");
-		setDomain("");
-	};
-
-	const handleRemove = (portId: string) => {
-		const isPending = pendingAdds.some((p) => p.id === portId);
-		if (isPending) {
-			setPendingAdds(pendingAdds.filter((p) => p.id !== portId));
-		} else {
-			setPendingRemoveIds(new Set([...pendingRemoveIds, portId]));
+	const handleAdd = async () => {
+		const port = parseInt(newPort, 10);
+		if (Number.isNaN(port) || port <= 0 || port > 65535 || !isValidDomain) {
+			return;
 		}
-	};
 
-	const handleSave = async () => {
-		if (!hasChanges) return;
 		setIsSaving(true);
 		try {
 			await updateServiceConfig(service.id, {
 				ports: {
-					remove: [...pendingRemoveIds],
-					add: pendingAdds.map((p) => ({
-						port: p.port,
-						isPublic: p.isPublic,
-						domain: p.domain,
-					})),
+					add: [
+						{
+							port,
+							isPublic: true,
+							domain: domain.trim().toLowerCase(),
+						},
+					],
 				},
 			});
-			setPendingAdds([]);
-			setPendingRemoveIds(new Set());
+			setNewPort("");
+			setDomain("");
 			onUpdate();
 		} catch (error) {
-			console.error("Failed to update ports:", error);
+			console.error("Failed to add port:", error);
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
+	const handleRemove = async (portId: string) => {
+		setIsSaving(true);
+		try {
+			await updateServiceConfig(service.id, {
+				ports: { remove: [portId] },
+			});
+			onUpdate();
+		} catch (error) {
+			console.error("Failed to remove port:", error);
 		} finally {
 			setIsSaving(false);
 		}
@@ -169,25 +138,16 @@ export const PortsSection = memo(function PortsSection({
 					<span className="text-muted-foreground">.internal</span>
 				</div>
 
-				{stagedPorts.length > 0 && (
+				{service.ports.length > 0 && (
 					<div className="space-y-2">
-						{stagedPorts.map((port) => (
+						{service.ports.map((port) => (
 							<div
 								key={port.id}
-								className={`flex items-center justify-between px-3 py-2 rounded-md text-sm ${
-									port.isNew
-										? "bg-primary/10 border border-primary/20"
-										: "bg-muted"
-								}`}
+								className="flex items-center justify-between px-3 py-2 rounded-md text-sm bg-muted"
 							>
 								<div className="flex items-center gap-2">
 									<Globe className="h-4 w-4 text-primary" />
 									<span className="font-medium">{port.port}</span>
-									{port.isNew && (
-										<Badge variant="outline" className="text-xs">
-											new
-										</Badge>
-									)}
 									{port.domain && (
 										<span className="text-xs text-muted-foreground">
 											{port.domain}
@@ -197,7 +157,8 @@ export const PortsSection = memo(function PortsSection({
 								<button
 									type="button"
 									onClick={() => handleRemove(port.id)}
-									className="text-muted-foreground hover:text-foreground"
+									disabled={isSaving}
+									className="text-muted-foreground hover:text-foreground disabled:opacity-50"
 								>
 									<X className="h-4 w-4" />
 								</button>
@@ -233,14 +194,6 @@ export const PortsSection = memo(function PortsSection({
 						<Plus className="h-4 w-4" />
 					</Button>
 				</div>
-
-				{hasChanges && (
-					<div className="pt-3 border-t">
-						<Button onClick={handleSave} disabled={isSaving} size="sm">
-							{isSaving ? "Saving..." : "Save"}
-						</Button>
-					</div>
-				)}
 			</div>
 		</div>
 	);
