@@ -454,25 +454,6 @@ export async function deleteService(serviceId: string) {
 	return { success: true };
 }
 
-export async function updateServiceName(serviceId: string, name: string) {
-	const trimmed = name.trim();
-	if (!trimmed) {
-		throw new Error("Service name cannot be empty");
-	}
-
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	await db
-		.update(services)
-		.set({ name: trimmed })
-		.where(eq(services.id, serviceId));
-
-	return { success: true };
-}
-
 export async function updateServiceHostname(
 	serviceId: string,
 	hostname: string,
@@ -543,93 +524,6 @@ export async function updateServiceGithubRepo(
 	await db.update(services).set(updateData).where(eq(services.id, serviceId));
 
 	return { success: true };
-}
-
-type PortChange = {
-	action: "add" | "remove";
-	portId?: string;
-	port?: number;
-	isPublic?: boolean;
-	domain?: string;
-};
-
-export async function updateServicePorts(
-	serviceId: string,
-	changes: PortChange[],
-) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	for (const change of changes) {
-		if (change.action === "remove" && change.portId) {
-			await db
-				.delete(deploymentPorts)
-				.where(eq(deploymentPorts.servicePortId, change.portId));
-			await db.delete(servicePorts).where(eq(servicePorts.id, change.portId));
-		} else if (change.action === "add" && change.port) {
-			const existing = await db
-				.select()
-				.from(servicePorts)
-				.where(eq(servicePorts.serviceId, serviceId));
-
-			if (existing.some((p) => p.port === change.port)) {
-				throw new Error(`Port ${change.port} already exists`);
-			}
-
-			if (change.isPublic) {
-				if (!change.domain) {
-					throw new Error("Domain is required for public ports");
-				}
-
-				const domain = change.domain.trim().toLowerCase();
-				if (!domain) {
-					throw new Error("Invalid domain");
-				}
-
-				const existingDomain = await db
-					.select()
-					.from(servicePorts)
-					.where(eq(servicePorts.domain, domain));
-
-				if (existingDomain.length > 0) {
-					throw new Error("Domain already in use");
-				}
-
-				await db.insert(servicePorts).values({
-					id: randomUUID(),
-					serviceId,
-					port: change.port,
-					isPublic: true,
-					domain,
-				});
-			} else {
-				await db.insert(servicePorts).values({
-					id: randomUUID(),
-					serviceId,
-					port: change.port,
-					isPublic: false,
-				});
-			}
-		}
-	}
-
-	const runningDeployments = await db
-		.select()
-		.from(deployments)
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
-			),
-		);
-
-	if (runningDeployments.length > 0) {
-		await deployService(serviceId);
-	}
-
-	return { success: true, redeployed: runningDeployments.length > 0 };
 }
 
 const PORT_RANGE_START = 30000;

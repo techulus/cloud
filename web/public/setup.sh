@@ -522,7 +522,7 @@ if [ "$IS_PROXY" = "true" ]; then
 fi
 
 systemctl enable techulus-agent
-systemctl start techulus-agent
+systemctl restart techulus-agent
 sleep 3
 if ! systemctl is-active --quiet techulus-agent; then
   journalctl -u techulus-agent --no-pager -n 20
