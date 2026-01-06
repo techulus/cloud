@@ -113,7 +113,7 @@ export default function ArchitecturePage() {
 								<DropdownMenuContent side="bottom" align="end">
 									<DropdownMenuItem
 										disabled={isLoading !== null}
-										onSelect={() =>
+										onClick={() =>
 											handleAction("redeploy", () => deployService(service.id))
 										}
 									>
@@ -123,7 +123,7 @@ export default function ArchitecturePage() {
 									<DropdownMenuSeparator />
 									<DropdownMenuItem
 										disabled={isLoading !== null}
-										onSelect={() =>
+										onClick={() =>
 											handleAction("stop", () => stopService(service.id))
 										}
 										className="text-orange-600 dark:text-orange-500"
@@ -134,7 +134,7 @@ export default function ArchitecturePage() {
 									<DropdownMenuItem
 										variant="destructive"
 										disabled={isLoading !== null}
-										onSelect={() =>
+										onClick={() =>
 											handleAction("delete", () =>
 												deleteDeployments(service.id),
 											)
@@ -176,7 +176,7 @@ export default function ArchitecturePage() {
 									<DropdownMenuItem
 										variant="destructive"
 										disabled={isLoading !== null}
-										onSelect={() =>
+										onClick={() =>
 											handleAction("delete", () =>
 												deleteDeployments(service.id),
 											)
