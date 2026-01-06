@@ -42,6 +42,16 @@ export IS_PROXY=true  # or false for worker nodes
 curl -sSL $CONTROL_PLANE_URL/setup.sh | sudo bash
 ```
 
+## Updating
+
+To update an existing agent to the latest version:
+
+```bash
+curl -sSL https://your-control-plane.com/update.sh | sudo bash
+```
+
+This downloads the latest agent binary, verifies the checksum, and restarts the service.
+
 ## Manual Setup
 
 ### Worker Node
