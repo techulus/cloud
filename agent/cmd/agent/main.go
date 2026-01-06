@@ -83,6 +83,7 @@ type ActualState struct {
 
 type Agent struct {
 	state              AgentState
+	stateMutex         sync.RWMutex
 	client             *agenthttp.Client
 	reconciler         *reconcile.Reconciler
 	config             *Config
@@ -112,6 +113,18 @@ func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config
 		builder:           builder,
 		isProxy:           isProxy,
 	}
+}
+
+func (a *Agent) getState() AgentState {
+	a.stateMutex.RLock()
+	defer a.stateMutex.RUnlock()
+	return a.state
+}
+
+func (a *Agent) setState(state AgentState) {
+	a.stateMutex.Lock()
+	defer a.stateMutex.Unlock()
+	a.state = state
 }
 
 func (a *Agent) Run(ctx context.Context) {
@@ -144,6 +157,8 @@ func (a *Agent) Run(ctx context.Context) {
 
 	workQueueTicker := time.NewTicker(5 * time.Second)
 	defer workQueueTicker.Stop()
+
+	go a.heartbeatLoop(ctx)
 
 	a.tick()
 
@@ -201,7 +216,7 @@ func (a *Agent) collectLogs() {
 }
 
 func (a *Agent) tick() {
-	switch a.state {
+	switch a.getState() {
 	case StateIdle:
 		a.handleIdle()
 	case StateProcessing:
@@ -231,7 +246,7 @@ func (a *Agent) handleIdle() {
 		log.Printf("[idle] transitioning to PROCESSING")
 		a.expectedState = expected
 		a.processingStart = time.Now()
-		a.state = StateProcessing
+		a.setState(StateProcessing)
 		a.reportStatus(false)
 		return
 	}
@@ -324,7 +339,7 @@ func (a *Agent) handleProcessing() {
 	if time.Since(a.processingStart) > processingTimeout {
 		log.Printf("[processing] timeout after %v, forcing transition to IDLE", processingTimeout)
 		a.reportStatus(false)
-		a.state = StateIdle
+		a.setState(StateIdle)
 		return
 	}
 
@@ -332,14 +347,14 @@ func (a *Agent) handleProcessing() {
 	if err != nil {
 		log.Printf("[processing] failed to get actual state: %v", err)
 		a.reportStatus(false)
-		a.state = StateIdle
+		a.setState(StateIdle)
 		return
 	}
 
 	if !a.hasDrift(a.expectedState, actual) {
 		log.Printf("[processing] state converged, transitioning to IDLE")
 		a.reportStatus(false)
-		a.state = StateIdle
+		a.setState(StateIdle)
 		return
 	}
 
@@ -347,7 +362,7 @@ func (a *Agent) handleProcessing() {
 	if err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
 		a.reportStatus(false)
-		a.state = StateIdle
+		a.setState(StateIdle)
 		return
 	}
 
@@ -627,6 +642,23 @@ func (a *Agent) reconcileWireguard(peers []wireguard.Peer) error {
 
 	log.Printf("[wireguard] config updated successfully")
 	return nil
+}
+
+func (a *Agent) heartbeatLoop(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if a.getState() == StateProcessing {
+				log.Printf("[heartbeat] sending heartbeat during processing")
+				a.reportStatus(false)
+			}
+		}
+	}
 }
 
 func (a *Agent) reportStatus(includeResources bool) {

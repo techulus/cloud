@@ -96,7 +96,13 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--name", config.Name,
 		"--replace",
 		"--restart", "on-failure:5",
+		"--security-opt", "no-new-privileges:true",
+		"--cap-drop", "ALL",
+		"--cap-add", "CHOWN",
+		"--cap-add", "SETUID",
+		"--cap-add", "SETGID",
 		"--cap-add", "NET_BIND_SERVICE",
+		"--cap-add", "NET_RAW",
 	}
 
 	args = append(args,
