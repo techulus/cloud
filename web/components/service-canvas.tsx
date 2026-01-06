@@ -3,18 +3,25 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import { Box, Globe, HardDrive, Lock, Settings } from "lucide-react";
+import {
+	Box,
+	ChevronDownIcon,
+	Globe,
+	HardDrive,
+	Lock,
+	Settings,
+} from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "./ui/select";
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Button } from "./ui/button";
 
 function ServiceCardSkeleton() {
 	return (
@@ -58,23 +65,24 @@ function EnvironmentSelector({
 
 	return (
 		<div className="absolute top-4 left-4 flex items-center gap-2">
-			<Select
-				value={selectedEnvName}
-				onValueChange={(name) =>
-					router.push(`/dashboard/projects/${projectSlug}/${name}`)
-				}
-			>
-				<SelectTrigger>
-					<SelectValue>{selectedEnvName}</SelectValue>
-				</SelectTrigger>
-				<SelectContent>
+			<DropdownMenu>
+				<DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+					{selectedEnvName}
+					<ChevronDownIcon />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent side="bottom" align="start">
 					{environments.map((env) => (
-						<SelectItem key={env.id} value={env.name}>
+						<DropdownMenuItem
+							key={env.id}
+							onClick={() =>
+								router.push(`/dashboard/projects/${projectSlug}/${env.name}`)
+							}
+						>
 							{env.name}
-						</SelectItem>
+						</DropdownMenuItem>
 					))}
-				</SelectContent>
-			</Select>
+				</DropdownMenuContent>
+			</DropdownMenu>
 			<Link
 				href={`/dashboard/projects/${projectSlug}/settings`}
 				className="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-2"
