@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { githubInstallations } from "@/db/schema";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createPrivateKey } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { SignJWT } from "jose";
 
 async function getInstallationDetails(installationId: number): Promise<{
 	account: { login: string; type: "User" | "Organization" };
@@ -19,8 +20,6 @@ async function getInstallationDetails(installationId: number): Promise<{
 		return null;
 	}
 
-	const { SignJWT } = await import("jose");
-	const { createPrivateKey } = await import("node:crypto");
 	const key = createPrivateKey(privateKey);
 	const now = Math.floor(Date.now() / 1000);
 	const jwt = await new SignJWT({})

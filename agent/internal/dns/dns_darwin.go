@@ -1,3 +1,5 @@
+//go:build darwin
+
 package dns
 
 import (
@@ -13,17 +15,18 @@ import (
 	"strings"
 	"time"
 
+	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/retry"
 )
 
-const (
-	dnsmasqInternalPath = "/etc/dnsmasq.d/internal.conf"
-	dnsmasqServicesPath = "/etc/dnsmasq.d/services.conf"
-	resolvedDropInPath  = "/etc/systemd/resolved.conf.d/internal.conf"
+var (
+	dnsmasqInternalPath = paths.DnsmasqDir + "/internal.conf"
+	dnsmasqServicesPath = paths.DnsmasqDir + "/services.conf"
+	resolverPath        = paths.ResolverDir + "/internal"
 )
 
 func SetupLocalDNS(wireguardIP string) error {
-	if err := os.MkdirAll("/etc/dnsmasq.d", 0o755); err != nil {
+	if err := os.MkdirAll(paths.DnsmasqDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create dnsmasq.d: %w", err)
 	}
 
@@ -33,22 +36,16 @@ func SetupLocalDNS(wireguardIP string) error {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
-	mainConfig := `port=5353
+	mainConfig := `port=5354
 listen-address=127.0.0.1
 bind-interfaces
-conf-dir=/etc/dnsmasq.d
-`
+conf-dir=` + paths.DnsmasqDir + "\n"
 
-	if err := os.WriteFile("/etc/dnsmasq.conf", []byte(mainConfig), 0o644); err != nil {
+	if err := os.WriteFile(paths.DnsmasqConf, []byte(mainConfig), 0o644); err != nil {
 		return fmt.Errorf("failed to write main dnsmasq config: %w", err)
 	}
 
-	cmd := exec.Command("systemctl", "enable", "--now", "dnsmasq")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to enable dnsmasq: %w", err)
-	}
-
-	cmd = exec.Command("systemctl", "restart", "dnsmasq")
+	cmd := exec.Command("brew", "services", "restart", "dnsmasq")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
@@ -61,25 +58,22 @@ conf-dir=/etc/dnsmasq.d
 }
 
 func ConfigureClientDNS() error {
-	if err := os.MkdirAll("/etc/systemd/resolved.conf.d", 0o755); err != nil {
-		return fmt.Errorf("failed to create resolved.conf.d: %w", err)
+	if err := os.MkdirAll(paths.ResolverDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create resolver dir: %w", err)
 	}
 
-	config := `[Resolve]
-DNS=127.0.0.1:5353
-Domains=~internal
-`
+	config := "nameserver 127.0.0.1\nport 5354\n"
 
-	if err := os.WriteFile(resolvedDropInPath, []byte(config), 0o644); err != nil {
-		return fmt.Errorf("failed to write resolved config: %w", err)
-	}
-
-	cmd := exec.Command("systemctl", "restart", "systemd-resolved")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
+	if err := os.WriteFile(resolverPath, []byte(config), 0o644); err != nil {
+		return fmt.Errorf("failed to write resolver config: %w", err)
 	}
 
 	return nil
+}
+
+func restartDnsmasq() error {
+	cmd := exec.Command("brew", "services", "restart", "dnsmasq")
+	return cmd.Run()
 }
 
 func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
@@ -87,7 +81,7 @@ func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, "udp", "127.0.0.1:5353")
+			return d.DialContext(ctx, "udp", "127.0.0.1:5354")
 		},
 	}
 
@@ -142,8 +136,7 @@ func UpdateDnsRecords(records []DnsRecord) error {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
-	cmd := exec.Command("systemctl", "restart", "dnsmasq")
-	if err := cmd.Run(); err != nil {
+	if err := restartDnsmasq(); err != nil {
 		return fmt.Errorf("failed to restart dnsmasq: %w", err)
 	}
 
@@ -237,4 +230,3 @@ func GetCurrentConfigHash() string {
 
 	return HashRecords(records)
 }
-

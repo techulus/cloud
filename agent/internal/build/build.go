@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"techulus/cloud-agent/internal/paths"
+	"techulus/cloud-agent/internal/container"
 )
 
 type Config struct {
@@ -164,7 +167,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 	buildkitAddr := os.Getenv("BUILDKIT_HOST")
 	if buildkitAddr == "" {
-		buildkitAddr = "unix:///run/buildkit/buildkitd.sock"
+		buildkitAddr = paths.BuildKitSocket
 	}
 
 	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", config.ImageURI)
@@ -379,7 +382,7 @@ func (b *Builder) Cleanup() error {
 	}
 
 	log.Printf("[build:cleanup] pruning dangling images")
-	exec.Command("podman", "image", "prune", "-f").Run()
+	container.ImagePrune()
 
 	return nil
 }

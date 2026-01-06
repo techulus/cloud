@@ -132,10 +132,9 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 		};
 	}
 
-	const totalReplicas = service.configuredReplicas.reduce(
-		(sum, r) => sum + r.count,
-		0,
-	);
+	const totalReplicas = service.autoPlace
+		? service.replicas
+		: service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
 
@@ -268,10 +267,9 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		}
 	}, [barState.mode, service.rollouts]);
 
-	const totalReplicas = service.configuredReplicas.reduce(
-		(sum, r) => sum + r.count,
-		0,
-	);
+	const totalReplicas = service.autoPlace
+		? service.replicas
+		: service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
 	const hasNoDeployments = service.deployments.length === 0;
 	const isGithubWithNoDeployments =
 		service.sourceType === "github" && hasNoDeployments;

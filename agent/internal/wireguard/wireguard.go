@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"techulus/cloud-agent/internal/paths"
 )
 
 const (
 	DefaultInterface = "wg0"
 	DefaultPort      = 51820
-	ConfigDir        = "/etc/wireguard"
 )
 
 type Peer struct {
@@ -71,11 +72,11 @@ func (c *Config) GenerateConfigFile() string {
 }
 
 func WriteConfig(interfaceName string, config *Config) error {
-	if err := os.MkdirAll(ConfigDir, 0700); err != nil {
+	if err := os.MkdirAll(paths.WireGuardDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	configPath := filepath.Join(ConfigDir, interfaceName+".conf")
+	configPath := filepath.Join(paths.WireGuardDir, interfaceName+".conf")
 	content := config.GenerateConfigFile()
 
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
@@ -166,7 +167,7 @@ func HashPeers(peers []Peer) string {
 }
 
 func GetCurrentPeersHash() string {
-	configPath := filepath.Join(ConfigDir, DefaultInterface+".conf")
+	configPath := filepath.Join(paths.WireGuardDir, DefaultInterface+".conf")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return ""

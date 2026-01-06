@@ -35,6 +35,7 @@ export type VolumeConfig = {
 
 export type DeployedConfig = {
 	source: SourceConfig;
+	hostname?: string;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	ports: PortConfig[];
@@ -52,6 +53,7 @@ export type ConfigChange = {
 export function buildCurrentConfig(
 	service: {
 		image: string;
+		hostname: string | null;
 		healthCheckCmd: string | null;
 		healthCheckInterval: number | null;
 		healthCheckTimeout: number | null;
@@ -68,6 +70,7 @@ export function buildCurrentConfig(
 			type: "image",
 			image: service.image,
 		},
+		hostname: service.hostname ?? undefined,
 		replicas: replicas.map((r) => ({
 			serverId: r.serverId,
 			serverName: r.serverName,
@@ -157,6 +160,14 @@ export function diffConfigs(
 			field: "Image",
 			from: deployed.source.image,
 			to: current.source.image,
+		});
+	}
+
+	if (deployed.hostname !== current.hostname) {
+		changes.push({
+			field: "Private endpoint",
+			from: deployed.hostname ?? "(default)",
+			to: current.hostname ?? "(default)",
 		});
 	}
 

@@ -12,6 +12,7 @@ import { StatusIndicator } from "@/components/core/status-indicator";
 import { formatRelativeTime } from "@/lib/date";
 import { LogViewer } from "@/components/log-viewer";
 import { Label } from "@/components/ui/label";
+import { ServerDangerZone } from "@/components/server-danger-zone";
 
 export default async function ServerDetailPage({
 	params,
@@ -126,6 +127,8 @@ export default async function ServerDetailPage({
 					<h3 className="text-sm font-medium">Agent Logs</h3>
 					<LogViewer variant="server-logs" serverId={id} />
 				</div>
+
+				<ServerDangerZone serverId={id} serverName={server.name} />
 			</div>
 		</>
 	);

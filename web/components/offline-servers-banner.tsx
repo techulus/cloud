@@ -1,32 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { AlertTriangle } from "lucide-react";
+import { fetcher } from "@/lib/fetcher";
 import type { Server } from "@/db/types";
 
 type ServerBasic = Pick<Server, "id" | "name" | "status">;
 
 export function OfflineServersBanner() {
-	const [offlineServers, setOfflineServers] = useState<ServerBasic[]>([]);
+	const { data: servers } = useSWR<ServerBasic[]>("/api/servers", fetcher, {
+		refreshInterval: 30000,
+	});
 
-	useEffect(() => {
-		async function fetchServers() {
-			try {
-				const response = await fetch("/api/servers");
-				if (!response.ok) return;
-				const servers: ServerBasic[] = await response.json();
-				const offline = servers.filter(
-					(s) => s.status === "offline" || s.status === "unknown",
-				);
-				setOfflineServers(offline);
-			} catch {}
-		}
-
-		fetchServers();
-		const interval = setInterval(fetchServers, 30000);
-		return () => clearInterval(interval);
-	}, []);
+	const offlineServers =
+		servers?.filter((s) => s.status === "offline" || s.status === "unknown") ??
+		[];
 
 	if (offlineServers.length === 0) return null;
 

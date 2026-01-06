@@ -6,7 +6,7 @@ import (
 
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
-	"techulus/cloud-agent/internal/podman"
+	"techulus/cloud-agent/internal/container"
 )
 
 type Reconciler struct {
@@ -20,17 +20,17 @@ func NewReconciler(encryptionKey string) *Reconciler {
 }
 
 func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
-	portMappings := make([]podman.PortMapping, len(exp.Ports))
+	portMappings := make([]container.PortMapping, len(exp.Ports))
 	for i, p := range exp.Ports {
-		portMappings[i] = podman.PortMapping{
+		portMappings[i] = container.PortMapping{
 			ContainerPort: p.ContainerPort,
 			HostPort:      p.HostPort,
 		}
 	}
 
-	var healthCheck *podman.HealthCheck
+	var healthCheck *container.HealthCheck
 	if exp.HealthCheck != nil && exp.HealthCheck.Cmd != "" {
-		healthCheck = &podman.HealthCheck{
+		healthCheck = &container.HealthCheck{
 			Cmd:         exp.HealthCheck.Cmd,
 			Interval:    exp.HealthCheck.Interval,
 			Timeout:     exp.HealthCheck.Timeout,
@@ -51,16 +51,16 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		decryptedEnv[key] = decrypted
 	}
 
-	volumeMounts := make([]podman.VolumeMount, len(exp.Volumes))
+	volumeMounts := make([]container.VolumeMount, len(exp.Volumes))
 	for i, v := range exp.Volumes {
-		volumeMounts[i] = podman.VolumeMount{
+		volumeMounts[i] = container.VolumeMount{
 			Name:          v.Name,
 			HostPath:      v.HostPath,
 			ContainerPath: v.ContainerPath,
 		}
 	}
 
-	_, err := podman.Deploy(&podman.DeployConfig{
+	_, err := container.Deploy(&container.DeployConfig{
 		Name:         exp.Name,
 		Image:        exp.Image,
 		ServiceID:    exp.ServiceID,

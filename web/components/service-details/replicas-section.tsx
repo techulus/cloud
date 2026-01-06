@@ -5,9 +5,15 @@ import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Server, Lock } from "lucide-react";
-import { updateServiceConfig } from "@/actions/projects";
+import { Server, Lock, Zap } from "lucide-react";
+import {
+	updateServiceConfig,
+	updateServiceAutoPlace,
+	updateServiceReplicas,
+} from "@/actions/projects";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import type {
 	Server as ServerType,
 	ServiceWithDetails as Service,
@@ -39,6 +45,10 @@ export const ReplicasSection = memo(function ReplicasSection({
 	);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [autoPlace, setAutoPlace] = useState(service.autoPlace ?? false);
+	const [totalReplicaCount, setTotalReplicaCount] = useState(
+		service.replicas ?? 1,
+	);
 
 	const configuredReplicas = service.configuredReplicas || [];
 
@@ -53,7 +63,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 			} else {
 				setSelectedServerId(null);
 			}
-		} else {
+		} else if (!autoPlace) {
 			const replicaMap: Record<string, number> = {};
 			for (const r of configuredReplicas) {
 				replicaMap[r.serverId] = r.count;
@@ -65,24 +75,44 @@ export const ReplicasSection = memo(function ReplicasSection({
 			}
 			setLocalReplicas(replicaMap);
 		}
-	}, [servers, configuredReplicas, service.stateful, service.lockedServerId]);
+	}, [
+		servers,
+		configuredReplicas,
+		service.stateful,
+		service.lockedServerId,
+		autoPlace,
+	]);
 
 	const hasChanges = useMemo(() => {
+		if (autoPlace !== (service.autoPlace ?? false)) return true;
+		if (autoPlace && totalReplicaCount !== (service.replicas ?? 1)) return true;
+
 		if (service.stateful) {
 			const currentServerId =
 				configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
 			return selectedServerId !== currentServerId;
 		}
 
-		const configuredMap = new Map(
-			configuredReplicas.map((r) => [r.serverId, r.count]),
-		);
-		for (const [serverId, count] of Object.entries(localReplicas)) {
-			const configured = configuredMap.get(serverId) ?? 0;
-			if (configured !== count) return true;
+		if (!autoPlace) {
+			const configuredMap = new Map(
+				configuredReplicas.map((r) => [r.serverId, r.count]),
+			);
+			for (const [serverId, count] of Object.entries(localReplicas)) {
+				const configured = configuredMap.get(serverId) ?? 0;
+				if (configured !== count) return true;
+			}
 		}
 		return false;
-	}, [configuredReplicas, localReplicas, service.stateful, selectedServerId]);
+	}, [
+		configuredReplicas,
+		localReplicas,
+		service.stateful,
+		selectedServerId,
+		autoPlace,
+		service.autoPlace,
+		totalReplicaCount,
+		service.replicas,
+	]);
 
 	const updateReplicas = (serverId: string, value: number) => {
 		setLocalReplicas((prev) => ({
@@ -91,10 +121,21 @@ export const ReplicasSection = memo(function ReplicasSection({
 		}));
 	};
 
+	const handleAutoPlaceToggle = async (checked: boolean) => {
+		setAutoPlace(checked);
+	};
+
 	const handleSave = async () => {
 		setIsSaving(true);
 		try {
-			if (service.stateful) {
+			if (autoPlace !== (service.autoPlace ?? false)) {
+				await updateServiceAutoPlace(service.id, autoPlace);
+			}
+			if (autoPlace) {
+				if (totalReplicaCount !== (service.replicas ?? 1)) {
+					await updateServiceReplicas(service.id, totalReplicaCount);
+				}
+			} else if (service.stateful) {
 				const replicas = selectedServerId
 					? [{ serverId: selectedServerId, count: 1 }]
 					: [];
@@ -111,11 +152,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 		}
 	};
 
-	const totalReplicas = service.stateful
-		? selectedServerId
-			? 1
-			: 0
-		: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
+	const totalReplicas = autoPlace
+		? totalReplicaCount
+		: service.stateful
+			? selectedServerId
+				? 1
+				: 0
+			: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
 
 	if (service.stateful) {
 		return (
@@ -214,7 +257,72 @@ export const ReplicasSection = memo(function ReplicasSection({
 				</ItemContent>
 			</Item>
 			<div className="p-4 space-y-4">
-				{isLoading ? (
+				<div className="flex items-center justify-between">
+					<div className="flex items-center gap-2">
+						<Zap className="h-4 w-4 text-muted-foreground" />
+						<Label htmlFor="auto-place">Auto-placement</Label>
+					</div>
+					<Switch
+						id="auto-place"
+						checked={autoPlace}
+						onCheckedChange={handleAutoPlaceToggle}
+					/>
+				</div>
+
+				{autoPlace ? (
+					<>
+						<p className="text-sm text-muted-foreground">
+							Replicas will be automatically distributed across healthy servers.
+							If a server goes offline, replicas are automatically recovered.
+						</p>
+						<div className="flex items-center gap-4">
+							<Label>Total Replicas:</Label>
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="icon"
+									className="h-8 w-8"
+									onClick={() =>
+										setTotalReplicaCount(Math.max(1, totalReplicaCount - 1))
+									}
+									disabled={totalReplicaCount <= 1}
+								>
+									-
+								</Button>
+								<Input
+									type="number"
+									value={totalReplicaCount}
+									onChange={(e) =>
+										setTotalReplicaCount(
+											Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
+										)
+									}
+									min={1}
+									max={10}
+									className="w-16 h-8 text-center"
+								/>
+								<Button
+									variant="outline"
+									size="icon"
+									className="h-8 w-8"
+									onClick={() =>
+										setTotalReplicaCount(Math.min(10, totalReplicaCount + 1))
+									}
+									disabled={totalReplicaCount >= 10}
+								>
+									+
+								</Button>
+							</div>
+						</div>
+						{hasChanges && (
+							<div className="pt-3 border-t">
+								<Button onClick={handleSave} disabled={isSaving} size="sm">
+									{isSaving ? "Saving..." : "Save"}
+								</Button>
+							</div>
+						)}
+					</>
+				) : isLoading ? (
 					<div className="flex justify-center py-4">
 						<Spinner />
 					</div>

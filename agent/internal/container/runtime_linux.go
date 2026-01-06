@@ -1,4 +1,6 @@
-package podman
+//go:build linux
+
+package container
 
 import (
 	"context"
@@ -12,53 +14,6 @@ import (
 
 	"techulus/cloud-agent/internal/retry"
 )
-
-type PortMapping struct {
-	ContainerPort int
-	HostPort      int
-}
-
-type HealthCheck struct {
-	Cmd         string
-	Interval    int
-	Timeout     int
-	Retries     int
-	StartPeriod int
-}
-
-type VolumeMount struct {
-	Name          string
-	HostPath      string
-	ContainerPath string
-}
-
-type BuildLogFunc func(stream string, message string)
-
-type DeployConfig struct {
-	Name         string
-	Image        string
-	ServiceID    string
-	ServiceName  string
-	DeploymentID string
-	WireGuardIP  string
-	IPAddress    string
-	PortMappings []PortMapping
-	HealthCheck  *HealthCheck
-	Env          map[string]string
-	VolumeMounts []VolumeMount
-	LogFunc      BuildLogFunc
-}
-
-type DeployResult struct {
-	ContainerID string
-}
-
-type containerInspect struct {
-	State struct {
-		Status  string `json:"Status"`
-		Running bool   `json:"Running"`
-	} `json:"State"`
-}
 
 func ContainerExists(containerID string) (bool, error) {
 	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)
@@ -142,10 +97,13 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--replace",
 		"--restart", "on-failure:5",
 		"--cap-add", "NET_BIND_SERVICE",
+	}
+
+	args = append(args,
 		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
-	}
+	)
 
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
@@ -422,15 +380,8 @@ func CheckPrerequisites() error {
 	return nil
 }
 
-type Container struct {
-	ID           string            `json:"Id"`
-	Name         string            `json:"Name"`
-	Image        string            `json:"Image"`
-	State        string            `json:"State"`
-	Created      int64             `json:"Created"`
-	Labels       map[string]string `json:"Labels"`
-	DeploymentID string
-	ServiceID    string
+func ImagePrune() {
+	exec.Command("podman", "image", "prune", "-f").Run()
 }
 
 type podmanContainer struct {
@@ -442,7 +393,7 @@ type podmanContainer struct {
 	Labels  map[string]string `json:"Labels"`
 }
 
-func ListContainers() ([]Container, error) {
+func List() ([]Container, error) {
 	cmd := exec.Command("podman", "ps", "-a", "--filter", "label=techulus.service.id", "--format", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -473,4 +424,34 @@ func ListContainers() ([]Container, error) {
 	}
 
 	return containers, nil
+}
+
+func EnsureNetwork(subnetId int) error {
+	subnet := fmt.Sprintf("10.200.%d.0/24", subnetId)
+	gateway := fmt.Sprintf("10.200.%d.1", subnetId)
+
+	checkCmd := exec.Command("podman", "network", "inspect", NetworkName)
+	if err := checkCmd.Run(); err == nil {
+		return nil
+	}
+
+	args := []string{
+		"network", "create",
+		"--driver", "bridge",
+		"--subnet", subnet,
+		"--gateway", gateway,
+		"--disable-dns",
+		NetworkName,
+	}
+
+	createCmd := exec.Command("podman", args...)
+	output, err := createCmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "already exists") {
+			return nil
+		}
+		return fmt.Errorf("failed to create network: %s: %w", string(output), err)
+	}
+
+	return nil
 }

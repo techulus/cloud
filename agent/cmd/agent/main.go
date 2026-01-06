@@ -24,7 +24,8 @@ import (
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
-	"techulus/cloud-agent/internal/podman"
+	"techulus/cloud-agent/internal/paths"
+	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/reconcile"
 	"techulus/cloud-agent/internal/retry"
 	"techulus/cloud-agent/internal/wireguard"
@@ -34,7 +35,6 @@ import (
 )
 
 const (
-	defaultDataDir       = "/var/lib/techulus-agent"
 	tickInterval         = 10 * time.Second
 	processingTimeout    = 5 * time.Minute
 	buildCheckInterval   = 30 * time.Second
@@ -75,7 +75,7 @@ type Config struct {
 }
 
 type ActualState struct {
-	Containers      []podman.Container
+	Containers      []container.Container
 	DnsConfigHash   string
 	CaddyConfigHash string
 	WireguardHash   string
@@ -176,7 +176,7 @@ func (a *Agent) collectLogs() {
 		return
 	}
 
-	containers, err := podman.ListContainers()
+	containers, err := container.List()
 	if err != nil {
 		return
 	}
@@ -247,7 +247,7 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		expectedMap[c.DeploymentID] = c
 	}
 
-	actualMap := make(map[string]podman.Container)
+	actualMap := make(map[string]container.Container)
 	for _, c := range actual.Containers {
 		if c.DeploymentID != "" {
 			actualMap[c.DeploymentID] = c
@@ -355,7 +355,7 @@ func (a *Agent) handleProcessing() {
 }
 
 func (a *Agent) getActualState() (*ActualState, error) {
-	containers, err := podman.ListContainers()
+	containers, err := container.List()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -408,13 +408,13 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 	return false
 }
 
-func (a *Agent) hasContainerDrift(expected []agenthttp.ExpectedContainer, actual []podman.Container) bool {
+func (a *Agent) hasContainerDrift(expected []agenthttp.ExpectedContainer, actual []container.Container) bool {
 	expectedMap := make(map[string]agenthttp.ExpectedContainer)
 	for _, c := range expected {
 		expectedMap[c.DeploymentID] = c
 	}
 
-	actualMap := make(map[string]podman.Container)
+	actualMap := make(map[string]container.Container)
 	for _, c := range actual {
 		if c.DeploymentID != "" {
 			actualMap[c.DeploymentID] = c
@@ -454,6 +454,9 @@ func normalizeImage(image string) string {
 	parts := strings.Split(image, "@")
 	image = parts[0]
 
+	image = strings.TrimPrefix(image, "docker.io/library/")
+	image = strings.TrimPrefix(image, "docker.io/")
+
 	if !strings.Contains(image, ":") {
 		image = image + ":latest"
 	}
@@ -466,7 +469,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		expectedMap[c.DeploymentID] = c
 	}
 
-	actualMap := make(map[string]podman.Container)
+	actualMap := make(map[string]container.Container)
 	for _, c := range actual.Containers {
 		if c.DeploymentID != "" {
 			actualMap[c.DeploymentID] = c
@@ -477,7 +480,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		if act.DeploymentID == "" {
 			if act.State == "running" {
 				log.Printf("[reconcile] stopping orphan container %s (no deployment ID)", act.ID)
-				if err := podman.Stop(act.ID); err != nil {
+				if err := container.Stop(act.ID); err != nil {
 					return fmt.Errorf("failed to stop orphan container: %w", err)
 				}
 				return nil
@@ -485,7 +488,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 				log.Printf("[reconcile] removing orphan container %s (no deployment ID)", act.ID)
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				err := retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
-					if err := podman.ForceRemove(act.ID); err != nil {
+					if err := container.ForceRemove(act.ID); err != nil {
 						log.Printf("[reconcile] remove attempt failed: %v, retrying...", err)
 						return false, err
 					}
@@ -504,13 +507,13 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		if _, exists := expectedMap[id]; !exists {
 			if act.State == "running" {
 				log.Printf("[reconcile] stopping orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
-				if err := podman.Stop(act.ID); err != nil {
+				if err := container.Stop(act.ID); err != nil {
 					return fmt.Errorf("failed to stop orphan container: %w", err)
 				}
 				return nil
 			} else {
 				log.Printf("[reconcile] removing orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
-				if err := podman.ForceRemove(act.ID); err != nil {
+				if err := container.ForceRemove(act.ID); err != nil {
 					log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
 				}
 				return nil
@@ -532,9 +535,9 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		if act, exists := actualMap[id]; exists {
 			if act.State == "created" || act.State == "exited" {
 				log.Printf("[reconcile] starting %s container %s for deployment %s", act.State, act.ID, id)
-				if err := podman.Start(act.ID); err != nil {
+				if err := container.Start(act.ID); err != nil {
 					log.Printf("[reconcile] start failed, will redeploy: %v", err)
-					if err := podman.Stop(act.ID); err != nil {
+					if err := container.Stop(act.ID); err != nil {
 						log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 					}
 					if err := a.reconciler.Deploy(exp); err != nil {
@@ -545,7 +548,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 			}
 			if act.State != "running" || normalizeImage(exp.Image) != normalizeImage(act.Image) {
 				log.Printf("[reconcile] redeploying container for deployment %s (state=%s)", id, act.State)
-				if err := podman.Stop(act.ID); err != nil {
+				if err := container.Stop(act.ID); err != nil {
 					log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 				}
 				if err := a.reconciler.Deploy(exp); err != nil {
@@ -636,7 +639,7 @@ func (a *Agent) reportStatus(includeResources bool) {
 		report.Resources = getSystemStats()
 	}
 
-	containers, err := podman.ListContainers()
+	containers, err := container.List()
 	if err == nil {
 		for _, c := range containers {
 			if c.DeploymentID == "" {
@@ -652,7 +655,7 @@ func (a *Agent) reportStatus(includeResources bool) {
 
 			healthStatus := "none"
 			if c.State == "running" {
-				healthStatus = podman.GetHealthStatus(c.ID)
+				healthStatus = container.GetHealthStatus(c.ID)
 			}
 
 			report.Containers = append(report.Containers, agenthttp.ContainerStatus{
@@ -722,7 +725,7 @@ func (a *Agent) processRestart(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[restart] restarting container %s for deployment %s", truncate(payload.ContainerID, 12), truncate(payload.DeploymentID, 8))
 
-	if err := podman.Restart(payload.ContainerID); err != nil {
+	if err := container.Restart(payload.ContainerID); err != nil {
 		return fmt.Errorf("failed to restart container: %w", err)
 	}
 
@@ -741,7 +744,7 @@ func (a *Agent) processStop(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[stop] stopping container %s for deployment %s", truncate(payload.ContainerID, 12), truncate(payload.DeploymentID, 8))
 
-	if err := podman.Stop(payload.ContainerID); err != nil {
+	if err := container.Stop(payload.ContainerID); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -761,10 +764,10 @@ func (a *Agent) processForceCleanup(item agenthttp.WorkQueueItem) error {
 	log.Printf("[force_cleanup] cleaning up %d containers for service %s", len(payload.ContainerIDs), truncate(payload.ServiceID, 8))
 
 	for _, containerID := range payload.ContainerIDs {
-		if err := podman.Stop(containerID); err != nil {
+		if err := container.Stop(containerID); err != nil {
 			log.Printf("[force_cleanup] failed to stop %s: %v", truncate(containerID, 12), err)
 		}
-		if err := podman.ForceRemove(containerID); err != nil {
+		if err := container.ForceRemove(containerID); err != nil {
 			log.Printf("[force_cleanup] failed to remove %s: %v", truncate(containerID, 12), err)
 		}
 	}
@@ -913,7 +916,7 @@ func main() {
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
-	flag.StringVar(&dataDir, "data-dir", defaultDataDir, "Data directory for agent state")
+	flag.StringVar(&dataDir, "data-dir", paths.DataDir, "Data directory for agent state")
 	flag.StringVar(&logsEndpoint, "logs-endpoint", "", "VictoriaLogs endpoint URL (enables logging)")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.Parse()
@@ -922,12 +925,16 @@ func main() {
 		log.Fatal("--url is required")
 	}
 
+	if isProxy && runtime.GOOS != "linux" {
+		log.Fatal("--proxy flag is only supported on Linux")
+	}
+
 	if err := wireguard.CheckPrerequisites(); err != nil {
 		log.Fatalf("WireGuard prerequisites check failed: %v", err)
 	}
 
-	if err := podman.CheckPrerequisites(); err != nil {
-		log.Fatalf("Podman prerequisites check failed: %v", err)
+	if err := container.CheckPrerequisites(); err != nil {
+		log.Fatalf("Container runtime prerequisites check failed: %v", err)
 	}
 
 	if isProxy {
@@ -974,7 +981,7 @@ func main() {
 			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		}
 
-		if err := podman.EnsureNetwork(config.SubnetID); err != nil {
+		if err := container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
 		}
 	} else {
@@ -1051,7 +1058,7 @@ func main() {
 		}
 
 		log.Println("Ensuring container network exists...")
-		if err := podman.EnsureNetwork(config.SubnetID); err != nil {
+		if err := container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to create container network: %v", err)
 		} else {
 			log.Println("Container network ready")
@@ -1069,8 +1076,10 @@ func main() {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint)
 		logCollector = logs.NewCollector(logsSender, dataDir)
-		caddyLogCollector = logs.NewCaddyCollector(logsSender)
-		log.Println("[caddy-logs] Caddy HTTP log collection enabled")
+		if isProxy {
+			caddyLogCollector = logs.NewCaddyCollector(logsSender)
+			log.Println("[caddy-logs] Caddy HTTP log collection enabled")
+		}
 		agentLogWriter = logs.NewAgentLogWriter(config.ServerID, logsSender)
 		log.SetOutput(agentLogWriter)
 		log.Println("[agent-logs] Agent log collection enabled")

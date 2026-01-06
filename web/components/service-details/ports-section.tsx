@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, memo } from "react";
+import { useState, memo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,7 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
 import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
 import { EditableText } from "@/components/editable-text";
-import type { Server, ServiceWithDetails as Service } from "@/db/types";
+import type { ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
 
 type StagedPort = {
@@ -27,13 +27,7 @@ type StagedPort = {
 	isNew?: boolean;
 };
 
-function DnsInstructionsModal({
-	servers,
-}: {
-	servers: Pick<Server, "id" | "name" | "publicIp">[];
-}) {
-	const serversWithIp = servers.filter((s) => s.publicIp);
-
+function DnsInstructionsModal() {
 	return (
 		<Dialog>
 			<DialogTrigger
@@ -49,30 +43,11 @@ function DnsInstructionsModal({
 				</DialogHeader>
 				<div className="space-y-4">
 					<p className="text-sm text-muted-foreground">
-						Configure DNS A records pointing to your servers.
+						Point your domain A record to your proxy servers.
 					</p>
-					{serversWithIp.length > 0 ? (
-						<>
-							<div className="space-y-2">
-								{serversWithIp.map((server) => (
-									<div
-										key={server.id}
-										className="flex items-center justify-between bg-muted px-3 py-2 rounded-md text-sm"
-									>
-										<span>{server.name}</span>
-										<code className="font-mono">{server.publicIp}</code>
-									</div>
-								))}
-							</div>
-							<div className="text-xs text-muted-foreground space-y-1">
-								<p>Type: A | TTL: 300</p>
-							</div>
-						</>
-					) : (
-						<p className="text-sm text-muted-foreground">
-							No servers with public IPs available.
-						</p>
-					)}
+					<div className="text-xs text-muted-foreground">
+						<p>Type: A | TTL: 300</p>
+					</div>
 				</div>
 			</DialogContent>
 		</Dialog>
@@ -94,9 +69,6 @@ export const PortsSection = memo(function PortsSection({
 	const [newPort, setNewPort] = useState("");
 	const [domain, setDomain] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
-	const [servers, setServers] = useState<
-		Pick<Server, "id" | "name" | "publicIp">[]
-	>([]);
 
 	const hostname = service.hostname || slugify(service.name);
 
@@ -104,13 +76,6 @@ export const PortsSection = memo(function PortsSection({
 		await updateServiceHostname(service.id, newHostname);
 		router.refresh();
 	};
-
-	useEffect(() => {
-		fetch("/api/servers")
-			.then((res) => res.json())
-			.then(setServers)
-			.catch(() => {});
-	}, []);
 
 	const existingPorts: StagedPort[] = service.ports
 		.filter((p) => !pendingRemoveIds.has(p.id))
@@ -258,7 +223,7 @@ export const PortsSection = memo(function PortsSection({
 						onChange={(e) => setDomain(e.target.value)}
 						className="flex-1 min-w-32"
 					/>
-					<DnsInstructionsModal servers={servers} />
+					<DnsInstructionsModal />
 					<Button
 						size="sm"
 						variant="outline"

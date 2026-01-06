@@ -27,6 +27,7 @@ import {
 import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
 import { getEnvironment, getService } from "@/db/queries";
+import { calculateSpreadPlacement } from "@/lib/placement";
 
 function parseImageReference(image: string): {
 	registry: string;
@@ -674,49 +675,82 @@ export async function deployService(serviceId: string) {
 		throw new Error("Service not found");
 	}
 
-	const configuredReplicas = await db
-		.select({
-			serverId: serviceReplicas.serverId,
-			replicas: serviceReplicas.count,
-		})
-		.from(serviceReplicas)
-		.where(eq(serviceReplicas.serviceId, serviceId));
+	let placements: { serverId: string; replicas: number }[];
 
-	const placements = configuredReplicas.filter((p) => p.replicas > 0);
+	if (service.autoPlace && !service.stateful) {
+		const totalReplicas = service.replicas;
+		if (totalReplicas < 1) {
+			throw new Error("At least one replica is required");
+		}
+		if (totalReplicas > 10) {
+			throw new Error("Maximum 10 replicas allowed");
+		}
 
-	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
-	if (totalReplicas < 1) {
-		throw new Error("At least one replica is required");
+		const calculatedPlacements = await calculateSpreadPlacement(totalReplicas);
+
+		await db
+			.delete(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId));
+
+		for (const placement of calculatedPlacements) {
+			await db.insert(serviceReplicas).values({
+				id: randomUUID(),
+				serviceId,
+				serverId: placement.serverId,
+				count: placement.count,
+			});
+		}
+
+		placements = calculatedPlacements.map((p) => ({
+			serverId: p.serverId,
+			replicas: p.count,
+		}));
+	} else {
+		const configuredReplicas = await db
+			.select({
+				serverId: serviceReplicas.serverId,
+				replicas: serviceReplicas.count,
+			})
+			.from(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId));
+
+		placements = configuredReplicas.filter((p) => p.replicas > 0);
+
+		const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
+		if (totalReplicas < 1) {
+			throw new Error("At least one replica is required");
+		}
+		if (totalReplicas > 10) {
+			throw new Error("Maximum 10 replicas allowed");
+		}
+
+		if (service.stateful) {
+			if (totalReplicas !== 1) {
+				throw new Error("Stateful services can only have exactly 1 replica");
+			}
+
+			const serverIds = placements.map((p) => p.serverId);
+			if (serverIds.length !== 1) {
+				throw new Error(
+					"Stateful services must be deployed to exactly one server",
+				);
+			}
+
+			const targetServerId = serverIds[0];
+			if (service.lockedServerId && service.lockedServerId !== targetServerId) {
+				throw new Error(
+					"This stateful service is locked to its original server. Volume data cannot be moved between machines.",
+				);
+			}
+		}
 	}
-	if (totalReplicas > 10) {
-		throw new Error("Maximum 10 replicas allowed");
-	}
 
-	const serverIds = placements
-		.filter((p) => p.replicas > 0)
-		.map((p) => p.serverId);
+	const serverIds = placements.map((p) => p.serverId);
 	if (serverIds.length === 0) {
 		throw new Error("No servers selected for deployment");
 	}
 
-	if (service.stateful) {
-		if (totalReplicas !== 1) {
-			throw new Error("Stateful services can only have exactly 1 replica");
-		}
-
-		if (serverIds.length !== 1) {
-			throw new Error(
-				"Stateful services must be deployed to exactly one server",
-			);
-		}
-
-		const targetServerId = serverIds[0];
-		if (service.lockedServerId && service.lockedServerId !== targetServerId) {
-			throw new Error(
-				"This stateful service is locked to its original server. Volume data cannot be moved between machines.",
-			);
-		}
-	}
+	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
 
 	const selectedServers = await db
 		.select()
@@ -1273,6 +1307,55 @@ export async function removeServiceVolume(volumeId: string) {
 	}
 
 	await db.delete(serviceVolumes).where(eq(serviceVolumes.id, volumeId));
+
+	return { success: true };
+}
+
+export async function updateServiceAutoPlace(
+	serviceId: string,
+	autoPlace: boolean,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (service.stateful && autoPlace) {
+		throw new Error("Stateful services cannot use auto-placement");
+	}
+
+	await db
+		.update(services)
+		.set({ autoPlace })
+		.where(eq(services.id, serviceId));
+
+	if (autoPlace) {
+		await db
+			.delete(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId));
+	}
+
+	return { success: true };
+}
+
+export async function updateServiceReplicas(
+	serviceId: string,
+	replicas: number,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (replicas < 1 || replicas > 10) {
+		throw new Error("Replicas must be between 1 and 10");
+	}
+
+	if (service.stateful && replicas > 1) {
+		throw new Error("Stateful services can only have exactly 1 replica");
+	}
+
+	await db.update(services).set({ replicas }).where(eq(services.id, serviceId));
 
 	return { success: true };
 }

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"techulus/cloud-agent/internal/podman"
+	"techulus/cloud-agent/internal/container"
 )
 
 const (
@@ -122,20 +122,20 @@ func (c *Collector) Collect() {
 	}
 }
 
-func (c *Collector) collectFromContainer(container ContainerInfo) {
-	since := c.state.GetPosition(container.ContainerID)
+func (c *Collector) collectFromContainer(ctr ContainerInfo) {
+	since := c.state.GetPosition(ctr.ContainerID)
 	if since == "" {
 		since = defaultSince
 	}
 
-	entryCh := make(chan podman.LogEntry, 100)
+	entryCh := make(chan container.LogEntry, 100)
 	errCh := make(chan error, 1)
 
 	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
-	go podman.StreamLogs(ctx, podman.LogsOptions{
-		ContainerID: container.ContainerID,
+	go container.StreamLogs(ctx, container.LogsOptions{
+		ContainerID: ctr.ContainerID,
 		Follow:      false,
 		Tail:        -1,
 		Since:       since,
@@ -144,8 +144,8 @@ func (c *Collector) collectFromContainer(container ContainerInfo) {
 	var lastTimestamp time.Time
 	for entry := range entryCh {
 		logEntry := LogEntry{
-			DeploymentID: container.DeploymentID,
-			ServiceID:    container.ServiceID,
+			DeploymentID: ctr.DeploymentID,
+			ServiceID:    ctr.ServiceID,
 			Stream:       entry.Stream,
 			Message:      string(entry.Message),
 			Timestamp:    entry.Timestamp.Format(time.RFC3339Nano),
@@ -156,11 +156,11 @@ func (c *Collector) collectFromContainer(container ContainerInfo) {
 	}
 
 	if err := <-errCh; err != nil {
-		log.Printf("[logs] error streaming from container %s: %v", container.ContainerID[:12], err)
+		log.Printf("[logs] error streaming from container %s: %v", ctr.ContainerID[:12], err)
 	}
 
 	if !lastTimestamp.IsZero() {
-		c.state.SetPosition(container.ContainerID, lastTimestamp.Add(time.Nanosecond).Format(time.RFC3339Nano))
+		c.state.SetPosition(ctr.ContainerID, lastTimestamp.Add(time.Nanosecond).Format(time.RFC3339Nano))
 	}
 }
 

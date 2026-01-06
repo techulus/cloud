@@ -1,4 +1,6 @@
-package podman
+//go:build darwin
+
+package container
 
 import (
 	"bufio"
@@ -9,20 +11,6 @@ import (
 	"strings"
 	"time"
 )
-
-type LogEntry struct {
-	Stream    string
-	Timestamp time.Time
-	Message   []byte
-}
-
-type LogsOptions struct {
-	ContainerID string
-	Follow      bool
-	Tail        int
-	Since       string
-	Until       string
-}
 
 func StreamLogs(ctx context.Context, opts LogsOptions, entryCh chan<- LogEntry, errCh chan<- error) {
 	defer close(entryCh)
@@ -50,7 +38,7 @@ func StreamLogs(ctx context.Context, opts LogsOptions, entryCh chan<- LogEntry, 
 
 	args = append(args, opts.ContainerID)
 
-	cmd := exec.CommandContext(ctx, "podman", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
