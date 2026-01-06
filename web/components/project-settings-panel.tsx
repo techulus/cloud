@@ -67,7 +67,6 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
 					value={project.name}
 					onChange={handleUpdateName}
 					label="Project Name"
-					textClassName="text-lg font-medium"
 				/>
 			</div>
 			<div className="p-4">
@@ -76,7 +75,6 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
 					value={project.slug}
 					onChange={handleUpdateSlug}
 					label="Project Slug"
-					textClassName="text-lg font-medium font-mono"
 				/>
 				<p className="text-sm text-muted-foreground mt-2">
 					The slug is used in the project URL. Changing it will update all

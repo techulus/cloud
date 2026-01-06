@@ -225,10 +225,14 @@ func (a *Agent) tick() {
 }
 
 func (a *Agent) handleIdle() {
-	expected, err := a.client.GetExpectedState()
+	expected, fromCache, err := a.client.GetExpectedStateWithFallback()
 	if err != nil {
 		log.Printf("[idle] failed to get expected state: %v", err)
 		return
+	}
+
+	if fromCache {
+		log.Printf("[idle] using cached state (CP unreachable)")
 	}
 
 	actual, err := a.getActualState()
@@ -247,11 +251,15 @@ func (a *Agent) handleIdle() {
 		a.expectedState = expected
 		a.processingStart = time.Now()
 		a.setState(StateProcessing)
-		a.reportStatus(false)
+		if !fromCache {
+			a.reportStatus(false)
+		}
 		return
 	}
 
-	a.reportStatus(true)
+	if !fromCache {
+		a.reportStatus(true)
+	}
 }
 
 func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualState) []string {
@@ -1098,7 +1106,7 @@ func main() {
 	}
 
 	reconciler := reconcile.NewReconciler(config.EncryptionKey)
-	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair)
+	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair, dataDir)
 
 	var logCollector *logs.Collector
 	var caddyLogCollector *logs.CaddyCollector

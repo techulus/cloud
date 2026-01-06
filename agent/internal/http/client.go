@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -17,13 +20,15 @@ type Client struct {
 	serverID  string
 	keyPair   *crypto.KeyPair
 	client    *http.Client
+	dataDir   string
 }
 
-func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair) *Client {
+func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
 	return &Client{
 		baseURL:  baseURL,
 		serverID: serverID,
 		keyPair:  keyPair,
+		dataDir:  dataDir,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -103,7 +108,37 @@ type ExpectedState struct {
 	} `json:"wireguard"`
 }
 
-func (c *Client) GetExpectedState() (*ExpectedState, error) {
+const expectedStateCacheFile = "expected-state.json"
+
+func (c *Client) cacheExpectedState(state *ExpectedState) error {
+	if c.dataDir == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(c.dataDir, expectedStateCacheFile)
+	return os.WriteFile(path, data, 0600)
+}
+
+func (c *Client) loadCachedExpectedState() (*ExpectedState, error) {
+	if c.dataDir == "" {
+		return nil, fmt.Errorf("data dir not configured")
+	}
+	path := filepath.Join(c.dataDir, expectedStateCacheFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var state ExpectedState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+func (c *Client) getExpectedState() (*ExpectedState, error) {
 	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/expected-state", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -127,7 +162,26 @@ func (c *Client) GetExpectedState() (*ExpectedState, error) {
 		return nil, fmt.Errorf("failed to decode expected state: %w", err)
 	}
 
+	if err := c.cacheExpectedState(&state); err != nil {
+		log.Printf("[cache] failed to cache expected state: %v", err)
+	}
+
 	return &state, nil
+}
+
+func (c *Client) GetExpectedStateWithFallback() (*ExpectedState, bool, error) {
+	state, err := c.getExpectedState()
+	if err == nil {
+		return state, false, nil
+	}
+
+	log.Printf("[state] CP unreachable, attempting to use cached state: %v", err)
+	cachedState, cacheErr := c.loadCachedExpectedState()
+	if cacheErr != nil {
+		return nil, false, fmt.Errorf("CP unreachable and no cached state available: %w (cache error: %v)", err, cacheErr)
+	}
+
+	return cachedState, true, nil
 }
 
 type ContainerStatus struct {

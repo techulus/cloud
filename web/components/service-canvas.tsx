@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
 import {
@@ -21,7 +22,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Button } from "./ui/button";
+import { Button, buttonVariants } from "./ui/button";
 
 function ServiceCardSkeleton() {
 	return (
@@ -85,9 +86,13 @@ function EnvironmentSelector({
 			</DropdownMenu>
 			<Link
 				href={`/dashboard/projects/${projectSlug}/settings`}
-				className="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-2"
+				className={cn(
+					buttonVariants({ variant: "outline", size: "sm" }),
+					"ml-1 gap-2",
+				)}
 			>
-				<Settings className="h-4 w-4 text-muted-foreground" />
+				<Settings className="h-4 w-4" />
+				<span>Settings</span>
 			</Link>
 		</div>
 	);
