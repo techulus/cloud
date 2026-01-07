@@ -28,6 +28,7 @@ type RegisterRequest struct {
 	WireGuardPublicKey string `json:"wireguardPublicKey"`
 	SigningPublicKey   string `json:"signingPublicKey"`
 	PublicIP           string `json:"publicIp,omitempty"`
+	PrivateIP          string `json:"privateIp,omitempty"`
 	IsProxy            bool   `json:"isProxy"`
 }
 
@@ -35,22 +36,16 @@ type RegisterResponse struct {
 	ServerID      string `json:"serverId"`
 	SubnetID      int    `json:"subnetId"`
 	WireGuardIP   string `json:"wireguardIp"`
-	Peers         []Peer `json:"peers"`
 	EncryptionKey string `json:"encryptionKey"`
 }
 
-type Peer struct {
-	PublicKey  string  `json:"publicKey"`
-	AllowedIPs string  `json:"allowedIps"`
-	Endpoint   *string `json:"endpoint"`
-}
-
-func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP string, isProxy bool) (*RegisterResponse, error) {
+func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP, privateIP string, isProxy bool) (*RegisterResponse, error) {
 	req := RegisterRequest{
 		Token:              token,
 		WireGuardPublicKey: wireguardPublicKey,
 		SigningPublicKey:   signingPublicKey,
 		PublicIP:           publicIP,
+		PrivateIP:          privateIP,
 		IsProxy:            isProxy,
 	}
 

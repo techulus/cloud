@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,6 +28,7 @@ import (
 	"techulus/cloud-agent/internal/retry"
 	"techulus/cloud-agent/internal/wireguard"
 
+	"github.com/hashicorp/go-sockaddr"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 )
@@ -88,6 +87,7 @@ type Agent struct {
 	reconciler         *reconcile.Reconciler
 	config             *Config
 	publicIP           string
+	privateIP          string
 	dataDir            string
 	expectedState      *agenthttp.ExpectedState
 	processingStart    time.Time
@@ -100,13 +100,14 @@ type Agent struct {
 	isProxy            bool
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder, isProxy bool) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, privateIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder, isProxy bool) *Agent {
 	return &Agent{
 		state:             StateIdle,
 		client:            client,
 		reconciler:        reconciler,
 		config:            config,
 		publicIP:          publicIP,
+		privateIP:         privateIP,
 		dataDir:           dataDir,
 		logCollector:      logCollector,
 		caddyLogCollector: caddyLogCollector,
@@ -672,6 +673,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 func (a *Agent) reportStatus(includeResources bool) {
 	report := &agenthttp.StatusReport{
 		PublicIP:   a.publicIP,
+		PrivateIP:  a.privateIP,
 		Containers: []agenthttp.ContainerStatus{},
 	}
 
@@ -1051,7 +1053,8 @@ func main() {
 
 		log.Println("Registering with control plane...")
 		publicIP := getPublicIP()
-		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP, isProxy)
+		privateIP := getPrivateIP()
+		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP, privateIP, isProxy)
 		if err != nil {
 			log.Fatalf("Failed to register: %v", err)
 		}
@@ -1069,13 +1072,12 @@ func main() {
 		}
 
 		log.Printf("Registration successful! serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
-		log.Printf("Received %d peers", len(resp.Peers))
 
 		wgConfig := &wireguard.Config{
 			PrivateKey: wgPrivateKey,
 			Address:    config.WireGuardIP,
 			ListenPort: wireguard.DefaultPort,
-			Peers:      convertPeers(resp.Peers),
+			Peers:      []wireguard.Peer{},
 		}
 
 		log.Println("Writing WireGuard config...")
@@ -1151,9 +1153,10 @@ func main() {
 	}
 
 	publicIP := getPublicIP()
-	log.Printf("Agent started. Public IP: %s. Tick interval: %v", publicIP, tickInterval)
+	privateIP := getPrivateIP()
+	log.Printf("Agent started. Public IP: %s, Private IP: %s. Tick interval: %v", publicIP, privateIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, dataDir, logCollector, caddyLogCollector, builder, config.IsProxy)
+	agent := NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, caddyLogCollector, builder, config.IsProxy)
 	agent.Run(ctx)
 
 	if agentLogFlusherDone != nil {
@@ -1161,18 +1164,6 @@ func main() {
 	}
 
 	log.Println("Agent stopped")
-}
-
-func convertPeers(apiPeers []api.Peer) []wireguard.Peer {
-	peers := make([]wireguard.Peer, len(apiPeers))
-	for i, p := range apiPeers {
-		peers[i] = wireguard.Peer{
-			PublicKey:  p.PublicKey,
-			AllowedIPs: p.AllowedIPs,
-			Endpoint:   p.Endpoint,
-		}
-	}
-	return peers
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -1217,18 +1208,19 @@ func getSystemStats() *agenthttp.Resources {
 }
 
 func getPublicIP() string {
-	resp, err := http.Get("https://api.ipify.org")
+	ip, err := sockaddr.GetPublicIP()
 	if err != nil {
 		log.Printf("Failed to get public IP: %v", err)
 		return ""
 	}
-	defer resp.Body.Close()
+	return ip
+}
 
-	ip, err := io.ReadAll(resp.Body)
+func getPrivateIP() string {
+	ip, err := sockaddr.GetPrivateIP()
 	if err != nil {
-		log.Printf("Failed to read public IP response: %v", err)
+		log.Printf("Failed to get private IP: %v", err)
 		return ""
 	}
-
-	return string(ip)
+	return ip
 }

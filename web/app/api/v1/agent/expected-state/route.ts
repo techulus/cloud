@@ -195,7 +195,7 @@ export async function GET(request: NextRequest) {
 		}
 	}
 
-	const wireguardPeers = await getWireGuardPeers(serverId);
+	const wireguardPeers = await getWireGuardPeers(serverId, server.privateIp);
 
 	return NextResponse.json({
 		containers,

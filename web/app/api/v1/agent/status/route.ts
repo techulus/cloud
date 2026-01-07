@@ -19,6 +19,7 @@ type StatusReport = {
 		diskGb: number;
 	};
 	publicIp?: string;
+	privateIp?: string;
 	containers: ContainerStatus[];
 };
 
@@ -140,6 +141,8 @@ export async function POST(request: NextRequest) {
 	if (report.publicIp) {
 		updateData.publicIp = report.publicIp;
 	}
+
+	updateData.privateIp = report.privateIp || null;
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
 

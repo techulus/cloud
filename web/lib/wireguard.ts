@@ -2,6 +2,18 @@ import { db } from "@/db";
 import { servers, deployments } from "@/db/schema";
 import { eq, isNotNull, and, ne } from "drizzle-orm";
 import { WIREGUARD_SUBNET_PREFIX, CONTAINER_SUBNET_PREFIX } from "./constants";
+import { Address4 } from "ip-address";
+
+function sameSubnet(ip1: string, ip2: string, prefix: number = 16): boolean {
+	if (!ip1 || !ip2) return false;
+	try {
+		const a = new Address4(ip1);
+		const b = new Address4(ip2);
+		return a.mask(prefix) === b.mask(prefix);
+	} catch {
+		return false;
+	}
+}
 
 export async function assignSubnet(): Promise<{
 	subnetId: number;
@@ -54,7 +66,10 @@ export async function assignContainerIp(serverId: string): Promise<string> {
 	throw new Error("No available IPs in server subnet");
 }
 
-export async function getWireGuardPeers(excludeServerId: string) {
+export async function getWireGuardPeers(
+	excludeServerId: string,
+	requestingServerPrivateIp: string | null = null,
+) {
 	const allServers = await db
 		.select({
 			id: servers.id,
@@ -62,6 +77,7 @@ export async function getWireGuardPeers(excludeServerId: string) {
 			wireguardIp: servers.wireguardIp,
 			wireguardPublicKey: servers.wireguardPublicKey,
 			publicIp: servers.publicIp,
+			privateIp: servers.privateIp,
 		})
 		.from(servers)
 		.where(
@@ -72,9 +88,23 @@ export async function getWireGuardPeers(excludeServerId: string) {
 			),
 		);
 
-	return allServers.map((s) => ({
-		publicKey: s.wireguardPublicKey!,
-		allowedIps: `${WIREGUARD_SUBNET_PREFIX}.${s.subnetId}.0/24,${CONTAINER_SUBNET_PREFIX}.${s.subnetId}.0/24`,
-		endpoint: s.publicIp ? `${s.publicIp}:51820` : null,
-	}));
+	return allServers.map((s) => {
+		let endpoint: string | null = null;
+
+		if (
+			requestingServerPrivateIp &&
+			s.privateIp &&
+			sameSubnet(requestingServerPrivateIp, s.privateIp, 16)
+		) {
+			endpoint = `${s.privateIp}:51820`;
+		} else if (s.publicIp) {
+			endpoint = `${s.publicIp}:51820`;
+		}
+
+		return {
+			publicKey: s.wireguardPublicKey,
+			allowedIps: `${WIREGUARD_SUBNET_PREFIX}.${s.subnetId}.0/24,${CONTAINER_SUBNET_PREFIX}.${s.subnetId}.0/24`,
+			endpoint,
+		};
+	});
 }

@@ -105,6 +105,7 @@ export const servers = pgTable("servers", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	publicIp: text("public_ip"),
+	privateIp: text("private_ip"),
 	subnetId: integer("subnet_id"),
 	wireguardIp: text("wireguard_ip"),
 	wireguardPublicKey: text("wireguard_public_key"),
