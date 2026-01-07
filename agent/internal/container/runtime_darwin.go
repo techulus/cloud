@@ -90,7 +90,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 			logFunc("stderr", fmt.Sprintf("Failed to create volume directory %s: %s", vm.HostPath, err))
 			return nil, fmt.Errorf("failed to create volume directory %s: %w", vm.HostPath, err)
 		}
-		logFunc("stdout", fmt.Sprintf("Created volume directory: %s", vm.HostPath))
+		logFunc("stdout", fmt.Sprintf("Created volume directory: %s (ensure your user owns this directory for Docker access)", vm.HostPath))
 	}
 
 	args := []string{
