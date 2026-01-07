@@ -194,7 +194,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		}
 		args = append(args, secretArgs...)
 
-		cmd := exec.CommandContext(ctx, "buildctl", args...)
+		cmd := exec.CommandContext(ctx, paths.BuildctlPath, args...)
 		cmd.Dir = buildDir
 		cmd.Env = append(os.Environ(), secretEnv...)
 		output, err := b.runCommandStreaming(cmd, config)
@@ -213,7 +213,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			prepareArgs = append(prepareArgs, "--env", fmt.Sprintf("%s=%s", key, value))
 		}
 
-		cmd := exec.CommandContext(ctx, "railpack", prepareArgs...)
+		cmd := exec.CommandContext(ctx, paths.RailpackPath, prepareArgs...)
 		cmd.Dir = buildDir
 		output, err := b.runCommandStreaming(cmd, config)
 		if err != nil {
@@ -241,7 +241,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 		args = append(args, secretArgs...)
 
-		cmd = exec.CommandContext(ctx, "buildctl", args...)
+		cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
 		cmd.Dir = buildDir
 		cmd.Env = append(os.Environ(), secretEnv...)
 		output, err = b.runCommandStreaming(cmd, config)
@@ -391,11 +391,11 @@ func CheckPrerequisites() error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found: %w", err)
 	}
-	if _, err := exec.LookPath("buildctl"); err != nil {
-		return fmt.Errorf("buildctl not found: %w", err)
+	if _, err := os.Stat(paths.BuildctlPath); err != nil {
+		return fmt.Errorf("buildctl not found at %s: %w", paths.BuildctlPath, err)
 	}
-	if _, err := exec.LookPath("railpack"); err != nil {
-		return fmt.Errorf("railpack not found: %w", err)
+	if _, err := os.Stat(paths.RailpackPath); err != nil {
+		return fmt.Errorf("railpack not found at %s: %w", paths.RailpackPath, err)
 	}
 	return nil
 }

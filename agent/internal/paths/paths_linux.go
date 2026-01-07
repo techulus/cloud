@@ -10,4 +10,6 @@ const (
 	DnsmasqDir     = "/etc/dnsmasq.d"
 	DnsmasqConf    = "/etc/dnsmasq.conf"
 	ResolvedDir    = "/etc/systemd/resolved.conf.d"
+	BuildctlPath   = "/usr/local/bin/buildctl"
+	RailpackPath   = "/usr/local/bin/railpack"
 )

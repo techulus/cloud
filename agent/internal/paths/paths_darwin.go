@@ -21,4 +21,6 @@ const (
 	DnsmasqDir     = "/opt/homebrew/etc/dnsmasq.d"
 	DnsmasqConf    = "/opt/homebrew/etc/dnsmasq.conf"
 	ResolverDir    = "/etc/resolver"
+	BuildctlPath   = "/opt/homebrew/bin/buildctl"
+	RailpackPath   = "/usr/local/bin/railpack"
 )
