@@ -293,12 +293,12 @@ fi
 echo "✓ BuildKit installed"
 
 step "Installing Railpack..."
-if command -v railpack &>/dev/null; then
+if [ -x /usr/local/bin/railpack ]; then
   echo "Railpack already installed, skipping"
 else
   curl -fsSL https://railpack.com/install.sh | bash
 fi
-if ! railpack --version &>/dev/null; then
+if ! /usr/local/bin/railpack --version &>/dev/null; then
   error "Failed to install Railpack"
 fi
 echo "✓ Railpack verified"
