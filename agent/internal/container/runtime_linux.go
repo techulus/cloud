@@ -99,6 +99,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--security-opt", "no-new-privileges:true",
 		"--cap-drop", "ALL",
 		"--cap-add", "CHOWN",
+		"--cap-add", "DAC_OVERRIDE",
 		"--cap-add", "FOWNER",
 		"--cap-add", "SETUID",
 		"--cap-add", "SETGID",
