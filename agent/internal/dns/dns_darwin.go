@@ -20,7 +20,6 @@ import (
 )
 
 var (
-	dnsmasqInternalPath = paths.DnsmasqDir + "/internal.conf"
 	dnsmasqServicesPath = paths.DnsmasqDir + "/services.conf"
 	resolverPath        = paths.ResolverDir + "/internal"
 )
@@ -28,12 +27,6 @@ var (
 func SetupLocalDNS(wireguardIP string) error {
 	if err := os.MkdirAll(paths.DnsmasqDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create dnsmasq.d: %w", err)
-	}
-
-	config := fmt.Sprintf("address=/internal/%s\n", wireguardIP)
-
-	if err := os.WriteFile(dnsmasqInternalPath, []byte(config), 0o644); err != nil {
-		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
 	mainConfig := `port=5354
