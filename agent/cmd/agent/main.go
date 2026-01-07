@@ -1233,10 +1233,23 @@ func getPublicIP() string {
 }
 
 func getPrivateIP() string {
-	ip, err := sockaddr.GetPrivateIP()
+	ips, err := sockaddr.GetPrivateIPs()
 	if err != nil {
-		log.Printf("Failed to get private IP: %v", err)
+		log.Printf("Failed to get private IPs: %v", err)
 		return ""
 	}
-	return ip
+
+	// Filter out our internal subnets (WireGuard mesh and container networks)
+	// to find the actual server private IP for VPC/private network detection
+	for _, ip := range strings.Split(ips, " ") {
+		if ip == "" {
+			continue
+		}
+		if strings.HasPrefix(ip, "10.100.") || strings.HasPrefix(ip, "10.200.") {
+			continue
+		}
+		return ip
+	}
+
+	return ""
 }
