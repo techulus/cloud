@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -1209,11 +1211,25 @@ func getSystemStats() *agenthttp.Resources {
 
 func getPublicIP() string {
 	ip, err := sockaddr.GetPublicIP()
+	if err == nil && ip != "" {
+		return ip
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("https://api.ipify.org")
 	if err != nil {
-		log.Printf("Failed to get public IP: %v", err)
+		log.Printf("Failed to get public IP from ipify: %v", err)
 		return ""
 	}
-	return ip
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read ipify response: %v", err)
+		return ""
+	}
+
+	return strings.TrimSpace(string(body))
 }
 
 func getPrivateIP() string {
