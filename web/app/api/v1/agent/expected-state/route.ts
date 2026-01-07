@@ -94,7 +94,6 @@ export async function GET(request: NextRequest) {
 
 		const volumeMounts = volumes.map((v) => ({
 			name: v.name,
-			hostPath: `/var/lib/techulus-agent/volumes/${dep.serviceId}/${v.name}`,
 			containerPath: v.containerPath,
 		}));
 

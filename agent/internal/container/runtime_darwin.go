@@ -215,31 +215,7 @@ func Stop(containerID string) error {
 		return fmt.Errorf("container did not stop after verification: %w", err)
 	}
 
-	log.Printf("[docker:stop] removing container %s", containerID)
-	rmCmd := exec.Command("docker", "rm", containerID)
-	if output, err := rmCmd.CombinedOutput(); err != nil {
-		outputStr := string(output)
-		if strings.Contains(outputStr, "No such container") ||
-			strings.Contains(outputStr, "no such container") {
-			return nil
-		}
-		return fmt.Errorf("failed to remove container: %s: %w", outputStr, err)
-	}
-
-	log.Printf("[docker:stop] verifying container %s removed", containerID)
-	err = retry.WithBackoff(ctx, retry.StopBackoff, func() (bool, error) {
-		exists, err := ContainerExists(containerID)
-		if err != nil {
-			return false, err
-		}
-		return !exists, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("container was not removed after verification: %w", err)
-	}
-
-	log.Printf("[docker:stop] container %s stopped and removed successfully", containerID)
+	log.Printf("[docker:stop] container %s stopped successfully", containerID)
 	return nil
 }
 

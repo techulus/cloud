@@ -3,19 +3,22 @@ package reconcile
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 
+	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
-	"techulus/cloud-agent/internal/container"
 )
 
 type Reconciler struct {
 	encryptionKey string
+	dataDir       string
 }
 
-func NewReconciler(encryptionKey string) *Reconciler {
+func NewReconciler(encryptionKey, dataDir string) *Reconciler {
 	return &Reconciler{
 		encryptionKey: encryptionKey,
+		dataDir:       dataDir,
 	}
 }
 
@@ -55,7 +58,7 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	for i, v := range exp.Volumes {
 		volumeMounts[i] = container.VolumeMount{
 			Name:          v.Name,
-			HostPath:      v.HostPath,
+			HostPath:      filepath.Join(r.dataDir, "volumes", exp.ServiceID, v.Name),
 			ContainerPath: v.ContainerPath,
 		}
 	}

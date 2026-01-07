@@ -2,8 +2,9 @@
 
 package paths
 
+var DataDir = "/var/lib/techulus-agent"
+
 const (
-	DataDir        = "/var/lib/techulus-agent"
 	BuildKitSocket = "unix:///run/buildkit/buildkitd.sock"
 	WireGuardDir   = "/etc/wireguard"
 	DnsmasqDir     = "/etc/dnsmasq.d"

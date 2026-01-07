@@ -60,7 +60,6 @@ type HealthCheck struct {
 
 type VolumeMount struct {
 	Name          string `json:"name"`
-	HostPath      string `json:"hostPath"`
 	ContainerPath string `json:"containerPath"`
 }
 

@@ -790,7 +790,6 @@ export async function deployService(serviceId: string) {
 
 			const volumeMounts = volumes.map((v) => ({
 				name: v.name,
-				hostPath: `/var/lib/techulus-agent/volumes/${serviceId}/${v.name}`,
 				containerPath: v.containerPath,
 			}));
 
