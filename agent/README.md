@@ -193,7 +193,7 @@ sudo systemctl start techulus-agent
 | `--url` | (required) | Control plane URL |
 | `--token` | | Registration token (required for first run) |
 | `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
-| `--logs-endpoint` | | VictoriaLogs endpoint (e.g., `http://athena:9428`) |
+| `--logs-endpoint` | | VictoriaLogs endpoint |
 | `--proxy` | `false` | Run as proxy node (handles TLS and public traffic) |
 
 ## Troubleshooting
@@ -218,99 +218,6 @@ sudo journalctl -u techulus-agent -f
 podman ps -a --format "table {{.Names}}\t{{.State}}\t{{.Labels}}"
 ```
 
-## macOS Troubleshooting
+## macOS
 
-On macOS, containers run inside OrbStack/Docker which has isolated networking. Additional setup is required for WireGuard traffic to reach containers.
-
-### Enable IP Forwarding
-
-```bash
-sudo sysctl -w net.inet.ip.forwarding=1
-```
-
-To persist across reboots:
-```bash
-echo "net.inet.ip.forwarding=1" | sudo tee /etc/sysctl.conf
-```
-
-### NAT Setup for Container Traffic
-
-Containers only respond to IPs on their local subnet. Traffic from other servers via WireGuard needs NAT.
-
-**1. Create NAT rule file:**
-
-Replace `X` with your subnet ID (check your WireGuard IP - if it's 10.100.5.1, your subnet ID is 5):
-
-```bash
-echo 'nat on bridge101 from 10.100.0.0/16 to 10.200.X.0/24 -> 10.200.X.0' | sudo tee /etc/pf.anchors/wireguard-nat
-```
-
-**2. Backup pf.conf:**
-
-```bash
-sudo cp /etc/pf.conf /etc/pf.conf.backup
-```
-
-**3. Add anchor to pf.conf:**
-
-```bash
-sudo nano /etc/pf.conf
-```
-
-Add these lines near the top (after existing `nat-anchor` lines):
-
-```
-nat-anchor "wireguard-nat"
-load anchor "wireguard-nat" from "/etc/pf.anchors/wireguard-nat"
-```
-
-**4. Load the config:**
-
-```bash
-sudo pfctl -f /etc/pf.conf
-```
-
-**5. Verify:**
-
-```bash
-sudo pfctl -a wireguard-nat -s nat
-```
-
-### WireGuard Commands (macOS)
-
-```bash
-sudo wg show
-wg-quick down wg0 && wg-quick up wg0
-```
-
-### Insecure Registry (HTTP)
-
-If you see errors like:
-```
-Error response from daemon: Get "https://athena:5000/v2/": http: server gave HTTP response to HTTPS client
-```
-
-Docker is trying to use HTTPS for a registry that only supports HTTP. Configure OrbStack to allow insecure registries:
-
-1. Open OrbStack → Settings → Docker
-2. Add `athena:5000` (or your registry address) to "Insecure registries"
-3. Restart Docker from the OrbStack menu bar
-
-Alternatively, edit `~/.orbstack/config/docker.json`:
-```json
-{
-  "insecure-registries": ["athena:5000"]
-}
-```
-
-### Debugging Network Issues
-
-Check if packets arrive on WireGuard interface:
-```bash
-sudo tcpdump -i utun9 icmp -n
-```
-
-Check if packets reach Docker bridge:
-```bash
-sudo tcpdump -i bridge101 icmp -n
-```
+See [MACOS.md](./MACOS.md) for macOS-specific setup and troubleshooting.
