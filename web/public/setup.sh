@@ -264,17 +264,6 @@ else
   echo "Skipping Caddy installation (worker node)"
 fi
 
-step "Installing dnsmasq..."
-if command -v dnsmasq &>/dev/null; then
-  echo "dnsmasq already installed, skipping"
-else
-  pkg_install dnsmasq
-fi
-if ! dnsmasq --version &>/dev/null; then
-  error "Failed to install dnsmasq"
-fi
-echo "✓ dnsmasq verified"
-
 step "Installing BuildKit..."
 BUILDKIT_VERSION="v0.21.0"
 if command -v buildkitd &>/dev/null; then
@@ -334,6 +323,9 @@ echo "✓ Checksum verified"
 rm -f /tmp/checksums.txt
 mv /tmp/techulus-agent /usr/local/bin/techulus-agent
 chmod +x /usr/local/bin/techulus-agent
+if command -v chcon &>/dev/null; then
+  chcon -t bin_t /usr/local/bin/techulus-agent 2>/dev/null || true
+fi
 
 if ! /usr/local/bin/techulus-agent --help &>/dev/null; then
   error "Agent binary is not executable or corrupted"
@@ -353,6 +345,11 @@ EOF
   echo "✓ Caddy environment file created"
 
   mkdir -p /etc/systemd/system/caddy.service.d
+  mkdir -p /var/log/caddy
+  chown caddy:caddy /var/log/caddy
+  if command -v chcon &>/dev/null; then
+    chcon -R -t httpd_log_t /var/log/caddy 2>/dev/null || true
+  fi
   cat > /etc/systemd/system/caddy.service.d/override.conf << 'EOF'
 [Service]
 EnvironmentFile=/etc/caddy/environment
@@ -402,11 +399,6 @@ EOF
   fi
   echo "✓ Caddyfile validated"
 fi
-
-step "Preparing dnsmasq..."
-mkdir -p /etc/dnsmasq.d
-systemctl stop dnsmasq 2>/dev/null || true
-echo "✓ dnsmasq installed (agent will configure and start it)"
 
 step "Enabling IP forwarding..."
 echo 'net.ipv4.ip_forward = 1' > /etc/sysctl.d/99-wireguard.conf
@@ -585,7 +577,6 @@ for svc in "${SERVICES[@]}"; do
   fi
   echo "✓ $svc is running"
 done
-echo "✓ dnsmasq will be configured by agent"
 
 echo ""
 echo "=========================================="

@@ -7,44 +7,31 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
-	"net"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
-	"time"
 
 	"techulus/cloud-agent/internal/paths"
-	"techulus/cloud-agent/internal/retry"
 )
 
 var (
-	dnsmasqServicesPath = paths.DnsmasqDir + "/services.conf"
-	resolverPath        = paths.ResolverDir + "/internal"
+	resolverPath = paths.ResolverDir + "/internal"
+	globalServer *Server
 )
 
+type DnsRecord struct {
+	Name string
+	Ips  []string
+}
+
 func SetupLocalDNS(wireguardIP string) error {
-	if err := os.MkdirAll(paths.DnsmasqDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create dnsmasq.d: %w", err)
-	}
-
-	mainConfig := `port=5354
-listen-address=127.0.0.1
-bind-interfaces
-conf-dir=` + paths.DnsmasqDir + "\n"
-
-	if err := os.WriteFile(paths.DnsmasqConf, []byte(mainConfig), 0o644); err != nil {
-		return fmt.Errorf("failed to write main dnsmasq config: %w", err)
-	}
-
-	cmd := exec.Command("brew", "services", "restart", "dnsmasq")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart dnsmasq: %w", err)
-	}
-
 	if err := ConfigureClientDNS(); err != nil {
 		return fmt.Errorf("failed to configure local DNS: %w", err)
+	}
+
+	globalServer = NewServer(DNSPort)
+	if err := globalServer.Start(context.Background()); err != nil {
+		return fmt.Errorf("failed to start DNS server: %w", err)
 	}
 
 	return nil
@@ -55,7 +42,7 @@ func ConfigureClientDNS() error {
 		return fmt.Errorf("failed to create resolver dir: %w", err)
 	}
 
-	config := "nameserver 127.0.0.1\nport 5354\n"
+	config := fmt.Sprintf("nameserver 127.0.0.1\nport %d\n", DNSPort)
 
 	if err := os.WriteFile(resolverPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write resolver config: %w", err)
@@ -64,108 +51,25 @@ func ConfigureClientDNS() error {
 	return nil
 }
 
-func restartDnsmasq() error {
-	cmd := exec.Command("brew", "services", "restart", "dnsmasq")
-	return cmd.Run()
-}
-
-func VerifyDNSRecord(hostname string, expectedIPs []string) (bool, error) {
-	resolver := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, "udp", "127.0.0.1:5354")
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	ips, err := resolver.LookupHost(ctx, hostname)
-	if err != nil {
-		return false, fmt.Errorf("DNS lookup failed for %s: %w", hostname, err)
-	}
-
-	sort.Strings(ips)
-	sortedExpected := make([]string, len(expectedIPs))
-	copy(sortedExpected, expectedIPs)
-	sort.Strings(sortedExpected)
-
-	if len(ips) != len(sortedExpected) {
-		return false, nil
-	}
-
-	for i := range ips {
-		if ips[i] != sortedExpected[i] {
-			return false, nil
-		}
-	}
-
-	return true, nil
-}
-
-type DnsRecord struct {
-	Name string
-	Ips  []string
-}
-
 func UpdateDnsRecords(records []DnsRecord) error {
-	var configLines []string
-
-	for _, record := range records {
-		for _, ip := range record.Ips {
-			configLines = append(configLines, fmt.Sprintf("address=/%s/%s", record.Name, ip))
-		}
+	if globalServer == nil {
+		return fmt.Errorf("DNS server not initialized")
 	}
+	globalServer.UpdateRecords(records)
+	return nil
+}
 
-	configContent := strings.Join(configLines, "\n")
-	if len(configLines) > 0 {
-		configContent += "\n"
+func GetCurrentConfigHash() string {
+	if globalServer == nil {
+		return HashRecords(nil)
 	}
+	return globalServer.GetRecordsHash()
+}
 
-	log.Printf("[dns] updating %d records", len(records))
-
-	if err := os.WriteFile(dnsmasqServicesPath, []byte(configContent), 0o644); err != nil {
-		return fmt.Errorf("failed to write dnsmasq config: %w", err)
+func StopDNSServer(ctx context.Context) error {
+	if globalServer != nil {
+		return globalServer.Stop(ctx)
 	}
-
-	if err := restartDnsmasq(); err != nil {
-		return fmt.Errorf("failed to restart dnsmasq: %w", err)
-	}
-
-	if len(records) == 0 {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	log.Printf("[dns] verifying DNS records...")
-	var failedRecords []string
-
-	for _, record := range records {
-		err := retry.WithBackoff(ctx, retry.ConfigBackoff, func() (bool, error) {
-			verified, err := VerifyDNSRecord(record.Name, record.Ips)
-			if err != nil {
-				log.Printf("[dns:verify] record %s lookup error: %v", record.Name, err)
-				return false, nil
-			}
-			return verified, nil
-		})
-
-		if err != nil {
-			failedRecords = append(failedRecords, record.Name)
-			log.Printf("[dns:verify] record %s verification failed after retries", record.Name)
-		} else {
-			log.Printf("[dns:verify] record %s verified successfully", record.Name)
-		}
-	}
-
-	if len(failedRecords) > 0 {
-		return fmt.Errorf("failed to verify DNS records: %v", failedRecords)
-	}
-
-	log.Printf("[dns] all records verified successfully")
 	return nil
 }
 
@@ -188,38 +92,4 @@ func HashRecords(records []DnsRecord) string {
 	}
 	hash := sha256.Sum256([]byte(sb.String()))
 	return hex.EncodeToString(hash[:])
-}
-
-func GetCurrentConfigHash() string {
-	data, err := os.ReadFile(dnsmasqServicesPath)
-	if err != nil {
-		return HashRecords(nil)
-	}
-
-	recordMap := make(map[string][]string)
-	lines := strings.Split(string(data), "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "address=/") {
-			continue
-		}
-		parts := strings.Split(strings.TrimPrefix(line, "address=/"), "/")
-		if len(parts) >= 2 {
-			name := parts[0]
-			ip := parts[1]
-			recordMap[name] = append(recordMap[name], ip)
-		}
-	}
-
-	var records []DnsRecord
-	for name, ips := range recordMap {
-		records = append(records, DnsRecord{Name: name, Ips: ips})
-	}
-
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].Name < records[j].Name
-	})
-
-	return HashRecords(records)
 }

@@ -16,7 +16,6 @@ The agent supports two modes:
 ### All Nodes
 - WireGuard (`wg` and `wg-quick` commands)
 - Podman
-- dnsmasq
 - BuildKit + buildctl
 - Railpack
 
@@ -58,7 +57,7 @@ This downloads the latest agent binary, verifies the checksum, and restarts the 
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install wireguard wireguard-tools podman dnsmasq -y
+sudo apt install wireguard wireguard-tools podman -y
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
@@ -70,7 +69,7 @@ curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install wireguard wireguard-tools podman dnsmasq caddy -y
+sudo apt install wireguard wireguard-tools podman caddy -y
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
