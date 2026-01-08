@@ -1,18 +1,17 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { secrets, services } from "@/db/schema";
 import { encryptSecret } from "@/lib/crypto";
 
-export async function createSecret(
+export async function createSecretsBatch(
 	serviceId: string,
-	key: string,
-	value: string,
+	items: { key: string; value: string }[],
 ) {
-	if (!key || !value) {
-		throw new Error("Key and value are required");
+	if (items.length === 0) {
+		return { created: 0, updated: 0 };
 	}
 
 	const service = await db
@@ -24,32 +23,55 @@ export async function createSecret(
 		throw new Error("Service not found");
 	}
 
+	const keys = items.map((item) => item.key);
 	const existing = await db
 		.select()
 		.from(secrets)
-		.where(and(eq(secrets.serviceId, serviceId), eq(secrets.key, key)));
+		.where(and(eq(secrets.serviceId, serviceId), inArray(secrets.key, keys)));
 
-	if (existing.length > 0) {
-		await db
-			.update(secrets)
-			.set({ encryptedValue: encryptSecret(value), updatedAt: new Date() })
-			.where(eq(secrets.id, existing[0].id));
+	const existingByKey = new Map(existing.map((s) => [s.key, s]));
 
-		return { id: existing[0].id, key };
+	const toInsert: typeof secrets.$inferInsert[] = [];
+	const toUpdate: { id: string; encryptedValue: string }[] = [];
+
+	for (const item of items) {
+		if (!item.key || !item.value) continue;
+
+		const existingSecret = existingByKey.get(item.key);
+		if (existingSecret) {
+			toUpdate.push({
+				id: existingSecret.id,
+				encryptedValue: encryptSecret(item.value),
+			});
+		} else {
+			toInsert.push({
+				id: randomUUID(),
+				serviceId,
+				key: item.key,
+				encryptedValue: encryptSecret(item.value),
+			});
+		}
 	}
 
-	const id = randomUUID();
-	await db.insert(secrets).values({
-		id,
-		serviceId,
-		key,
-		encryptedValue: encryptSecret(value),
-	});
+	if (toInsert.length > 0) {
+		await db.insert(secrets).values(toInsert);
+	}
 
-	return { id, key };
+	for (const update of toUpdate) {
+		await db
+			.update(secrets)
+			.set({ encryptedValue: update.encryptedValue, updatedAt: new Date() })
+			.where(eq(secrets.id, update.id));
+	}
+
+	return { created: toInsert.length, updated: toUpdate.length };
 }
 
-export async function deleteSecret(secretId: string) {
-	await db.delete(secrets).where(eq(secrets.id, secretId));
-	return { success: true };
+export async function deleteSecretsBatch(secretIds: string[]) {
+	if (secretIds.length === 0) {
+		return { deleted: 0 };
+	}
+
+	await db.delete(secrets).where(inArray(secrets.id, secretIds));
+	return { deleted: secretIds.length };
 }

@@ -347,6 +347,8 @@ EOF
   mkdir -p /etc/systemd/system/caddy.service.d
   mkdir -p /var/log/caddy
   chown caddy:caddy /var/log/caddy
+  touch /var/log/caddy/techulus.log
+  chown caddy:caddy /var/log/caddy/techulus.log
   if command -v chcon &>/dev/null; then
     chcon -R -t httpd_log_t /var/log/caddy 2>/dev/null || true
   fi
@@ -398,6 +400,29 @@ EOF
     error "Caddyfile validation failed"
   fi
   echo "✓ Caddyfile validated"
+
+  step "Configuring firewall for proxy node..."
+  if [ "$OS_FAMILY" = "rhel" ] && systemctl is-active --quiet firewalld; then
+    firewall-cmd --permanent --add-port=80/tcp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=443/tcp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=51820/udp 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo "✓ firewalld rules added (HTTP, HTTPS, WireGuard)"
+  elif command -v iptables &>/dev/null; then
+    iptables -I INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null || true
+    iptables -I INPUT -p tcp --dport 443 -m state --state NEW -j ACCEPT 2>/dev/null || true
+    iptables -I INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || true
+    echo "✓ iptables rules added (HTTP, HTTPS, WireGuard)"
+
+    if command -v netfilter-persistent &>/dev/null; then
+      netfilter-persistent save 2>/dev/null || true
+      echo "✓ iptables rules persisted"
+    elif [ "$OS_FAMILY" = "debian" ]; then
+      pkg_install iptables-persistent -y 2>/dev/null || true
+      netfilter-persistent save 2>/dev/null || true
+      echo "✓ iptables-persistent installed and rules saved"
+    fi
+  fi
 fi
 
 step "Enabling IP forwarding..."

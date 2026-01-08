@@ -640,6 +640,7 @@ func (a *Agent) reconcileWireguard(peers []wireguard.Peer) error {
 		PrivateKey: wgPrivateKey,
 		Address:    a.config.WireGuardIP,
 		ListenPort: wireguard.DefaultPort,
+		MTU:        1420,
 		Peers:      peers,
 	}
 
@@ -1079,6 +1080,7 @@ func main() {
 			PrivateKey: wgPrivateKey,
 			Address:    config.WireGuardIP,
 			ListenPort: wireguard.DefaultPort,
+			MTU:        1420,
 			Peers:      []wireguard.Peer{},
 		}
 

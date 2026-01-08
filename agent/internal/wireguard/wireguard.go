@@ -28,6 +28,7 @@ type Config struct {
 	PrivateKey string
 	Address    string
 	ListenPort int
+	MTU        int
 	Peers      []Peer
 }
 
@@ -57,6 +58,9 @@ func (c *Config) GenerateConfigFile() string {
 	sb.WriteString(fmt.Sprintf("PrivateKey = %s\n", c.PrivateKey))
 	sb.WriteString(fmt.Sprintf("Address = %s/32\n", c.Address))
 	sb.WriteString(fmt.Sprintf("ListenPort = %d\n", c.ListenPort))
+	if c.MTU > 0 {
+		sb.WriteString(fmt.Sprintf("MTU = %d\n", c.MTU))
+	}
 
 	for _, peer := range c.Peers {
 		sb.WriteString("\n[Peer]\n")
