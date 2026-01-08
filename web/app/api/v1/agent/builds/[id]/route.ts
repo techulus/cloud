@@ -8,11 +8,11 @@ import {
 	projects,
 	secrets,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { getInstallationToken, buildCloneUrl } from "@/lib/github";
 
-export async function POST(
+export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
@@ -24,24 +24,24 @@ export async function POST(
 	const { id: buildId } = await params;
 	const { serverId } = auth;
 
-	const result = await db
+	const build = await db
+		.select()
+		.from(builds)
+		.where(eq(builds.id, buildId))
+		.then((r) => r[0]);
+
+	if (!build) {
+		return NextResponse.json({ error: "Build not found" }, { status: 404 });
+	}
+
+	await db
 		.update(builds)
 		.set({
 			status: "claimed",
 			claimedBy: serverId,
 			claimedAt: new Date(),
 		})
-		.where(and(eq(builds.id, buildId), eq(builds.status, "pending")))
-		.returning();
-
-	if (result.length === 0) {
-		return NextResponse.json(
-			{ error: "Build already claimed or not found" },
-			{ status: 409 },
-		);
-	}
-
-	const build = result[0];
+		.where(eq(builds.id, buildId));
 
 	const service = await db
 		.select()
@@ -108,7 +108,7 @@ export async function POST(
 				installation.installationId,
 			);
 		} catch (error) {
-			console.error("[build:claim] failed to get installation token:", error);
+			console.error("[build:get] failed to get installation token:", error);
 			await db
 				.update(builds)
 				.set({
@@ -146,7 +146,7 @@ export async function POST(
 	}
 
 	console.log(
-		`[build:claim] build ${buildId.slice(0, 8)} claimed by ${serverId.slice(0, 8)}, image: ${imageUri}, secrets: ${Object.keys(secretsMap).length}`,
+		`[build:get] build ${buildId.slice(0, 8)} details fetched by ${serverId.slice(0, 8)}, image: ${imageUri}`,
 	);
 
 	return NextResponse.json({

@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
+import { selectBuildServer } from "@/lib/build-assignment";
+import { enqueueWork } from "@/lib/work-queue";
 
 export async function cancelBuild(buildId: string) {
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
@@ -54,6 +56,9 @@ export async function retryBuild(buildId: string) {
 		author: build.author,
 		status: "pending",
 	});
+
+	const serverId = await selectBuildServer(build.serviceId);
+	await enqueueWork(serverId, "build", { buildId: newBuildId });
 
 	return { success: true, buildId: newBuildId };
 }
@@ -108,6 +113,9 @@ export async function triggerBuild(serviceId: string) {
 			status: "pending",
 		});
 
+		const serverId = await selectBuildServer(serviceId);
+		await enqueueWork(serverId, "build", { buildId: newBuildId });
+
 		return { success: true, buildId: newBuildId };
 	}
 
@@ -133,6 +141,9 @@ export async function triggerBuild(serviceId: string) {
 		branch: service.githubBranch || "main",
 		status: "pending",
 	});
+
+	const serverId = await selectBuildServer(serviceId);
+	await enqueueWork(serverId, "build", { buildId: newBuildId });
 
 	return { success: true, buildId: newBuildId };
 }

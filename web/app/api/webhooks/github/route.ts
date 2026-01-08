@@ -13,6 +13,8 @@ import {
 	createGitHubDeployment,
 	updateGitHubDeploymentStatus,
 } from "@/lib/github";
+import { selectBuildServer } from "@/lib/build-assignment";
+import { enqueueWork } from "@/lib/work-queue";
 
 type InstallationPayload = {
 	action: "created" | "deleted" | "suspend" | "unsuspend";
@@ -205,11 +207,14 @@ async function handlePushEvent(payload: PushPayload) {
 		githubDeploymentId,
 	});
 
+	const serverId = await selectBuildServer(githubRepo.serviceId);
+	await enqueueWork(serverId, "build", { buildId });
+
 	console.log(
-		`[webhook:push] created build ${buildId} for ${repository.full_name}@${head_commit.id.slice(0, 7)}`,
+		`[webhook:push] created build ${buildId} for ${repository.full_name}@${head_commit.id.slice(0, 7)}, assigned to server ${serverId.slice(0, 8)}`,
 	);
 
-	return NextResponse.json({ ok: true, buildId });
+	return NextResponse.json({ ok: true, buildId, serverId });
 }
 
 export async function POST(request: NextRequest) {

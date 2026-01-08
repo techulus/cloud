@@ -329,7 +329,14 @@ export const workQueue = pgTable(
 			.notNull()
 			.references(() => servers.id, { onDelete: "cascade" }),
 		type: text("type", {
-			enum: ["deploy", "stop", "restart", "force_cleanup", "cleanup_volumes"],
+			enum: [
+				"deploy",
+				"stop",
+				"restart",
+				"force_cleanup",
+				"cleanup_volumes",
+				"build",
+			],
 		}).notNull(),
 		payload: text("payload").notNull(),
 		status: text("status", {

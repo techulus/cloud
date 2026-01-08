@@ -38,7 +38,6 @@ import (
 const (
 	tickInterval         = 10 * time.Second
 	processingTimeout    = 5 * time.Minute
-	buildCheckInterval   = 30 * time.Second
 	buildCleanupInterval = 1 * time.Hour
 )
 
@@ -146,13 +145,8 @@ func (a *Agent) Run(ctx context.Context) {
 		a.caddyLogCollector.Start()
 	}
 
-	var buildTickerC <-chan time.Time
 	var cleanupTickerC <-chan time.Time
 	if a.builder != nil {
-		buildTicker := time.NewTicker(buildCheckInterval)
-		defer buildTicker.Stop()
-		buildTickerC = buildTicker.C
-
 		cleanupTicker := time.NewTicker(buildCleanupInterval)
 		defer cleanupTicker.Stop()
 		cleanupTickerC = cleanupTicker.C
@@ -179,8 +173,6 @@ func (a *Agent) Run(ctx context.Context) {
 			a.tick()
 		case <-logTickerC:
 			a.collectLogs()
-		case <-buildTickerC:
-			go a.checkForBuilds(ctx)
 		case <-cleanupTickerC:
 			go a.runBuildCleanup()
 		case <-workQueueTicker.C:
@@ -739,6 +731,8 @@ func (a *Agent) processWorkQueue() {
 			processErr = a.processForceCleanup(item)
 		case "cleanup_volumes":
 			processErr = a.processCleanupVolumes(item)
+		case "build":
+			processErr = a.processBuild(item)
 		default:
 			log.Printf("[work-queue] unknown work item type: %s", item.Type)
 			continue
@@ -839,39 +833,26 @@ func (a *Agent) processCleanupVolumes(item agenthttp.WorkQueueItem) error {
 	return nil
 }
 
-func (a *Agent) checkForBuilds(ctx context.Context) {
+func (a *Agent) processBuild(item agenthttp.WorkQueueItem) error {
 	if a.builder == nil {
-		return
+		return fmt.Errorf("builder not configured")
+	}
+
+	var payload struct {
+		BuildID string `json:"buildId"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse build payload: %w", err)
 	}
 
 	a.buildMutex.Lock()
 	if a.isBuilding {
 		a.buildMutex.Unlock()
-		return
+		return fmt.Errorf("another build is in progress")
 	}
-	a.buildMutex.Unlock()
-
-	pending, err := a.client.GetPendingBuild()
-	if err != nil {
-		log.Printf("[build] failed to check for pending builds: %v", err)
-		return
-	}
-
-	if pending == nil {
-		return
-	}
-
-	log.Printf("[build] found pending build %s for commit %s", truncate(pending.ID, 8), truncate(pending.CommitSha, 8))
-
-	claimed, err := a.client.ClaimBuild(pending.ID)
-	if err != nil {
-		log.Printf("[build] failed to claim build %s: %v", truncate(pending.ID, 8), err)
-		return
-	}
-
-	a.buildMutex.Lock()
 	a.isBuilding = true
-	a.currentBuildID = pending.ID
+	a.currentBuildID = payload.BuildID
 	a.buildMutex.Unlock()
 
 	defer func() {
@@ -881,14 +862,19 @@ func (a *Agent) checkForBuilds(ctx context.Context) {
 		a.buildMutex.Unlock()
 	}()
 
-	log.Printf("[build] starting build %s", truncate(pending.ID, 8))
+	buildDetails, err := a.client.GetBuild(payload.BuildID)
+	if err != nil {
+		return fmt.Errorf("failed to get build details: %w", err)
+	}
 
-	if err := a.client.UpdateBuildStatus(pending.ID, "cloning", ""); err != nil {
+	log.Printf("[build] starting build %s for commit %s", truncate(payload.BuildID, 8), truncate(buildDetails.Build.CommitSha, 8))
+
+	if err := a.client.UpdateBuildStatus(payload.BuildID, "cloning", ""); err != nil {
 		log.Printf("[build] failed to update status to cloning: %v", err)
 	}
 
 	checkCancelled := func() bool {
-		status, err := a.client.GetBuildStatus(pending.ID)
+		status, err := a.client.GetBuildStatus(payload.BuildID)
 		if err != nil {
 			return false
 		}
@@ -896,7 +882,7 @@ func (a *Agent) checkForBuilds(ctx context.Context) {
 	}
 
 	decryptedSecrets := make(map[string]string)
-	for key, encryptedValue := range claimed.Secrets {
+	for key, encryptedValue := range buildDetails.Secrets {
 		decrypted, err := crypto.DecryptSecret(encryptedValue, a.config.EncryptionKey)
 		if err != nil {
 			log.Printf("[build] failed to decrypt secret %s: %v", key, err)
@@ -906,35 +892,38 @@ func (a *Agent) checkForBuilds(ctx context.Context) {
 	}
 
 	buildConfig := &build.Config{
-		BuildID:   pending.ID,
-		CloneURL:  claimed.CloneURL,
-		CommitSha: claimed.Build.CommitSha,
-		Branch:    claimed.Build.Branch,
-		ImageURI:  claimed.ImageURI,
-		ServiceID: claimed.Build.ServiceID,
-		ProjectID: claimed.Build.ProjectID,
+		BuildID:   payload.BuildID,
+		CloneURL:  buildDetails.CloneURL,
+		CommitSha: buildDetails.Build.CommitSha,
+		Branch:    buildDetails.Build.Branch,
+		ImageURI:  buildDetails.ImageURI,
+		ServiceID: buildDetails.Build.ServiceID,
+		ProjectID: buildDetails.Build.ProjectID,
 		Secrets:   decryptedSecrets,
 	}
 
 	onStatusChange := func(status string) {
-		if err := a.client.UpdateBuildStatus(pending.ID, status, ""); err != nil {
+		if err := a.client.UpdateBuildStatus(payload.BuildID, status, ""); err != nil {
 			log.Printf("[build] failed to update status to %s: %v", status, err)
 		}
 	}
 
+	ctx := context.Background()
 	err = a.builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
-		log.Printf("[build] build %s failed: %v", truncate(pending.ID, 8), err)
-		if err := a.client.UpdateBuildStatus(pending.ID, "failed", err.Error()); err != nil {
-			log.Printf("[build] failed to update status to failed: %v", err)
+		log.Printf("[build] build %s failed: %v", truncate(payload.BuildID, 8), err)
+		if updateErr := a.client.UpdateBuildStatus(payload.BuildID, "failed", err.Error()); updateErr != nil {
+			log.Printf("[build] failed to update status to failed: %v", updateErr)
 		}
-		return
+		return err
 	}
 
-	log.Printf("[build] build %s completed successfully", truncate(pending.ID, 8))
-	if err := a.client.UpdateBuildStatus(pending.ID, "completed", ""); err != nil {
+	log.Printf("[build] build %s completed successfully", truncate(payload.BuildID, 8))
+	if err := a.client.UpdateBuildStatus(payload.BuildID, "completed", ""); err != nil {
 		log.Printf("[build] failed to update status to completed: %v", err)
 	}
+
+	return nil
 }
 
 func (a *Agent) runBuildCleanup() {

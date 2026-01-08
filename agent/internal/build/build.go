@@ -190,6 +190,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--frontend", "dockerfile.v0",
 			"--local", "context=.",
 			"--local", "dockerfile=.",
+			"--opt", "platform=linux/amd64,linux/arm64",
 			"--output", outputFlag,
 		}
 		args = append(args, secretArgs...)
@@ -231,6 +232,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--local", "context=.",
 			"--local", "dockerfile=.",
 			"--opt", "filename=railpack-plan.json",
+			"--opt", "platform=linux/amd64,linux/arm64",
 			"--output", outputFlag,
 		}
 

@@ -283,6 +283,26 @@ sudo wg show
 wg-quick down wg0 && wg-quick up wg0
 ```
 
+### Insecure Registry (HTTP)
+
+If you see errors like:
+```
+Error response from daemon: Get "https://athena:5000/v2/": http: server gave HTTP response to HTTPS client
+```
+
+Docker is trying to use HTTPS for a registry that only supports HTTP. Configure OrbStack to allow insecure registries:
+
+1. Open OrbStack → Settings → Docker
+2. Add `athena:5000` (or your registry address) to "Insecure registries"
+3. Restart Docker from the OrbStack menu bar
+
+Alternatively, edit `~/.orbstack/config/docker.json`:
+```json
+{
+  "insecure-registries": ["athena:5000"]
+}
+```
+
 ### Debugging Network Issues
 
 Check if packets arrive on WireGuard interface:

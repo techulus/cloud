@@ -31,7 +31,7 @@ export async function createSecretsBatch(
 
 	const existingByKey = new Map(existing.map((s) => [s.key, s]));
 
-	const toInsert: typeof secrets.$inferInsert[] = [];
+	const toInsert: (typeof secrets.$inferInsert)[] = [];
 	const toUpdate: { id: string; encryptedValue: string }[] = [];
 
 	for (const item of items) {

@@ -231,16 +231,7 @@ func (c *Client) ReportStatus(report *StatusReport) error {
 	return nil
 }
 
-type PendingBuild struct {
-	ID            string `json:"id"`
-	CommitSha     string `json:"commitSha"`
-	CommitMessage string `json:"commitMessage"`
-	Branch        string `json:"branch"`
-	ServiceID     string `json:"serviceId"`
-	GithubRepoID  string `json:"githubRepoId"`
-}
-
-type ClaimedBuild struct {
+type BuildDetails struct {
 	Build struct {
 		ID            string `json:"id"`
 		CommitSha     string `json:"commitSha"`
@@ -254,8 +245,8 @@ type ClaimedBuild struct {
 	Secrets  map[string]string `json:"secrets"`
 }
 
-func (c *Client) GetPendingBuild() (*PendingBuild, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/pending-builds", nil)
+func (c *Client) GetBuild(buildID string) (*BuildDetails, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -264,51 +255,18 @@ func (c *Client) GetPendingBuild() (*PendingBuild, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pending builds: %w", err)
+		return nil, fmt.Errorf("failed to get build: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("pending builds request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("get build failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result struct {
-		Build *PendingBuild `json:"build"`
-	}
+	var result BuildDetails
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode pending builds: %w", err)
-	}
-
-	return result.Build, nil
-}
-
-func (c *Client) ClaimBuild(buildID string) (*ClaimedBuild, error) {
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID+"/claim", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	c.signRequest(req, "")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim build: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusConflict {
-		return nil, fmt.Errorf("build already claimed")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("claim build failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result ClaimedBuild
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode claimed build: %w", err)
+		return nil, fmt.Errorf("failed to decode build: %w", err)
 	}
 
 	return &result, nil
