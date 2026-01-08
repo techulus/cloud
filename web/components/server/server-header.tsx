@@ -43,7 +43,11 @@ export function ServerHeader({ server }: ServerHeaderProps) {
 				textClassName="text-lg font-semibold"
 			/>
 			<span className="text-sm text-muted-foreground">
-				({server.lastHeartbeat ? formatRelativeTime(server.lastHeartbeat) : "Never seen"})
+				(
+				{server.lastHeartbeat
+					? formatRelativeTime(server.lastHeartbeat)
+					: "Never seen"}
+				)
 			</span>
 			<StatusIndicator status={server.status} />
 			{server.isProxy && <Badge variant="secondary">Proxy</Badge>}
