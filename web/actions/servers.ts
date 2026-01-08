@@ -40,3 +40,10 @@ export async function deleteServer(id: string) {
 export async function approveServer(id: string) {
 	await db.update(servers).set({ status: "pending" }).where(eq(servers.id, id));
 }
+
+export async function updateServerName(id: string, name: string) {
+	if (!name || name.trim().length === 0) {
+		throw new Error("Server name is required");
+	}
+	await db.update(servers).set({ name: name.trim() }).where(eq(servers.id, id));
+}

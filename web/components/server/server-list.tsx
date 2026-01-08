@@ -1,6 +1,6 @@
 "use client";
 
-import { Server as ServerIcon } from "lucide-react";
+import { Globe, Server as ServerIcon } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
@@ -18,7 +18,7 @@ import { fetcher } from "@/lib/fetcher";
 
 type ServerWithIp = Pick<
 	Server,
-	"id" | "name" | "publicIp" | "wireguardIp" | "status"
+	"id" | "name" | "publicIp" | "wireguardIp" | "status" | "isProxy"
 >;
 
 export function ServerList({
@@ -60,7 +60,11 @@ export function ServerList({
 							render={<Link href={`/dashboard/servers/${server.id}`} />}
 						>
 							<ItemMedia variant="icon">
-								<ServerIcon className="size-5 text-muted-foreground" />
+								{server.isProxy ? (
+									<Globe className="size-5 text-muted-foreground" />
+								) : (
+									<ServerIcon className="size-5 text-muted-foreground" />
+								)}
 							</ItemMedia>
 							<ItemContent>
 								<div className="flex items-center justify-between">

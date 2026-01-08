@@ -8,11 +8,11 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
-import { StatusIndicator } from "@/components/core/status-indicator";
 import { formatRelativeTime } from "@/lib/date";
 import { LogViewer } from "@/components/log-viewer";
 import { Label } from "@/components/ui/label";
 import { ServerDangerZone } from "@/components/server-danger-zone";
+import { ServerHeader } from "@/components/server/server-header";
 
 export default async function ServerDetailPage({
 	params,
@@ -37,10 +37,7 @@ export default async function ServerDetailPage({
 				]}
 			/>
 			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
-				<div className="flex items-center gap-3">
-					<h1 className="text-lg font-semibold">{server.name}</h1>
-					<StatusIndicator status={server.status} />
-				</div>
+				<ServerHeader server={server} />
 
 				{isUnregistered && (
 					<Card className="border-amber-500/50 bg-amber-500/5">
@@ -84,16 +81,12 @@ export default async function ServerDetailPage({
 								<p className="font-mono">{server.publicIp || "—"}</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">WireGuard IP</p>
-								<p className="font-mono">{server.wireguardIp || "—"}</p>
+								<p className="text-sm text-muted-foreground">Private IP</p>
+								<p className="font-mono">{server.privateIp || "—"}</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Last Seen</p>
-								<p>
-									{server.lastHeartbeat
-										? formatRelativeTime(server.lastHeartbeat)
-										: "Never"}
-								</p>
+								<p className="text-sm text-muted-foreground">WireGuard IP</p>
+								<p className="font-mono">{server.wireguardIp || "—"}</p>
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">CPU</p>

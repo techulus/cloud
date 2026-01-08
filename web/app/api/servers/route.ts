@@ -21,6 +21,7 @@ export async function GET() {
 			status: servers.status,
 			wireguardIp: servers.wireguardIp,
 			publicIp: servers.publicIp,
+			isProxy: servers.isProxy,
 		})
 		.from(servers)
 		.orderBy(servers.createdAt);
