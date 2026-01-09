@@ -38,7 +38,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		new Set(initialSettings.excludedServerIds),
 	);
 	const [buildTimeoutMinutes, setBuildTimeoutMinutes] = useState(
-		initialSettings.buildTimeoutMinutes,
+		String(initialSettings.buildTimeoutMinutes),
 	);
 	const [isSavingBuild, setIsSavingBuild] = useState(false);
 	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
@@ -101,7 +101,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const handleSaveBuildTimeout = async () => {
 		setIsSavingTimeout(true);
 		try {
-			await updateBuildTimeout(buildTimeoutMinutes);
+			await updateBuildTimeout(parseInt(buildTimeoutMinutes, 10));
 			toast.success("Build timeout updated");
 			router.refresh();
 		} catch (error) {
@@ -122,7 +122,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		!initialSettings.excludedServerIds.every((id) => excludedServerIds.has(id));
 
 	const buildTimeoutChanged =
-		buildTimeoutMinutes !== initialSettings.buildTimeoutMinutes;
+		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
 
 	if (servers.length === 0) {
 		return (
@@ -284,9 +284,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 							min={5}
 							max={120}
 							value={buildTimeoutMinutes}
-							onChange={(e) =>
-								setBuildTimeoutMinutes(parseInt(e.target.value) || 0)
-							}
+							onChange={(e) => setBuildTimeoutMinutes(e.target.value)}
 							className="w-24"
 						/>
 						<span className="text-sm text-muted-foreground">minutes</span>
