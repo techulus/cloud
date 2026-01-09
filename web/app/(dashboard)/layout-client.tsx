@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { Settings } from "lucide-react";
 import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
@@ -58,6 +59,13 @@ function DashboardHeader({ email }: { email: string }) {
 					<span className="hidden sm:inline text-sm text-muted-foreground">
 						{email}
 					</span>
+					<Button
+						variant="ghost"
+						size="icon"
+						render={<Link href="/dashboard/settings" />}
+					>
+						<Settings className="size-4" />
+					</Button>
 					<Button
 						variant="outline"
 						size="sm"

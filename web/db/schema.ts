@@ -457,3 +457,12 @@ export const builds = pgTable(
 		index("builds_github_repo_id_idx").on(table.githubRepoId),
 	],
 );
+
+export const settings = pgTable("settings", {
+	key: text("key").primaryKey(),
+	value: jsonb("value").notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true })
+		.defaultNow()
+		.notNull()
+		.$onUpdate(() => new Date()),
+});

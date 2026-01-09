@@ -1,6 +1,8 @@
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { getSetting } from "@/db/queries";
+import { SETTING_KEYS } from "@/lib/settings-keys";
 
 export type PlacementResult = { serverId: string; count: number }[];
 
@@ -14,8 +16,17 @@ export async function getHealthyServers(excludeServerIds?: string[]) {
 		.from(servers)
 		.where(and(eq(servers.status, "online"), isNotNull(servers.wireguardIp)));
 
-	if (excludeServerIds && excludeServerIds.length > 0) {
-		return allOnlineServers.filter((s) => !excludeServerIds.includes(s.id));
+	const excludedFromWorkload = await getSetting<string[]>(
+		SETTING_KEYS.SERVERS_EXCLUDED_FROM_WORKLOAD_PLACEMENT,
+	);
+
+	const allExcludedIds = new Set([
+		...(excludeServerIds ?? []),
+		...(excludedFromWorkload ?? []),
+	]);
+
+	if (allExcludedIds.size > 0) {
+		return allOnlineServers.filter((s) => !allExcludedIds.has(s.id));
 	}
 
 	return allOnlineServers;

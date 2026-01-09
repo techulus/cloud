@@ -1,6 +1,8 @@
 import { db } from "@/db";
 import { servers, services } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
+import { getSetting } from "@/db/queries";
+import { SETTING_KEYS } from "@/lib/settings-keys";
 
 export async function selectBuildServer(serviceId: string): Promise<string> {
 	const service = await db
@@ -32,13 +34,31 @@ export async function selectBuildServer(serviceId: string): Promise<string> {
 		return server.id;
 	}
 
-	const onlineServers = await db
-		.select({ id: servers.id })
-		.from(servers)
-		.where(eq(servers.status, "online"));
+	const allowedBuildServerIds = await getSetting<string[]>(
+		SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS,
+	);
+
+	let onlineServers: { id: string }[];
+
+	if (allowedBuildServerIds && allowedBuildServerIds.length > 0) {
+		onlineServers = await db
+			.select({ id: servers.id })
+			.from(servers)
+			.where(
+				and(
+					eq(servers.status, "online"),
+					inArray(servers.id, allowedBuildServerIds),
+				),
+			);
+	} else {
+		onlineServers = await db
+			.select({ id: servers.id })
+			.from(servers)
+			.where(eq(servers.status, "online"));
+	}
 
 	if (onlineServers.length === 0) {
-		throw new Error("No online servers available");
+		throw new Error("No online servers available for builds");
 	}
 
 	return onlineServers[Math.floor(Math.random() * onlineServers.length)].id;

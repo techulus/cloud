@@ -10,6 +10,7 @@ import {
 	servicePorts,
 	serviceReplicas,
 	services,
+	settings,
 } from "@/db/schema";
 
 export async function listProjects() {
@@ -185,4 +186,28 @@ export async function getEnvironmentByName(projectId: string, name: string) {
 			and(eq(environments.projectId, projectId), eq(environments.name, name)),
 		);
 	return results[0] || null;
+}
+
+export async function getSetting<T>(key: string): Promise<T | null> {
+	const results = await db.select().from(settings).where(eq(settings.key, key));
+	return (results[0]?.value as T) ?? null;
+}
+
+export async function getGlobalSettings() {
+	const [buildServers, excludedServers] = await Promise.all([
+		getSetting<string[]>("servers_allowed_for_builds"),
+		getSetting<string[]>("servers_excluded_from_workload_placement"),
+	]);
+
+	return {
+		buildServerIds: buildServers ?? [],
+		excludedServerIds: excludedServers ?? [],
+	};
+}
+
+export async function setSetting<T>(key: string, value: T): Promise<void> {
+	await db.insert(settings).values({ key, value }).onConflictDoUpdate({
+		target: settings.key,
+		set: { value },
+	});
 }
