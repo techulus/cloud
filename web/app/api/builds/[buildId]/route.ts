@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { builds } from "@/db/schema";
 
 export async function GET(
-	request: NextRequest,
+	_: NextRequest,
 	{ params }: { params: Promise<{ buildId: string }> },
 ) {
 	const { buildId } = await params;

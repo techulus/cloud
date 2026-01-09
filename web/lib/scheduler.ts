@@ -144,7 +144,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 
 		try {
 			const cron = new Cron(service.schedule);
-			const prevRun = cron.previousRun();
+			const prevRun = cron.previousRun(new Date());
 
 			if (!prevRun) continue;
 

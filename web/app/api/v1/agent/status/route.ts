@@ -158,7 +158,6 @@ export async function POST(request: NextRequest) {
 	}
 
 	const { serverId } = auth;
-	console.log(`[status:${serverId.slice(0, 8)}] received status report`);
 
 	let report: StatusReport;
 	try {
@@ -167,17 +166,10 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
 
-	console.log(
-		`[status:${serverId.slice(0, 8)}] containers reported: ${report.containers.length}`,
-	);
-
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
 		status: "online",
 	};
-	console.log(
-		`[status:${serverId.slice(0, 8)}] setting server status to ONLINE`,
-	);
 
 	if (report.resources) {
 		if (report.resources.cpuCores !== undefined) {
@@ -228,10 +220,6 @@ export async function POST(request: NextRequest) {
 				inArray(deployments.status, activeStatuses),
 			),
 		);
-
-	console.log(
-		`[status:${serverId.slice(0, 8)}] active deployments on this server: ${activeDeployments.length}, reported: ${reportedDeploymentIds.length}`,
-	);
 
 	for (const dep of activeDeployments) {
 		if (!reportedDeploymentIds.includes(dep.id)) {

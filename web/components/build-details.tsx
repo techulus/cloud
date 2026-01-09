@@ -18,12 +18,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild } from "@/actions/builds";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Item,
 	ItemContent,
 	ItemDescription,
-	ItemMedia,
 	ItemTitle,
 } from "@/components/ui/item";
 import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
@@ -137,7 +137,7 @@ export function BuildDetails({
 		fetcher,
 		{
 			fallbackData: { build: initialBuild },
-			refreshInterval: isActiveBuild(initialBuild.status) ? 3000 : 0,
+			refreshInterval: isActiveBuild(initialBuild.status) ? 1500 : 0,
 		},
 	);
 
@@ -306,17 +306,11 @@ export function BuildDetails({
 			</div>
 
 			{build.error && (
-				<Item variant="outline" className="border-red-500/50">
-					<ItemMedia variant="icon">
-						<XCircle className="size-5 text-red-500" />
-					</ItemMedia>
-					<ItemContent>
-						<ItemTitle className="text-red-500">Build Failed</ItemTitle>
-						<ItemDescription className="text-red-500/80">
-							{build.error}
-						</ItemDescription>
-					</ItemContent>
-				</Item>
+				<Alert variant="destructive">
+					<XCircle className="size-4" />
+					<AlertTitle>Build Failed</AlertTitle>
+					<AlertDescription>{build.error}</AlertDescription>
+				</Alert>
 			)}
 
 			<div className="space-y-2">
