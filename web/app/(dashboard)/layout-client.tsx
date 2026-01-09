@@ -4,19 +4,32 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Settings } from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
 import { OfflineServersBanner } from "@/components/offline-servers-banner";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuGroup,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { signOut, useSession } from "@/lib/auth-client";
 
 function DashboardHeader({ email }: { email: string }) {
 	const router = useRouter();
 	const breadcrumbs = useBreadcrumbs();
+
+	const mobileBreadcrumbs =
+		breadcrumbs.length > 2 ? breadcrumbs.slice(-2) : breadcrumbs;
+	const showEllipsis = breadcrumbs.length > 2;
 
 	return (
 		<header className="border-b">
@@ -32,48 +45,86 @@ function DashboardHeader({ email }: { email: string }) {
 						/>
 					</Link>
 					{breadcrumbs.length > 0 ? (
-						<nav className="flex items-center gap-2 text-sm">
-							{breadcrumbs.map((crumb, index) => (
-								<span key={crumb.href} className="flex items-center gap-2">
-									<Link
-										href={crumb.href}
-										className={
-											index === breadcrumbs.length - 1
-												? "font-semibold text-foreground"
-												: "text-muted-foreground hover:text-foreground transition-colors"
-										}
-									>
-										{crumb.label}
-									</Link>
-									{index < breadcrumbs.length - 1 && (
+						<>
+							<nav className="hidden sm:flex items-center gap-2 text-sm">
+								{breadcrumbs.map((crumb, index) => (
+									<span key={crumb.href} className="flex items-center gap-2">
+										<Link
+											href={crumb.href}
+											className={
+												index === breadcrumbs.length - 1
+													? "font-semibold text-foreground"
+													: "text-muted-foreground hover:text-foreground transition-colors"
+											}
+										>
+											{crumb.label}
+										</Link>
+										{index < breadcrumbs.length - 1 && (
+											<span className="text-muted-foreground">/</span>
+										)}
+									</span>
+								))}
+							</nav>
+							<nav className="flex sm:hidden items-center gap-2 text-sm">
+								{showEllipsis && (
+									<>
+										<span className="text-muted-foreground">...</span>
 										<span className="text-muted-foreground">/</span>
-									)}
-								</span>
-							))}
-						</nav>
+									</>
+								)}
+								{mobileBreadcrumbs.map((crumb, index) => (
+									<span key={crumb.href} className="flex items-center gap-2">
+										<Link
+											href={crumb.href}
+											className={
+												index === mobileBreadcrumbs.length - 1
+													? "font-semibold text-foreground"
+													: "text-muted-foreground hover:text-foreground transition-colors"
+											}
+										>
+											{crumb.label}
+										</Link>
+										{index < mobileBreadcrumbs.length - 1 && (
+											<span className="text-muted-foreground">/</span>
+										)}
+									</span>
+								))}
+							</nav>
+						</>
 					) : (
 						<span className="text-sm font-semibold">techulus.cloud</span>
 					)}
 				</div>
-				<div className="flex items-center gap-4">
-					<span className="hidden sm:inline text-sm text-muted-foreground">
-						{email}
-					</span>
-					<Button
-						variant="ghost"
-						size="icon"
-						render={<Link href="/dashboard/settings" />}
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						className="flex items-center rounded-md p-2 hover:bg-accent transition-colors cursor-pointer"
+						render={<button type="button" />}
 					>
-						<Settings className="size-4" />
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => signOut().then(() => router.push("/login"))}
-					>
-						Sign Out
-					</Button>
-				</div>
+						<User className="size-4" />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" sideOffset={8}>
+						<DropdownMenuGroup>
+							<DropdownMenuLabel>{email}</DropdownMenuLabel>
+						</DropdownMenuGroup>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							render={<Link href="/dashboard/settings" />}
+							className="cursor-pointer"
+						>
+							<Settings className="size-4" />
+							Settings
+						</DropdownMenuItem>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							variant="destructive"
+							onClick={() => signOut().then(() => router.push("/login"))}
+							className="cursor-pointer"
+						>
+							<LogOut className="size-4" />
+							Sign Out
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 			</div>
 		</header>
 	);

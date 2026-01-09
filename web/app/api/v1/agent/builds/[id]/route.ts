@@ -11,6 +11,11 @@ import {
 import { eq } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { getInstallationToken, buildCloneUrl } from "@/lib/github";
+import { getSetting } from "@/db/queries";
+import {
+	SETTING_KEYS,
+	DEFAULT_BUILD_TIMEOUT_MINUTES,
+} from "@/lib/settings-keys";
 
 export async function GET(
 	request: NextRequest,
@@ -135,10 +140,10 @@ export async function GET(
 		);
 	}
 
-	const serviceSecrets = await db
-		.select()
-		.from(secrets)
-		.where(eq(secrets.serviceId, service.id));
+	const [serviceSecrets, buildTimeoutMinutes] = await Promise.all([
+		db.select().from(secrets).where(eq(secrets.serviceId, service.id)),
+		getSetting<number>(SETTING_KEYS.BUILD_TIMEOUT_MINUTES),
+	]);
 
 	const secretsMap: Record<string, string> = {};
 	for (const secret of serviceSecrets) {
@@ -161,5 +166,6 @@ export async function GET(
 		cloneUrl,
 		imageUri,
 		secrets: secretsMap,
+		timeoutMinutes: buildTimeoutMinutes ?? DEFAULT_BUILD_TIMEOUT_MINUTES,
 	});
 }

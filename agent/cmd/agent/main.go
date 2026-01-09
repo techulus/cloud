@@ -865,7 +865,11 @@ func (a *Agent) processBuild(item agenthttp.WorkQueueItem) error {
 		return fmt.Errorf("failed to get build details: %w", err)
 	}
 
-	log.Printf("[build] starting build %s for commit %s", truncate(payload.BuildID, 8), truncate(buildDetails.Build.CommitSha, 8))
+	timeoutMinutes := buildDetails.TimeoutMinutes
+	if timeoutMinutes <= 0 {
+		timeoutMinutes = 30
+	}
+	log.Printf("[build] starting build %s for commit %s (timeout: %d minutes)", truncate(payload.BuildID, 8), truncate(buildDetails.Build.CommitSha, 8), timeoutMinutes)
 
 	if err := a.client.UpdateBuildStatus(payload.BuildID, "cloning", ""); err != nil {
 		log.Printf("[build] failed to update status to cloning: %v", err)
@@ -906,7 +910,8 @@ func (a *Agent) processBuild(item agenthttp.WorkQueueItem) error {
 		}
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMinutes)*time.Minute)
+	defer cancel()
 	err = a.builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
 		log.Printf("[build] build %s failed: %v", truncate(payload.BuildID, 8), err)

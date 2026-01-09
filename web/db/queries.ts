@@ -194,14 +194,16 @@ export async function getSetting<T>(key: string): Promise<T | null> {
 }
 
 export async function getGlobalSettings() {
-	const [buildServers, excludedServers] = await Promise.all([
+	const [buildServers, excludedServers, buildTimeout] = await Promise.all([
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<string[]>("servers_excluded_from_workload_placement"),
+		getSetting<number>("build_timeout_minutes"),
 	]);
 
 	return {
 		buildServerIds: buildServers ?? [],
 		excludedServerIds: excludedServers ?? [],
+		buildTimeoutMinutes: buildTimeout ?? 30,
 	};
 }
 

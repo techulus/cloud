@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Hammer, Server, Ban } from "lucide-react";
+import { Hammer, Server, Ban, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	Empty,
@@ -12,7 +13,11 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
-import { updateBuildServers, updateExcludedServers } from "@/actions/settings";
+import {
+	updateBuildServers,
+	updateExcludedServers,
+	updateBuildTimeout,
+} from "@/actions/settings";
 import type { Server as ServerType } from "@/db/types";
 
 type Props = {
@@ -20,6 +25,7 @@ type Props = {
 	initialSettings: {
 		buildServerIds: string[];
 		excludedServerIds: string[];
+		buildTimeoutMinutes: number;
 	};
 };
 
@@ -31,8 +37,12 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const [excludedServerIds, setExcludedServerIds] = useState<Set<string>>(
 		new Set(initialSettings.excludedServerIds),
 	);
+	const [buildTimeoutMinutes, setBuildTimeoutMinutes] = useState(
+		initialSettings.buildTimeoutMinutes,
+	);
 	const [isSavingBuild, setIsSavingBuild] = useState(false);
 	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
+	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -88,6 +98,21 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		}
 	};
 
+	const handleSaveBuildTimeout = async () => {
+		setIsSavingTimeout(true);
+		try {
+			await updateBuildTimeout(buildTimeoutMinutes);
+			toast.success("Build timeout updated");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to update settings",
+			);
+		} finally {
+			setIsSavingTimeout(false);
+		}
+	};
+
 	const buildServersChanged =
 		buildServerIds.size !== initialSettings.buildServerIds.length ||
 		!initialSettings.buildServerIds.every((id) => buildServerIds.has(id));
@@ -95,6 +120,9 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const excludedServersChanged =
 		excludedServerIds.size !== initialSettings.excludedServerIds.length ||
 		!initialSettings.excludedServerIds.every((id) => excludedServerIds.has(id));
+
+	const buildTimeoutChanged =
+		buildTimeoutMinutes !== initialSettings.buildTimeoutMinutes;
 
 	if (servers.length === 0) {
 		return (
@@ -230,6 +258,52 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 								size="sm"
 							>
 								{isSavingExcluded ? "Saving..." : "Save"}
+							</Button>
+						</div>
+					)}
+				</div>
+			</div>
+
+			<div className="rounded-lg border">
+				<Item className="border-0 border-b rounded-none">
+					<ItemMedia variant="icon">
+						<Clock className="size-5 text-muted-foreground" />
+					</ItemMedia>
+					<ItemContent>
+						<ItemTitle>Build Timeout</ItemTitle>
+					</ItemContent>
+				</Item>
+				<div className="p-4 space-y-4">
+					<p className="text-sm text-muted-foreground">
+						Maximum time allowed for builds to complete. Builds exceeding this
+						limit will be automatically cancelled.
+					</p>
+					<div className="flex items-center gap-3">
+						<Input
+							type="number"
+							min={5}
+							max={120}
+							value={buildTimeoutMinutes}
+							onChange={(e) =>
+								setBuildTimeoutMinutes(
+									Math.max(5, Math.min(120, parseInt(e.target.value) || 30)),
+								)
+							}
+							className="w-24"
+						/>
+						<span className="text-sm text-muted-foreground">minutes</span>
+					</div>
+					<p className="text-xs text-muted-foreground">
+						Minimum: 5 minutes, Maximum: 120 minutes
+					</p>
+					{buildTimeoutChanged && (
+						<div className="pt-3 border-t">
+							<Button
+								onClick={handleSaveBuildTimeout}
+								disabled={isSavingTimeout}
+								size="sm"
+							>
+								{isSavingTimeout ? "Saving..." : "Save"}
 							</Button>
 						</div>
 					)}
