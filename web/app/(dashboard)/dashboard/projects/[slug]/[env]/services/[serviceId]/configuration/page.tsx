@@ -11,6 +11,7 @@ import { VolumesSection } from "@/components/service-details/volumes-section";
 import { SecretsSection } from "@/components/service-details/secrets-section";
 import { PortsSection } from "@/components/service-details/ports-section";
 import { HealthCheckSection } from "@/components/service-details/health-check-section";
+import { ScheduleSection } from "@/components/service-details/schedule-section";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -56,6 +57,8 @@ export default function ConfigurationPage() {
 			<PortsSection service={service} onUpdate={onUpdate} />
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
+
+			<ScheduleSection service={service} onUpdate={onUpdate} />
 
 			<div className="space-y-3">
 				<h2 className="text-xl font-semibold text-destructive">Danger Zone</h2>

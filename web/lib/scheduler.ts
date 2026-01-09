@@ -1,9 +1,17 @@
 import { db } from "@/db";
-import { deployments, servers, services, serviceReplicas } from "@/db/schema";
-import { and, eq, inArray, lt, ne } from "drizzle-orm";
+import {
+	deployments,
+	rollouts,
+	servers,
+	services,
+	serviceReplicas,
+} from "@/db/schema";
+import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { Cron } from "croner";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { deployService } from "@/actions/projects";
+import { triggerBuild } from "@/actions/builds";
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
@@ -115,4 +123,75 @@ export async function checkAndRecoverStaleServers(
 	triggerRecoveryForOfflineServers(offlineIds).catch((error) => {
 		console.error("[scheduler] recovery failed:", error);
 	});
+}
+
+export async function checkAndRunScheduledDeployments(): Promise<void> {
+	const scheduledServices = await db
+		.select({
+			id: services.id,
+			name: services.name,
+			sourceType: services.sourceType,
+			schedule: services.deploymentSchedule,
+			lastScheduledDeploymentRunAt: services.lastScheduledDeploymentRunAt,
+		})
+		.from(services)
+		.where(isNotNull(services.deploymentSchedule));
+
+	if (scheduledServices.length === 0) return;
+
+	for (const service of scheduledServices) {
+		if (!service.schedule) continue;
+
+		try {
+			const cron = new Cron(service.schedule);
+			const prevRun = cron.previousRun();
+
+			if (!prevRun) continue;
+
+			if (
+				service.lastScheduledDeploymentRunAt &&
+				prevRun <= service.lastScheduledDeploymentRunAt
+			) {
+				continue;
+			}
+
+			const [inProgressRollout] = await db
+				.select({ id: rollouts.id })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, service.id),
+						eq(rollouts.status, "in_progress"),
+					),
+				)
+				.limit(1);
+
+			if (inProgressRollout) {
+				console.log(
+					`[scheduler] skipping scheduled deployment for ${service.name} - deployment already in progress`,
+				);
+				continue;
+			}
+
+			await db
+				.update(services)
+				.set({ lastScheduledDeploymentRunAt: new Date() })
+				.where(eq(services.id, service.id));
+
+			console.log(
+				`[scheduler] triggering scheduled deployment for ${service.name}`,
+			);
+
+			if (service.sourceType === "github") {
+				await triggerBuild(service.id);
+			} else {
+				await deployService(service.id);
+			}
+		} catch (error) {
+			console.error(
+				`[scheduler] failed to process schedule for ${service.name}:`,
+				error,
+			);
+		}
+	}
 }

@@ -28,6 +28,7 @@ import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
 import { getEnvironment, getService } from "@/db/queries";
 import { calculateSpreadPlacement } from "@/lib/placement";
+import cronstrue from "cronstrue";
 
 function parseImageReference(image: string): {
 	registry: string;
@@ -888,6 +889,31 @@ export async function updateServiceHealthCheck(
 			healthCheckRetries: config.retries,
 			healthCheckStartPeriod: config.startPeriod,
 		})
+		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
+export async function updateServiceSchedule(
+	serviceId: string,
+	schedule: string | null,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (schedule) {
+		try {
+			cronstrue.toString(schedule);
+		} catch {
+			throw new Error("Invalid cron expression");
+		}
+	}
+
+	await db
+		.update(services)
+		.set({ deploymentSchedule: schedule })
 		.where(eq(services.id, serviceId));
 
 	return { success: true };
