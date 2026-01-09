@@ -285,9 +285,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 							max={120}
 							value={buildTimeoutMinutes}
 							onChange={(e) =>
-								setBuildTimeoutMinutes(
-									Math.max(5, Math.min(120, parseInt(e.target.value) || 30)),
-								)
+								setBuildTimeoutMinutes(parseInt(e.target.value) || 0)
 							}
 							className="w-24"
 						/>
