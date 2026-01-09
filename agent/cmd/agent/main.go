@@ -657,10 +657,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if a.getState() == StateProcessing {
-				log.Printf("[heartbeat] sending heartbeat during processing")
-				a.reportStatus(false)
-			}
+			a.reportStatus(false)
 		}
 	}
 }
