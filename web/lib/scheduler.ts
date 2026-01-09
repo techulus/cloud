@@ -86,20 +86,23 @@ export async function triggerRecoveryForOfflineServers(
 }
 
 export async function checkAndRecoverStaleServers(
-	excludeServerId: string,
+	excludeServerId?: string,
 ): Promise<void> {
 	const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
+
+	const conditions = [
+		eq(servers.status, "online"),
+		lt(servers.lastHeartbeat, staleThreshold),
+	];
+
+	if (excludeServerId) {
+		conditions.push(ne(servers.id, excludeServerId));
+	}
 
 	const markedOffline = await db
 		.update(servers)
 		.set({ status: "offline" })
-		.where(
-			and(
-				eq(servers.status, "online"),
-				lt(servers.lastHeartbeat, staleThreshold),
-				ne(servers.id, excludeServerId),
-			),
-		)
+		.where(and(...conditions))
 		.returning({ id: servers.id });
 
 	if (markedOffline.length === 0) return;

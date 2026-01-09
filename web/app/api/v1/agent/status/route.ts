@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { deployments, servers, services, rollouts } from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { checkAndRecoverStaleServers } from "@/lib/scheduler";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -145,10 +144,6 @@ export async function POST(request: NextRequest) {
 	updateData.privateIp = report.privateIp || null;
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
-
-	checkAndRecoverStaleServers(serverId).catch((error) => {
-		console.error("[status] stale server check failed:", error);
-	});
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)
