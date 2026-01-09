@@ -4,6 +4,7 @@ import {
 	boolean,
 	index,
 	integer,
+	jsonb,
 	pgTable,
 	text,
 	timestamp,
@@ -101,6 +102,12 @@ export const accountRelations = relations(account, ({ one }) => ({
 	}),
 }));
 
+type ServerMeta = {
+	arch?: string;
+	os?: string;
+	hostname?: string;
+};
+
 export const servers = pgTable("servers", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -118,6 +125,7 @@ export const servers = pgTable("servers", {
 	resourcesCpu: integer("resources_cpu"),
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),
+	meta: jsonb("meta").$type<ServerMeta>(),
 	agentToken: text("agent_token"),
 	tokenCreatedAt: timestamp("token_created_at", { withTimezone: true }),
 	tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),

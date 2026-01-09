@@ -151,6 +151,7 @@ export async function getServerDetails(id: string) {
 			resourcesCpu: servers.resourcesCpu,
 			resourcesMemory: servers.resourcesMemory,
 			resourcesDisk: servers.resourcesDisk,
+			meta: servers.meta,
 			createdAt: servers.createdAt,
 			agentToken: servers.agentToken,
 		})

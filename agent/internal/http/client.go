@@ -200,6 +200,7 @@ type StatusReport struct {
 	Resources  *Resources        `json:"resources,omitempty"`
 	PublicIP   string            `json:"publicIp,omitempty"`
 	PrivateIP  string            `json:"privateIp,omitempty"`
+	Meta       map[string]string `json:"meta,omitempty"`
 	Containers []ContainerStatus `json:"containers"`
 }
 

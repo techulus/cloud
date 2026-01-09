@@ -111,6 +111,20 @@ export default async function ServerDetailPage({
 										: "—"}
 								</p>
 							</div>
+							{server.meta && (
+								<>
+									<div>
+										<p className="text-sm text-muted-foreground">OS / Arch</p>
+										<p>
+											{server.meta.os || "—"} / {server.meta.arch || "—"}
+										</p>
+									</div>
+									<div>
+										<p className="text-sm text-muted-foreground">Hostname</p>
+										<p className="font-mono">{server.meta.hostname || "—"}</p>
+									</div>
+								</>
+							)}
 						</div>
 					</CardContent>
 				</Card>

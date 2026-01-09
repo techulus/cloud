@@ -674,6 +674,7 @@ func (a *Agent) reportStatus(includeResources bool) {
 
 	if includeResources {
 		report.Resources = getSystemStats()
+		report.Meta = getSystemMeta()
 	}
 
 	containers, err := container.List()
@@ -1204,6 +1205,19 @@ func getSystemStats() *agenthttp.Resources {
 	}
 
 	return resources
+}
+
+func getSystemMeta() map[string]string {
+	meta := map[string]string{
+		"arch": runtime.GOARCH,
+		"os":   runtime.GOOS,
+	}
+
+	if hostname, err := os.Hostname(); err == nil {
+		meta["hostname"] = hostname
+	}
+
+	return meta
 }
 
 func getPublicIP() string {

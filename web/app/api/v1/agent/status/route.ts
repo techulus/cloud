@@ -19,6 +19,7 @@ type StatusReport = {
 	};
 	publicIp?: string;
 	privateIp?: string;
+	meta?: Record<string, string>;
 	containers: ContainerStatus[];
 };
 
@@ -142,6 +143,10 @@ export async function POST(request: NextRequest) {
 	}
 
 	updateData.privateIp = report.privateIp || null;
+
+	if (report.meta) {
+		updateData.meta = report.meta;
+	}
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
 
