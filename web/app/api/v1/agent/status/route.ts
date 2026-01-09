@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { deployments, servers, services, rollouts } from "@/db/schema";
+import {
+	deployments,
+	deploymentPorts,
+	servers,
+	services,
+	rollouts,
+} from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 
@@ -24,6 +30,14 @@ type StatusReport = {
 };
 
 async function checkRolloutProgress(rolloutId: string): Promise<void> {
+	const rollout = await db
+		.select()
+		.from(rollouts)
+		.where(eq(rollouts.id, rolloutId))
+		.then((r) => r[0]);
+
+	if (!rollout || rollout.status !== "in_progress") return;
+
 	const rolloutDeployments = await db
 		.select()
 		.from(deployments)
@@ -41,28 +55,45 @@ async function checkRolloutProgress(rolloutId: string): Promise<void> {
 	const allHealthy = newDeployments.every((d) => d.status === "healthy");
 
 	if (allHealthy) {
-		console.log(
-			`[rollout:${rolloutId}] all healthy → running, completing rollout`,
-		);
+		const serviceId = newDeployments[0].serviceId;
 
-		await db
-			.update(deployments)
-			.set({ status: "running" })
-			.where(
-				and(
-					eq(deployments.rolloutId, rolloutId),
-					eq(deployments.status, "healthy"),
-				),
-			);
-
-		await db
+		const updated = await db
 			.update(rollouts)
 			.set({
 				status: "completed",
 				currentStage: "completed",
 				completedAt: new Date(),
 			})
-			.where(eq(rollouts.id, rolloutId));
+			.where(
+				and(eq(rollouts.id, rolloutId), eq(rollouts.status, "in_progress")),
+			)
+			.returning();
+
+		if (updated.length > 0) {
+			console.log(
+				`[rollout:${rolloutId}] all healthy → running, completing rollout`,
+			);
+
+			await db
+				.update(deployments)
+				.set({ status: "stopping" })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.status, "draining"),
+					),
+				);
+
+			await db
+				.update(deployments)
+				.set({ status: "running" })
+				.where(
+					and(
+						eq(deployments.rolloutId, rolloutId),
+						eq(deployments.status, "healthy"),
+					),
+				);
+		}
 	}
 }
 
@@ -70,31 +101,53 @@ async function handleRolloutFailure(
 	rolloutId: string,
 	failedStage: string,
 ): Promise<void> {
-	await db
-		.update(rollouts)
-		.set({ status: "failed", currentStage: failedStage })
-		.where(eq(rollouts.id, rolloutId));
-
 	const rolloutDeployments = await db
 		.select()
 		.from(deployments)
 		.where(eq(deployments.rolloutId, rolloutId));
 
-	const newDeployments = rolloutDeployments.filter(
-		(d) => d.status !== "running" && d.status !== "stopped",
-	);
+	if (rolloutDeployments.length === 0) return;
 
-	for (const dep of newDeployments) {
+	const serviceId = rolloutDeployments[0].serviceId;
+
+	const updated = await db
+		.update(rollouts)
+		.set({ status: "failed", currentStage: failedStage })
+		.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "in_progress")))
+		.returning();
+
+	if (updated.length > 0) {
 		await db
 			.update(deployments)
-			.set({ status: "rolled_back", failedStage: failedStage })
-			.where(eq(deployments.id, dep.id));
-	}
+			.set({ status: "running" })
+			.where(
+				and(
+					eq(deployments.serviceId, serviceId),
+					eq(deployments.status, "draining"),
+				),
+			);
 
-	await db
-		.update(rollouts)
-		.set({ status: "rolled_back", completedAt: new Date() })
-		.where(eq(rollouts.id, rolloutId));
+		await db
+			.update(deployments)
+			.set({ status: "rolled_back", failedStage })
+			.where(
+				and(
+					eq(deployments.rolloutId, rolloutId),
+					inArray(deployments.status, [
+						"pending",
+						"pulling",
+						"starting",
+						"healthy",
+						"failed",
+					]),
+				),
+			);
+
+		await db
+			.update(rollouts)
+			.set({ status: "rolled_back", completedAt: new Date() })
+			.where(eq(rollouts.id, rolloutId));
+	}
 }
 
 export async function POST(request: NextRequest) {
@@ -184,12 +237,12 @@ export async function POST(request: NextRequest) {
 		if (!reportedDeploymentIds.includes(dep.id)) {
 			if (dep.status === "stopping") {
 				console.log(
-					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was stopping and container gone, marking STOPPED`,
+					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was stopping and container gone, deleting`,
 				);
 				await db
-					.update(deployments)
-					.set({ status: "stopped", healthStatus: null, containerId: null })
-					.where(eq(deployments.id, dep.id));
+					.delete(deploymentPorts)
+					.where(eq(deploymentPorts.deploymentId, dep.id));
+				await db.delete(deployments).where(eq(deployments.id, dep.id));
 			} else {
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,

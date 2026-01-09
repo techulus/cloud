@@ -266,6 +266,7 @@ export const deployments = pgTable(
 				"starting",
 				"healthy",
 				"running",
+				"draining",
 				"stopping",
 				"stopped",
 				"failed",

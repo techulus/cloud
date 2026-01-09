@@ -20,6 +20,7 @@ const EXPECTED_STATUSES = [
 	"starting",
 	"healthy",
 	"running",
+	"draining",
 	"unknown",
 ] as const;
 

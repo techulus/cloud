@@ -698,11 +698,26 @@ export async function deployService(serviceId: string) {
 		currentStage: "deploying",
 	});
 
-	for (const dep of existingDeployments) {
-		await db
-			.delete(deploymentPorts)
-			.where(eq(deploymentPorts.deploymentId, dep.id));
-		await db.delete(deployments).where(eq(deployments.id, dep.id));
+	const runningDeployments = existingDeployments.filter(
+		(d) => d.status === "running" || d.status === "healthy",
+	);
+
+	const useRollingUpdate = !service.stateful && runningDeployments.length > 0;
+
+	if (useRollingUpdate) {
+		for (const dep of runningDeployments) {
+			await db
+				.update(deployments)
+				.set({ status: "draining" })
+				.where(eq(deployments.id, dep.id));
+		}
+	} else {
+		for (const dep of existingDeployments) {
+			await db
+				.delete(deploymentPorts)
+				.where(eq(deploymentPorts.deploymentId, dep.id));
+			await db.delete(deployments).where(eq(deployments.id, dep.id));
+		}
 	}
 
 	const servicePortsList = await db
