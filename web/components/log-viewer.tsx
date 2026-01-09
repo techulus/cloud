@@ -19,6 +19,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDateTime, formatTime } from "@/lib/date";
@@ -738,9 +739,11 @@ export function LogViewer(props: LogViewerProps) {
 						<Spinner className="size-5" />
 					</div>
 				) : filteredLogs.length === 0 ? (
-					<div className="flex items-center justify-center h-full text-muted-foreground">
-						{logs.length === 0 ? config.emptyMessage : config.noMatchMessage}
-					</div>
+					<Empty className="h-full">
+						<EmptyTitle>
+							{logs.length === 0 ? config.emptyMessage : config.noMatchMessage}
+						</EmptyTitle>
+					</Empty>
 				) : (
 					<div className="p-4 py-2">
 						{filteredLogs.map((entry, idx) => {

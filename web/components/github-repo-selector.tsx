@@ -2,23 +2,8 @@
 
 import { useState, useMemo } from "react";
 import useSWR from "swr";
-import { Check, ChevronsUpDown, Github, Globe, Lock } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-	CommandSeparator,
-} from "@/components/ui/command";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@/components/ui/popover";
+import { Globe, Lock, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 type GitHubRepo = {
 	id: number;
@@ -48,7 +33,6 @@ export function GitHubRepoSelector({
 	onChange: (repo: SelectedRepo | null) => void;
 	disabled?: boolean;
 }) {
-	const [open, setOpen] = useState(false);
 	const [search, setSearch] = useState("");
 
 	const { data, isLoading } = useSWR<{
@@ -92,7 +76,6 @@ export function GitHubRepoSelector({
 			isPrivate: repo.private,
 			installationId: repo.installationId,
 		});
-		setOpen(false);
 		setSearch("");
 	};
 
@@ -103,119 +86,117 @@ export function GitHubRepoSelector({
 			isPrivate: false,
 			installationId: undefined,
 		});
-		setOpen(false);
+		setSearch("");
+	};
+
+	const handleClear = () => {
+		onChange(null);
 		setSearch("");
 	};
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
-			<PopoverTrigger
-				render={
-					<Button
-						variant="outline"
-						role="combobox"
-						aria-expanded={open}
-						className="w-full justify-between font-normal"
-						disabled={disabled}
-					/>
-				}
-			>
-				{value ? (
-					<span className="flex items-center gap-2 truncate">
+		<div className="space-y-2">
+			{value ? (
+				<div className="flex items-center justify-between rounded-md border bg-muted/50 px-3 py-2">
+					<span className="flex items-center gap-2 text-sm">
 						{value.isPrivate ? (
-							<Lock className="size-4 text-muted-foreground shrink-0" />
+							<Lock className="size-4 text-muted-foreground" />
 						) : (
-							<Globe className="size-4 text-muted-foreground shrink-0" />
+							<Globe className="size-4 text-muted-foreground" />
 						)}
 						{value.fullName}
 					</span>
-				) : (
-					<span className="text-muted-foreground">Select repository...</span>
-				)}
-				<ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-			</PopoverTrigger>
-			<PopoverContent className="w-[400px] p-0" align="start">
-				<Command shouldFilter={false}>
-					<CommandInput
+					<button
+						type="button"
+						onClick={handleClear}
+						disabled={disabled}
+						className="text-xs text-muted-foreground hover:text-foreground"
+					>
+						Change
+					</button>
+				</div>
+			) : (
+				<>
+					<Input
 						placeholder="Search or paste GitHub URL..."
 						value={search}
-						onValueChange={setSearch}
+						onChange={(e) => setSearch(e.target.value)}
+						disabled={disabled}
 					/>
-					<CommandList>
+					<div className="max-h-48 overflow-y-auto rounded-md border">
 						{isLoading ? (
-							<div className="py-6 text-center text-sm text-muted-foreground">
+							<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+								<Loader2 className="size-4 animate-spin" />
 								Loading repositories...
 							</div>
 						) : (
 							<>
 								{publicRepoFromSearch && (
-									<CommandGroup heading="Public Repository">
-										<CommandItem
-											onSelect={() => handleSelectPublic(publicRepoFromSearch)}
-											className="cursor-pointer"
+									<div className="border-b p-1">
+										<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+											Public Repository
+										</p>
+										<button
+											type="button"
+											onClick={() => handleSelectPublic(publicRepoFromSearch)}
+											className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 										>
-											<Globe className="mr-2 size-4" />
+											<Globe className="size-4" />
 											<span>{publicRepoFromSearch}</span>
-										</CommandItem>
-									</CommandGroup>
-								)}
-
-								{publicRepoFromSearch && filteredRepos.length > 0 && (
-									<CommandSeparator />
+										</button>
+									</div>
 								)}
 
 								{hasInstallations && filteredRepos.length > 0 && (
-									<CommandGroup heading="Connected Repositories">
+									<div className="p-1">
+										<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+											Connected Repositories
+										</p>
 										{filteredRepos.map((repo) => (
-											<CommandItem
+											<button
+												type="button"
 												key={repo.id}
-												value={repo.fullName}
-												onSelect={() => handleSelect(repo)}
-												className="cursor-pointer"
+												onClick={() => handleSelect(repo)}
+												className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 											>
 												{repo.private ? (
-													<Lock className="mr-2 size-4" />
+													<Lock className="size-4" />
 												) : (
-													<Globe className="mr-2 size-4" />
+													<Globe className="size-4" />
 												)}
-												<span className="flex-1 truncate">{repo.fullName}</span>
-												{value?.fullName === repo.fullName && (
-													<Check className="ml-2 size-4" />
-												)}
-											</CommandItem>
+												<span className="flex-1 truncate text-left">
+													{repo.fullName}
+												</span>
+											</button>
 										))}
-									</CommandGroup>
+									</div>
 								)}
 
 								{!hasInstallations && !publicRepoFromSearch && (
-									<CommandEmpty>
-										<div className="space-y-2 p-2">
-											<p>No GitHub App installed.</p>
-											<p className="text-muted-foreground">
-												Paste a public repo URL or install the GitHub App for
-												private repos.
-											</p>
-										</div>
-									</CommandEmpty>
+									<div className="space-y-1 p-4 text-center text-sm">
+										<p>No GitHub App installed.</p>
+										<p className="text-muted-foreground">
+											Paste a public repo URL or install the GitHub App for
+											private repos.
+										</p>
+									</div>
 								)}
 
 								{hasInstallations &&
 									filteredRepos.length === 0 &&
 									!publicRepoFromSearch && (
-										<CommandEmpty>
-											<div className="space-y-2 p-2">
-												<p>No matching repositories.</p>
-												<p className="text-muted-foreground">
-													Paste a public GitHub URL to use any public repo.
-												</p>
-											</div>
-										</CommandEmpty>
+										<div className="space-y-1 p-4 text-center text-sm">
+											<p>No matching repositories.</p>
+											<p className="text-muted-foreground">
+												Paste a public GitHub URL to use any public repo.
+											</p>
+										</div>
 									)}
 							</>
 						)}
-					</CommandList>
-				</Command>
-			</PopoverContent>
-		</Popover>
+					</div>
+				</>
+			)}
+		</div>
 	);
 }

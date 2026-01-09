@@ -3,6 +3,12 @@
 import { useState, useMemo, useEffect, memo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Server, Lock, Zap } from "lucide-react";
@@ -191,9 +197,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 							<Spinner />
 						</div>
 					) : !servers || servers.length === 0 ? (
-						<p className="text-sm text-muted-foreground">
-							No online servers available
-						</p>
+						<Empty className="py-6">
+							<EmptyMedia variant="icon">
+								<Server />
+							</EmptyMedia>
+							<EmptyTitle>No online servers available</EmptyTitle>
+							<EmptyDescription>
+								Add a server to deploy this service.
+							</EmptyDescription>
+						</Empty>
 					) : (
 						<>
 							<p className="text-sm text-muted-foreground">
@@ -327,9 +339,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 						<Spinner />
 					</div>
 				) : !servers || servers.length === 0 ? (
-					<p className="text-sm text-muted-foreground">
-						No online servers available
-					</p>
+					<Empty className="py-6">
+						<EmptyMedia variant="icon">
+							<Server />
+						</EmptyMedia>
+						<EmptyTitle>No online servers available</EmptyTitle>
+						<EmptyDescription>
+							Add a server to deploy this service.
+						</EmptyDescription>
+					</Empty>
 				) : (
 					<>
 						<div className="grid grid-cols-1 md:grid-cols-2 gap-3">

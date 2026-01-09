@@ -6,6 +6,13 @@ import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { CreateServerDialog } from "@/components/create-server-dialog";
 import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
+import {
 	Item,
 	ItemContent,
 	ItemDescription,
@@ -45,12 +52,18 @@ export function ServerList({
 			</div>
 
 			{!servers || servers.length === 0 ? (
-				<div className="py-10 text-center border rounded-lg">
-					<p className="text-muted-foreground mb-4">
-						No servers yet. Add your first server to get started.
-					</p>
-					<CreateServerDialog />
-				</div>
+				<Empty className="border py-10">
+					<EmptyMedia variant="icon">
+						<ServerIcon />
+					</EmptyMedia>
+					<EmptyTitle>No servers yet</EmptyTitle>
+					<EmptyDescription>
+						Add your first server to get started.
+					</EmptyDescription>
+					<EmptyContent>
+						<CreateServerDialog />
+					</EmptyContent>
+				</Empty>
 			) : (
 				<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 					{servers.map((server) => (

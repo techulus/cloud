@@ -16,13 +16,20 @@ import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
+import { Button, buttonVariants } from "./ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Button, buttonVariants } from "./ui/button";
+import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "./ui/empty";
 
 function ServiceCardSkeleton() {
 	return (
@@ -276,21 +283,20 @@ export function ServiceCanvas({
 					selectedEnvName={envName}
 					projectSlug={projectSlug}
 				/>
-				<div className="text-center space-y-4">
-					<div className="w-16 h-16 mx-auto rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
-						<Box className="h-8 w-8 text-zinc-400" />
-					</div>
-					<div>
-						<p className="text-muted-foreground mb-4">
-							No services yet. Add your first service to deploy.
-						</p>
+				<Empty>
+					<EmptyMedia variant="icon">
+						<Box className="size-5" />
+					</EmptyMedia>
+					<EmptyTitle>No services yet</EmptyTitle>
+					<EmptyDescription>Add your first service to deploy.</EmptyDescription>
+					<EmptyContent>
 						<CreateServiceDialog
 							projectId={projectId}
 							environmentId={envId}
 							onSuccess={() => mutate()}
 						/>
-					</div>
-				</div>
+					</EmptyContent>
+				</Empty>
 			</div>
 		);
 	}

@@ -27,7 +27,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [x] Deploy Logs
 - [x] GitHub deployments
 - [x] HTTP Logs
-- [ ] Rolling updates
+- [x] Rolling updates
 - [ ] Volume backups
 - [ ] TCP / L4 proxying
 - [ ] Smart multi-arch builds (detect fleet architectures instead of always building amd64+arm64)

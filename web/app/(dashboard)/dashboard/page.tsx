@@ -4,6 +4,13 @@ import { listProjects, listServers } from "@/db/queries";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { ServerList } from "@/components/server/server-list";
 import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
+import {
 	Item,
 	ItemContent,
 	ItemDescription,
@@ -32,12 +39,18 @@ export default async function DashboardPage() {
 				</div>
 
 				{projects.length === 0 ? (
-					<div className="py-10 text-center border rounded-lg">
-						<p className="text-muted-foreground mb-4">
-							No projects yet. Create your first project to deploy services.
-						</p>
-						<CreateProjectDialog />
-					</div>
+					<Empty className="border py-10">
+						<EmptyMedia variant="icon">
+							<Box />
+						</EmptyMedia>
+						<EmptyTitle>No projects yet</EmptyTitle>
+						<EmptyDescription>
+							Create your first project to deploy services.
+						</EmptyDescription>
+						<EmptyContent>
+							<CreateProjectDialog />
+						</EmptyContent>
+					</Empty>
 				) : (
 					<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 						{projects.map((project) => (

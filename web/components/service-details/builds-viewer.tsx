@@ -7,6 +7,7 @@ import {
 	Clock,
 	GitBranch,
 	GitCommit,
+	Hammer,
 	Loader2,
 	Play,
 	RotateCcw,
@@ -18,6 +19,12 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild, triggerBuild } from "@/actions/builds";
 import { Button } from "@/components/ui/button";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
 import {
 	Item,
 	ItemActions,
@@ -226,9 +233,15 @@ export function BuildsViewer({
 			</div>
 
 			{builds.length === 0 ? (
-				<div className="py-12 text-center text-muted-foreground border rounded-lg">
-					No builds yet. Push to your repository to trigger a build.
-				</div>
+				<Empty className="border py-10">
+					<EmptyMedia variant="icon">
+						<Hammer />
+					</EmptyMedia>
+					<EmptyTitle>No builds yet</EmptyTitle>
+					<EmptyDescription>
+						Push to your repository to trigger a build.
+					</EmptyDescription>
+				</Empty>
 			) : (
 				<ItemGroup>
 					{builds.map((build) => (
