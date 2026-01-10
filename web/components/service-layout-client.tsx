@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import useSWR from "swr";
+import type { ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import {
 	buildCurrentConfig,
@@ -12,8 +13,6 @@ import {
 } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
 import { DeploymentStatusBar } from "./service-details/deployment-status-bar";
-import type { ServiceWithDetails as Service } from "@/db/types";
-import { createContext, useContext } from "react";
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -116,16 +115,16 @@ export function ServiceLayoutClient({
 
 	return (
 		<>
-			<nav className="flex gap-1 border-b overflow-x-auto overflow-y-hidden scrollbar-none px-4 pt-1.5">
+			<nav className="flex gap-1 border-b overflow-x-auto overflow-y-hidden scrollbar-none px-4 py-1.5">
 				{tabs.map((tab) => (
 					<Link
 						key={tab.href}
 						href={tab.href}
 						className={cn(
-							"px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0",
+							"px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap shrink-0",
 							isActiveTab(tab.href)
-								? "border-primary text-foreground"
-								: "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50",
+								? "bg-accent text-foreground"
+								: "text-muted-foreground hover:text-foreground hover:bg-accent/50",
 						)}
 					>
 						{tab.name}

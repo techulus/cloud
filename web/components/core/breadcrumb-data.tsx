@@ -1,9 +1,10 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
 	createContext,
 	useContext,
-	useEffect,
+	useLayoutEffect,
 	useCallback,
 	useState,
 	type ReactNode,
@@ -13,23 +14,31 @@ export type Breadcrumb = { label: string; href: string };
 
 type BreadcrumbContextType = {
 	breadcrumbs: Breadcrumb[];
-	setBreadcrumbs: (breadcrumbs: Breadcrumb[]) => void;
+	pathname: string;
+	setBreadcrumbs: (breadcrumbs: Breadcrumb[], pathname: string) => void;
 };
 
 const BreadcrumbDataContext = createContext<BreadcrumbContextType>({
 	breadcrumbs: [],
+	pathname: "",
 	setBreadcrumbs: () => {},
 });
 
 export function BreadcrumbDataProvider({ children }: { children: ReactNode }) {
-	const [breadcrumbs, setBreadcrumbsState] = useState<Breadcrumb[]>([]);
+	const pathname = usePathname();
+	const [state, setState] = useState<{ breadcrumbs: Breadcrumb[]; pathname: string }>({
+		breadcrumbs: [],
+		pathname: "",
+	});
 
-	const setBreadcrumbs = useCallback((newBreadcrumbs: Breadcrumb[]) => {
-		setBreadcrumbsState(newBreadcrumbs);
+	const breadcrumbs = state.pathname === pathname ? state.breadcrumbs : [];
+
+	const setBreadcrumbs = useCallback((newBreadcrumbs: Breadcrumb[], forPathname: string) => {
+		setState({ breadcrumbs: newBreadcrumbs, pathname: forPathname });
 	}, []);
 
 	return (
-		<BreadcrumbDataContext.Provider value={{ breadcrumbs, setBreadcrumbs }}>
+		<BreadcrumbDataContext.Provider value={{ breadcrumbs, pathname, setBreadcrumbs }}>
 			{children}
 		</BreadcrumbDataContext.Provider>
 	);
@@ -40,12 +49,11 @@ export function useBreadcrumbs() {
 }
 
 export function SetBreadcrumbs({ items }: { items: Breadcrumb[] }) {
-	const { setBreadcrumbs } = useContext(BreadcrumbDataContext);
+	const { setBreadcrumbs, pathname } = useContext(BreadcrumbDataContext);
 
-	useEffect(() => {
-		setBreadcrumbs(items);
-		return () => setBreadcrumbs([]);
-	}, [items, setBreadcrumbs]);
+	useLayoutEffect(() => {
+		setBreadcrumbs(items, pathname);
+	}, [items, setBreadcrumbs, pathname]);
 
 	return null;
 }

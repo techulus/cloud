@@ -63,7 +63,7 @@ export async function retryBuild(buildId: string) {
 	return { success: true, buildId: newBuildId };
 }
 
-export async function triggerBuild(serviceId: string) {
+export async function triggerBuild(serviceId: string, trigger: "manual" | "scheduled" = "manual") {
 	const [service] = await db
 		.select()
 		.from(services)
@@ -102,12 +102,14 @@ export async function triggerBuild(serviceId: string) {
 			throw new Error("A build is already pending");
 		}
 
+		const triggerMessage = trigger === "scheduled" ? "Scheduled build trigger" : "Manual build trigger";
+
 		await db.insert(builds).values({
 			id: newBuildId,
 			githubRepoId: githubRepo.id,
 			serviceId,
 			commitSha: latestBuild?.commitSha || "HEAD",
-			commitMessage: latestBuild?.commitMessage || "Manual build trigger",
+			commitMessage: latestBuild?.commitMessage || triggerMessage,
 			branch: latestBuild?.branch || githubRepo.deployBranch || "main",
 			author: latestBuild?.author,
 			status: "pending",
@@ -133,11 +135,13 @@ export async function triggerBuild(serviceId: string) {
 		throw new Error("A build is already pending");
 	}
 
+	const triggerMessage = trigger === "scheduled" ? "Scheduled build trigger" : "Manual build trigger";
+
 	await db.insert(builds).values({
 		id: newBuildId,
 		serviceId,
 		commitSha: "HEAD",
-		commitMessage: "Manual build trigger",
+		commitMessage: triggerMessage,
 		branch: service.githubBranch || "main",
 		status: "pending",
 	});
