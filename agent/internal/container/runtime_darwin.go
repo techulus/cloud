@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"techulus/cloud-agent/internal/dns"
 	"techulus/cloud-agent/internal/retry"
 )
 
@@ -121,6 +122,10 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 			portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
 			args = append(args, "-p", portMapping)
 		}
+	}
+
+	if dnsIP := dns.GetContainerDNS(); dnsIP != "" {
+		args = append(args, "--dns", dnsIP)
 	}
 
 	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {

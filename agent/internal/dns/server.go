@@ -26,7 +26,7 @@ type Server struct {
 func NewServer(port int) *Server {
 	return &Server{
 		store:       NewRecordStore(),
-		listenAddr:  "127.0.0.1",
+		listenAddr:  "0.0.0.0",
 		port:        port,
 		startedChan: make(chan struct{}),
 	}

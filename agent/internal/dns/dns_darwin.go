@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	resolverPath = paths.ResolverDir + "/internal"
-	globalServer *Server
+	resolverPath   = paths.ResolverDir + "/internal"
+	globalServer   *Server
+	containerDNSIP string
 )
 
 type DnsRecord struct {
@@ -24,10 +25,12 @@ type DnsRecord struct {
 	Ips  []string
 }
 
-func SetupLocalDNS(wireguardIP string) error {
+func SetupLocalDNS(subnetID int) error {
 	if err := ConfigureClientDNS(); err != nil {
 		return fmt.Errorf("failed to configure local DNS: %w", err)
 	}
+
+	containerDNSIP = fmt.Sprintf("10.200.%d.1", subnetID)
 
 	globalServer = NewServer(DNSPort)
 	if err := globalServer.Start(context.Background()); err != nil {
@@ -35,6 +38,10 @@ func SetupLocalDNS(wireguardIP string) error {
 	}
 
 	return nil
+}
+
+func GetContainerDNS() string {
+	return containerDNSIP
 }
 
 func ConfigureClientDNS() error {

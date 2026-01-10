@@ -1016,7 +1016,7 @@ func main() {
 
 		log.Printf("Loaded config: serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 
-		if err := dns.SetupLocalDNS(config.WireGuardIP); err != nil {
+		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		}
 
@@ -1091,7 +1091,7 @@ func main() {
 		log.Println("WireGuard interface is up!")
 
 		log.Println("Setting up local DNS...")
-		if err := dns.SetupLocalDNS(config.WireGuardIP); err != nil {
+		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		} else {
 			log.Println("Local DNS configured successfully")
