@@ -23,7 +23,7 @@ export function FloatingBar({
 					: "-bottom-16 opacity-0 pointer-events-none",
 			)}
 		>
-			<div className="flex items-center justify-between gap-3 px-5 py-3 rounded-full bg-black text-white shadow-xl border border-white/10 dark:border-white/20">
+			<div className="flex items-center justify-between gap-3 px-5 py-3 rounded-full bg-black text-white shadow-xl border border-white/10">
 				{loading && <Spinner className="shrink-0" />}
 				<span className="text-sm font-medium">{status}</span>
 				{action}
