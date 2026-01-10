@@ -1,25 +1,25 @@
 "use client";
 
 import {
-	Globe,
+	ArrowDown,
 	Box,
+	Globe,
+	HardDrive,
 	HeartPulse,
 	Lock,
-	ArrowDown,
-	HardDrive,
 } from "lucide-react";
 import {
 	CanvasWrapper,
-	getStatusColor,
 	getHealthColor,
+	getStatusColor,
 } from "@/components/ui/canvas-wrapper";
 import { Spinner } from "@/components/ui/spinner";
 import type {
 	Deployment as BaseDeployment,
 	DeploymentPort,
 	Server as ServerType,
-	ServiceVolume,
 	ServiceWithDetails as Service,
+	ServiceVolume,
 } from "@/db/types";
 
 type Deployment = BaseDeployment & {

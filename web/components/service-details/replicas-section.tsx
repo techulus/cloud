@@ -51,7 +51,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
-	const [autoPlace, setAutoPlace] = useState(service.autoPlace ?? false);
+	const [autoPlace, setAutoPlace] = useState(service.autoPlace ?? true);
 	const [totalReplicaCount, setTotalReplicaCount] = useState(
 		service.replicas ?? 1,
 	);
@@ -90,7 +90,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	]);
 
 	const hasChanges = useMemo(() => {
-		if (autoPlace !== (service.autoPlace ?? false)) return true;
+		if (autoPlace !== (service.autoPlace ?? true)) return true;
 		if (autoPlace && totalReplicaCount !== (service.replicas ?? 1)) return true;
 
 		if (service.stateful) {
@@ -134,7 +134,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	const handleSave = async () => {
 		setIsSaving(true);
 		try {
-			if (autoPlace !== (service.autoPlace ?? false)) {
+			if (autoPlace !== (service.autoPlace ?? true)) {
 				await updateServiceAutoPlace(service.id, autoPlace);
 			}
 			if (autoPlace) {

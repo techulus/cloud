@@ -182,7 +182,7 @@ export const services = pgTable("services", {
 	githubRootDir: text("github_root_dir"),
 	replicas: integer("replicas").notNull().default(1),
 	stateful: boolean("stateful").notNull().default(false),
-	autoPlace: boolean("auto_place").notNull().default(false),
+	autoPlace: boolean("auto_place").notNull().default(true),
 	lockedServerId: text("locked_server_id").references(() => servers.id, {
 		onDelete: "set null",
 	}),

@@ -154,7 +154,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 						Select which servers can run builds. If none are selected, all
 						online servers can run builds.
 					</p>
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+					<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 						{servers.map((server) => (
 							<button
 								type="button"
@@ -216,7 +216,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 						Select servers to exclude from workload placement. These servers
 						will not receive any new deployments.
 					</p>
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+					<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 						{servers.map((server) => (
 							<button
 								type="button"

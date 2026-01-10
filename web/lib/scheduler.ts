@@ -139,18 +139,10 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 		.from(services)
 		.where(isNotNull(services.deploymentSchedule));
 
-	console.log(
-		`[scheduler] found ${scheduledServices.length} services with schedules`,
-	);
-
 	if (scheduledServices.length === 0) return;
 
 	for (const service of scheduledServices) {
 		if (!service.schedule) continue;
-
-		console.log(
-			`[scheduler] evaluating ${service.name}: schedule="${service.schedule}", lastRun=${service.lastScheduledDeploymentRunAt?.toISOString() ?? "never"}`,
-		);
 
 		try {
 			const cron = new Cron(service.schedule);
@@ -160,15 +152,9 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 				const nextScheduledRun = cron.nextRun(
 					service.lastScheduledDeploymentRunAt,
 				);
-				console.log(
-					`[scheduler] ${service.name}: nextScheduledRun=${nextScheduledRun?.toISOString() ?? "null"}, now=${now.toISOString()}`,
-				);
 				if (!nextScheduledRun || nextScheduledRun > now) {
-					console.log(`[scheduler] ${service.name}: not due yet, skipping`);
 					continue;
 				}
-			} else {
-				console.log(`[scheduler] ${service.name}: first run, will trigger`);
 			}
 
 			const [inProgressRollout] = await db

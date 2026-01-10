@@ -172,7 +172,10 @@ export async function POST(
 			.from(serviceReplicas)
 			.where(eq(serviceReplicas.serviceId, build.serviceId));
 
-		if (replicas.length > 0) {
+		const shouldDeploy =
+			replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+
+		if (shouldDeploy) {
 			console.log(
 				`[build:complete] triggering deployment for service ${build.serviceId}`,
 			);
