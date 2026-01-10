@@ -26,7 +26,7 @@ export function isLoggingEnabled(): boolean {
 export async function queryLogsByService(
 	serviceId: string,
 	limit: number,
-	after?: string,
+	before?: string,
 	logType?: LogType,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
 	if (!VICTORIA_LOGS_URL) {
@@ -39,8 +39,8 @@ export async function queryLogsByService(
 	} else if (logType === "container") {
 		query += ` -log_type:http`;
 	}
-	if (after) {
-		query += ` _time:>${after}`;
+	if (before) {
+		query += ` _time:<${before}`;
 	}
 
 	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
@@ -68,15 +68,15 @@ export async function queryLogsByService(
 export async function queryLogsByDeployment(
 	deploymentId: string,
 	limit: number,
-	after?: string,
+	before?: string,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
 	if (!VICTORIA_LOGS_URL) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
 	let query = `deployment_id:${deploymentId}`;
-	if (after) {
-		query += ` _time:>${after}`;
+	if (before) {
+		query += ` _time:<${before}`;
 	}
 
 	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
@@ -121,15 +121,15 @@ export type AgentLog = {
 export async function queryLogsByServer(
 	serverId: string,
 	limit: number = 500,
-	after?: string,
+	before?: string,
 ): Promise<{ logs: AgentLog[]; hasMore: boolean }> {
 	if (!VICTORIA_LOGS_URL) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
 	let query = `server_id:${serverId} log_type:agent`;
-	if (after) {
-		query += ` _time:>${after}`;
+	if (before) {
+		query += ` _time:<${before}`;
 	}
 	query += " | sort by (_time desc)";
 

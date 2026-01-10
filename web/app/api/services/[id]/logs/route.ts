@@ -28,7 +28,7 @@ export async function GET(
 		Number.parseInt(url.searchParams.get("limit") || "100", 10),
 		1000,
 	);
-	const after = url.searchParams.get("after") || undefined;
+	const before = url.searchParams.get("before") || undefined;
 	const logTypeParam = url.searchParams.get("type");
 	const logType =
 		logTypeParam === "container" || logTypeParam === "http"
@@ -36,7 +36,7 @@ export async function GET(
 			: undefined;
 
 	try {
-		const result = await queryLogsByService(serviceId, limit, after, logType);
+		const result = await queryLogsByService(serviceId, limit, before, logType);
 
 		const logs = result.logs.map((log) => ({
 			id: `${log.deployment_id || log.service_id}-${log._time}`,

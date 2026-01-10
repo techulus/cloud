@@ -386,7 +386,7 @@ export async function createService(input: CreateServiceInput) {
 		githubRepoUrl,
 		githubBranch,
 		githubRootDir,
-		replicas: 0,
+		replicas: 1,
 		stateful,
 	});
 

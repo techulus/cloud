@@ -550,9 +550,56 @@ export function LogViewer(props: LogViewerProps) {
 		new Set(["2xx", "3xx", "4xx", "5xx"]),
 	);
 
-	const { data, mutate, isLoading } = useLogData(props);
-	const logs = (data?.logs || []) as unknown[];
-	const hasMore = data?.hasMore || false;
+	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
+	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+	const [olderHasMore, setOlderHasMore] = useState(true);
+
+	const { data, isLoading } = useLogData(props);
+	const recentLogs = (data?.logs || []) as unknown[];
+	const logs = useMemo(() => [...olderLogs, ...recentLogs], [olderLogs, recentLogs]);
+	const hasMore = olderLogs.length === 0 ? (data?.hasMore || false) : olderHasMore;
+
+	const loadOlderLogs = async () => {
+		if (isLoadingOlder || !hasMore) return;
+
+		const oldestLog = logs[0] as { timestamp?: string } | undefined;
+		if (!oldestLog?.timestamp) return;
+
+		setIsLoadingOlder(true);
+		try {
+			const cursor = oldestLog.timestamp;
+			let endpoint: string;
+			const beforeParam = `&before=${encodeURIComponent(cursor)}`;
+
+			switch (props.variant) {
+				case "service-logs":
+					endpoint = `/api/services/${props.serviceId}/logs?limit=500&type=container${beforeParam}`;
+					break;
+				case "requests":
+					endpoint = `/api/services/${props.serviceId}/requests?limit=500${beforeParam}`;
+					break;
+				case "server-logs":
+					endpoint = `/api/servers/${props.serverId}/logs?limit=500${beforeParam}`;
+					break;
+				default:
+					return;
+			}
+
+			const response = await fetch(endpoint);
+			const result = await response.json();
+
+			if (result.logs && result.logs.length > 0) {
+				setOlderLogs((prev) => [...result.logs, ...prev]);
+				setOlderHasMore(result.hasMore || false);
+			} else {
+				setOlderHasMore(false);
+			}
+		} catch (error) {
+			console.error("Failed to load older logs:", error);
+		} finally {
+			setIsLoadingOlder(false);
+		}
+	};
 
 	const filteredLogs = useMemo(() => {
 		return logs.filter((log) => {
@@ -725,11 +772,16 @@ export function LogViewer(props: LogViewerProps) {
 						<Button
 							variant="ghost"
 							size="sm"
-							onClick={() => mutate()}
+							onClick={loadOlderLogs}
+							disabled={isLoadingOlder}
 							className="gap-1 text-muted-foreground"
 						>
-							<ChevronUp className="size-3" />
-							{config.loadMoreLabel}
+							{isLoadingOlder ? (
+								<Spinner className="size-3" />
+							) : (
+								<ChevronUp className="size-3" />
+							)}
+							{isLoadingOlder ? "Loading..." : config.loadMoreLabel}
 						</Button>
 					</div>
 				)}

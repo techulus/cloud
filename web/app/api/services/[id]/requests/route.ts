@@ -24,10 +24,10 @@ export async function GET(
 		Number.parseInt(url.searchParams.get("limit") || "100", 10),
 		1000,
 	);
-	const after = url.searchParams.get("after") || undefined;
+	const before = url.searchParams.get("before") || undefined;
 
 	try {
-		const result = await queryLogsByService(serviceId, limit, after, "http");
+		const result = await queryLogsByService(serviceId, limit, before, "http");
 
 		const logs = result.logs.map((log) => ({
 			id: `${log.service_id}-${log._time}`,
