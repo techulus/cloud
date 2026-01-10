@@ -27,7 +27,12 @@ export async function GET(
 	const before = url.searchParams.get("before") || undefined;
 
 	try {
-		const result = await queryLogsByService(serviceId, limit, before, "http");
+		const result = await queryLogsByService({
+			serviceId,
+			limit,
+			before,
+			logType: "http",
+		});
 
 		const logs = result.logs.map((log) => ({
 			id: `${log.service_id}-${log._time}`,

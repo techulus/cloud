@@ -23,12 +23,19 @@ export function isLoggingEnabled(): boolean {
 	return !!VICTORIA_LOGS_URL;
 }
 
+type QueryLogsByServiceOptions = {
+	serviceId: string;
+	limit: number;
+	before?: string;
+	logType?: LogType;
+	serverId?: string;
+};
+
 export async function queryLogsByService(
-	serviceId: string,
-	limit: number,
-	before?: string,
-	logType?: LogType,
+	options: QueryLogsByServiceOptions,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
+	const { serviceId, limit, before, logType, serverId } = options;
+
 	if (!VICTORIA_LOGS_URL) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
@@ -38,6 +45,9 @@ export async function queryLogsByService(
 		query += ` log_type:http`;
 	} else if (logType === "container") {
 		query += ` -log_type:http`;
+	}
+	if (serverId) {
+		query += ` server_id:${serverId}`;
 	}
 	if (before) {
 		query += ` _time:<${before}`;

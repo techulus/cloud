@@ -38,6 +38,8 @@ const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	}));
 };
 
+const SERVERS_URL = "/api/servers?forPlacement=true";
+
 export const ReplicasSection = memo(function ReplicasSection({
 	service,
 	onUpdate,
@@ -45,7 +47,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	service: Service;
 	onUpdate: () => void;
 }) {
-	const { data: servers, isLoading } = useSWR("/api/servers", fetcher);
+	const { data: servers, isLoading } = useSWR(SERVERS_URL, fetcher);
 	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>(
 		{},
 	);

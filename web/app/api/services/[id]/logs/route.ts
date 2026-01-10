@@ -29,6 +29,7 @@ export async function GET(
 		1000,
 	);
 	const before = url.searchParams.get("before") || undefined;
+	const serverId = url.searchParams.get("serverId") || undefined;
 	const logTypeParam = url.searchParams.get("type");
 	const logType =
 		logTypeParam === "container" || logTypeParam === "http"
@@ -36,7 +37,13 @@ export async function GET(
 			: undefined;
 
 	try {
-		const result = await queryLogsByService(serviceId, limit, before, logType);
+		const result = await queryLogsByService({
+			serviceId,
+			limit,
+			before,
+			logType,
+			serverId,
+		});
 
 		const logs = result.logs.map((log) => ({
 			id: `${log.deployment_id || log.service_id}-${log._time}`,

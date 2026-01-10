@@ -58,8 +58,10 @@ interface ServerLogEntry extends BaseEntry {
 	level: string;
 }
 
+type Server = { id: string; name: string };
+
 type LogViewerProps =
-	| { variant: "service-logs"; serviceId: string }
+	| { variant: "service-logs"; serviceId: string; servers?: Server[] }
 	| { variant: "requests"; serviceId: string }
 	| { variant: "build-logs"; buildId: string; isLive: boolean }
 	| { variant: "server-logs"; serverId: string };
@@ -118,11 +120,12 @@ function highlightMatches(text: string, search: string): React.ReactNode {
 	);
 }
 
-function useLogData(props: LogViewerProps) {
+function useLogData(props: LogViewerProps, filterServerId?: string) {
 	const endpoint = useMemo(() => {
+		const serverParam = filterServerId ? `&serverId=${filterServerId}` : "";
 		switch (props.variant) {
 			case "service-logs":
-				return `/api/services/${props.serviceId}/logs?limit=500&type=container`;
+				return `/api/services/${props.serviceId}/logs?limit=500&type=container${serverParam}`;
 			case "requests":
 				return `/api/services/${props.serviceId}/requests?limit=500`;
 			case "build-logs":
@@ -130,7 +133,7 @@ function useLogData(props: LogViewerProps) {
 			case "server-logs":
 				return `/api/servers/${props.serverId}/logs?limit=500`;
 		}
-	}, [props]);
+	}, [props, filterServerId]);
 
 	const pollingInterval = useMemo(() => {
 		if (props.variant === "build-logs") {
@@ -395,6 +398,49 @@ function RequestsFilters({
 	);
 }
 
+function ServerFilter({
+	servers,
+	selectedServerId,
+	onServerChange,
+}: {
+	servers: Server[];
+	selectedServerId: string | null;
+	onServerChange: (serverId: string | null) => void;
+}) {
+	const selectedServer = servers.find((s) => s.id === selectedServerId);
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 h-7 px-2.5 text-[0.8rem] font-medium rounded-[min(var(--radius-md),12px)] border border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50">
+				{selectedServer ? selectedServer.name : "All servers"}
+				<ChevronDown className="size-3" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start">
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>Filter by Server</DropdownMenuLabel>
+					<DropdownMenuSeparator />
+					<DropdownMenuCheckboxItem
+						checked={selectedServerId === null}
+						onCheckedChange={() => onServerChange(null)}
+					>
+						All servers
+					</DropdownMenuCheckboxItem>
+					<DropdownMenuSeparator />
+					{servers.map((server) => (
+						<DropdownMenuCheckboxItem
+							key={server.id}
+							checked={selectedServerId === server.id}
+							onCheckedChange={() => onServerChange(server.id)}
+						>
+							{server.name}
+						</DropdownMenuCheckboxItem>
+					))}
+				</DropdownMenuGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
 function ServiceLogRow({
 	entry,
 	search,
@@ -538,6 +584,7 @@ export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [search, setSearch] = useState("");
 	const [autoScroll, setAutoScroll] = useState(true);
+	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 
 	const [levels, setLevels] = useState<Set<LogLevel>>(() =>
 		props.variant === "server-logs"
@@ -554,10 +601,21 @@ export function LogViewer(props: LogViewerProps) {
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 	const [olderHasMore, setOlderHasMore] = useState(true);
 
-	const { data, isLoading } = useLogData(props);
+	const servers = props.variant === "service-logs" ? props.servers : undefined;
+
+	const { data, isLoading } = useLogData(props, selectedServerId ?? undefined);
 	const recentLogs = (data?.logs || []) as unknown[];
-	const logs = useMemo(() => [...olderLogs, ...recentLogs], [olderLogs, recentLogs]);
-	const hasMore = olderLogs.length === 0 ? (data?.hasMore || false) : olderHasMore;
+	const logs = useMemo(
+		() => [...olderLogs, ...recentLogs],
+		[olderLogs, recentLogs],
+	);
+	const hasMore =
+		olderLogs.length === 0 ? data?.hasMore || false : olderHasMore;
+
+	useEffect(() => {
+		setOlderLogs([]);
+		setOlderHasMore(true);
+	}, [selectedServerId]);
 
 	const loadOlderLogs = async () => {
 		if (isLoadingOlder || !hasMore) return;
@@ -570,10 +628,13 @@ export function LogViewer(props: LogViewerProps) {
 			const cursor = oldestLog.timestamp;
 			let endpoint: string;
 			const beforeParam = `&before=${encodeURIComponent(cursor)}`;
+			const serverParam = selectedServerId
+				? `&serverId=${selectedServerId}`
+				: "";
 
 			switch (props.variant) {
 				case "service-logs":
-					endpoint = `/api/services/${props.serviceId}/logs?limit=500&type=container${beforeParam}`;
+					endpoint = `/api/services/${props.serviceId}/logs?limit=500&type=container${beforeParam}${serverParam}`;
 					break;
 				case "requests":
 					endpoint = `/api/services/${props.serviceId}/requests?limit=500${beforeParam}`;
@@ -749,6 +810,14 @@ export function LogViewer(props: LogViewerProps) {
 
 				{props.variant === "server-logs" && (
 					<ServerLogFilters levels={levels} onLevelsChange={setLevels} />
+				)}
+
+				{servers && servers.length > 1 && (
+					<ServerFilter
+						servers={servers}
+						selectedServerId={selectedServerId}
+						onServerChange={setSelectedServerId}
+					/>
 				)}
 
 				<div className="flex items-center gap-2 ml-auto">
