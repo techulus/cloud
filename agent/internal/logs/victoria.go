@@ -12,12 +12,14 @@ import (
 
 type VictoriaLogsSender struct {
 	endpoint string
+	serverID string
 	client   *http.Client
 }
 
-func NewVictoriaLogsSender(endpoint string) *VictoriaLogsSender {
+func NewVictoriaLogsSender(endpoint, serverID string) *VictoriaLogsSender {
 	return &VictoriaLogsSender{
 		endpoint: endpoint,
+		serverID: serverID,
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -29,6 +31,7 @@ type victoriaLogEntry struct {
 	Time         string `json:"_time"`
 	DeploymentID string `json:"deployment_id"`
 	ServiceID    string `json:"service_id"`
+	ServerID     string `json:"server_id"`
 	Stream       string `json:"stream"`
 	LogType      string `json:"log_type"`
 }
@@ -44,6 +47,7 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 			Time:         l.Timestamp,
 			DeploymentID: l.DeploymentID,
 			ServiceID:    l.ServiceID,
+			ServerID:     v.serverID,
 			Stream:       l.Stream,
 			LogType:      "container",
 		}
@@ -88,6 +92,7 @@ type victoriaHTTPLogEntry struct {
 	Msg       string  `json:"_msg"`
 	Time      string  `json:"_time"`
 	ServiceID string  `json:"service_id"`
+	ServerID  string  `json:"server_id"`
 	Host      string  `json:"host"`
 	Method    string  `json:"method"`
 	Path      string  `json:"path"`
@@ -106,6 +111,7 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 			Msg:       msg,
 			Time:      l.Timestamp,
 			ServiceID: l.ServiceId,
+			ServerID:  v.serverID,
 			Host:      l.Host,
 			Method:    l.Method,
 			Path:      l.Path,

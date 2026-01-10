@@ -1114,7 +1114,7 @@ func main() {
 	var agentLogWriter *logs.AgentLogWriter
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
-		logsSender = logs.NewVictoriaLogsSender(logsEndpoint)
+		logsSender = logs.NewVictoriaLogsSender(logsEndpoint, config.ServerID)
 		logCollector = logs.NewCollector(logsSender, dataDir)
 		if isProxy {
 			caddyLogCollector = logs.NewCaddyCollector(logsSender)
