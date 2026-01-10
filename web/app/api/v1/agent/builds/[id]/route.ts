@@ -10,7 +10,7 @@ import {
 	projects,
 	secrets,
 } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNotNull, notInArray } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { getInstallationToken, buildCloneUrl } from "@/lib/github";
 import { getSetting } from "@/db/queries";
@@ -152,20 +152,50 @@ export async function GET(
 		secretsMap[secret.key] = secret.encryptedValue;
 	}
 
-	const replicas = await db
-		.select({ meta: servers.meta })
-		.from(serviceReplicas)
-		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-		.where(eq(serviceReplicas.serviceId, service.id));
+	let targetPlatforms: string[] = [];
 
-	const targetPlatforms = [
-		...new Set(
-			replicas
-				.map((r) => r.meta?.arch)
-				.filter((arch): arch is string => !!arch)
-				.map((arch) => `linux/${arch}`),
-		),
-	];
+	if (service.autoPlace) {
+		const excludedFromWorkload = await getSetting<string[]>(
+			SETTING_KEYS.SERVERS_EXCLUDED_FROM_WORKLOAD_PLACEMENT,
+		);
+
+		const eligibleServers = await db
+			.select({ meta: servers.meta })
+			.from(servers)
+			.where(
+				excludedFromWorkload && excludedFromWorkload.length > 0
+					? and(
+							eq(servers.status, "online"),
+							isNotNull(servers.wireguardIp),
+							notInArray(servers.id, excludedFromWorkload),
+						)
+					: and(eq(servers.status, "online"), isNotNull(servers.wireguardIp)),
+			);
+
+		targetPlatforms = [
+			...new Set(
+				eligibleServers
+					.map((s) => s.meta?.arch)
+					.filter((arch): arch is string => !!arch)
+					.map((arch) => `linux/${arch}`),
+			),
+		];
+	} else {
+		const replicas = await db
+			.select({ meta: servers.meta })
+			.from(serviceReplicas)
+			.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+			.where(eq(serviceReplicas.serviceId, service.id));
+
+		targetPlatforms = [
+			...new Set(
+				replicas
+					.map((r) => r.meta?.arch)
+					.filter((arch): arch is string => !!arch)
+					.map((arch) => `linux/${arch}`),
+			),
+		];
+	}
 
 	if (targetPlatforms.length === 0) {
 		targetPlatforms.push("linux/amd64", "linux/arm64");
