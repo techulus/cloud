@@ -38,6 +38,7 @@ export type DeployedConfig = {
 	hostname?: string;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
+	startCommand?: string | null;
 	ports: PortConfig[];
 	secretKeys?: string[];
 	secrets?: SecretConfig[];
@@ -59,6 +60,7 @@ export function buildCurrentConfig(
 		healthCheckTimeout: number | null;
 		healthCheckRetries: number | null;
 		healthCheckStartPeriod: number | null;
+		startCommand: string | null;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
@@ -85,6 +87,7 @@ export function buildCurrentConfig(
 					startPeriod: service.healthCheckStartPeriod ?? 30,
 				}
 			: null,
+		startCommand: service.startCommand,
 		ports: ports.map((p) => ({
 			port: p.port,
 			isPublic: p.isPublic,
@@ -128,6 +131,13 @@ export function diffConfigs(
 				field: "Health check",
 				from: "(none)",
 				to: current.healthCheck.cmd,
+			});
+		}
+		if (current.startCommand) {
+			changes.push({
+				field: "Start command",
+				from: "(default)",
+				to: current.startCommand,
 			});
 		}
 		for (const port of current.ports) {
@@ -256,6 +266,14 @@ export function diffConfigs(
 				to: `${currentHc.startPeriod}s`,
 			});
 		}
+	}
+
+	if (deployed.startCommand !== current.startCommand) {
+		changes.push({
+			field: "Start command",
+			from: deployed.startCommand || "(default)",
+			to: current.startCommand || "(default)",
+		});
 	}
 
 	const deployedPortsMap = new Map(

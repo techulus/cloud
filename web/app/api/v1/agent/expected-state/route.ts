@@ -117,6 +117,7 @@ export async function GET(request: NextRequest) {
 				hostPort: p.hostPort,
 			})),
 			env,
+			startCommand: service.startCommand || null,
 			healthCheck: service.healthCheckCmd
 				? {
 						cmd: service.healthCheckCmd,

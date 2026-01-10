@@ -901,6 +901,23 @@ export async function updateServiceHealthCheck(
 	return { success: true };
 }
 
+export async function updateServiceStartCommand(
+	serviceId: string,
+	startCommand: string | null,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	await db
+		.update(services)
+		.set({ startCommand })
+		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
 export async function updateServiceSchedule(
 	serviceId: string,
 	schedule: string | null,

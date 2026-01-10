@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Key, Plus, X, Eye, EyeOff, Save } from "lucide-react";
+import { Key, Plus, X, Save } from "lucide-react";
 import { toast } from "sonner";
 import { createSecretsBatch, deleteSecretsBatch } from "@/actions/secrets";
 import type { Secret, ServiceWithDetails as Service } from "@/db/types";
@@ -58,7 +58,6 @@ export const SecretsSection = memo(function SecretsSection({
 	);
 	const [newKey, setNewKey] = useState("");
 	const [newValue, setNewValue] = useState("");
-	const [showValue, setShowValue] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 	const [pendingVars, setPendingVars] = useState<
 		{ key: string; value: string }[]
@@ -229,26 +228,13 @@ export const SecretsSection = memo(function SecretsSection({
 							className="flex-1 font-mono"
 						/>
 						<span className="text-muted-foreground">=</span>
-						<div className="flex-1 relative">
-							<Input
-								type={showValue ? "text" : "password"}
-								placeholder="value"
-								value={newValue}
-								onChange={(e) => setNewValue(e.target.value)}
-								className="pr-10 font-mono"
-							/>
-							<button
-								type="button"
-								onClick={() => setShowValue(!showValue)}
-								className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-							>
-								{showValue ? (
-									<EyeOff className="h-4 w-4" />
-								) : (
-									<Eye className="h-4 w-4" />
-								)}
-							</button>
-						</div>
+						<Input
+							type="text"
+							placeholder="value"
+							value={newValue}
+							onChange={(e) => setNewValue(e.target.value)}
+							className="flex-1 font-mono"
+						/>
 						<Button
 							size="sm"
 							variant="outline"

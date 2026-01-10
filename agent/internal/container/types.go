@@ -37,6 +37,7 @@ type DeployConfig struct {
 	HealthCheck  *HealthCheck
 	Env          map[string]string
 	VolumeMounts []VolumeMount
+	StartCommand string
 	LogFunc      BuildLogFunc
 }
 

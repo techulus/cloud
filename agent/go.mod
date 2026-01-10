@@ -3,6 +3,7 @@ module techulus/cloud-agent
 go 1.25.5
 
 require (
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/miekg/dns v1.1.62
 	github.com/shirou/gopsutil/v3 v3.24.5

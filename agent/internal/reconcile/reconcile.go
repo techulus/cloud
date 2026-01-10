@@ -74,6 +74,7 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		HealthCheck:  healthCheck,
 		Env:          decryptedEnv,
 		VolumeMounts: volumeMounts,
+		StartCommand: exp.StartCommand,
 		LogFunc:      func(stream, message string) { log.Printf("[deploy:%s] %s", stream, message) },
 	})
 

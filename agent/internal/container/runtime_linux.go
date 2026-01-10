@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/shlex"
 	"techulus/cloud-agent/internal/retry"
 )
 
@@ -139,6 +140,14 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	}
 
 	args = append(args, image)
+
+	if config.StartCommand != "" {
+		cmdParts, err := shlex.Split(config.StartCommand)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse start command: %w", err)
+		}
+		args = append(args, cmdParts...)
+	}
 
 	logFunc("stdout", fmt.Sprintf("Starting container: %s", config.Name))
 

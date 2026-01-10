@@ -191,6 +191,7 @@ export const services = pgTable("services", {
 	healthCheckTimeout: integer("health_check_timeout").default(5),
 	healthCheckRetries: integer("health_check_retries").default(3),
 	healthCheckStartPeriod: integer("health_check_start_period").default(30),
+	startCommand: text("start_command"),
 	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {

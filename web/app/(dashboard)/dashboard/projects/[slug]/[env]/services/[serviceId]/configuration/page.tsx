@@ -11,6 +11,7 @@ import { VolumesSection } from "@/components/service-details/volumes-section";
 import { SecretsSection } from "@/components/service-details/secrets-section";
 import { PortsSection } from "@/components/service-details/ports-section";
 import { HealthCheckSection } from "@/components/service-details/health-check-section";
+import { StartCommandSection } from "@/components/service-details/start-command-section";
 import { ScheduleSection } from "@/components/service-details/schedule-section";
 import {
 	AlertDialog,
@@ -57,6 +58,8 @@ export default function ConfigurationPage() {
 			<PortsSection service={service} onUpdate={onUpdate} />
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
+
+			<StartCommandSection service={service} onUpdate={onUpdate} />
 
 			<ScheduleSection service={service} onUpdate={onUpdate} />
 

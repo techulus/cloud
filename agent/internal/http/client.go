@@ -72,6 +72,7 @@ type ExpectedContainer struct {
 	IPAddress    string            `json:"ipAddress"`
 	Ports        []PortMapping     `json:"ports"`
 	Env          map[string]string `json:"env"`
+	StartCommand string            `json:"startCommand"`
 	HealthCheck  *HealthCheck      `json:"healthCheck"`
 	Volumes      []VolumeMount     `json:"volumes"`
 }
