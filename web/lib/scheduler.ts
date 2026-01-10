@@ -126,6 +126,8 @@ export async function checkAndRecoverStaleServers(
 }
 
 export async function checkAndRunScheduledDeployments(): Promise<void> {
+	console.log("[scheduler] checking scheduled deployments");
+
 	const scheduledServices = await db
 		.select({
 			id: services.id,
@@ -137,22 +139,36 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 		.from(services)
 		.where(isNotNull(services.deploymentSchedule));
 
+	console.log(
+		`[scheduler] found ${scheduledServices.length} services with schedules`,
+	);
+
 	if (scheduledServices.length === 0) return;
 
 	for (const service of scheduledServices) {
 		if (!service.schedule) continue;
 
+		console.log(
+			`[scheduler] evaluating ${service.name}: schedule="${service.schedule}", lastRun=${service.lastScheduledDeploymentRunAt?.toISOString() ?? "never"}`,
+		);
+
 		try {
 			const cron = new Cron(service.schedule);
-			const prevRun = cron.previousRun(new Date());
+			const now = new Date();
 
-			if (!prevRun) continue;
-
-			if (
-				service.lastScheduledDeploymentRunAt &&
-				prevRun <= service.lastScheduledDeploymentRunAt
-			) {
-				continue;
+			if (service.lastScheduledDeploymentRunAt) {
+				const nextScheduledRun = cron.nextRun(
+					service.lastScheduledDeploymentRunAt,
+				);
+				console.log(
+					`[scheduler] ${service.name}: nextScheduledRun=${nextScheduledRun?.toISOString() ?? "null"}, now=${now.toISOString()}`,
+				);
+				if (!nextScheduledRun || nextScheduledRun > now) {
+					console.log(`[scheduler] ${service.name}: not due yet, skipping`);
+					continue;
+				}
+			} else {
+				console.log(`[scheduler] ${service.name}: first run, will trigger`);
 			}
 
 			const [inProgressRollout] = await db
@@ -168,7 +184,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 
 			if (inProgressRollout) {
 				console.log(
-					`[scheduler] skipping scheduled deployment for ${service.name} - deployment already in progress`,
+					`[scheduler] skipping ${service.name} - deployment already in progress`,
 				);
 				continue;
 			}
@@ -179,7 +195,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 				.where(eq(services.id, service.id));
 
 			console.log(
-				`[scheduler] triggering scheduled deployment for ${service.name}`,
+				`[scheduler] triggering scheduled deployment for ${service.name} (sourceType=${service.sourceType})`,
 			);
 
 			if (service.sourceType === "github") {
@@ -187,6 +203,10 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 			} else {
 				await deployService(service.id);
 			}
+
+			console.log(
+				`[scheduler] ${service.name}: deployment triggered successfully`,
+			);
 		} catch (error) {
 			console.error(
 				`[scheduler] failed to process schedule for ${service.name}:`,
@@ -194,4 +214,6 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 			);
 		}
 	}
+
+	console.log("[scheduler] finished checking scheduled deployments");
 }
