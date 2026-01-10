@@ -32,6 +32,11 @@ func (h *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 func (h *dnsHandler) handleA(m *dns.Msg, q dns.Question) {
 	ips := h.store.Lookup(q.Name)
 
+	if ips == nil {
+		m.Rcode = dns.RcodeNameError
+		return
+	}
+
 	for _, ip := range ips {
 		if ip4 := ip.To4(); ip4 != nil {
 			rr := &dns.A{
@@ -46,14 +51,15 @@ func (h *dnsHandler) handleA(m *dns.Msg, q dns.Question) {
 			m.Answer = append(m.Answer, rr)
 		}
 	}
-
-	if len(m.Answer) == 0 {
-		m.Rcode = dns.RcodeNameError
-	}
 }
 
 func (h *dnsHandler) handleAAAA(m *dns.Msg, q dns.Question) {
 	ips := h.store.Lookup(q.Name)
+
+	if ips == nil {
+		m.Rcode = dns.RcodeNameError
+		return
+	}
 
 	for _, ip := range ips {
 		if ip.To4() == nil && ip.To16() != nil {
@@ -68,9 +74,5 @@ func (h *dnsHandler) handleAAAA(m *dns.Msg, q dns.Question) {
 			}
 			m.Answer = append(m.Answer, rr)
 		}
-	}
-
-	if len(m.Answer) == 0 {
-		m.Rcode = dns.RcodeNameError
 	}
 }
