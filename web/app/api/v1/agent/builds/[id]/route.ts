@@ -5,6 +5,8 @@ import {
 	githubRepos,
 	githubInstallations,
 	services,
+	serviceReplicas,
+	servers,
 	projects,
 	secrets,
 } from "@/db/schema";
@@ -150,6 +152,25 @@ export async function GET(
 		secretsMap[secret.key] = secret.encryptedValue;
 	}
 
+	const replicas = await db
+		.select({ meta: servers.meta })
+		.from(serviceReplicas)
+		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+		.where(eq(serviceReplicas.serviceId, service.id));
+
+	const targetPlatforms = [
+		...new Set(
+			replicas
+				.map((r) => r.meta?.arch)
+				.filter((arch): arch is string => !!arch)
+				.map((arch) => `linux/${arch}`),
+		),
+	];
+
+	if (targetPlatforms.length === 0) {
+		targetPlatforms.push("linux/amd64", "linux/arm64");
+	}
+
 	console.log(
 		`[build:get] build ${buildId.slice(0, 8)} details fetched by ${serverId.slice(0, 8)}, image: ${imageUri}`,
 	);
@@ -168,5 +189,6 @@ export async function GET(
 		rootDir: service.githubRootDir || "",
 		secrets: secretsMap,
 		timeoutMinutes: buildTimeoutMinutes ?? DEFAULT_BUILD_TIMEOUT_MINUTES,
+		targetPlatforms,
 	});
 }

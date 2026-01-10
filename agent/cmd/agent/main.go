@@ -894,15 +894,16 @@ func (a *Agent) processBuild(item agenthttp.WorkQueueItem) error {
 	}
 
 	buildConfig := &build.Config{
-		BuildID:   payload.BuildID,
-		CloneURL:  buildDetails.CloneURL,
-		CommitSha: buildDetails.Build.CommitSha,
-		Branch:    buildDetails.Build.Branch,
-		ImageURI:  buildDetails.ImageURI,
-		ServiceID: buildDetails.Build.ServiceID,
-		ProjectID: buildDetails.Build.ProjectID,
-		RootDir:   buildDetails.RootDir,
-		Secrets:   decryptedSecrets,
+		BuildID:         payload.BuildID,
+		CloneURL:        buildDetails.CloneURL,
+		CommitSha:       buildDetails.Build.CommitSha,
+		Branch:          buildDetails.Build.Branch,
+		ImageURI:        buildDetails.ImageURI,
+		ServiceID:       buildDetails.Build.ServiceID,
+		ProjectID:       buildDetails.Build.ProjectID,
+		RootDir:         buildDetails.RootDir,
+		Secrets:         decryptedSecrets,
+		TargetPlatforms: buildDetails.TargetPlatforms,
 	}
 
 	onStatusChange := func(status string) {

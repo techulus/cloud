@@ -20,15 +20,16 @@ import (
 )
 
 type Config struct {
-	BuildID   string
-	CloneURL  string
-	CommitSha string
-	Branch    string
-	ImageURI  string
-	ServiceID string
-	ProjectID string
-	RootDir   string
-	Secrets   map[string]string
+	BuildID         string
+	CloneURL        string
+	CommitSha       string
+	Branch          string
+	ImageURI        string
+	ServiceID       string
+	ProjectID       string
+	RootDir         string
+	Secrets         map[string]string
+	TargetPlatforms []string
 }
 
 type LogSender interface {
@@ -189,6 +190,11 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		secretEnv = append(secretEnv, fmt.Sprintf("%s=%s", key, value))
 	}
 
+	platforms := config.TargetPlatforms
+	if len(platforms) == 0 {
+		platforms = []string{"linux/amd64", "linux/arm64"}
+	}
+
 	if hasDockerfile {
 		log.Printf("[build:%s] building with Dockerfile via buildctl", truncateStr(config.BuildID, 8))
 		b.sendLog(config, "Using existing Dockerfile")
@@ -200,7 +206,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--frontend", "dockerfile.v0",
 			"--local", "context=.",
 			"--local", "dockerfile=.",
-			"--opt", "platform=linux/amd64,linux/arm64",
+			"--opt", fmt.Sprintf("platform=%s", strings.Join(platforms, ",")),
 			"--output", outputFlag,
 		}
 		args = append(args, secretArgs...)
@@ -233,7 +239,6 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			return fmt.Errorf("railpack prepare failed: %w", err)
 		}
 
-		platforms := []string{"linux/amd64", "linux/arm64"}
 		var platformImages []string
 
 		for _, platform := range platforms {
@@ -274,18 +279,30 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			}
 		}
 
-		b.sendLog(config, "Creating multi-arch manifest...")
-		craneArgs := []string{"index", "append", "--insecure", "-t", config.ImageURI}
-		for _, img := range platformImages {
-			craneArgs = append(craneArgs, "-m", img)
-		}
+		if len(platformImages) == 1 {
+			b.sendLog(config, "Tagging single-platform image...")
+			craneArgs := []string{"copy", "--insecure", platformImages[0], config.ImageURI}
+			cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
+			output, err = b.runCommandStreaming(cmd, config)
+			if err != nil {
+				log.Printf("[build:%s] crane copy failed: %s", truncateStr(config.BuildID, 8), output)
+				b.sendLog(config, fmt.Sprintf("Image tagging error: %s", output))
+				return fmt.Errorf("crane copy failed: %w", err)
+			}
+		} else {
+			b.sendLog(config, "Creating multi-arch manifest...")
+			craneArgs := []string{"index", "append", "--insecure", "-t", config.ImageURI}
+			for _, img := range platformImages {
+				craneArgs = append(craneArgs, "-m", img)
+			}
 
-		cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
-		output, err = b.runCommandStreaming(cmd, config)
-		if err != nil {
-			log.Printf("[build:%s] crane failed: %s", truncateStr(config.BuildID, 8), output)
-			b.sendLog(config, fmt.Sprintf("Manifest creation error: %s", output))
-			return fmt.Errorf("crane index append failed: %w", err)
+			cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
+			output, err = b.runCommandStreaming(cmd, config)
+			if err != nil {
+				log.Printf("[build:%s] crane failed: %s", truncateStr(config.BuildID, 8), output)
+				b.sendLog(config, fmt.Sprintf("Manifest creation error: %s", output))
+				return fmt.Errorf("crane index append failed: %w", err)
+			}
 		}
 	}
 

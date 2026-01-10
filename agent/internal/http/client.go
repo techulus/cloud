@@ -242,11 +242,12 @@ type BuildDetails struct {
 		ServiceID     string `json:"serviceId"`
 		ProjectID     string `json:"projectId"`
 	} `json:"build"`
-	CloneURL       string            `json:"cloneUrl"`
-	ImageURI       string            `json:"imageUri"`
-	RootDir        string            `json:"rootDir"`
-	Secrets        map[string]string `json:"secrets"`
-	TimeoutMinutes int               `json:"timeoutMinutes"`
+	CloneURL        string            `json:"cloneUrl"`
+	ImageURI        string            `json:"imageUri"`
+	RootDir         string            `json:"rootDir"`
+	Secrets         map[string]string `json:"secrets"`
+	TimeoutMinutes  int               `json:"timeoutMinutes"`
+	TargetPlatforms []string          `json:"targetPlatforms"`
 }
 
 func (c *Client) GetBuild(buildID string) (*BuildDetails, error) {
