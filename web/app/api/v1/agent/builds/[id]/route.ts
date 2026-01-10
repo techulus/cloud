@@ -165,6 +165,7 @@ export async function GET(
 		},
 		cloneUrl,
 		imageUri,
+		rootDir: service.githubRootDir || "",
 		secrets: secretsMap,
 		timeoutMinutes: buildTimeoutMinutes ?? DEFAULT_BUILD_TIMEOUT_MINUTES,
 	});

@@ -901,6 +901,7 @@ func (a *Agent) processBuild(item agenthttp.WorkQueueItem) error {
 		ImageURI:  buildDetails.ImageURI,
 		ServiceID: buildDetails.Build.ServiceID,
 		ProjectID: buildDetails.Build.ProjectID,
+		RootDir:   buildDetails.RootDir,
 		Secrets:   decryptedSecrets,
 	}
 

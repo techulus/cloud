@@ -40,6 +40,7 @@ export function CreateServiceDialog({
 	const [image, setImage] = useState("");
 	const [selectedRepo, setSelectedRepo] = useState<SelectedRepo | null>(null);
 	const [branch, setBranch] = useState("main");
+	const [rootDir, setRootDir] = useState("");
 	const [stateful, setStateful] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export function CreateServiceDialog({
 				github: {
 					repoUrl: `https://github.com/${selectedRepo.fullName}`,
 					branch: branch.trim() || selectedRepo.defaultBranch,
+					rootDir: rootDir.trim() || undefined,
 					installationId: selectedRepo.installationId,
 					repoId: selectedRepo.id,
 				},
@@ -115,6 +117,7 @@ export function CreateServiceDialog({
 		setImage("");
 		setSelectedRepo(null);
 		setBranch("main");
+		setRootDir("");
 		setStateful(false);
 		setError(null);
 	};
@@ -126,6 +129,7 @@ export function CreateServiceDialog({
 			setImage("");
 			setSelectedRepo(null);
 			setBranch("main");
+			setRootDir("");
 			setStateful(false);
 			setError(null);
 		}
@@ -238,6 +242,18 @@ export function CreateServiceDialog({
 									onChange={(e) => setBranch(e.target.value)}
 									placeholder="main"
 								/>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="gh-root-dir">Root Directory</Label>
+								<Input
+									id="gh-root-dir"
+									value={rootDir}
+									onChange={(e) => setRootDir(e.target.value)}
+									placeholder="apps/web"
+								/>
+								<p className="text-xs text-muted-foreground">
+									Subdirectory containing the app (leave empty for repo root)
+								</p>
 							</div>
 							<div className="flex items-center justify-between rounded-lg border p-3">
 								<div className="space-y-0.5">

@@ -243,6 +243,7 @@ type BuildDetails struct {
 	} `json:"build"`
 	CloneURL       string            `json:"cloneUrl"`
 	ImageURI       string            `json:"imageUri"`
+	RootDir        string            `json:"rootDir"`
 	Secrets        map[string]string `json:"secrets"`
 	TimeoutMinutes int               `json:"timeoutMinutes"`
 }

@@ -179,6 +179,7 @@ export const services = pgTable("services", {
 		.default("image"),
 	githubRepoUrl: text("github_repo_url"),
 	githubBranch: text("github_branch").default("main"),
+	githubRootDir: text("github_root_dir"),
 	replicas: integer("replicas").notNull().default(1),
 	stateful: boolean("stateful").notNull().default(false),
 	autoPlace: boolean("auto_place").notNull().default(false),

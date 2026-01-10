@@ -21,4 +21,5 @@ const (
 	ResolverDir    = "/etc/resolver"
 	BuildctlPath   = "/opt/homebrew/bin/buildctl"
 	RailpackPath   = "/usr/local/bin/railpack"
+	CranePath      = "/opt/homebrew/bin/crane"
 )

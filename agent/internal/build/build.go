@@ -27,6 +27,7 @@ type Config struct {
 	ImageURI  string
 	ServiceID string
 	ProjectID string
+	RootDir   string
 	Secrets   map[string]string
 }
 
@@ -159,7 +160,16 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 }
 
 func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir string) error {
-	dockerfilePath := filepath.Join(buildDir, "Dockerfile")
+	contextDir := buildDir
+	if config.RootDir != "" {
+		contextDir = filepath.Join(buildDir, config.RootDir)
+		if _, err := os.Stat(contextDir); err != nil {
+			return fmt.Errorf("root directory %s does not exist: %w", config.RootDir, err)
+		}
+		b.sendLog(config, fmt.Sprintf("Using root directory: %s", config.RootDir))
+	}
+
+	dockerfilePath := filepath.Join(contextDir, "Dockerfile")
 	hasDockerfile := false
 	if _, err := os.Stat(dockerfilePath); err == nil {
 		hasDockerfile = true
@@ -196,7 +206,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		args = append(args, secretArgs...)
 
 		cmd := exec.CommandContext(ctx, paths.BuildctlPath, args...)
-		cmd.Dir = buildDir
+		cmd.Dir = contextDir
 		cmd.Env = append(os.Environ(), secretEnv...)
 		output, err := b.runCommandStreaming(cmd, config)
 		if err != nil {
@@ -215,7 +225,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		}
 
 		cmd := exec.CommandContext(ctx, paths.RailpackPath, prepareArgs...)
-		cmd.Dir = buildDir
+		cmd.Dir = contextDir
 		output, err := b.runCommandStreaming(cmd, config)
 		if err != nil {
 			log.Printf("[build:%s] railpack prepare failed with output: %s", truncateStr(config.BuildID, 8), output)
@@ -223,34 +233,59 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			return fmt.Errorf("railpack prepare failed: %w", err)
 		}
 
-		b.sendLog(config, fmt.Sprintf("Building and pushing %s", config.ImageURI))
-		args := []string{
-			"--addr", buildkitAddr,
-			"build",
-			"--frontend", "gateway.v0",
-			"--opt", "source=ghcr.io/railwayapp/railpack-frontend:v0.15.4",
-			"--local", "context=.",
-			"--local", "dockerfile=.",
-			"--opt", "filename=railpack-plan.json",
-			"--opt", "platform=linux/amd64,linux/arm64",
-			"--output", outputFlag,
+		platforms := []string{"linux/amd64", "linux/arm64"}
+		var platformImages []string
+
+		for _, platform := range platforms {
+			arch := strings.Split(platform, "/")[1]
+			platformTag := config.ImageURI + "-" + arch
+			platformImages = append(platformImages, platformTag)
+
+			b.sendLog(config, fmt.Sprintf("Building for %s...", platform))
+
+			platformOutput := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", platformTag)
+
+			args := []string{
+				"--addr", buildkitAddr,
+				"build",
+				"--frontend", "gateway.v0",
+				"--opt", "source=ghcr.io/railwayapp/railpack-frontend:v0.15.4",
+				"--local", "context=.",
+				"--local", "dockerfile=.",
+				"--opt", "filename=railpack-plan.json",
+				"--opt", fmt.Sprintf("platform=%s", platform),
+				"--output", platformOutput,
+			}
+
+			secretsHash := computeSecretsHash(config.Secrets)
+			if secretsHash != "" {
+				args = append(args, "--opt", fmt.Sprintf("build-arg:secrets-hash=%s", secretsHash))
+			}
+			args = append(args, secretArgs...)
+
+			cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
+			cmd.Dir = contextDir
+			cmd.Env = append(os.Environ(), secretEnv...)
+			output, err = b.runCommandStreaming(cmd, config)
+			if err != nil {
+				log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)
+				b.sendLog(config, fmt.Sprintf("Build error (%s): %s", platform, output))
+				return fmt.Errorf("buildctl build failed for %s: %w", platform, err)
+			}
 		}
 
-		secretsHash := computeSecretsHash(config.Secrets)
-		if secretsHash != "" {
-			args = append(args, "--opt", fmt.Sprintf("build-arg:secrets-hash=%s", secretsHash))
+		b.sendLog(config, "Creating multi-arch manifest...")
+		craneArgs := []string{"index", "append", "--insecure", "-t", config.ImageURI}
+		for _, img := range platformImages {
+			craneArgs = append(craneArgs, "-m", img)
 		}
 
-		args = append(args, secretArgs...)
-
-		cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
-		cmd.Dir = buildDir
-		cmd.Env = append(os.Environ(), secretEnv...)
+		cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
 		output, err = b.runCommandStreaming(cmd, config)
 		if err != nil {
-			log.Printf("[build:%s] buildctl failed with output: %s", truncateStr(config.BuildID, 8), output)
-			b.sendLog(config, fmt.Sprintf("Build error: %s", output))
-			return fmt.Errorf("buildctl build failed: %w", err)
+			log.Printf("[build:%s] crane failed: %s", truncateStr(config.BuildID, 8), output)
+			b.sendLog(config, fmt.Sprintf("Manifest creation error: %s", output))
+			return fmt.Errorf("crane index append failed: %w", err)
 		}
 	}
 
@@ -398,6 +433,9 @@ func CheckPrerequisites() error {
 	}
 	if _, err := os.Stat(paths.RailpackPath); err != nil {
 		return fmt.Errorf("railpack not found at %s: %w", paths.RailpackPath, err)
+	}
+	if _, err := os.Stat(paths.CranePath); err != nil {
+		return fmt.Errorf("crane not found at %s: %w", paths.CranePath, err)
 	}
 	return nil
 }

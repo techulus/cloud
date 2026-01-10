@@ -10,4 +10,5 @@ const (
 	ResolvedDir    = "/etc/systemd/resolved.conf.d"
 	BuildctlPath   = "/usr/local/bin/buildctl"
 	RailpackPath   = "/usr/local/bin/railpack"
+	CranePath      = "/usr/local/bin/crane"
 )

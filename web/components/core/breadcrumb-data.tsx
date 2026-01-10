@@ -26,19 +26,27 @@ const BreadcrumbDataContext = createContext<BreadcrumbContextType>({
 
 export function BreadcrumbDataProvider({ children }: { children: ReactNode }) {
 	const pathname = usePathname();
-	const [state, setState] = useState<{ breadcrumbs: Breadcrumb[]; pathname: string }>({
+	const [state, setState] = useState<{
+		breadcrumbs: Breadcrumb[];
+		pathname: string;
+	}>({
 		breadcrumbs: [],
 		pathname: "",
 	});
 
 	const breadcrumbs = state.pathname === pathname ? state.breadcrumbs : [];
 
-	const setBreadcrumbs = useCallback((newBreadcrumbs: Breadcrumb[], forPathname: string) => {
-		setState({ breadcrumbs: newBreadcrumbs, pathname: forPathname });
-	}, []);
+	const setBreadcrumbs = useCallback(
+		(newBreadcrumbs: Breadcrumb[], forPathname: string) => {
+			setState({ breadcrumbs: newBreadcrumbs, pathname: forPathname });
+		},
+		[],
+	);
 
 	return (
-		<BreadcrumbDataContext.Provider value={{ breadcrumbs, pathname, setBreadcrumbs }}>
+		<BreadcrumbDataContext.Provider
+			value={{ breadcrumbs, pathname, setBreadcrumbs }}
+		>
 			{children}
 		</BreadcrumbDataContext.Provider>
 	);

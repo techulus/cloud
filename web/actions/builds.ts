@@ -63,7 +63,10 @@ export async function retryBuild(buildId: string) {
 	return { success: true, buildId: newBuildId };
 }
 
-export async function triggerBuild(serviceId: string, trigger: "manual" | "scheduled" = "manual") {
+export async function triggerBuild(
+	serviceId: string,
+	trigger: "manual" | "scheduled" = "manual",
+) {
 	const [service] = await db
 		.select()
 		.from(services)
@@ -102,7 +105,10 @@ export async function triggerBuild(serviceId: string, trigger: "manual" | "sched
 			throw new Error("A build is already pending");
 		}
 
-		const triggerMessage = trigger === "scheduled" ? "Scheduled build trigger" : "Manual build trigger";
+		const triggerMessage =
+			trigger === "scheduled"
+				? "Scheduled build trigger"
+				: "Manual build trigger";
 
 		await db.insert(builds).values({
 			id: newBuildId,
@@ -135,7 +141,10 @@ export async function triggerBuild(serviceId: string, trigger: "manual" | "sched
 		throw new Error("A build is already pending");
 	}
 
-	const triggerMessage = trigger === "scheduled" ? "Scheduled build trigger" : "Manual build trigger";
+	const triggerMessage =
+		trigger === "scheduled"
+			? "Scheduled build trigger"
+			: "Manual build trigger";
 
 	await db.insert(builds).values({
 		id: newBuildId,

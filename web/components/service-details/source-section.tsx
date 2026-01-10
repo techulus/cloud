@@ -54,13 +54,19 @@ export const SourceSection = memo(function SourceSection({
 	const [isSaving, setIsSaving] = useState(false);
 	const [repoUrl, setRepoUrl] = useState(service.githubRepoUrl || "");
 	const [branch, setBranch] = useState(service.githubBranch || "main");
+	const [rootDir, setRootDir] = useState(service.githubRootDir || "");
 
 	const { registry, repository, tag } = parseImageInfo(service.image);
 
 	const handleSave = async () => {
 		setIsSaving(true);
 		try {
-			await updateServiceGithubRepo(service.id, repoUrl || null, branch);
+			await updateServiceGithubRepo(
+				service.id,
+				repoUrl || null,
+				branch,
+				rootDir,
+			);
 			toast.success("Repository settings updated");
 			setIsEditing(false);
 			onUpdate?.();
@@ -74,6 +80,7 @@ export const SourceSection = memo(function SourceSection({
 	const handleCancel = () => {
 		setRepoUrl(service.githubRepoUrl || "");
 		setBranch(service.githubBranch || "main");
+		setRootDir(service.githubRootDir || "");
 		setIsEditing(false);
 	};
 
@@ -120,6 +127,18 @@ export const SourceSection = memo(function SourceSection({
 									onChange={(e) => setBranch(e.target.value)}
 								/>
 							</div>
+							<div className="space-y-2">
+								<Label htmlFor="root-dir">Root Directory</Label>
+								<Input
+									id="root-dir"
+									placeholder="apps/web"
+									value={rootDir}
+									onChange={(e) => setRootDir(e.target.value)}
+								/>
+								<p className="text-xs text-muted-foreground">
+									Subdirectory containing the app (leave empty for repo root)
+								</p>
+							</div>
 							<div className="flex items-center gap-2">
 								<Button onClick={handleSave} disabled={isSaving} size="sm">
 									{isSaving && (
@@ -138,7 +157,7 @@ export const SourceSection = memo(function SourceSection({
 							</div>
 						</div>
 					) : (
-						<div className="grid gap-4 sm:grid-cols-2">
+						<div className="grid gap-4 sm:grid-cols-3">
 							<div className="space-y-1">
 								<p className="text-xs font-medium text-muted-foreground">
 									Repository
@@ -161,6 +180,14 @@ export const SourceSection = memo(function SourceSection({
 									{service.githubBranch || "main"}
 								</p>
 							</div>
+							{service.githubRootDir && (
+								<div className="space-y-1">
+									<p className="text-xs font-medium text-muted-foreground">
+										Root Directory
+									</p>
+									<p className="text-sm font-mono">{service.githubRootDir}</p>
+								</div>
+							)}
 						</div>
 					)}
 				</div>
@@ -212,6 +239,18 @@ export const SourceSection = memo(function SourceSection({
 								value={branch}
 								onChange={(e) => setBranch(e.target.value)}
 							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="root-dir-connect">Root Directory</Label>
+							<Input
+								id="root-dir-connect"
+								placeholder="apps/web"
+								value={rootDir}
+								onChange={(e) => setRootDir(e.target.value)}
+							/>
+							<p className="text-xs text-muted-foreground">
+								Subdirectory containing the app (leave empty for repo root)
+							</p>
 						</div>
 						<div className="flex items-center gap-2">
 							<Button

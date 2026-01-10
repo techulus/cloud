@@ -333,6 +333,7 @@ type CreateServiceInput = {
 	github?: {
 		repoUrl: string;
 		branch: string;
+		rootDir?: string;
 		installationId?: number;
 		repoId?: number;
 	};
@@ -360,6 +361,7 @@ export async function createService(input: CreateServiceInput) {
 	let sourceType: "image" | "github" = "image";
 	let githubRepoUrl: string | null = null;
 	let githubBranch: string | null = null;
+	let githubRootDir: string | null = null;
 
 	if (github) {
 		const registryHost = process.env.REGISTRY_HOST;
@@ -370,6 +372,7 @@ export async function createService(input: CreateServiceInput) {
 		sourceType = "github";
 		githubRepoUrl = github.repoUrl;
 		githubBranch = github.branch || "main";
+		githubRootDir = github.rootDir?.trim() || null;
 	}
 
 	await db.insert(services).values({
@@ -382,6 +385,7 @@ export async function createService(input: CreateServiceInput) {
 		sourceType,
 		githubRepoUrl,
 		githubBranch,
+		githubRootDir,
 		replicas: 0,
 		stateful,
 	});
@@ -490,6 +494,7 @@ export async function updateServiceGithubRepo(
 	serviceId: string,
 	repoUrl: string | null,
 	branch: string,
+	rootDir?: string,
 ) {
 	const service = await getService(serviceId);
 	if (!service) {
@@ -507,11 +512,13 @@ export async function updateServiceGithubRepo(
 	}
 
 	const normalizedBranch = branch.trim() || "main";
+	const normalizedRootDir = rootDir?.trim() || null;
 
 	const updateData: Record<string, unknown> = {
 		sourceType: normalizedUrl ? "github" : "image",
 		githubRepoUrl: normalizedUrl,
 		githubBranch: normalizedBranch,
+		githubRootDir: normalizedRootDir,
 	};
 
 	if (normalizedUrl) {

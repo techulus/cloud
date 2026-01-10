@@ -292,6 +292,28 @@ if ! /usr/local/bin/railpack --version &>/dev/null; then
 fi
 echo "✓ Railpack verified"
 
+step "Installing crane (for multi-arch manifests)..."
+CRANE_VERSION="v0.20.7"
+CRANE_ARCH=$ARCH
+if [ "$ARCH" = "aarch64" ]; then
+  CRANE_ARCH="arm64"
+fi
+if [ -x /usr/local/bin/crane ]; then
+  echo "crane already installed, skipping"
+else
+  curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_${CRANE_ARCH}.tar.gz" -o /tmp/crane.tar.gz
+  if [ ! -f /tmp/crane.tar.gz ]; then
+    error "Failed to download crane"
+  fi
+  tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane
+  rm /tmp/crane.tar.gz
+  chmod +x /usr/local/bin/crane
+fi
+if ! /usr/local/bin/crane version &>/dev/null; then
+  error "Failed to install crane"
+fi
+echo "✓ crane installed"
+
 step "Downloading Techulus Cloud agent..."
 AGENT_URL="https://github.com/techulus/cloud/releases/download/tip/agent-linux-${AGENT_ARCH}"
 CHECKSUM_URL="https://github.com/techulus/cloud/releases/download/tip/checksums.txt"
