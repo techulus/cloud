@@ -386,8 +386,9 @@ export async function createService(input: CreateServiceInput) {
 		githubRepoUrl,
 		githubBranch,
 		githubRootDir,
-		replicas: 1,
+		replicas: stateful ? 0 : 1,
 		stateful,
+		autoPlace: !stateful,
 	});
 
 	if (github?.installationId && github?.repoId) {
