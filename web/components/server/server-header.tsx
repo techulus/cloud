@@ -6,7 +6,6 @@ import { updateServerName } from "@/actions/servers";
 import { EditableText } from "@/components/editable-text";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { Badge } from "@/components/ui/badge";
-import { formatRelativeTime } from "@/lib/date";
 
 type ServerHeaderProps = {
 	server: {
@@ -42,13 +41,6 @@ export function ServerHeader({ server }: ServerHeaderProps) {
 				label="Server Name"
 				textClassName="text-lg font-semibold"
 			/>
-			<span className="text-sm text-muted-foreground">
-				(
-				{server.lastHeartbeat
-					? formatRelativeTime(server.lastHeartbeat)
-					: "Never seen"}
-				)
-			</span>
 			<StatusIndicator status={server.status} />
 			{server.isProxy && <Badge variant="secondary">Proxy</Badge>}
 		</div>

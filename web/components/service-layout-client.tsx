@@ -77,12 +77,12 @@ export function ServiceLayoutClient({
 
 	const tabs = [
 		{ name: "Architecture", href: basePath },
-		{ name: "Configuration", href: `${basePath}/configuration` },
+		{ name: "Logs", href: `${basePath}/logs` },
+		{ name: "Requests", href: `${basePath}/requests` },
 		...(service?.sourceType === "github"
 			? [{ name: "Builds", href: `${basePath}/builds` }]
 			: []),
-		{ name: "Logs", href: `${basePath}/logs` },
-		{ name: "Requests", href: `${basePath}/requests` },
+		{ name: "Configuration", href: `${basePath}/configuration` },
 	];
 
 	const isActiveTab = (href: string) => {

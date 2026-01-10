@@ -12,6 +12,7 @@ import { LogViewer } from "@/components/log-viewer";
 import { Label } from "@/components/ui/label";
 import { ServerDangerZone } from "@/components/server-danger-zone";
 import { ServerHeader } from "@/components/server/server-header";
+import { formatRelativeTime } from "@/lib/date";
 
 export default async function ServerDetailPage({
 	params,
@@ -86,6 +87,14 @@ export default async function ServerDetailPage({
 							<div>
 								<p className="text-sm text-muted-foreground">WireGuard IP</p>
 								<p className="font-mono">{server.wireguardIp || "—"}</p>
+							</div>
+							<div>
+								<p className="text-sm text-muted-foreground">Last Heartbeat</p>
+								<p>
+									{server.lastHeartbeat
+										? formatRelativeTime(server.lastHeartbeat)
+										: "Never seen"}
+								</p>
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">CPU</p>
