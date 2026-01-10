@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CircleCheckIcon, Hammer, Loader2 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,25 +147,6 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 	}
 
 	return { mode: "hidden" };
-}
-
-function ProgressDots({ current, total }: { current: number; total: number }) {
-	return (
-		<div className="flex items-center gap-1">
-			{STAGES.map((stage, i) => (
-				<div
-					key={stage.id}
-					className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
-						i < current
-							? "bg-emerald-500"
-							: i === current
-								? "bg-orange-500 animate-pulse"
-								: "bg-zinc-300 dark:bg-zinc-600"
-					}`}
-				/>
-			))}
-		</div>
-	);
 }
 
 function PendingChangesModal({
@@ -321,25 +302,24 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		};
 
 		return (
-			<FloatingBar visible progress>
-				<div className="flex items-center gap-3">
-					<Hammer className="size-4 text-blue-500" />
-					<span className="text-sm font-medium">
-						{statusLabels[barState.buildStatus] || "Building"}
-					</span>
-				</div>
-				<button
-					type="button"
-					onClick={() =>
-						router.push(
-							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
-						)
-					}
-					className="px-2.5 py-1 rounded-md text-sm font-medium text-blue-600 hover:bg-blue-500/10 dark:text-blue-400 transition-colors"
-				>
-					View Logs
-				</button>
-			</FloatingBar>
+			<FloatingBar
+				visible
+				loading
+				status={statusLabels[barState.buildStatus] || "Building"}
+				action={
+					<button
+						type="button"
+						onClick={() =>
+							router.push(
+								`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
+							)
+						}
+						className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors"
+					>
+						View Logs
+					</button>
+				}
+			/>
 		);
 	}
 
@@ -347,59 +327,55 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		const currentStage = STAGES[barState.stageIndex];
 
 		return (
-			<FloatingBar visible progress>
-				<div className="flex items-center gap-3">
-					<span className="text-sm font-medium">
-						{currentStage?.label || "Deploying"}
-					</span>
-					<ProgressDots current={barState.stageIndex} total={STAGES.length} />
-				</div>
-				<button
-					type="button"
-					onClick={handleAbort}
-					disabled={isAborting}
-					className="px-2.5 py-1 rounded-md text-sm font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400 transition-colors disabled:opacity-50"
-				>
-					{isAborting ? <Loader2 className="size-4 animate-spin" /> : "Abort"}
-				</button>
-			</FloatingBar>
+			<FloatingBar
+				visible
+				loading
+				status={currentStage?.label || "Deploying"}
+				action={
+					<button
+						type="button"
+						onClick={handleAbort}
+						disabled={isAborting}
+						className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+					>
+						{isAborting ? "..." : "Abort"}
+					</button>
+				}
+			/>
 		);
 	}
 
 	return (
 		<>
-			<FloatingBar visible>
-				<div className="flex items-center gap-3">
-					<CircleCheckIcon className="size-4 text-emerald-500" />
-					<span className="text-sm font-medium">
-						{barState.hasChanges
-							? `${barState.changesCount} change${barState.changesCount !== 1 ? "s" : ""}`
-							: "Ready to deploy"}
-					</span>
-				</div>
-				<div className="flex items-center gap-2">
-					{barState.hasChanges && (
+			<FloatingBar
+				visible
+				status={
+					barState.hasChanges
+						? `${barState.changesCount} change${barState.changesCount !== 1 ? "s" : ""}`
+						: "Ready to deploy"
+				}
+				action={
+					<div className="flex items-center gap-3">
+						{barState.hasChanges && (
+							<button
+								type="button"
+								onClick={() => setShowModal(true)}
+								className="text-sm font-medium text-white/70 hover:text-white transition-colors"
+							>
+								View
+							</button>
+						)}
 						<button
 							type="button"
-							onClick={() => setShowModal(true)}
-							className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
+							onClick={handleDeploy}
+							disabled={isDeploying || totalReplicas === 0}
+							className="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
 						>
-							View
+							{isDeploying ? "..." : "Deploy"}
 						</button>
-					)}
-					<Button
-						variant="positive"
-						onClick={handleDeploy}
-						disabled={isDeploying || totalReplicas === 0}
-					>
-						{isDeploying ? (
-							<Loader2 className="size-4 animate-spin" />
-						) : (
-							"Deploy"
-						)}
-					</Button>
-				</div>
-			</FloatingBar>
+					</div>
+				}
+			/>
 			<PendingChangesModal
 				changes={changes}
 				isOpen={showModal}

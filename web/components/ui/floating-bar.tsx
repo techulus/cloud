@@ -1,57 +1,33 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
 export function FloatingBar({
-	children,
 	visible = true,
-	progress = false,
-	className,
+	loading = false,
+	status,
+	action,
 }: {
-	children: React.ReactNode;
 	visible?: boolean;
-	progress?: boolean;
-	className?: string;
+	loading?: boolean;
+	status: string;
+	action?: React.ReactNode;
 }) {
 	return (
 		<div
 			className={cn(
-				"fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out w-[90%] sm:w-auto sm:min-w-[320px] sm:max-w-[420px]",
+				"fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out w-3/4 sm:w-1/4",
 				visible
-					? "bottom-12 opacity-100"
-					: "-bottom-24 opacity-0 pointer-events-none",
+					? "bottom-8 opacity-100"
+					: "-bottom-16 opacity-0 pointer-events-none",
 			)}
 		>
-			{progress ? (
-				<div className="relative rounded-lg p-[2px] overflow-hidden shadow-sm border border-border">
-					<div
-						className="absolute inset-0 animate-spin-slow"
-						style={{
-							background:
-								"conic-gradient(from 0deg, transparent, #3b82f6, transparent 40%)",
-						}}
-					/>
-					<div
-						className={cn(
-							"relative flex items-center justify-between gap-4 px-4 h-12 rounded-lg",
-							"bg-popover text-popover-foreground",
-							className,
-						)}
-					>
-						{children}
-					</div>
-				</div>
-			) : (
-				<div
-					className={cn(
-						"flex items-center justify-between gap-4 px-4 h-12 rounded-lg border shadow-sm",
-						"bg-popover text-popover-foreground border-border",
-						className,
-					)}
-				>
-					{children}
-				</div>
-			)}
+			<div className="flex items-center justify-between gap-3 px-5 py-3 rounded-full bg-black text-white shadow-xl border border-white/10 dark:border-white/40">
+				{loading && <Spinner className="shrink-0" />}
+				<span className="text-sm font-medium">{status}</span>
+				{action}
+			</div>
 		</div>
 	);
 }
