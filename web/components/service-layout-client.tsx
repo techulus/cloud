@@ -72,6 +72,9 @@ export function ServiceLayoutClient({
 
 	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service?.id}`;
 
+	const isConstrainedTab =
+		pathname.includes("/configuration") || pathname.includes("/builds");
+
 	const tabs = [
 		{ name: "Architecture", href: basePath },
 		{ name: "Configuration", href: `${basePath}/configuration` },
@@ -132,7 +135,12 @@ export function ServiceLayoutClient({
 				))}
 			</nav>
 
-			<div className="container max-w-7xl mx-auto px-4 py-6">
+			<div
+				className={cn(
+					"px-4 py-6",
+					isConstrainedTab && "container max-w-7xl mx-auto",
+				)}
+			>
 				<ServiceContext.Provider
 					value={{
 						service,

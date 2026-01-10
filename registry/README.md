@@ -24,3 +24,22 @@ docker compose up -d
 ## Network
 
 Should only be accessible via WireGuard mesh - not exposed publicly.
+
+## Garbage Collection
+
+Clean up unreferenced image layers to reclaim storage space.
+
+**Dry-run** (see what would be deleted):
+```bash
+docker exec registry /bin/registry garbage-collect --dry-run /etc/docker/registry/config.yml
+```
+
+**Run GC**:
+```bash
+docker exec registry /bin/registry garbage-collect /etc/docker/registry/config.yml
+```
+
+**Scheduled GC** (daily at 2 AM via cron):
+```bash
+0 2 * * * docker exec registry /bin/registry garbage-collect /etc/docker/registry/config.yml >> /var/log/registry-gc.log 2>&1
+```
