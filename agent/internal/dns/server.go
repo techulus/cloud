@@ -44,16 +44,16 @@ func (s *Server) Start(ctx context.Context) error {
 
 	handler := &dnsHandler{store: s.store}
 
-	var udpReady, tcpReady sync.WaitGroup
-	udpReady.Add(1)
-	tcpReady.Add(1)
+	udpReady := make(chan struct{})
+	tcpReady := make(chan struct{})
+	errChan := make(chan error, 2)
 
 	s.udpServer = &dns.Server{
 		Addr:    addr,
 		Net:     "udp",
 		Handler: handler,
 		NotifyStartedFunc: func() {
-			udpReady.Done()
+			close(udpReady)
 		},
 	}
 
@@ -62,11 +62,9 @@ func (s *Server) Start(ctx context.Context) error {
 		Net:     "tcp",
 		Handler: handler,
 		NotifyStartedFunc: func() {
-			tcpReady.Done()
+			close(tcpReady)
 		},
 	}
-
-	errChan := make(chan error, 2)
 
 	go func() {
 		if err := s.udpServer.ListenAndServe(); err != nil {
@@ -86,13 +84,17 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	udpReady.Wait()
-	tcpReady.Wait()
-
-	select {
-	case err := <-errChan:
-		return err
-	default:
+	for i := 0; i < 2; i++ {
+		select {
+		case <-udpReady:
+			udpReady = nil
+		case <-tcpReady:
+			tcpReady = nil
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	s.started.Store(true)
