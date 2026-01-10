@@ -17,7 +17,7 @@ import (
 var (
 	resolverPath   = paths.ResolverDir + "/internal"
 	globalServer   *Server
-	containerDNSIP string
+	darwinDNSPort  = 5533
 )
 
 type DnsRecord struct {
@@ -26,13 +26,11 @@ type DnsRecord struct {
 }
 
 func SetupLocalDNS(subnetID int) error {
-	containerDNSIP = fmt.Sprintf("10.200.%d.1", subnetID)
-
-	if err := ConfigureClientDNS(containerDNSIP); err != nil {
+	if err := ConfigureClientDNS("127.0.0.1"); err != nil {
 		return fmt.Errorf("failed to configure local DNS: %w", err)
 	}
 
-	globalServer = NewServer(DNSPort, containerDNSIP)
+	globalServer = NewServer(darwinDNSPort, "127.0.0.1")
 	if err := globalServer.Start(context.Background()); err != nil {
 		return fmt.Errorf("failed to start DNS server: %w", err)
 	}
@@ -41,7 +39,7 @@ func SetupLocalDNS(subnetID int) error {
 }
 
 func GetContainerDNS() string {
-	return containerDNSIP
+	return ""
 }
 
 func ConfigureClientDNS(dnsIP string) error {
@@ -49,7 +47,7 @@ func ConfigureClientDNS(dnsIP string) error {
 		return fmt.Errorf("failed to create resolver dir: %w", err)
 	}
 
-	config := fmt.Sprintf("nameserver %s\n", dnsIP)
+	config := fmt.Sprintf("nameserver %s\nport %d\n", dnsIP, darwinDNSPort)
 
 	if err := os.WriteFile(resolverPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write resolver config: %w", err)
