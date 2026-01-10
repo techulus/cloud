@@ -10,7 +10,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-const DNSPort = 5533
+const DNSPort = 53
 
 type Server struct {
 	store       *RecordStore
@@ -23,10 +23,10 @@ type Server struct {
 	mu          sync.Mutex
 }
 
-func NewServer(port int) *Server {
+func NewServer(port int, listenAddr string) *Server {
 	return &Server{
 		store:       NewRecordStore(),
-		listenAddr:  "0.0.0.0",
+		listenAddr:  listenAddr,
 		port:        port,
 		startedChan: make(chan struct{}),
 	}

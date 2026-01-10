@@ -27,13 +27,13 @@ type DnsRecord struct {
 }
 
 func SetupLocalDNS(subnetID int) error {
-	if err := ConfigureClientDNS(); err != nil {
+	containerDNSIP = fmt.Sprintf("10.200.%d.1", subnetID)
+
+	if err := ConfigureClientDNS(containerDNSIP); err != nil {
 		return fmt.Errorf("failed to configure local DNS: %w", err)
 	}
 
-	containerDNSIP = fmt.Sprintf("10.200.%d.1", subnetID)
-
-	globalServer = NewServer(DNSPort)
+	globalServer = NewServer(DNSPort, containerDNSIP)
 	if err := globalServer.Start(context.Background()); err != nil {
 		return fmt.Errorf("failed to start DNS server: %w", err)
 	}
@@ -45,15 +45,15 @@ func GetContainerDNS() string {
 	return containerDNSIP
 }
 
-func ConfigureClientDNS() error {
+func ConfigureClientDNS(dnsIP string) error {
 	if err := os.MkdirAll(paths.ResolvedDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create resolved.conf.d: %w", err)
 	}
 
 	config := fmt.Sprintf(`[Resolve]
-DNS=127.0.0.1:%d
+DNS=%s
 Domains=~internal
-`, DNSPort)
+`, dnsIP)
 
 	if err := os.WriteFile(resolvedDropInPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("failed to write resolved config: %w", err)
