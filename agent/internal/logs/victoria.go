@@ -130,7 +130,7 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 	}
 
 	url := v.endpoint + "/insert/jsonline"
-	log.Printf("[caddy-logs] sending %d HTTP logs (%d bytes) to %s", len(logs), buf.Len(), url)
+	log.Printf("[traefik-logs] sending %d HTTP logs (%d bytes) to %s", len(logs), buf.Len(), url)
 
 	req, err := http.NewRequest("POST", url, &buf)
 	if err != nil {
@@ -145,7 +145,7 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("[caddy-logs] response: %d in %v", resp.StatusCode, time.Since(start))
+	log.Printf("[traefik-logs] response: %d in %v", resp.StatusCode, time.Since(start))
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)

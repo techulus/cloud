@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
 		}
 	}
 
-	const caddyRoutes = [];
+	const traefikRoutes = [];
 
 	if (server.isProxy) {
 		for (const service of allServices) {
@@ -184,7 +184,7 @@ export async function GET(request: NextRequest) {
 						.map((d) => `${d.ipAddress}:${port.port}`);
 
 					if (upstreams.length > 0) {
-						caddyRoutes.push({
+						traefikRoutes.push({
 							id: port.domain,
 							domain: port.domain,
 							upstreams,
@@ -201,7 +201,7 @@ export async function GET(request: NextRequest) {
 	return NextResponse.json({
 		containers,
 		dns: { records: dnsRecords },
-		caddy: { routes: caddyRoutes },
+		traefik: { routes: traefikRoutes },
 		wireguard: { peers: wireguardPeers },
 	});
 }

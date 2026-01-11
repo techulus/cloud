@@ -19,8 +19,8 @@ import (
 
 	"techulus/cloud-agent/internal/api"
 	"techulus/cloud-agent/internal/build"
-	"techulus/cloud-agent/internal/caddy"
 	"techulus/cloud-agent/internal/crypto"
+	"techulus/cloud-agent/internal/traefik"
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
@@ -75,10 +75,10 @@ type Config struct {
 }
 
 type ActualState struct {
-	Containers      []container.Container
-	DnsConfigHash   string
-	CaddyConfigHash string
-	WireguardHash   string
+	Containers        []container.Container
+	DnsConfigHash     string
+	TraefikConfigHash string
+	WireguardHash     string
 }
 
 type Agent struct {
@@ -90,30 +90,30 @@ type Agent struct {
 	publicIP           string
 	privateIP          string
 	dataDir            string
-	expectedState      *agenthttp.ExpectedState
-	processingStart    time.Time
-	logCollector       *logs.Collector
-	caddyLogCollector  *logs.CaddyCollector
-	builder            *build.Builder
+	expectedState        *agenthttp.ExpectedState
+	processingStart      time.Time
+	logCollector         *logs.Collector
+	traefikLogCollector  *logs.TraefikCollector
+	builder              *build.Builder
 	isBuilding         bool
 	buildMutex         sync.Mutex
 	currentBuildID     string
 	isProxy            bool
 }
 
-func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, privateIP, dataDir string, logCollector *logs.Collector, caddyLogCollector *logs.CaddyCollector, builder *build.Builder, isProxy bool) *Agent {
+func NewAgent(client *agenthttp.Client, reconciler *reconcile.Reconciler, config *Config, publicIP, privateIP, dataDir string, logCollector *logs.Collector, traefikLogCollector *logs.TraefikCollector, builder *build.Builder, isProxy bool) *Agent {
 	return &Agent{
-		state:             StateIdle,
-		client:            client,
-		reconciler:        reconciler,
-		config:            config,
-		publicIP:          publicIP,
-		privateIP:         privateIP,
-		dataDir:           dataDir,
-		logCollector:      logCollector,
-		caddyLogCollector: caddyLogCollector,
-		builder:           builder,
-		isProxy:           isProxy,
+		state:               StateIdle,
+		client:              client,
+		reconciler:          reconciler,
+		config:              config,
+		publicIP:            publicIP,
+		privateIP:           privateIP,
+		dataDir:             dataDir,
+		logCollector:        logCollector,
+		traefikLogCollector: traefikLogCollector,
+		builder:             builder,
+		isProxy:             isProxy,
 	}
 }
 
@@ -141,8 +141,8 @@ func (a *Agent) Run(ctx context.Context) {
 		logTickerC = logTicker.C
 	}
 
-	if a.isProxy && a.caddyLogCollector != nil {
-		a.caddyLogCollector.Start()
+	if a.isProxy && a.traefikLogCollector != nil {
+		a.traefikLogCollector.Start()
 	}
 
 	var cleanupTickerC <-chan time.Time
@@ -165,8 +165,8 @@ func (a *Agent) Run(ctx context.Context) {
 			if a.logCollector != nil {
 				a.logCollector.Stop()
 			}
-			if a.isProxy && a.caddyLogCollector != nil {
-				a.caddyLogCollector.Stop()
+			if a.isProxy && a.traefikLogCollector != nil {
+				a.traefikLogCollector.Stop()
 			}
 			return
 		case <-ticker.C:
@@ -312,13 +312,13 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 	}
 
 	if a.isProxy {
-		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
-		for i, r := range expected.Caddy.Routes {
-			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
+		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(expected.Traefik.Routes))
+		for i, r := range expected.Traefik.Routes {
+			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 		}
-		expectedCaddyHash := caddy.HashRoutes(expectedCaddyRoutes)
-		if expectedCaddyHash != actual.CaddyConfigHash {
-			changes = append(changes, fmt.Sprintf("UPDATE Caddy (%d routes)", len(expected.Caddy.Routes)))
+		expectedTraefikHash := traefik.HashRoutes(expectedTraefikRoutes)
+		if expectedTraefikHash != actual.TraefikConfigHash {
+			changes = append(changes, fmt.Sprintf("UPDATE Traefik (%d routes)", len(expected.Traefik.Routes)))
 		}
 	}
 
@@ -383,7 +383,7 @@ func (a *Agent) getActualState() (*ActualState, error) {
 		WireguardHash: wireguard.GetCurrentPeersHash(),
 	}
 	if a.isProxy {
-		state.CaddyConfigHash = caddy.GetCurrentConfigHash()
+		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
 	}
 	return state, nil
 }
@@ -402,11 +402,11 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 	}
 
 	if a.isProxy {
-		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(expected.Caddy.Routes))
-		for i, r := range expected.Caddy.Routes {
-			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
+		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(expected.Traefik.Routes))
+		for i, r := range expected.Traefik.Routes {
+			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 		}
-		if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
+		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
 			return true
 		}
 	}
@@ -590,14 +590,14 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 	}
 
 	if a.isProxy {
-		expectedCaddyRoutes := make([]caddy.CaddyRoute, len(a.expectedState.Caddy.Routes))
-		for i, r := range a.expectedState.Caddy.Routes {
-			expectedCaddyRoutes[i] = caddy.CaddyRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
+		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(a.expectedState.Traefik.Routes))
+		for i, r := range a.expectedState.Traefik.Routes {
+			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 		}
-		if caddy.HashRoutes(expectedCaddyRoutes) != actual.CaddyConfigHash {
-			log.Printf("[reconcile] updating Caddy routes")
-			if err := caddy.UpdateCaddyRoutes(expectedCaddyRoutes); err != nil {
-				return fmt.Errorf("failed to update Caddy: %w", err)
+		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
+			log.Printf("[reconcile] updating Traefik routes")
+			if err := traefik.UpdateTraefikRoutes(expectedTraefikRoutes); err != nil {
+				return fmt.Errorf("failed to update Traefik: %w", err)
 			}
 			return nil
 		}
@@ -977,12 +977,12 @@ func main() {
 	}
 
 	if isProxy {
-		if err := caddy.CheckPrerequisites(); err != nil {
-			log.Fatalf("Caddy prerequisites check failed: %v", err)
+		if err := traefik.CheckPrerequisites(); err != nil {
+			log.Fatalf("Traefik prerequisites check failed: %v", err)
 		}
-		log.Println("Running as proxy node - Caddy will handle public traffic")
+		log.Println("Running as proxy node - Traefik will handle public traffic")
 	} else {
-		log.Println("Running as worker node - Caddy disabled")
+		log.Println("Running as worker node - Traefik disabled")
 	}
 
 	if err := build.CheckPrerequisites(); err != nil {
@@ -1109,7 +1109,7 @@ func main() {
 	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair, dataDir)
 
 	var logCollector *logs.Collector
-	var caddyLogCollector *logs.CaddyCollector
+	var traefikLogCollector *logs.TraefikCollector
 	var logsSender *logs.VictoriaLogsSender
 	var agentLogWriter *logs.AgentLogWriter
 	if logsEndpoint != "" {
@@ -1117,8 +1117,8 @@ func main() {
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint, config.ServerID)
 		logCollector = logs.NewCollector(logsSender, dataDir)
 		if isProxy {
-			caddyLogCollector = logs.NewCaddyCollector(logsSender)
-			log.Println("[caddy-logs] Caddy HTTP log collection enabled")
+			traefikLogCollector = logs.NewTraefikCollector(logsSender)
+			log.Println("[traefik-logs] Traefik HTTP log collection enabled")
 		}
 		agentLogWriter = logs.NewAgentLogWriter(config.ServerID, logsSender)
 		log.SetOutput(agentLogWriter)
@@ -1154,7 +1154,7 @@ func main() {
 	privateIP := getPrivateIP()
 	log.Printf("Agent started. Public IP: %s, Private IP: %s. Tick interval: %v", publicIP, privateIP, tickInterval)
 
-	agent := NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, caddyLogCollector, builder, config.IsProxy)
+	agent := NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, builder, config.IsProxy)
 	agent.Run(ctx)
 
 	if agentLogFlusherDone != nil {

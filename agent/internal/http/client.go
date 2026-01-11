@@ -82,7 +82,7 @@ type DnsRecord struct {
 	Ips  []string `json:"ips"`
 }
 
-type CaddyRoute struct {
+type TraefikRoute struct {
 	ID        string   `json:"id"`
 	Domain    string   `json:"domain"`
 	Upstreams []string `json:"upstreams"`
@@ -100,9 +100,9 @@ type ExpectedState struct {
 	Dns        struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
-	Caddy struct {
-		Routes []CaddyRoute `json:"routes"`
-	} `json:"caddy"`
+	Traefik struct {
+		Routes []TraefikRoute `json:"routes"`
+	} `json:"traefik"`
 	Wireguard struct {
 		Peers []WireGuardPeer `json:"peers"`
 	} `json:"wireguard"`

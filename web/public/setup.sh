@@ -77,6 +77,8 @@ echo "For non-interactive installation, set these environment variables:"
 echo "  CONTROL_PLANE_URL  (required)"
 echo "  REGISTRATION_TOKEN (required for new installs)"
 echo "  IS_PROXY           (set to 'true' for proxy nodes)"
+echo "  ETCD_ENDPOINT      (required for proxy nodes, e.g., 'http://etcd.example.com:2379')"
+echo "  ACME_EMAIL         (required for proxy nodes)"
 echo "  LOGS_ENDPOINT      (optional)"
 echo ""
 
@@ -163,6 +165,23 @@ else
   echo "✓ Logs Endpoint: (disabled)"
 fi
 
+if [ "$IS_PROXY" = "true" ]; then
+  prompt ETCD_ENDPOINT "Enter etcd endpoint (e.g., http://etcd.example.com:2379): " required
+  if [ -z "$ETCD_ENDPOINT" ]; then
+    error "etcd endpoint is required for proxy nodes"
+  fi
+  if [[ ! "$ETCD_ENDPOINT" =~ ^https?:// ]]; then
+    ETCD_ENDPOINT="http://${ETCD_ENDPOINT}"
+  fi
+  echo "✓ etcd Endpoint: $ETCD_ENDPOINT"
+
+  prompt ACME_EMAIL "Enter email for Let's Encrypt certificates: " required
+  if [ -z "$ACME_EMAIL" ]; then
+    error "ACME email is required for proxy nodes"
+  fi
+  echo "✓ ACME Email: $ACME_EMAIL"
+fi
+
 step "Verifying connectivity..."
 
 HEALTH_URL="${CONTROL_PLANE_URL}/api/health"
@@ -179,10 +198,34 @@ if [ -n "$LOGS_ENDPOINT" ]; then
   echo "✓ Logs endpoint is reachable"
 fi
 
+if [ "$IS_PROXY" = "true" ] && [ -n "$ETCD_ENDPOINT" ]; then
+  ETCD_URL_NO_SCHEME="${ETCD_ENDPOINT#http://}"
+  ETCD_URL_NO_SCHEME="${ETCD_URL_NO_SCHEME#https://}"
+  ETCD_HOST=$(echo "$ETCD_URL_NO_SCHEME" | cut -d: -f1)
+  ETCD_PORT=$(echo "$ETCD_URL_NO_SCHEME" | cut -d: -f2)
+  if [ -z "$ETCD_PORT" ] || [ "$ETCD_PORT" = "$ETCD_HOST" ]; then
+    ETCD_PORT="2379"
+  fi
+  if command -v nc &>/dev/null; then
+    if ! nc -z -w5 "$ETCD_HOST" "$ETCD_PORT" 2>/dev/null; then
+      error "Cannot reach etcd at $ETCD_ENDPOINT. Traefik requires etcd for certificate storage. Please ensure etcd is running and accessible."
+    fi
+  else
+    if ! timeout 5 bash -c "echo >/dev/tcp/$ETCD_HOST/$ETCD_PORT" 2>/dev/null; then
+      error "Cannot reach etcd at $ETCD_ENDPOINT. Traefik requires etcd for certificate storage. Please ensure etcd is running and accessible."
+    fi
+  fi
+  echo "✓ etcd endpoint is reachable"
+fi
+
 echo ""
 echo "Configuration summary:"
 echo "  Control Plane URL: $CONTROL_PLANE_URL"
 echo "  Proxy Mode:        $IS_PROXY"
+if [ "$IS_PROXY" = "true" ]; then
+  echo "  etcd Endpoint:     $ETCD_ENDPOINT"
+  echo "  ACME Email:        $ACME_EMAIL"
+fi
 echo "  Logs Endpoint:     ${LOGS_ENDPOINT:-disabled}"
 echo "  New Setup:         $NEW_SETUP"
 echo ""
@@ -238,30 +281,28 @@ fi
 echo "✓ Podman verified"
 
 if [ "$IS_PROXY" = "true" ]; then
-  step "Installing Caddy (proxy mode)..."
-  if command -v caddy &>/dev/null; then
-    echo "Caddy already installed, skipping"
+  step "Installing Traefik (proxy mode)..."
+  TRAEFIK_VERSION="v3.2.3"
+  if [ -x /usr/local/bin/traefik ]; then
+    echo "Traefik already installed, skipping"
   else
-    if [ "$OS_FAMILY" = "debian" ]; then
-      pkg_install debian-keyring debian-archive-keyring apt-transport-https curl
-      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-      chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-      chmod o+r /etc/apt/sources.list.d/caddy-stable.list
-      pkg_update
-      pkg_install caddy
-    else
-      dnf install -y 'dnf-command(copr)'
-      dnf copr enable -y @caddy/caddy
-      pkg_install caddy
+    curl -fsSL "https://github.com/traefik/traefik/releases/download/${TRAEFIK_VERSION}/traefik_${TRAEFIK_VERSION}_linux_${AGENT_ARCH}.tar.gz" -o /tmp/traefik.tar.gz
+    if [ ! -f /tmp/traefik.tar.gz ]; then
+      error "Failed to download Traefik"
+    fi
+    tar -xzf /tmp/traefik.tar.gz -C /usr/local/bin traefik
+    rm /tmp/traefik.tar.gz
+    chmod +x /usr/local/bin/traefik
+    if command -v chcon &>/dev/null; then
+      chcon -t bin_t /usr/local/bin/traefik 2>/dev/null || true
     fi
   fi
-  if ! caddy version &>/dev/null; then
-    error "Failed to install Caddy"
+  if ! /usr/local/bin/traefik version &>/dev/null; then
+    error "Failed to install Traefik"
   fi
-  echo "✓ Caddy verified"
+  echo "✓ Traefik verified"
 else
-  echo "Skipping Caddy installation (worker node)"
+  echo "Skipping Traefik installation (worker node)"
 fi
 
 step "Installing BuildKit..."
@@ -355,73 +396,105 @@ fi
 echo "✓ Agent binary verified"
 
 if [ "$IS_PROXY" = "true" ]; then
-  step "Configuring Caddy..."
+  step "Configuring Traefik..."
 
-  cat > /etc/caddy/environment << EOF
-CONTROL_PLANE_URL=${CONTROL_PLANE_URL}
-EOF
-  if [ ! -f /etc/caddy/environment ]; then
-    error "Failed to create /etc/caddy/environment"
-  fi
-  chmod 600 /etc/caddy/environment
-  echo "✓ Caddy environment file created"
-
-  mkdir -p /etc/systemd/system/caddy.service.d
-  mkdir -p /var/log/caddy
-  chown caddy:caddy /var/log/caddy
-  touch /var/log/caddy/techulus.log
-  chown caddy:caddy /var/log/caddy/techulus.log
+  mkdir -p /etc/traefik/dynamic
+  mkdir -p /var/log/traefik
+  chmod 755 /var/log/traefik
+  touch /var/log/traefik/access.log
+  chmod 644 /var/log/traefik/access.log
   if command -v chcon &>/dev/null; then
-    chcon -R -t httpd_log_t /var/log/caddy 2>/dev/null || true
+    chcon -R -t httpd_log_t /var/log/traefik 2>/dev/null || true
   fi
-  cat > /etc/systemd/system/caddy.service.d/override.conf << 'EOF'
+  echo "✓ Traefik directories created"
+
+  cat > /etc/traefik/environment << EOF
+ETCD_ENDPOINT=${ETCD_ENDPOINT}
+ACME_EMAIL=${ACME_EMAIL}
+EOF
+  chmod 600 /etc/traefik/environment
+  echo "✓ Traefik environment file created"
+
+  cat > /etc/traefik/traefik.yaml << 'EOF'
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+
+api:
+  dashboard: false
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "${ACME_EMAIL}"
+      storage: "etcd"
+      caServer: "https://acme-v02.api.letsencrypt.org/directory"
+      httpChallenge:
+        entryPoint: web
+
+etcd:
+  endpoints:
+    - "${ETCD_ENDPOINT}"
+  rootKey: "traefik"
+EOF
+  if [ ! -f /etc/traefik/traefik.yaml ]; then
+    error "Failed to create Traefik config"
+  fi
+  echo "✓ Traefik config created"
+
+  cat > /etc/systemd/system/traefik.service << 'EOF'
+[Unit]
+Description=Traefik Reverse Proxy
+After=network-online.target
+Wants=network-online.target
+
 [Service]
-EnvironmentFile=/etc/caddy/environment
+Type=simple
+EnvironmentFile=/etc/traefik/environment
+ExecStart=/usr/local/bin/traefik --configFile=/etc/traefik/traefik.yaml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 EOF
-  if [ ! -f /etc/systemd/system/caddy.service.d/override.conf ]; then
-    error "Failed to create Caddy systemd override"
+  if [ ! -f /etc/systemd/system/traefik.service ]; then
+    error "Failed to create Traefik service file"
   fi
-  echo "✓ Caddy systemd override created"
-
-  cat > /etc/caddy/Caddyfile << 'EOF'
-{
-  admin localhost:2019
-  on_demand_tls {
-    ask {$CONTROL_PLANE_URL}/api/v1/caddy/check
-  }
-}
-
-:80 {
-  redir https://{host}{uri} permanent
-}
-
-:443 {
-  tls {
-    on_demand
-  }
-
-  log {
-    output file /var/log/caddy/techulus.log {
-      roll_size 50mb
-      roll_keep 3
-    }
-    format json
-  }
-
-  respond /__caddy_health__ "ok" 200
-}
-EOF
-  if [ ! -f /etc/caddy/Caddyfile ]; then
-    error "Failed to create Caddyfile"
-  fi
-  echo "✓ Caddyfile created"
-
-  export CONTROL_PLANE_URL="$CONTROL_PLANE_URL"
-  caddy validate --config /etc/caddy/Caddyfile
-  if [ $? -ne 0 ]; then
-    error "Caddyfile validation failed"
-  fi
-  echo "✓ Caddyfile validated"
+  echo "✓ Traefik systemd service created"
 
   step "Configuring firewall for proxy node..."
   if [ "$OS_FAMILY" = "rhel" ] && systemctl is-active --quiet firewalld; then
@@ -520,7 +593,7 @@ if [ "$IS_PROXY" = "true" ]; then
 fi
 
 if [ "$IS_PROXY" = "true" ]; then
-  AFTER_SERVICES="network-online.target caddy.service buildkitd.service"
+  AFTER_SERVICES="network-online.target traefik.service buildkitd.service"
 else
   AFTER_SERVICES="network-online.target buildkitd.service"
 fi
@@ -592,13 +665,13 @@ step "Starting services..."
 systemctl daemon-reload
 
 if [ "$IS_PROXY" = "true" ]; then
-  systemctl enable caddy
-  systemctl restart caddy
+  systemctl enable traefik
+  systemctl restart traefik
   sleep 2
-  if ! systemctl is-active --quiet caddy; then
-    error "Failed to start Caddy"
+  if ! systemctl is-active --quiet traefik; then
+    error "Failed to start Traefik"
   fi
-  echo "✓ Caddy started"
+  echo "✓ Traefik started"
 fi
 
 systemctl enable techulus-agent
@@ -613,7 +686,7 @@ echo "✓ Agent started"
 step "Final verification..."
 
 if [ "$IS_PROXY" = "true" ]; then
-  SERVICES=("caddy" "techulus-agent" "buildkitd")
+  SERVICES=("traefik" "techulus-agent" "buildkitd")
 else
   SERVICES=("techulus-agent" "buildkitd")
 fi
@@ -645,7 +718,7 @@ echo ""
 echo "Useful commands:"
 echo "  View agent logs:    journalctl -u techulus-agent -f"
 if [ "$IS_PROXY" = "true" ]; then
-  echo "  View Caddy logs:    journalctl -u caddy -f"
+  echo "  View Traefik logs:  journalctl -u traefik -f"
 fi
 echo "  Agent status:       systemctl status techulus-agent"
 echo "  Restart agent:      systemctl restart techulus-agent"
