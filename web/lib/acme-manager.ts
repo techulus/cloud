@@ -78,6 +78,7 @@ export async function issueCertificate(domain: string): Promise<{
 	privateKey: string;
 	expiresAt: Date;
 }> {
+	console.log(`[acme] starting certificate issuance for ${domain}`);
 	const client = await getAcmeClient();
 	const email = process.env.ACME_EMAIL;
 
@@ -89,23 +90,40 @@ export async function issueCertificate(domain: string): Promise<{
 		commonName: domain,
 	});
 
+	console.log(`[acme] created CSR for ${domain}, starting ACME flow`);
+
 	const cert = await client.auto({
 		csr,
 		email,
 		termsOfServiceAgreed: true,
 		challengeCreateFn: async (authz, challenge, keyAuthorization) => {
 			void authz;
+			console.log(
+				`[acme] storing challenge for ${domain}: token=${challenge.token}`,
+			);
 			await storeChallenge(challenge.token, keyAuthorization);
+			console.log(
+				`[acme] challenge stored, waiting for validation at http://${domain}/.well-known/acme-challenge/${challenge.token}`,
+			);
 		},
 		challengeRemoveFn: async (authz, challenge) => {
 			void authz;
+			console.log(
+				`[acme] removing challenge for ${domain}: token=${challenge.token}`,
+			);
 			await removeChallenge(challenge.token);
 		},
 		challengePriority: ["http-01"],
 	});
 
+	console.log(`[acme] certificate issued successfully for ${domain}`);
+
 	const certInfo = await acme.crypto.readCertificateInfo(cert);
 	const expiresAt = certInfo.notAfter;
+
+	console.log(
+		`[acme] certificate for ${domain} expires at ${expiresAt.toISOString()}`,
+	);
 
 	await db
 		.insert(domainCertificates)
