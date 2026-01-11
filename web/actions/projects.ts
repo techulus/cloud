@@ -28,6 +28,7 @@ import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
 import { getEnvironment, getService } from "@/db/queries";
 import { calculateSpreadPlacement } from "@/lib/placement";
+import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import cronstrue from "cronstrue";
 
 function parseImageReference(image: string): {
@@ -733,6 +734,25 @@ export async function deployService(serviceId: string) {
 		.select()
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, serviceId));
+
+	const domainsNeedingCerts = servicePortsList
+		.filter((p) => p.isPublic && p.domain)
+		.map((p) => p.domain as string);
+
+	for (const domain of domainsNeedingCerts) {
+		const existingCert = await getCertificate(domain);
+		if (!existingCert) {
+			try {
+				await issueCertificate(domain);
+				console.log(`[deploy] issued certificate for ${domain}`);
+			} catch (error) {
+				console.error(
+					`[deploy] failed to issue certificate for ${domain}:`,
+					error,
+				);
+			}
+		}
+	}
 
 	const serviceSecrets = await db
 		.select()
