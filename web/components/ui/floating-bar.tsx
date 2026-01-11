@@ -17,7 +17,7 @@ export function FloatingBar({
 	return (
 		<div
 			className={cn(
-				"fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out w-3/4 sm:w-1/4",
+				"fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out w-full max-w-[400px]",
 				visible
 					? "bottom-8 opacity-100"
 					: "-bottom-16 opacity-0 pointer-events-none",

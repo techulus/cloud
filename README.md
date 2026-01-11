@@ -8,7 +8,7 @@ A stateless container deployment platform with private-first networking.
 
 - **Container Orchestration**: Deploy containers via Podman with automatic port binding
 - **WireGuard Mesh**: Private networking between all servers
-- **Automatic HTTPS**: Caddy-based proxy with on-demand TLS via DNS-01 (Cloudflare)
+- **Automatic HTTPS**: Traefik-based proxy with automatic TLS via Let's Encrypt
 - **Simple Architecture**: Next.js control plane, Go agents, PostgreSQL database
 
 ## Architecture
@@ -18,7 +18,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 ## TODO
 
 - [x] HTTP polling for agent communication
-- [x] Distributed Caddy
+- [x] Traefik reverse proxy
 - [x] Per-machine subnet allocation
 - [x] Local DNS on each machine
 - [x] Health checks

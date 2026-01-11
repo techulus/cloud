@@ -6,8 +6,8 @@ The agent runs on servers and reconciles expected state from the control plane.
 
 The agent supports two modes:
 
-| Type | Flag | Caddy | Description |
-|------|------|-------|-------------|
+| Type | Flag | Traefik | Description |
+|------|------|---------|-------------|
 | Worker | (default) | ✗ | Runs containers only |
 | Proxy | `--proxy` | ✓ | Handles TLS and public traffic |
 
@@ -35,7 +35,7 @@ Two-state machine for reconciliation:
   3. Deploy missing containers
   4. Redeploy containers with wrong image
   5. Update DNS records
-  6. Update Caddy routes (proxy nodes only)
+  6. Update Traefik routes (proxy nodes only)
   7. Update WireGuard peers
 - Timeout: 5 minutes max
 - Always reports status before returning to IDLE
@@ -45,7 +45,7 @@ Two-state machine for reconciliation:
 Uses hash comparisons for deterministic drift detection:
 - Containers: Missing, orphaned, wrong state, or image mismatch
 - DNS: Hash of sorted records
-- Caddy: Hash of sorted routes (proxy nodes only)
+- Traefik: Hash of sorted routes (proxy nodes only)
 - WireGuard: Hash of sorted peers
 
 ## Container Labels
@@ -99,13 +99,13 @@ Agents process work queue items for operations that can't be expressed via expec
 ## Proxy vs Worker Behavior
 
 ### Proxy Node (`--proxy`)
-- Runs Caddy for TLS termination
-- Receives Caddy routes from control plane
+- Runs Traefik for TLS termination
+- Receives Traefik routes from control plane
 - Handles public traffic and routes to containers via WireGuard
-- Collects and ships Caddy access logs
+- Collects and ships Traefik access logs
 
 ### Worker Node (default)
-- Does not run Caddy
-- Receives empty Caddy routes from control plane
-- Skips all Caddy-related drift detection and reconciliation
+- Does not run Traefik
+- Receives empty Traefik routes from control plane
+- Skips all Traefik-related drift detection and reconciliation
 - Lighter footprint, focused on running containers

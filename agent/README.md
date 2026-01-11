@@ -20,7 +20,7 @@ The agent supports two modes:
 - Railpack
 
 ### Proxy Nodes Only
-- Caddy
+- Traefik
 
 ## Automated Installation
 
@@ -69,12 +69,18 @@ curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install wireguard wireguard-tools podman caddy -y
+sudo apt install wireguard wireguard-tools podman -y
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
 
 curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0.26.3.linux-amd64.tar.gz | sudo tar -xz -C /usr/local
+
+# Install Traefik
+TRAEFIK_VERSION="v3.2.3"
+curl -fsSL "https://github.com/traefik/traefik/releases/download/${TRAEFIK_VERSION}/traefik_${TRAEFIK_VERSION}_linux_amd64.tar.gz" -o /tmp/traefik.tar.gz
+sudo tar -xzf /tmp/traefik.tar.gz -C /usr/local/bin traefik
+rm /tmp/traefik.tar.gz
 ```
 
 ## BuildKit Setup
@@ -165,7 +171,7 @@ Proxy node:
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target caddy.service buildkitd.service
+After=network.target traefik.service buildkitd.service
 
 [Service]
 Type=simple

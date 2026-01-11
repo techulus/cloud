@@ -15,15 +15,15 @@ A stateless container deployment platform with three core principles:
 | Database | Postgres + Drizzle | Simple, no external deps, single file, easy backup |
 | Server Agent | Go | Single binary, shells out to Podman |
 | Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
-| Reverse Proxy | Caddy | Automatic HTTPS, runs on proxy nodes only |
+| Reverse Proxy | Traefik | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only |
 | Private Network | WireGuard (self-managed) | Full mesh, control plane coordinates |
-| Service Discovery | dnsmasq | Local DNS on each server for .internal domains |
+| Service Discovery | Built-in DNS | Agent runs DNS server for .internal domains |
 | Agent Communication | Pull-based HTTP | Agent polls for expected state, reports status |
 
 ## Node Types
 
-| Type | Caddy | Public Traffic | Containers |
-|------|-------|----------------|------------|
+| Type | Traefik | Public Traffic | Containers |
+|------|---------|----------------|------------|
 | Proxy | ✓ | Handles TLS termination | ✓ |
 | Worker | ✗ | None | ✓ |
 
@@ -60,9 +60,9 @@ A stateless container deployment platform with three core principles:
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
 │  │ │   Podman    │ │  │ │   Podman    │ │  │ │   Podman    │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
-│  │ │    Caddy    │ │  │ │      -      │ │  │ │      -      │ │ │
+│  │ │   Traefik   │ │  │ │      -      │ │  │ │      -      │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
-│  │ │   dnsmasq   │ │  │ │   dnsmasq   │ │  │ │   dnsmasq   │ │ │
+│  │ │  DNS Server │ │  │ │  DNS Server │ │  │ │  DNS Server │ │ │
 │  │ ├─────────────┤ │  │ ├─────────────┤ │  │ ├─────────────┤ │ │
 │  │ │  WireGuard  │ │  │ │  WireGuard  │ │  │ │  WireGuard  │ │ │
 │  │ └─────────────┘ │  │ └─────────────┘ │  │ └─────────────┘ │ │
@@ -73,7 +73,7 @@ A stateless container deployment platform with three core principles:
 └─────────────────────────────────────────────────────────────────┘
 
 Public Traffic Flow:
-  Internet → DNS → Proxy Node → Caddy (TLS) → WireGuard → Container
+  Internet → DNS → Proxy Node → Traefik (TLS) → WireGuard → Container
 ```
 
 ## Agent State Machine
@@ -93,11 +93,11 @@ The agent uses a two-state machine to prevent race conditions during reconciliat
 
 ### IDLE State
 - Poll control plane every 10 seconds for expected state
-- Compare expected state vs actual state (containers, DNS, Caddy*, WireGuard)
+- Compare expected state vs actual state (containers, DNS, Traefik*, WireGuard)
 - If no drift: send status report, stay in IDLE
 - If drift detected: snapshot expected state, transition to PROCESSING
 
-*Caddy drift detection only on proxy nodes
+*Traefik drift detection only on proxy nodes
 
 ### PROCESSING State
 - Stop polling (use the expected state snapshot)
@@ -111,8 +111,8 @@ The agent uses a two-state machine to prevent race conditions during reconciliat
 
 The agent detects drift using hash comparisons:
 - **Containers**: Missing, orphaned, wrong state, or image mismatch
-- **DNS**: Hash of sorted records vs current dnsmasq config
-- **Caddy**: Hash of sorted routes vs current Caddy config (proxy nodes only)
+- **DNS**: Hash of sorted records vs current DNS server config
+- **Traefik**: Hash of sorted routes vs current Traefik config (proxy nodes only)
 - **WireGuard**: Hash of sorted peers vs current wg0.conf
 
 ### Container Reconciliation
@@ -123,7 +123,7 @@ Order of operations:
 3. Deploy missing containers
 4. Redeploy containers with wrong state or image mismatch
 5. Update DNS records
-6. Update Caddy routes (proxy nodes only)
+6. Update Traefik routes (proxy nodes only)
 7. Update WireGuard peers
 
 ## Rollout Stages
@@ -131,7 +131,7 @@ Order of operations:
 Deployments go through these stages:
 
 ```
-pending → pulling → starting → healthy → dns_updating → caddy_updating → stopping_old → running
+pending → pulling → starting → healthy → dns_updating → traefik_updating → stopping_old → running
 ```
 
 | Stage | Description |
@@ -141,7 +141,7 @@ pending → pulling → starting → healthy → dns_updating → caddy_updating
 | `starting` | Container started, waiting for health check |
 | `healthy` | Health check passed (or no health check) |
 | `dns_updating` | DNS records being updated |
-| `caddy_updating` | Caddy routes being updated |
+| `traefik_updating` | Traefik routes being updated |
 | `stopping_old` | Old deployment containers being stopped |
 | `running` | Deployment complete and serving traffic |
 
@@ -196,26 +196,24 @@ podman run -d \
   traefik/whoami
 ```
 
-### DNS Resolution (dnsmasq)
+### DNS Resolution
 
-Each server runs dnsmasq with records pushed from control plane:
-```
-/etc/dnsmasq.d/internal.conf:
-address=/whoami.internal/10.200.1.2
-address=/whoami.internal/10.200.2.2
-address=/redis.internal/10.200.1.3
-```
+Each agent runs a built-in DNS server for `.internal` domain resolution:
+- Listens on the container gateway IP (e.g., `10.200.1.1`)
+- Configures systemd-resolved to forward `.internal` queries
+- Records pushed from control plane via expected state
 
 Services resolve via `.internal` domain with round-robin across replicas.
 
-### Caddy (Proxy Nodes Only)
+### Traefik (Proxy Nodes Only)
 
-Proxy nodes run Caddy with routes pushed from control plane:
-- Uses on-demand TLS with HTTP-01 ACME challenge
+Proxy nodes run Traefik with routes pushed from control plane:
+- Uses HTTP-01 ACME challenge for automatic TLS via Let's Encrypt
+- Routes configured via file provider in `/etc/traefik/dynamic/`
 - Routes: `subdomain.example.com` → container IPs (via WireGuard mesh)
 - Control plane only sends routes to proxy nodes
 
-Worker nodes do not run Caddy.
+Worker nodes do not run Traefik.
 
 ### Traffic Flows
 
@@ -231,7 +229,7 @@ Container A (10.200.1.2)
 **External (public):**
 ```
 Internet → DNS → Proxy Node public IP
-  → Caddy: app.example.com → 10.200.1.2:80
+  → Traefik: app.example.com → 10.200.1.2:80
   → WireGuard tunnel to Worker Node
   → Container (10.200.1.2)
 ```
@@ -250,7 +248,7 @@ Internet → DNS → Proxy Node public IP
 - Advances rollout stages based on deployment status
 
 **API Endpoints:**
-- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Caddy (proxy only), WireGuard config
+- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Traefik (proxy only), WireGuard config
 - `POST /api/v1/agent/status` - Receives container status, advances rollout stages
 
 ### 2. Server Agent (Go)
@@ -259,8 +257,8 @@ Internet → DNS → Proxy Node public IP
 - Polls control plane for expected state
 - Manages containers via Podman with static IPs
 - Manages local WireGuard interface
-- Updates Caddy routes via admin API (proxy nodes only)
-- Updates dnsmasq records
+- Updates Traefik routes via file provider (proxy nodes only)
+- Updates DNS records
 - Reports status (resources, public IP, container health)
 
 **Agent Lifecycle:**
@@ -270,7 +268,7 @@ Internet → DNS → Proxy Node public IP
 4. Agent generates WireGuard and signing keypairs
 5. Agent registers with control plane via HTTP (includes isProxy flag)
 6. Control plane assigns subnet, returns WireGuard peers
-7. Agent configures WireGuard, container network, dnsmasq, and Caddy (if proxy)
+7. Agent configures WireGuard, container network, DNS server, and Traefik (if proxy)
 8. Agent enters IDLE state, begins polling
 
 ### 3. Container Labels
@@ -286,7 +284,7 @@ Containers are tracked via Podman labels:
 2. **Request Signing**: Body + timestamp signed with server-specific secret
 3. **WireGuard**: All inter-server traffic encrypted
 4. **No Public Ports on Containers**: Only reachable via WireGuard mesh
-5. **Caddy**: Only entry point for public traffic (proxy nodes only)
+5. **Traefik**: Only entry point for public traffic (proxy nodes only)
 
 **Registration Token:**
 - One-time-use token for initial registration
