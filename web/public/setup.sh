@@ -77,7 +77,6 @@ echo "For non-interactive installation, set these environment variables:"
 echo "  CONTROL_PLANE_URL  (required)"
 echo "  REGISTRATION_TOKEN (required for new installs)"
 echo "  IS_PROXY           (set to 'true' for proxy nodes)"
-echo "  ACME_EMAIL         (required for proxy nodes)"
 echo "  LOGS_ENDPOINT      (optional)"
 echo ""
 
@@ -164,14 +163,6 @@ else
   echo "✓ Logs Endpoint: (disabled)"
 fi
 
-if [ "$IS_PROXY" = "true" ]; then
-  prompt ACME_EMAIL "Enter email for Let's Encrypt certificates: " required
-  if [ -z "$ACME_EMAIL" ]; then
-    error "ACME email is required for proxy nodes"
-  fi
-  echo "✓ ACME Email: $ACME_EMAIL"
-fi
-
 step "Verifying connectivity..."
 
 HEALTH_URL="${CONTROL_PLANE_URL}/api/health"
@@ -192,9 +183,6 @@ echo ""
 echo "Configuration summary:"
 echo "  Control Plane URL: $CONTROL_PLANE_URL"
 echo "  Proxy Mode:        $IS_PROXY"
-if [ "$IS_PROXY" = "true" ]; then
-  echo "  ACME Email:        $ACME_EMAIL"
-fi
 echo "  Logs Endpoint:     ${LOGS_ENDPOINT:-disabled}"
 echo "  New Setup:         $NEW_SETUP"
 echo ""
@@ -368,6 +356,8 @@ if [ "$IS_PROXY" = "true" ]; then
   step "Configuring Traefik..."
 
   mkdir -p /etc/traefik/dynamic
+  mkdir -p /etc/traefik/certs
+  chmod 700 /etc/traefik/certs
   mkdir -p /var/log/traefik
   chmod 755 /var/log/traefik
   touch /var/log/traefik/access.log
@@ -377,13 +367,7 @@ if [ "$IS_PROXY" = "true" ]; then
   fi
   echo "✓ Traefik directories created"
 
-  cat > /etc/traefik/environment << EOF
-ACME_EMAIL=${ACME_EMAIL}
-EOF
-  chmod 600 /etc/traefik/environment
-  echo "✓ Traefik environment file created"
-
-  cat > /etc/traefik/traefik.yaml << EOF
+  cat > /etc/traefik/traefik.yaml << 'EOF'
 global:
   checkNewVersion: false
   sendAnonymousUsage: false
@@ -407,31 +391,13 @@ api:
 entryPoints:
   web:
     address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-          permanent: true
   websecure:
     address: ":443"
-    http:
-      tls:
-        certResolver: letsencrypt
 
 providers:
   file:
     directory: /etc/traefik/dynamic
     watch: true
-
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: "${ACME_EMAIL}"
-      storage: "/etc/traefik/acme.json"
-      caServer: "https://acme-v02.api.letsencrypt.org/directory"
-      httpChallenge:
-        entryPoint: web
 EOF
   if [ ! -f /etc/traefik/traefik.yaml ]; then
     error "Failed to create Traefik config"
@@ -446,7 +412,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/traefik/environment
 ExecStart=/usr/local/bin/traefik --configFile=/etc/traefik/traefik.yaml
 Restart=always
 RestartSec=10

@@ -112,8 +112,8 @@ export default function Page() {
 							</div>
 							<h3 className="text-lg font-semibold mb-2">Automatic HTTPS</h3>
 							<p className="text-muted-foreground text-sm">
-								TLS certificates handled automatically. Point your
-								domain, get HTTPS. No manual certificate management.
+								TLS certificates handled automatically. Point your domain, get
+								HTTPS. No manual certificate management.
 							</p>
 						</CardContent>
 					</Card>

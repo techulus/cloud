@@ -13,6 +13,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { slugify } from "@/lib/utils";
 import { getWireGuardPeers } from "@/lib/wireguard";
+import { getAllCertificatesForDomains } from "@/lib/acme-manager";
 
 const EXPECTED_STATUSES = [
 	"pending",
@@ -198,10 +199,40 @@ export async function GET(request: NextRequest) {
 
 	const wireguardPeers = await getWireGuardPeers(serverId, server.privateIp);
 
+	let traefikConfig: {
+		routes: typeof traefikRoutes;
+		certificates?: Array<{
+			domain: string;
+			certificate: string;
+			certificateKey: string;
+		}>;
+		challengeRoute?: {
+			controlPlaneUrl: string;
+		};
+	} = { routes: traefikRoutes };
+
+	if (server.isProxy) {
+		const routedDomains = traefikRoutes.map((r) => r.domain);
+		const certificates = await getAllCertificatesForDomains(routedDomains);
+
+		const controlPlaneUrl = process.env.NEXT_PUBLIC_APP_URL;
+		if (!controlPlaneUrl) {
+			console.warn(
+				"[expected-state] NEXT_PUBLIC_APP_URL not set - ACME challenge route will not be configured",
+			);
+		}
+
+		traefikConfig = {
+			routes: traefikRoutes,
+			certificates,
+			challengeRoute: controlPlaneUrl ? { controlPlaneUrl } : undefined,
+		};
+	}
+
 	return NextResponse.json({
 		containers,
 		dns: { records: dnsRecords },
-		traefik: { routes: traefikRoutes },
+		traefik: traefikConfig,
 		wireguard: { peers: wireguardPeers },
 	});
 }

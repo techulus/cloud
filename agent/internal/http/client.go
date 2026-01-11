@@ -89,6 +89,16 @@ type TraefikRoute struct {
 	ServiceId string   `json:"serviceId"`
 }
 
+type Certificate struct {
+	Domain         string `json:"domain"`
+	Certificate    string `json:"certificate"`
+	CertificateKey string `json:"certificateKey"`
+}
+
+type ChallengeRouteConfig struct {
+	ControlPlaneUrl string `json:"controlPlaneUrl"`
+}
+
 type WireGuardPeer struct {
 	PublicKey  string  `json:"publicKey"`
 	AllowedIPs string  `json:"allowedIps"`
@@ -101,7 +111,9 @@ type ExpectedState struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
 	Traefik struct {
-		Routes []TraefikRoute `json:"routes"`
+		Routes         []TraefikRoute        `json:"routes"`
+		Certificates   []Certificate         `json:"certificates,omitempty"`
+		ChallengeRoute *ChallengeRouteConfig `json:"challengeRoute,omitempty"`
 	} `json:"traefik"`
 	Wireguard struct {
 		Peers []WireGuardPeer `json:"peers"`

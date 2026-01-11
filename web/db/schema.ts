@@ -468,3 +468,32 @@ export const settings = pgTable("settings", {
 		.notNull()
 		.$onUpdate(() => new Date()),
 });
+
+export const acmeChallenges = pgTable("acme_challenges", {
+	token: text("token").primaryKey(),
+	keyAuthorization: text("key_authorization").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export const domainCertificates = pgTable(
+	"domain_certificates",
+	{
+		id: text("id").primaryKey(),
+		domain: text("domain").notNull().unique(),
+		certificate: text("certificate").notNull(),
+		certificateKey: text("certificate_key").notNull(),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull()
+			.$onUpdate(() => new Date()),
+	},
+	(table) => [index("domain_certificates_expires_at_idx").on(table.expiresAt)],
+);

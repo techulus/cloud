@@ -75,10 +75,12 @@ type Config struct {
 }
 
 type ActualState struct {
-	Containers        []container.Container
-	DnsConfigHash     string
-	TraefikConfigHash string
-	WireguardHash     string
+	Containers            []container.Container
+	DnsConfigHash         string
+	TraefikConfigHash     string
+	CertificatesHash      string
+	ChallengeRouteWritten bool
+	WireguardHash         string
 }
 
 type Agent struct {
@@ -320,6 +322,19 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		if expectedTraefikHash != actual.TraefikConfigHash {
 			changes = append(changes, fmt.Sprintf("UPDATE Traefik (%d routes)", len(expected.Traefik.Routes)))
 		}
+
+		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
+		for i, c := range expected.Traefik.Certificates {
+			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
+		}
+		expectedCertsHash := traefik.HashCertificates(expectedCerts)
+		if expectedCertsHash != actual.CertificatesHash {
+			changes = append(changes, fmt.Sprintf("UPDATE Certificates (%d certs)", len(expected.Traefik.Certificates)))
+		}
+
+		if expected.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
+			changes = append(changes, "WRITE Challenge Route")
+		}
 	}
 
 	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
@@ -384,6 +399,8 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	}
 	if a.isProxy {
 		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
+		state.CertificatesHash = traefik.GetCurrentCertificatesHash()
+		state.ChallengeRouteWritten = traefik.ChallengeRouteExists()
 	}
 	return state, nil
 }
@@ -407,6 +424,18 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
 		}
 		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
+			return true
+		}
+
+		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
+		for i, c := range expected.Traefik.Certificates {
+			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
+		}
+		if traefik.HashCertificates(expectedCerts) != actual.CertificatesHash {
+			return true
+		}
+
+		if expected.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
 			return true
 		}
 	}
@@ -598,6 +627,26 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 			log.Printf("[reconcile] updating Traefik routes")
 			if err := traefik.UpdateTraefikRoutes(expectedTraefikRoutes); err != nil {
 				return fmt.Errorf("failed to update Traefik: %w", err)
+			}
+			return nil
+		}
+
+		expectedCerts := make([]traefik.Certificate, len(a.expectedState.Traefik.Certificates))
+		for i, c := range a.expectedState.Traefik.Certificates {
+			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
+		}
+		if traefik.HashCertificates(expectedCerts) != actual.CertificatesHash {
+			log.Printf("[reconcile] updating certificates")
+			if err := traefik.UpdateCertificates(expectedCerts); err != nil {
+				return fmt.Errorf("failed to update certificates: %w", err)
+			}
+			return nil
+		}
+
+		if a.expectedState.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
+			log.Printf("[reconcile] writing challenge route")
+			if err := traefik.WriteChallengeRoute(a.expectedState.Traefik.ChallengeRoute.ControlPlaneUrl); err != nil {
+				return fmt.Errorf("failed to write challenge route: %w", err)
 			}
 			return nil
 		}

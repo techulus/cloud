@@ -16,7 +16,10 @@ import (
 
 const (
 	traefikDynamicDir  = "/etc/traefik/dynamic"
+	traefikCertsDir    = "/etc/traefik/certs"
 	routesFileName     = "routes.yaml"
+	tlsFileName        = "tls.yaml"
+	challengesFileName = "challenges.yaml"
 )
 
 func CheckPrerequisites() error {
@@ -43,14 +46,32 @@ type httpConfig struct {
 }
 
 type router struct {
-	Rule        string   `yaml:"rule"`
-	EntryPoints []string `yaml:"entryPoints"`
-	Service     string   `yaml:"service"`
-	TLS         *tlsConfig `yaml:"tls,omitempty"`
+	Rule        string      `yaml:"rule"`
+	EntryPoints []string    `yaml:"entryPoints"`
+	Service     string      `yaml:"service"`
+	TLS         *tlsConfig  `yaml:"tls,omitempty"`
+	Priority    int         `yaml:"priority,omitempty"`
 }
 
-type tlsConfig struct {
-	CertResolver string `yaml:"certResolver"`
+type tlsConfig struct{}
+
+type tlsFileConfig struct {
+	TLS tlsSection `yaml:"tls"`
+}
+
+type tlsSection struct {
+	Certificates []certEntry `yaml:"certificates"`
+}
+
+type certEntry struct {
+	CertFile string `yaml:"certFile"`
+	KeyFile  string `yaml:"keyFile"`
+}
+
+type Certificate struct {
+	Domain         string
+	Certificate    string
+	CertificateKey string
 }
 
 type service struct {
@@ -82,9 +103,7 @@ func UpdateTraefikRoutes(routes []TraefikRoute) error {
 			Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
 			EntryPoints: []string{"websecure"},
 			Service:     route.ServiceId,
-			TLS: &tlsConfig{
-				CertResolver: "letsencrypt",
-			},
+			TLS:         &tlsConfig{},
 		}
 
 		servers := make([]server, len(route.Upstreams))
@@ -228,4 +247,244 @@ func extractDomainFromRule(rule string) string {
 	rule = strings.TrimPrefix(rule, "Host(`")
 	rule = strings.TrimSuffix(rule, "`)")
 	return rule
+}
+
+func UpdateCertificates(certs []Certificate) error {
+	if err := os.MkdirAll(traefikCertsDir, 0700); err != nil {
+		return fmt.Errorf("failed to create certs dir: %w", err)
+	}
+
+	for _, cert := range certs {
+		certPath := filepath.Join(traefikCertsDir, cert.Domain+".crt")
+		keyPath := filepath.Join(traefikCertsDir, cert.Domain+".key")
+
+		if err := atomicWrite(certPath, []byte(cert.Certificate), 0600); err != nil {
+			return fmt.Errorf("failed to write cert for %s: %w", cert.Domain, err)
+		}
+		if err := atomicWrite(keyPath, []byte(cert.CertificateKey), 0600); err != nil {
+			return fmt.Errorf("failed to write key for %s: %w", cert.Domain, err)
+		}
+	}
+
+	return writeTLSConfig(certs)
+}
+
+func writeTLSConfig(certs []Certificate) error {
+	config := tlsFileConfig{
+		TLS: tlsSection{
+			Certificates: make([]certEntry, len(certs)),
+		},
+	}
+
+	for i, cert := range certs {
+		config.TLS.Certificates[i] = certEntry{
+			CertFile: filepath.Join(traefikCertsDir, cert.Domain+".crt"),
+			KeyFile:  filepath.Join(traefikCertsDir, cert.Domain+".key"),
+		}
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal TLS config: %w", err)
+	}
+
+	if err := os.MkdirAll(traefikDynamicDir, 0755); err != nil {
+		return fmt.Errorf("failed to create dynamic config dir: %w", err)
+	}
+
+	tlsPath := filepath.Join(traefikDynamicDir, tlsFileName)
+	if err := atomicWrite(tlsPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write TLS config: %w", err)
+	}
+
+	log.Printf("[traefik] TLS config updated with %d certificates", len(certs))
+	return nil
+}
+
+type middleware struct {
+	RedirectScheme *redirectScheme `yaml:"redirectScheme,omitempty"`
+	StripPrefix    *stripPrefix    `yaml:"stripPrefix,omitempty"`
+	AddPrefix      *addPrefix      `yaml:"addPrefix,omitempty"`
+}
+
+type redirectScheme struct {
+	Scheme    string `yaml:"scheme"`
+	Permanent bool   `yaml:"permanent"`
+}
+
+type stripPrefix struct {
+	Prefixes []string `yaml:"prefixes"`
+}
+
+type addPrefix struct {
+	Prefix string `yaml:"prefix"`
+}
+
+type httpConfigWithMiddlewares struct {
+	Routers     map[string]routerWithMiddleware `yaml:"routers,omitempty"`
+	Services    map[string]service              `yaml:"services,omitempty"`
+	Middlewares map[string]middleware           `yaml:"middlewares,omitempty"`
+}
+
+type routerWithMiddleware struct {
+	Rule        string   `yaml:"rule"`
+	EntryPoints []string `yaml:"entryPoints"`
+	Service     string   `yaml:"service,omitempty"`
+	Priority    int      `yaml:"priority,omitempty"`
+	Middlewares []string `yaml:"middlewares,omitempty"`
+}
+
+type challengeConfig struct {
+	HTTP httpConfigWithMiddlewares `yaml:"http"`
+}
+
+func WriteChallengeRoute(controlPlaneUrl string) error {
+	config := challengeConfig{
+		HTTP: httpConfigWithMiddlewares{
+			Routers: map[string]routerWithMiddleware{
+				"acme_challenge": {
+					Rule:        "PathPrefix(`/.well-known/acme-challenge/`)",
+					EntryPoints: []string{"web"},
+					Service:     "acme_challenge_svc",
+					Middlewares: []string{"acme_strip", "acme_addprefix"},
+					Priority:    9999,
+				},
+				"http_to_https": {
+					Rule:        "HostRegexp(`.*`)",
+					EntryPoints: []string{"web"},
+					Middlewares: []string{"redirect_https"},
+					Service:     "noop@internal",
+					Priority:    1,
+				},
+			},
+			Services: map[string]service{
+				"acme_challenge_svc": {
+					LoadBalancer: loadBalancer{
+						Servers: []server{
+							{URL: controlPlaneUrl},
+						},
+					},
+				},
+			},
+			Middlewares: map[string]middleware{
+				"acme_strip": {
+					StripPrefix: &stripPrefix{
+						Prefixes: []string{"/.well-known/acme-challenge"},
+					},
+				},
+				"acme_addprefix": {
+					AddPrefix: &addPrefix{
+						Prefix: "/api/v1/acme/challenge",
+					},
+				},
+				"redirect_https": {
+					RedirectScheme: &redirectScheme{
+						Scheme:    "https",
+						Permanent: true,
+					},
+				},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal challenge route config: %w", err)
+	}
+
+	if err := os.MkdirAll(traefikDynamicDir, 0755); err != nil {
+		return fmt.Errorf("failed to create dynamic config dir: %w", err)
+	}
+
+	challengePath := filepath.Join(traefikDynamicDir, challengesFileName)
+	if err := atomicWrite(challengePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write challenge route config: %w", err)
+	}
+
+	log.Printf("[traefik] challenge route written pointing to %s", controlPlaneUrl)
+	return nil
+}
+
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func HashCertificates(certs []Certificate) string {
+	sortedCerts := make([]Certificate, len(certs))
+	copy(sortedCerts, certs)
+	sort.Slice(sortedCerts, func(i, j int) bool {
+		return sortedCerts[i].Domain < sortedCerts[j].Domain
+	})
+
+	var sb strings.Builder
+	for _, c := range sortedCerts {
+		sb.WriteString(c.Domain)
+		sb.WriteString(":")
+		h := sha256.Sum256([]byte(c.Certificate + "|" + c.CertificateKey))
+		sb.WriteString(hex.EncodeToString(h[:8]))
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func GetCurrentCertificatesHash() string {
+	certs, err := readCurrentCertificates()
+	if err != nil {
+		log.Printf("[traefik:hash] failed to read certs: %v", err)
+		return ""
+	}
+	return HashCertificates(certs)
+}
+
+func readCurrentCertificates() ([]Certificate, error) {
+	tlsPath := filepath.Join(traefikDynamicDir, tlsFileName)
+	data, err := os.ReadFile(tlsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var config tlsFileConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	var certs []Certificate
+	for _, entry := range config.TLS.Certificates {
+		domain := strings.TrimSuffix(filepath.Base(entry.CertFile), ".crt")
+		certData, err := os.ReadFile(entry.CertFile)
+		if err != nil {
+			log.Printf("[traefik] warning: failed to read cert file %s: %v", entry.CertFile, err)
+			continue
+		}
+		keyData, err := os.ReadFile(entry.KeyFile)
+		if err != nil {
+			log.Printf("[traefik] warning: failed to read key file %s: %v", entry.KeyFile, err)
+			continue
+		}
+		certs = append(certs, Certificate{
+			Domain:         domain,
+			Certificate:    string(certData),
+			CertificateKey: string(keyData),
+		})
+	}
+
+	return certs, nil
+}
+
+func ChallengeRouteExists() bool {
+	challengePath := filepath.Join(traefikDynamicDir, challengesFileName)
+	_, err := os.Stat(challengePath)
+	return err == nil
 }
