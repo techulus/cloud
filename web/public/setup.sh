@@ -415,7 +415,7 @@ EOF
   chmod 600 /etc/traefik/environment
   echo "✓ Traefik environment file created"
 
-  cat > /etc/traefik/traefik.yaml << 'EOF'
+  cat > /etc/traefik/traefik.yaml << EOF
 global:
   checkNewVersion: false
   sendAnonymousUsage: false

@@ -175,16 +175,14 @@ func HashRoutes(routes []TraefikRoute) string {
 	sortedRoutes := make([]TraefikRoute, len(routes))
 	copy(sortedRoutes, routes)
 	sort.Slice(sortedRoutes, func(i, j int) bool {
-		return sortedRoutes[i].ID < sortedRoutes[j].ID
+		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
 	})
 
 	var sb strings.Builder
 	for _, r := range sortedRoutes {
-		sb.WriteString(r.ID)
+		sb.WriteString(r.ServiceId)
 		sb.WriteString(":")
 		sb.WriteString(r.Domain)
-		sb.WriteString(":")
-		sb.WriteString(r.ServiceId)
 		sb.WriteString(":")
 		sortedUpstreams := make([]string, len(r.Upstreams))
 		copy(sortedUpstreams, r.Upstreams)
