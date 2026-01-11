@@ -27,10 +27,6 @@ export const VolumesSection = memo(function VolumesSection({
 
 	const volumes = service.volumes || [];
 
-	const hasRunningDeployments = service.deployments?.some((d) =>
-		["pending", "pulling", "starting", "healthy", "running"].includes(d.status),
-	);
-
 	const handleAdd = async () => {
 		if (!name || !containerPath) return;
 		setIsAdding(true);
@@ -102,12 +98,8 @@ export const VolumesSection = memo(function VolumesSection({
 									variant="ghost"
 									size="icon"
 									onClick={() => handleRemove(volume.id)}
-									disabled={removingId === volume.id || hasRunningDeployments}
-									title={
-										hasRunningDeployments
-											? "Stop service before removing volumes"
-											: "Remove volume"
-									}
+									disabled={removingId === volume.id}
+									title="Remove volume"
 								>
 									<Trash2 className="h-4 w-4" />
 								</Button>
@@ -120,35 +112,27 @@ export const VolumesSection = memo(function VolumesSection({
 					<p className="text-sm text-red-600 dark:text-red-400">{error}</p>
 				)}
 
-				{hasRunningDeployments && (
-					<p className="text-sm text-amber-600 dark:text-amber-400">
-						Stop the service to add or remove volumes
-					</p>
-				)}
-
-				{!hasRunningDeployments && (
-					<div className="flex flex-col sm:flex-row gap-2">
-						<Input
-							placeholder="Volume name (e.g., data)"
-							value={name}
-							onChange={(e) => setName(e.target.value)}
-							className="flex-1"
-						/>
-						<Input
-							placeholder="Container path (e.g., /data)"
-							value={containerPath}
-							onChange={(e) => setContainerPath(e.target.value)}
-							className="flex-1"
-						/>
-						<Button
-							onClick={handleAdd}
-							disabled={isAdding || !name || !containerPath}
-							size="icon"
-						>
-							<Plus className="h-4 w-4" />
-						</Button>
-					</div>
-				)}
+				<div className="flex flex-col sm:flex-row gap-2">
+					<Input
+						placeholder="Volume name (e.g., data)"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						className="flex-1"
+					/>
+					<Input
+						placeholder="Container path (e.g., /data)"
+						value={containerPath}
+						onChange={(e) => setContainerPath(e.target.value)}
+						className="flex-1"
+					/>
+					<Button
+						onClick={handleAdd}
+						disabled={isAdding || !name || !containerPath}
+						size="icon"
+					>
+						<Plus className="h-4 w-4" />
+					</Button>
+				</div>
 			</div>
 		</div>
 	);

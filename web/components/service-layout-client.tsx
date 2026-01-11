@@ -75,10 +75,14 @@ export function ServiceLayoutClient({
 	const isConstrainedTab =
 		pathname.includes("/configuration") || pathname.includes("/builds");
 
+	const hasPublicPorts = service?.ports?.some((p) => p.isPublic);
+
 	const tabs = [
 		{ name: "Architecture", href: basePath },
 		{ name: "Logs", href: `${basePath}/logs` },
-		{ name: "Requests", href: `${basePath}/requests` },
+		...(hasPublicPorts
+			? [{ name: "Requests", href: `${basePath}/requests` }]
+			: []),
 		...(service?.sourceType === "github"
 			? [{ name: "Builds", href: `${basePath}/builds` }]
 			: []),
