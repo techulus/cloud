@@ -302,9 +302,14 @@ func writeTLSConfig(certs []Certificate) error {
 }
 
 type middleware struct {
-	RedirectScheme *redirectScheme `yaml:"redirectScheme,omitempty"`
-	StripPrefix    *stripPrefix    `yaml:"stripPrefix,omitempty"`
-	AddPrefix      *addPrefix      `yaml:"addPrefix,omitempty"`
+	RedirectScheme    *redirectScheme    `yaml:"redirectScheme,omitempty"`
+	StripPrefix       *stripPrefix       `yaml:"stripPrefix,omitempty"`
+	ReplacePathRegex  *replacePathRegex  `yaml:"replacePathRegex,omitempty"`
+}
+
+type replacePathRegex struct {
+	Regex       string `yaml:"regex"`
+	Replacement string `yaml:"replacement"`
 }
 
 type redirectScheme struct {
@@ -346,7 +351,7 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 					Rule:        "PathPrefix(`/.well-known/acme-challenge/`)",
 					EntryPoints: []string{"web"},
 					Service:     "acme_challenge_svc",
-					Middlewares: []string{"acme_strip@file"},
+					Middlewares: []string{"acme_rewrite@file"},
 					Priority:    9999,
 				},
 				"http_to_https": {
@@ -361,15 +366,16 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 				"acme_challenge_svc": {
 					LoadBalancer: loadBalancer{
 						Servers: []server{
-							{URL: controlPlaneUrl + "/api/v1/acme/challenge"},
+							{URL: controlPlaneUrl},
 						},
 					},
 				},
 			},
 			Middlewares: map[string]middleware{
-				"acme_strip": {
-					StripPrefix: &stripPrefix{
-						Prefixes: []string{"/.well-known/acme-challenge"},
+				"acme_rewrite": {
+					ReplacePathRegex: &replacePathRegex{
+						Regex:       "^/.well-known/acme-challenge/(.*)",
+						Replacement: "/api/v1/acme/challenge/$1",
 					},
 				},
 				"redirect_https": {

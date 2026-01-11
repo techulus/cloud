@@ -181,6 +181,13 @@ export async function getChallenge(
 		.from(acmeChallenges)
 		.where(eq(acmeChallenges.token, token));
 
+	console.log(`[getChallenge] token=${token} found=${!!result[0]}`);
+	if (result[0]) {
+		console.log(
+			`[getChallenge] expires_at=${result[0].expiresAt}, now=${new Date()}, valid=${new Date() < result[0].expiresAt}`,
+		);
+	}
+
 	if (!result[0] || new Date() > result[0].expiresAt) {
 		return null;
 	}
