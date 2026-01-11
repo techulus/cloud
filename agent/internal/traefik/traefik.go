@@ -305,6 +305,11 @@ type middleware struct {
 	RedirectScheme    *redirectScheme    `yaml:"redirectScheme,omitempty"`
 	StripPrefix       *stripPrefix       `yaml:"stripPrefix,omitempty"`
 	ReplacePathRegex  *replacePathRegex  `yaml:"replacePathRegex,omitempty"`
+	Headers           *headersMiddleware `yaml:"headers,omitempty"`
+}
+
+type headersMiddleware struct {
+	CustomRequestHeaders map[string]string `yaml:"customRequestHeaders,omitempty"`
 }
 
 type replacePathRegex struct {
@@ -343,6 +348,17 @@ type challengeConfig struct {
 	HTTP httpConfigWithMiddlewares `yaml:"http"`
 }
 
+func controlPlaneHost(controlPlaneUrl string) string {
+	// Extract hostname from URL (e.g., "https://techulus.cloud" -> "techulus.cloud")
+	if strings.HasPrefix(controlPlaneUrl, "https://") {
+		return strings.TrimPrefix(controlPlaneUrl, "https://")
+	}
+	if strings.HasPrefix(controlPlaneUrl, "http://") {
+		return strings.TrimPrefix(controlPlaneUrl, "http://")
+	}
+	return controlPlaneUrl
+}
+
 func WriteChallengeRoute(controlPlaneUrl string) error {
 	config := challengeConfig{
 		HTTP: httpConfigWithMiddlewares{
@@ -351,7 +367,7 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 					Rule:        "PathPrefix(`/.well-known/acme-challenge/`)",
 					EntryPoints: []string{"web"},
 					Service:     "acme_challenge_svc",
-					Middlewares: []string{"acme_rewrite@file"},
+					Middlewares: []string{"acme_rewrite@file", "acme_headers@file"},
 					Priority:    9999,
 				},
 				"http_to_https": {
@@ -376,6 +392,13 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 					ReplacePathRegex: &replacePathRegex{
 						Regex:       "^/.well-known/acme-challenge/(.*)",
 						Replacement: "/api/v1/acme/challenge/$1",
+					},
+				},
+				"acme_headers": {
+					Headers: &headersMiddleware{
+						CustomRequestHeaders: map[string]string{
+							"Host": controlPlaneHost(controlPlaneUrl),
+						},
 					},
 				},
 				"redirect_https": {
