@@ -98,7 +98,6 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"run", "-d",
 		"--name", config.Name,
 		"--restart", "on-failure:5",
-		"--security-opt", "no-new-privileges:true",
 		"--cap-drop", "ALL",
 		"--cap-add", "CHOWN",
 		"--cap-add", "DAC_OVERRIDE",
