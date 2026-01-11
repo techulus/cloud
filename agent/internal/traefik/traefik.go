@@ -346,13 +346,13 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 					Rule:        "PathPrefix(`/.well-known/acme-challenge/`)",
 					EntryPoints: []string{"web"},
 					Service:     "acme_challenge_svc",
-					Middlewares: []string{"acme_strip", "acme_addprefix"},
+					Middlewares: []string{"acme_strip@file"},
 					Priority:    9999,
 				},
 				"http_to_https": {
 					Rule:        "HostRegexp(`.*`)",
 					EntryPoints: []string{"web"},
-					Middlewares: []string{"redirect_https"},
+					Middlewares: []string{"redirect_https@file"},
 					Service:     "noop@internal",
 					Priority:    1,
 				},
@@ -361,7 +361,7 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 				"acme_challenge_svc": {
 					LoadBalancer: loadBalancer{
 						Servers: []server{
-							{URL: controlPlaneUrl},
+							{URL: controlPlaneUrl + "/api/v1/acme/challenge"},
 						},
 					},
 				},
@@ -370,11 +370,6 @@ func WriteChallengeRoute(controlPlaneUrl string) error {
 				"acme_strip": {
 					StripPrefix: &stripPrefix{
 						Prefixes: []string{"/.well-known/acme-challenge"},
-					},
-				},
-				"acme_addprefix": {
-					AddPrefix: &addPrefix{
-						Prefix: "/api/v1/acme/challenge",
 					},
 				},
 				"redirect_https": {
