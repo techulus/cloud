@@ -77,7 +77,6 @@ echo "For non-interactive installation, set these environment variables:"
 echo "  CONTROL_PLANE_URL  (required)"
 echo "  REGISTRATION_TOKEN (required for new installs)"
 echo "  IS_PROXY           (set to 'true' for proxy nodes)"
-echo "  ETCD_ENDPOINT      (required for proxy nodes, e.g., 'http://etcd.example.com:2379')"
 echo "  ACME_EMAIL         (required for proxy nodes)"
 echo "  LOGS_ENDPOINT      (optional)"
 echo ""
@@ -166,15 +165,6 @@ else
 fi
 
 if [ "$IS_PROXY" = "true" ]; then
-  prompt ETCD_ENDPOINT "Enter etcd endpoint (e.g., http://etcd.example.com:2379): " required
-  if [ -z "$ETCD_ENDPOINT" ]; then
-    error "etcd endpoint is required for proxy nodes"
-  fi
-  if [[ ! "$ETCD_ENDPOINT" =~ ^https?:// ]]; then
-    ETCD_ENDPOINT="http://${ETCD_ENDPOINT}"
-  fi
-  echo "✓ etcd Endpoint: $ETCD_ENDPOINT"
-
   prompt ACME_EMAIL "Enter email for Let's Encrypt certificates: " required
   if [ -z "$ACME_EMAIL" ]; then
     error "ACME email is required for proxy nodes"
@@ -198,32 +188,11 @@ if [ -n "$LOGS_ENDPOINT" ]; then
   echo "✓ Logs endpoint is reachable"
 fi
 
-if [ "$IS_PROXY" = "true" ] && [ -n "$ETCD_ENDPOINT" ]; then
-  ETCD_URL_NO_SCHEME="${ETCD_ENDPOINT#http://}"
-  ETCD_URL_NO_SCHEME="${ETCD_URL_NO_SCHEME#https://}"
-  ETCD_HOST=$(echo "$ETCD_URL_NO_SCHEME" | cut -d: -f1)
-  ETCD_PORT=$(echo "$ETCD_URL_NO_SCHEME" | cut -d: -f2)
-  if [ -z "$ETCD_PORT" ] || [ "$ETCD_PORT" = "$ETCD_HOST" ]; then
-    ETCD_PORT="2379"
-  fi
-  if command -v nc &>/dev/null; then
-    if ! nc -z -w5 "$ETCD_HOST" "$ETCD_PORT" 2>/dev/null; then
-      error "Cannot reach etcd at $ETCD_ENDPOINT. Traefik requires etcd for certificate storage. Please ensure etcd is running and accessible."
-    fi
-  else
-    if ! timeout 5 bash -c "echo >/dev/tcp/$ETCD_HOST/$ETCD_PORT" 2>/dev/null; then
-      error "Cannot reach etcd at $ETCD_ENDPOINT. Traefik requires etcd for certificate storage. Please ensure etcd is running and accessible."
-    fi
-  fi
-  echo "✓ etcd endpoint is reachable"
-fi
-
 echo ""
 echo "Configuration summary:"
 echo "  Control Plane URL: $CONTROL_PLANE_URL"
 echo "  Proxy Mode:        $IS_PROXY"
 if [ "$IS_PROXY" = "true" ]; then
-  echo "  etcd Endpoint:     $ETCD_ENDPOINT"
   echo "  ACME Email:        $ACME_EMAIL"
 fi
 echo "  Logs Endpoint:     ${LOGS_ENDPOINT:-disabled}"
@@ -409,7 +378,6 @@ if [ "$IS_PROXY" = "true" ]; then
   echo "✓ Traefik directories created"
 
   cat > /etc/traefik/environment << EOF
-ETCD_ENDPOINT=${ETCD_ENDPOINT}
 ACME_EMAIL=${ACME_EMAIL}
 EOF
   chmod 600 /etc/traefik/environment
@@ -460,15 +428,10 @@ certificatesResolvers:
   letsencrypt:
     acme:
       email: "${ACME_EMAIL}"
-      storage: "etcd"
+      storage: "/etc/traefik/acme.json"
       caServer: "https://acme-v02.api.letsencrypt.org/directory"
       httpChallenge:
         entryPoint: web
-
-etcd:
-  endpoints:
-    - "${ETCD_ENDPOINT}"
-  rootKey: "traefik"
 EOF
   if [ ! -f /etc/traefik/traefik.yaml ]; then
     error "Failed to create Traefik config"

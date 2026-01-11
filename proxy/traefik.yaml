@@ -42,12 +42,7 @@ certificatesResolvers:
   letsencrypt:
     acme:
       email: "${ACME_EMAIL}"
-      storage: "etcd"
+      storage: "/etc/traefik/acme.json"
       caServer: "https://acme-v02.api.letsencrypt.org/directory"
       httpChallenge:
         entryPoint: web
-
-etcd:
-  endpoints:
-    - "${ETCD_ENDPOINT}"
-  rootKey: "traefik"
