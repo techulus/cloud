@@ -29,10 +29,15 @@ func CheckPrerequisites() error {
 	return nil
 }
 
+type Upstream struct {
+	URL    string
+	Weight int
+}
+
 type TraefikRoute struct {
 	ID        string
 	Domain    string
-	Upstreams []string
+	Upstreams []Upstream
 	ServiceId string
 }
 
@@ -83,7 +88,8 @@ type loadBalancer struct {
 }
 
 type server struct {
-	URL string `yaml:"url"`
+	URL    string `yaml:"url"`
+	Weight *int   `yaml:"weight,omitempty"`
 }
 
 func UpdateTraefikRoutes(routes []TraefikRoute) error {
@@ -108,7 +114,11 @@ func UpdateTraefikRoutes(routes []TraefikRoute) error {
 
 		servers := make([]server, len(route.Upstreams))
 		for i, upstream := range route.Upstreams {
-			servers[i] = server{URL: fmt.Sprintf("http://%s", upstream)}
+			srv := server{URL: fmt.Sprintf("http://%s", upstream.URL)}
+			if upstream.Weight > 0 {
+				srv.Weight = &upstream.Weight
+			}
+			servers[i] = srv
 		}
 
 		config.HTTP.Services[route.ServiceId] = service{
@@ -203,10 +213,18 @@ func HashRoutes(routes []TraefikRoute) string {
 		sb.WriteString(":")
 		sb.WriteString(r.Domain)
 		sb.WriteString(":")
-		sortedUpstreams := make([]string, len(r.Upstreams))
+		// Sort upstreams by URL for consistent hashing
+		sortedUpstreams := make([]Upstream, len(r.Upstreams))
 		copy(sortedUpstreams, r.Upstreams)
-		sort.Strings(sortedUpstreams)
-		sb.WriteString(strings.Join(sortedUpstreams, ","))
+		sort.Slice(sortedUpstreams, func(i, j int) bool {
+			return sortedUpstreams[i].URL < sortedUpstreams[j].URL
+		})
+		for _, u := range sortedUpstreams {
+			sb.WriteString(u.URL)
+			sb.WriteString("@")
+			sb.WriteString(fmt.Sprintf("%d", u.Weight))
+			sb.WriteString(",")
+		}
 		sb.WriteString("|")
 	}
 	hash := sha256.Sum256([]byte(sb.String()))
@@ -224,11 +242,18 @@ func GetCurrentConfigHash() string {
 	for serviceId, router := range config.HTTP.Routers {
 		domain := extractDomainFromRule(router.Rule)
 
-		var upstreams []string
+		var upstreams []Upstream
 		if svc, exists := config.HTTP.Services[serviceId]; exists {
 			for _, server := range svc.LoadBalancer.Servers {
-				upstream := strings.TrimPrefix(server.URL, "http://")
-				upstreams = append(upstreams, upstream)
+				url := strings.TrimPrefix(server.URL, "http://")
+				weight := 1 // default weight
+				if server.Weight != nil {
+					weight = *server.Weight
+				}
+				upstreams = append(upstreams, Upstream{
+					URL:    url,
+					Weight: weight,
+				})
 			}
 		}
 

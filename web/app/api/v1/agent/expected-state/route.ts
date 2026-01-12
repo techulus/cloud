@@ -171,7 +171,10 @@ export async function GET(request: NextRequest) {
 			for (const port of ports) {
 				if (port.isPublic && port.domain) {
 					const routableDeployments = await db
-						.select({ ipAddress: deployments.ipAddress })
+						.select({ 
+							ipAddress: deployments.ipAddress,
+							serverId: deployments.serverId,
+						})
 						.from(deployments)
 						.where(
 							and(
@@ -180,9 +183,24 @@ export async function GET(request: NextRequest) {
 							),
 						);
 
-					const upstreams = routableDeployments
-						.filter((d) => d.ipAddress)
-						.map((d) => `${d.ipAddress}:${port.port}`);
+					// Prioritize local replicas (on same proxy server) first for proximity steering
+					const localDeployments = routableDeployments.filter(
+						(d) => d.serverId === serverId && d.ipAddress
+					);
+					const remoteDeployments = routableDeployments.filter(
+						(d) => d.serverId !== serverId && d.ipAddress
+					);
+
+					const upstreams = [
+						...localDeployments.map((d) => ({
+							url: `${d.ipAddress}:${port.port}`,
+							weight: 5,
+						})),
+						...remoteDeployments.map((d) => ({
+							url: `${d.ipAddress}:${port.port}`,
+							weight: 1,
+						})),
+					];
 
 					if (upstreams.length > 0) {
 						traefikRoutes.push({

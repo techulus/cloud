@@ -66,6 +66,18 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
+func convertToTraefikRoutes(routes []agenthttp.TraefikRoute) []traefik.TraefikRoute {
+	traefikRoutes := make([]traefik.TraefikRoute, len(routes))
+	for i, r := range routes {
+		upstreams := make([]traefik.Upstream, len(r.Upstreams))
+		for j, u := range r.Upstreams {
+			upstreams[j] = traefik.Upstream{URL: u.Url, Weight: u.Weight}
+		}
+		traefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: upstreams, ServiceId: r.ServiceId}
+	}
+	return traefikRoutes
+}
+
 type Config struct {
 	ServerID      string `json:"serverId"`
 	SubnetID      int    `json:"subnetId"`
@@ -314,10 +326,7 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(expected.Traefik.Routes))
-		for i, r := range expected.Traefik.Routes {
-			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-		}
+		expectedTraefikRoutes := convertToTraefikRoutes(expected.Traefik.Routes)
 		expectedTraefikHash := traefik.HashRoutes(expectedTraefikRoutes)
 		if expectedTraefikHash != actual.TraefikConfigHash {
 			changes = append(changes, fmt.Sprintf("UPDATE Traefik (%d routes)", len(expected.Traefik.Routes)))
@@ -419,10 +428,7 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(expected.Traefik.Routes))
-		for i, r := range expected.Traefik.Routes {
-			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-		}
+		expectedTraefikRoutes := convertToTraefikRoutes(expected.Traefik.Routes)
 		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
 			return true
 		}
@@ -619,10 +625,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := make([]traefik.TraefikRoute, len(a.expectedState.Traefik.Routes))
-		for i, r := range a.expectedState.Traefik.Routes {
-			expectedTraefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: r.Upstreams, ServiceId: r.ServiceId}
-		}
+		expectedTraefikRoutes := convertToTraefikRoutes(a.expectedState.Traefik.Routes)
 		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
 			log.Printf("[reconcile] updating Traefik routes")
 			if err := traefik.UpdateTraefikRoutes(expectedTraefikRoutes); err != nil {

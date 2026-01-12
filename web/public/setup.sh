@@ -239,7 +239,7 @@ echo "✓ Podman verified"
 
 if [ "$IS_PROXY" = "true" ]; then
   step "Installing Traefik (proxy mode)..."
-  TRAEFIK_VERSION="v3.2.3"
+  TRAEFIK_VERSION="v3.6.6"
   if [ -x /usr/local/bin/traefik ]; then
     echo "Traefik already installed, skipping"
   else

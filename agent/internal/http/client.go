@@ -82,11 +82,16 @@ type DnsRecord struct {
 	Ips  []string `json:"ips"`
 }
 
+type Upstream struct {
+	Url    string `json:"url"`
+	Weight int    `json:"weight"`
+}
+
 type TraefikRoute struct {
-	ID        string   `json:"id"`
-	Domain    string   `json:"domain"`
-	Upstreams []string `json:"upstreams"`
-	ServiceId string   `json:"serviceId"`
+	ID        string     `json:"id"`
+	Domain    string     `json:"domain"`
+	Upstreams []Upstream `json:"upstreams"`
+	ServiceId string     `json:"serviceId"`
 }
 
 type Certificate struct {

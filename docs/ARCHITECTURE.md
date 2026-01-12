@@ -207,13 +207,69 @@ Services resolve via `.internal` domain with round-robin across replicas.
 
 ### Traefik (Proxy Nodes Only)
 
-Proxy nodes run Traefik with routes pushed from control plane:
-- Uses HTTP-01 ACME challenge for automatic TLS via Let's Encrypt
-- Routes configured via file provider in `/etc/traefik/dynamic/`
+Proxy nodes run Traefik with routes and certificates pushed from control plane:
+- Routes configured via file provider in `/etc/traefik/dynamic/routes.yaml`
+- Certificates configured via file provider in `/etc/traefik/dynamic/tls.yaml`
 - Routes: `subdomain.example.com` → container IPs (via WireGuard mesh)
-- Control plane only sends routes to proxy nodes
+- TLS: Static certificates managed by control plane
+- Challenge route: `/.well-known/acme-challenge/*` → control plane for ACME validation
+- Control plane only sends routes and certificates to proxy nodes
 
 Worker nodes do not run Traefik.
+
+### Multiple Proxy Nodes (Geographic Distribution)
+
+The platform supports multiple proxy nodes in different regions:
+- All proxy nodes share the same public IP (via load balancer or Cloudflare)
+- Users point custom domains to this single IP (via A record or CNAME)
+- Traffic automatically routes through nearest proxy (Cloudflare geo-steering or DNS failover)
+
+Example:
+```
+Proxy US:   1.2.3.4
+Proxy EU:   5.6.7.8
+Proxy SYD:  9.10.11.12
+
+Load Balancer (Cloudflare):
+  example.com → points to lb.techulus.cloud
+  → Cloudflare steers to nearest proxy based on client geography
+  → Returns 1.2.3.4, 5.6.7.8, or 9.10.11.12 based on location
+
+All proxies share same TLS certificates (synced from control plane)
+```
+
+ACME challenges work seamlessly because:
+- Let's Encrypt validates the domain via single IP
+- Challenge hits any proxy node (they're all interchangeable)
+- All proxies have identical certificates
+- If one proxy goes down, others already have the cert
+
+### ACME Certificate Management (Centralized)
+
+Instead of each proxy managing its own ACME certificates, the control plane handles all certificate lifecycle:
+
+**Challenge Flow:**
+1. Control plane initiates ACME renewal for expiring certificates
+2. Let's Encrypt requests validation: `GET http://domain/.well-known/acme-challenge/{token}`
+3. Request hits load balancer → any proxy node (all behind same IP)
+4. Traefik matches `PathPrefix(/.well-known/acme-challenge/)` → special challenge route
+5. Challenge route (via middleware) rewrites path to `/api/v1/acme/challenge/{token}`
+6. Traefik forwards to control plane: `https://control-plane.internal/api/v1/acme/challenge/{token}`
+7. Control plane returns keyAuthorization from database
+8. Let's Encrypt validates and issues certificate
+
+**Certificate Sync:**
+1. Certificate issued and stored in `domain_certificates` table
+2. Control plane includes certificates in expected state API response (proxy nodes only)
+3. Agent receives certificates, writes to `/etc/traefik/certs/{domain}.crt` and `.key`
+4. Agent updates `/etc/traefik/dynamic/tls.yaml` with certificate paths
+5. Traefik reloads and serves TLS with new certificates
+
+**Renewal:**
+- Cron job checks daily for certificates expiring in 30 days
+- Triggers ACME renewal via acme-client library
+- Challenge responses served through any proxy node
+- New certificates synced to all proxies within agent poll cycle (10 seconds)
 
 ### Traffic Flows
 
@@ -226,12 +282,24 @@ Container A (10.200.1.2)
   → Container B (10.200.2.3)
 ```
 
-**External (public):**
+**External (public) - Custom Domain:**
 ```
-Internet → DNS → Proxy Node public IP
-  → Traefik: app.example.com → 10.200.1.2:80
-  → WireGuard tunnel to Worker Node
+User domain: example.com (points to proxy IP via A record or CNAME)
+  → Internet → Proxy Node public IP
+  → Traefik: example.com → 10.200.1.2:80 (TLS terminated)
+  → WireGuard tunnel to target node
   → Container (10.200.1.2)
+```
+
+**ACME Challenge (Let's Encrypt validation):**
+```
+Let's Encrypt → HTTP request to example.com/.well-known/acme-challenge/{token}
+  → Proxy Node (any of them, all same IP)
+  → Traefik matches challenge route (priority 9999)
+  → Middleware rewrites path to /api/v1/acme/challenge/{token}
+  → Traefik backend: control plane HTTPS
+  → Returns keyAuthorization
+  → Let's Encrypt validates
 ```
 
 ## Components
@@ -243,13 +311,19 @@ Internet → DNS → Proxy Node public IP
 - Project and service configuration
 - WireGuard coordination (assigns subnets, broadcasts peer updates)
 - Deployment orchestration (rollouts)
+- Certificate lifecycle management (issuance, renewal, sync)
 - Serves expected state to agents
 - Processes status reports from agents
 - Advances rollout stages based on deployment status
 
 **API Endpoints:**
-- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Traefik (proxy only), WireGuard config
+- `GET /api/v1/agent/expected-state` - Returns containers, DNS, Traefik (proxy only), WireGuard, certificates config
 - `POST /api/v1/agent/status` - Receives container status, advances rollout stages
+- `GET /api/v1/acme/challenge/{token}` - Returns ACME challenge keyAuthorization for Let's Encrypt validation
+
+**Background Jobs (Cron):**
+- Every 24h: Check for certificates expiring in 30 days, trigger ACME renewal
+- Every 10m: Clean up expired ACME challenge tokens from database
 
 ### 2. Server Agent (Go)
 
@@ -258,6 +332,7 @@ Internet → DNS → Proxy Node public IP
 - Manages containers via Podman with static IPs
 - Manages local WireGuard interface
 - Updates Traefik routes via file provider (proxy nodes only)
+- Syncs TLS certificates to disk (proxy nodes only)
 - Updates DNS records
 - Reports status (resources, public IP, container health)
 
