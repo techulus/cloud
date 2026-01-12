@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
 			for (const port of ports) {
 				if (port.isPublic && port.domain) {
 					const routableDeployments = await db
-						.select({ 
+						.select({
 							ipAddress: deployments.ipAddress,
 							serverId: deployments.serverId,
 						})
@@ -185,10 +185,10 @@ export async function GET(request: NextRequest) {
 
 					// Prioritize local replicas (on same proxy server) first for proximity steering
 					const localDeployments = routableDeployments.filter(
-						(d) => d.serverId === serverId && d.ipAddress
+						(d) => d.serverId === serverId && d.ipAddress,
 					);
 					const remoteDeployments = routableDeployments.filter(
-						(d) => d.serverId !== serverId && d.ipAddress
+						(d) => d.serverId !== serverId && d.ipAddress,
 					);
 
 					const upstreams = [

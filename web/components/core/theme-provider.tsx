@@ -1,5 +1,6 @@
 "use client";
 
+import { ProgressProvider } from "@bprogress/next/app";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -10,7 +11,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 			enableSystem
 			storageKey=""
 		>
-			{children}
+			<ProgressProvider
+				height="3px"
+				color="#4f7df3"
+				options={{ showSpinner: false }}
+			>
+				{children}
+			</ProgressProvider>
 		</NextThemesProvider>
 	);
 }

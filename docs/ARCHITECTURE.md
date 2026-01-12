@@ -219,10 +219,11 @@ Worker nodes do not run Traefik.
 
 ### Multiple Proxy Nodes (Geographic Distribution)
 
-The platform supports multiple proxy nodes in different regions:
-- All proxy nodes share the same public IP (via load balancer or Cloudflare)
-- Users point custom domains to this single IP (via A record or CNAME)
-- Traffic automatically routes through nearest proxy (Cloudflare geo-steering or DNS failover)
+The platform supports multiple proxy nodes in different regions with automatic proximity steering:
+- Users point custom domains to a single DNS name via GeoDNS (BunnyDNS)
+- BunnyDNS routes clients to geographically nearest proxy based on their location
+- BunnyDNS health checks automatically failover if a proxy goes down
+- All proxies share the same TLS certificates (synced from control plane)
 
 Example:
 ```
@@ -230,19 +231,45 @@ Proxy US:   1.2.3.4
 Proxy EU:   5.6.7.8
 Proxy SYD:  9.10.11.12
 
-Load Balancer (Cloudflare):
-  example.com → points to lb.techulus.cloud
-  → Cloudflare steers to nearest proxy based on client geography
-  → Returns 1.2.3.4, 5.6.7.8, or 9.10.11.12 based on location
+GeoDNS (BunnyDNS):
+  example.com → lb.techulus.cloud
+  → BunnyDNS steers to nearest proxy based on client geography
+  → Returns 1.2.3.4 (US), 5.6.7.8 (EU), or 9.10.11.12 (SYD)
+  → Health checks: exclude proxy if down, failover to next nearest
 
 All proxies share same TLS certificates (synced from control plane)
 ```
 
 ACME challenges work seamlessly because:
-- Let's Encrypt validates the domain via single IP
+- Let's Encrypt validates the domain via single IP (any proxy)
 - Challenge hits any proxy node (they're all interchangeable)
 - All proxies have identical certificates
 - If one proxy goes down, others already have the cert
+
+### Proximity-Aware Load Balancing
+
+Within a proxy node, traffic is distributed to replicas using weighted round-robin:
+
+**Replica Selection Priority:**
+1. **Local replicas** (on same proxy server) - weight 5
+2. **Remote replicas** (on other proxy servers) - weight 1
+
+This means if a service has 1 local replica and 1 remote replica, the local replica receives ~83% of traffic.
+
+**Traffic Flow:**
+```
+User (US) 
+  → GeoDNS: nearest proxy = US (1.2.3.4)
+  → Traefik: weighted round-robin
+    - Local replicas (weight 5) ← 83% of traffic
+    - Remote replicas (weight 1) ← 17% of traffic (failover)
+  → Container
+```
+
+Benefits:
+- **Low latency**: Requests stay on same proxy when possible
+- **Failover**: If local replica fails, automatically uses remote
+- **Cost-effective**: Minimizes cross-region traffic
 
 ### ACME Certificate Management (Centralized)
 
