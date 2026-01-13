@@ -836,48 +836,72 @@ func GetCurrentL4ConfigHash() string {
 		return ""
 	}
 
-	var sb strings.Builder
+	var tcpRoutes []TraefikTCPRoute
+	for routerName, router := range config.TCP.Routers {
+		var externalPort int
+		var serviceId string
+		fmt.Sscanf(routerName, "tcp_%s_%d", &serviceId, &externalPort)
 
-	var tcpKeys []string
-	for k := range config.TCP.Routers {
-		tcpKeys = append(tcpKeys, k)
-	}
-	sort.Strings(tcpKeys)
-	for _, k := range tcpKeys {
-		router := config.TCP.Routers[k]
-		sb.WriteString(k)
-		sb.WriteString(":")
-		if svc, exists := config.TCP.Services[k]; exists {
+		for _, ep := range router.EntryPoints {
+			fmt.Sscanf(ep, "tcp-%d", &externalPort)
+		}
+
+		parts := strings.Split(routerName, "_")
+		if len(parts) >= 2 {
+			serviceId = parts[1]
+		}
+
+		var upstreams []string
+		if svc, exists := config.TCP.Services[routerName]; exists {
 			for _, s := range svc.LoadBalancer.Servers {
-				sb.WriteString(s.Address)
-				sb.WriteString(",")
+				upstreams = append(upstreams, s.Address)
 			}
 		}
+
+		tlsPassthrough := false
 		if router.TLS != nil {
-			sb.WriteString(fmt.Sprintf("tls:%t", router.TLS.Passthrough))
+			tlsPassthrough = router.TLS.Passthrough
 		}
-		sb.WriteString("|")
+
+		tcpRoutes = append(tcpRoutes, TraefikTCPRoute{
+			ID:             routerName,
+			ServiceId:      serviceId,
+			Upstreams:      upstreams,
+			ExternalPort:   externalPort,
+			TLSPassthrough: tlsPassthrough,
+		})
 	}
 
-	var udpKeys []string
-	for k := range config.UDP.Routers {
-		udpKeys = append(udpKeys, k)
-	}
-	sort.Strings(udpKeys)
-	for _, k := range udpKeys {
-		sb.WriteString(k)
-		sb.WriteString(":")
-		if svc, exists := config.UDP.Services[k]; exists {
+	var udpRoutes []TraefikUDPRoute
+	for routerName, router := range config.UDP.Routers {
+		var externalPort int
+		var serviceId string
+
+		for _, ep := range router.EntryPoints {
+			fmt.Sscanf(ep, "udp-%d", &externalPort)
+		}
+
+		parts := strings.Split(routerName, "_")
+		if len(parts) >= 2 {
+			serviceId = parts[1]
+		}
+
+		var upstreams []string
+		if svc, exists := config.UDP.Services[routerName]; exists {
 			for _, s := range svc.LoadBalancer.Servers {
-				sb.WriteString(s.Address)
-				sb.WriteString(",")
+				upstreams = append(upstreams, s.Address)
 			}
 		}
-		sb.WriteString("|")
+
+		udpRoutes = append(udpRoutes, TraefikUDPRoute{
+			ID:           routerName,
+			ServiceId:    serviceId,
+			Upstreams:    upstreams,
+			ExternalPort: externalPort,
+		})
 	}
 
-	hash := sha256.Sum256([]byte(sb.String()))
-	return hex.EncodeToString(hash[:])
+	return HashTCPRoutes(tcpRoutes) + HashUDPRoutes(udpRoutes)
 }
 
 func readCurrentFullConfig() (*traefikFullConfig, error) {
