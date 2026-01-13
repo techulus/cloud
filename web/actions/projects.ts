@@ -29,6 +29,7 @@ import { slugify } from "@/lib/utils";
 import { getEnvironment, getService } from "@/db/queries";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
+import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
 
 function parseImageReference(image: string): {
@@ -1030,42 +1031,60 @@ export async function updateServiceConfig(
 				.where(eq(servicePorts.serviceId, serviceId));
 
 			for (const port of config.ports.add) {
-				if (existing.some((p) => p.port === port.port)) {
-					throw new Error(`Port ${port.port} already exists`);
+				const protocol = port.protocol || "http";
+
+				if (existing.some((p) => p.port === port.port && p.protocol === protocol)) {
+					throw new Error(`Port ${port.port} (${protocol}) already exists`);
 				}
 
 				if (port.isPublic) {
-					if (!port.domain) {
-						throw new Error("Domain is required for public ports");
+					if (protocol === "http") {
+						if (!port.domain) {
+							throw new Error("Domain is required for public HTTP ports");
+						}
+
+						const domain = port.domain.trim().toLowerCase();
+						if (!domain) {
+							throw new Error("Invalid domain");
+						}
+
+						const existingDomain = await db
+							.select()
+							.from(servicePorts)
+							.where(eq(servicePorts.domain, domain));
+
+						if (existingDomain.length > 0) {
+							throw new Error("Domain already in use");
+						}
+
+						await db.insert(servicePorts).values({
+							id: randomUUID(),
+							serviceId,
+							port: port.port,
+							isPublic: true,
+							domain,
+							protocol: "http",
+						});
+					} else if (protocol === "tcp" || protocol === "udp") {
+						const externalPort = await allocatePort(protocol);
+
+						await db.insert(servicePorts).values({
+							id: randomUUID(),
+							serviceId,
+							port: port.port,
+							isPublic: true,
+							protocol,
+							externalPort,
+							tlsPassthrough: port.tlsPassthrough ?? false,
+						});
 					}
-
-					const domain = port.domain.trim().toLowerCase();
-					if (!domain) {
-						throw new Error("Invalid domain");
-					}
-
-					const existingDomain = await db
-						.select()
-						.from(servicePorts)
-						.where(eq(servicePorts.domain, domain));
-
-					if (existingDomain.length > 0) {
-						throw new Error("Domain already in use");
-					}
-
-					await db.insert(servicePorts).values({
-						id: randomUUID(),
-						serviceId,
-						port: port.port,
-						isPublic: true,
-						domain,
-					});
 				} else {
 					await db.insert(servicePorts).values({
 						id: randomUUID(),
 						serviceId,
 						port: port.port,
 						isPublic: false,
+						protocol,
 					});
 				}
 			}

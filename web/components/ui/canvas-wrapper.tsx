@@ -35,9 +35,9 @@ const statusColorMap: Record<string, StatusColors> = {
 		text: "text-amber-600 dark:text-amber-400",
 	},
 	stopped: {
-		bg: "bg-zinc-500/5",
+		bg: "bg-slate-500/5",
 		border: "border-zinc-400/30",
-		dot: "bg-zinc-400",
+		dot: "bg-slate-400",
 		text: "text-zinc-500",
 	},
 	failed: {
@@ -55,9 +55,9 @@ const statusColorMap: Record<string, StatusColors> = {
 };
 
 const defaultColors: StatusColors = {
-	bg: "bg-zinc-500/5",
+	bg: "bg-slate-500/5",
 	border: "border-zinc-300/50 dark:border-zinc-700/50",
-	dot: "bg-zinc-300 dark:bg-zinc-600",
+	dot: "bg-slate-300 dark:bg-slate-600",
 	text: "text-zinc-400",
 };
 
@@ -105,7 +105,7 @@ const healthColorMap: Record<string, HealthColors> = {
 };
 
 const defaultHealthColors: HealthColors = {
-	dot: "bg-zinc-400",
+	dot: "bg-slate-400",
 	text: "text-zinc-500",
 };
 
@@ -133,7 +133,7 @@ export function CanvasWrapper({
 			<div
 				className={cn(
 					"rounded-xl border border-zinc-200 dark:border-zinc-800",
-					"bg-zinc-50 dark:bg-zinc-900/50",
+					"bg-slate-50 dark:bg-slate-900/50",
 					"flex items-center justify-center",
 					className,
 				)}
@@ -152,7 +152,7 @@ export function CanvasWrapper({
 		<div
 			className={cn(
 				"p-6 rounded-xl border border-zinc-200 dark:border-zinc-800",
-				"bg-zinc-50/50 dark:bg-zinc-900/30",
+				"bg-slate-50/50 dark:bg-slate-900/30",
 				"overflow-auto",
 				className,
 			)}

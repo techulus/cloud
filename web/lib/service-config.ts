@@ -8,6 +8,8 @@ export type PortConfig = {
 	port: number;
 	isPublic: boolean;
 	domain: string | null;
+	protocol?: "http" | "tcp" | "udp";
+	tlsPassthrough?: boolean;
 };
 
 export type HealthCheckConfig = {

@@ -221,6 +221,11 @@ export const servicePorts = pgTable("service_ports", {
 	port: integer("port").notNull(),
 	isPublic: boolean("is_public").notNull().default(false),
 	domain: text("domain").unique(),
+	protocol: text("protocol", { enum: ["http", "tcp", "udp"] })
+		.notNull()
+		.default("http"),
+	externalPort: integer("external_port"),
+	tlsPassthrough: boolean("tls_passthrough").notNull().default(false),
 	createdAt: timestamp("created_at", { withTimezone: true })
 		.defaultNow()
 		.notNull(),

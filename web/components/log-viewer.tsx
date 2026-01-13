@@ -70,7 +70,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 	error: "text-red-500 bg-red-500/10",
 	warn: "text-yellow-500 bg-yellow-500/10",
 	info: "text-blue-500 bg-blue-500/10",
-	debug: "text-zinc-500 bg-zinc-500/10",
+	debug: "text-slate-500 bg-slate-500/10",
 };
 
 const STATUS_COLORS: Record<StatusCategory, string> = {
@@ -207,7 +207,7 @@ function ServiceLogsFilters({
 													? "bg-yellow-500"
 													: level === "info"
 														? "bg-blue-500"
-														: "bg-zinc-500"
+														: "bg-slate-500"
 										}`}
 									/>
 									{level.charAt(0).toUpperCase() + level.slice(1)}
@@ -469,7 +469,7 @@ function ServiceLogRow({
 				className={`shrink-0 px-1 rounded text-[10px] mr-2 ${
 					entry.stream === "stderr"
 						? "text-red-600 dark:text-red-400 bg-red-500/10"
-						: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10"
+						: "text-slate-600 dark:text-slate-400 bg-slate-500/10"
 				}`}
 			>
 				{entry.stream}
@@ -767,10 +767,8 @@ export function LogViewer(props: LogViewerProps) {
 	}, [props.variant]);
 
 	return (
-		<div
-			className={`flex flex-col ${config.height} bg-zinc-100 dark:bg-zinc-950 rounded-md border`}
-		>
-			<div className="flex flex-wrap items-center gap-2 p-2 border-b bg-zinc-50 dark:bg-zinc-900 rounded-t-md">
+		<div className={`flex flex-col ${config.height} rounded-md border`}>
+			<div className="flex flex-wrap items-center gap-2 p-2 border-b rounded-t-md">
 				<div className="relative flex-1 min-w-50">
 					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
 					<Input

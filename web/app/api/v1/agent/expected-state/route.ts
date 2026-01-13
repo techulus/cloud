@@ -159,7 +159,25 @@ export async function GET(request: NextRequest) {
 		}
 	}
 
-	const traefikRoutes = [];
+	const httpRoutes: Array<{
+		id: string;
+		domain: string;
+		upstreams: Array<{ url: string; weight: number }>;
+		serviceId: string;
+	}> = [];
+	const tcpRoutes: Array<{
+		id: string;
+		serviceId: string;
+		upstreams: string[];
+		externalPort: number;
+		tlsPassthrough: boolean;
+	}> = [];
+	const udpRoutes: Array<{
+		id: string;
+		serviceId: string;
+		upstreams: string[];
+		externalPort: number;
+	}> = [];
 
 	if (server.isProxy) {
 		for (const service of allServices) {
@@ -169,21 +187,20 @@ export async function GET(request: NextRequest) {
 				.where(eq(servicePorts.serviceId, service.id));
 
 			for (const port of ports) {
-				if (port.isPublic && port.domain) {
-					const routableDeployments = await db
-						.select({
-							ipAddress: deployments.ipAddress,
-							serverId: deployments.serverId,
-						})
-						.from(deployments)
-						.where(
-							and(
-								eq(deployments.serviceId, service.id),
-								inArray(deployments.status, [...ROUTABLE_STATUSES]),
-							),
-						);
+				const routableDeployments = await db
+					.select({
+						ipAddress: deployments.ipAddress,
+						serverId: deployments.serverId,
+					})
+					.from(deployments)
+					.where(
+						and(
+							eq(deployments.serviceId, service.id),
+							inArray(deployments.status, [...ROUTABLE_STATUSES]),
+						),
+					);
 
-					// Prioritize local replicas (on same proxy server) first for proximity steering
+				if (port.isPublic && port.protocol === "http" && port.domain) {
 					const localDeployments = routableDeployments.filter(
 						(d) => d.serverId === serverId && d.ipAddress,
 					);
@@ -203,11 +220,38 @@ export async function GET(request: NextRequest) {
 					];
 
 					if (upstreams.length > 0) {
-						traefikRoutes.push({
+						httpRoutes.push({
 							id: port.domain,
 							domain: port.domain,
 							upstreams,
 							serviceId: service.id,
+						});
+					}
+				} else if (port.isPublic && port.protocol === "tcp" && port.externalPort) {
+					const upstreams = routableDeployments
+						.filter((d) => d.ipAddress)
+						.map((d) => `${d.ipAddress}:${port.port}`);
+
+					if (upstreams.length > 0) {
+						tcpRoutes.push({
+							id: `tcp-${service.id}-${port.port}`,
+							serviceId: service.id,
+							upstreams,
+							externalPort: port.externalPort,
+							tlsPassthrough: port.tlsPassthrough,
+						});
+					}
+				} else if (port.isPublic && port.protocol === "udp" && port.externalPort) {
+					const upstreams = routableDeployments
+						.filter((d) => d.ipAddress)
+						.map((d) => `${d.ipAddress}:${port.port}`);
+
+					if (upstreams.length > 0) {
+						udpRoutes.push({
+							id: `udp-${service.id}-${port.port}`,
+							serviceId: service.id,
+							upstreams,
+							externalPort: port.externalPort,
 						});
 					}
 				}
@@ -218,7 +262,9 @@ export async function GET(request: NextRequest) {
 	const wireguardPeers = await getWireGuardPeers(serverId, server.privateIp);
 
 	let traefikConfig: {
-		routes: typeof traefikRoutes;
+		httpRoutes: typeof httpRoutes;
+		tcpRoutes: typeof tcpRoutes;
+		udpRoutes: typeof udpRoutes;
 		certificates?: Array<{
 			domain: string;
 			certificate: string;
@@ -227,10 +273,10 @@ export async function GET(request: NextRequest) {
 		challengeRoute?: {
 			controlPlaneUrl: string;
 		};
-	} = { routes: traefikRoutes };
+	} = { httpRoutes, tcpRoutes, udpRoutes };
 
 	if (server.isProxy) {
-		const routedDomains = traefikRoutes.map((r) => r.domain);
+		const routedDomains = httpRoutes.map((r) => r.domain);
 		const certificates = await getAllCertificatesForDomains(routedDomains);
 
 		const controlPlaneUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -241,7 +287,9 @@ export async function GET(request: NextRequest) {
 		}
 
 		traefikConfig = {
-			routes: traefikRoutes,
+			httpRoutes,
+			tcpRoutes,
+			udpRoutes,
 			certificates,
 			challengeRoute: controlPlaneUrl ? { controlPlaneUrl } : undefined,
 		};

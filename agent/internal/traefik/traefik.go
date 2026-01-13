@@ -15,11 +15,17 @@ import (
 )
 
 const (
-	traefikDynamicDir  = "/etc/traefik/dynamic"
-	traefikCertsDir    = "/etc/traefik/certs"
-	routesFileName     = "routes.yaml"
-	tlsFileName        = "tls.yaml"
-	challengesFileName = "challenges.yaml"
+	traefikStaticConfigPath = "/etc/traefik/traefik.yaml"
+	traefikDynamicDir       = "/etc/traefik/dynamic"
+	traefikCertsDir         = "/etc/traefik/certs"
+	routesFileName          = "routes.yaml"
+	tlsFileName             = "tls.yaml"
+	challengesFileName      = "challenges.yaml"
+
+	TCPPortStart = 10000
+	TCPPortEnd   = 10999
+	UDPPortStart = 11000
+	UDPPortEnd   = 11999
 )
 
 func CheckPrerequisites() error {
@@ -92,7 +98,7 @@ type server struct {
 	Weight *int   `yaml:"weight,omitempty"`
 }
 
-func UpdateTraefikRoutes(routes []TraefikRoute) error {
+func UpdateHttpRoutes(routes []TraefikRoute) error {
 	config := traefikConfig{
 		HTTP: httpConfig{
 			Routers:  make(map[string]router),
@@ -536,4 +542,516 @@ func ChallengeRouteExists() bool {
 	challengePath := filepath.Join(traefikDynamicDir, challengesFileName)
 	_, err := os.Stat(challengePath)
 	return err == nil
+}
+
+type TraefikTCPRoute struct {
+	ID             string
+	ServiceId      string
+	Upstreams      []string
+	ExternalPort   int
+	TLSPassthrough bool
+}
+
+type TraefikUDPRoute struct {
+	ID           string
+	ServiceId    string
+	Upstreams    []string
+	ExternalPort int
+}
+
+func ValidateTCPPort(port int) error {
+	if port < TCPPortStart || port > TCPPortEnd {
+		return fmt.Errorf("TCP port %d outside allowed range %d-%d", port, TCPPortStart, TCPPortEnd)
+	}
+	return nil
+}
+
+func ValidateUDPPort(port int) error {
+	if port < UDPPortStart || port > UDPPortEnd {
+		return fmt.Errorf("UDP port %d outside allowed range %d-%d", port, UDPPortStart, UDPPortEnd)
+	}
+	return nil
+}
+
+func ValidateL4Routes(tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute) error {
+	for _, route := range tcpRoutes {
+		if err := ValidateTCPPort(route.ExternalPort); err != nil {
+			return fmt.Errorf("invalid TCP route %s: %w", route.ID, err)
+		}
+	}
+	for _, route := range udpRoutes {
+		if err := ValidateUDPPort(route.ExternalPort); err != nil {
+			return fmt.Errorf("invalid UDP route %s: %w", route.ID, err)
+		}
+	}
+	return nil
+}
+
+type tcpConfig struct {
+	Routers  map[string]tcpRouter  `yaml:"routers,omitempty"`
+	Services map[string]tcpService `yaml:"services,omitempty"`
+}
+
+type tcpRouter struct {
+	Rule        string        `yaml:"rule"`
+	EntryPoints []string      `yaml:"entryPoints"`
+	Service     string        `yaml:"service"`
+	TLS         *tcpTLSConfig `yaml:"tls,omitempty"`
+}
+
+type tcpTLSConfig struct {
+	Passthrough bool `yaml:"passthrough"`
+}
+
+type tcpService struct {
+	LoadBalancer tcpLoadBalancer `yaml:"loadBalancer"`
+}
+
+type tcpLoadBalancer struct {
+	Servers []tcpServer `yaml:"servers"`
+}
+
+type tcpServer struct {
+	Address string `yaml:"address"`
+}
+
+type udpConfig struct {
+	Routers  map[string]udpRouter  `yaml:"routers,omitempty"`
+	Services map[string]udpService `yaml:"services,omitempty"`
+}
+
+type udpRouter struct {
+	EntryPoints []string `yaml:"entryPoints"`
+	Service     string   `yaml:"service"`
+}
+
+type udpService struct {
+	LoadBalancer udpLoadBalancer `yaml:"loadBalancer"`
+}
+
+type udpLoadBalancer struct {
+	Servers []udpServer `yaml:"servers"`
+}
+
+type udpServer struct {
+	Address string `yaml:"address"`
+}
+
+type traefikFullConfig struct {
+	HTTP httpConfig `yaml:"http,omitempty"`
+	TCP  tcpConfig  `yaml:"tcp,omitempty"`
+	UDP  udpConfig  `yaml:"udp,omitempty"`
+}
+
+func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute) error {
+	if err := ValidateL4Routes(tcpRoutes, udpRoutes); err != nil {
+		return fmt.Errorf("port validation failed: %w", err)
+	}
+
+	config := traefikFullConfig{
+		HTTP: httpConfig{
+			Routers:  make(map[string]router),
+			Services: make(map[string]service),
+		},
+		TCP: tcpConfig{
+			Routers:  make(map[string]tcpRouter),
+			Services: make(map[string]tcpService),
+		},
+		UDP: udpConfig{
+			Routers:  make(map[string]udpRouter),
+			Services: make(map[string]udpService),
+		},
+	}
+
+	for _, route := range httpRoutes {
+		if len(route.Upstreams) == 0 {
+			continue
+		}
+
+		config.HTTP.Routers[route.ServiceId] = router{
+			Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
+			EntryPoints: []string{"websecure"},
+			Service:     route.ServiceId,
+			TLS:         &tlsConfig{},
+		}
+
+		servers := make([]server, len(route.Upstreams))
+		for i, upstream := range route.Upstreams {
+			srv := server{URL: fmt.Sprintf("http://%s", upstream.URL)}
+			if upstream.Weight > 0 {
+				srv.Weight = &upstream.Weight
+			}
+			servers[i] = srv
+		}
+
+		config.HTTP.Services[route.ServiceId] = service{
+			LoadBalancer: loadBalancer{
+				Servers: servers,
+			},
+		}
+	}
+
+	for _, route := range tcpRoutes {
+		if len(route.Upstreams) == 0 {
+			continue
+		}
+
+		routerName := fmt.Sprintf("tcp_%s_%d", route.ServiceId, route.ExternalPort)
+		entryPoint := fmt.Sprintf("tcp-%d", route.ExternalPort)
+
+		tcpRouter := tcpRouter{
+			Rule:        "HostSNI(`*`)",
+			EntryPoints: []string{entryPoint},
+			Service:     routerName,
+		}
+
+		if route.TLSPassthrough {
+			tcpRouter.TLS = &tcpTLSConfig{Passthrough: true}
+		}
+
+		config.TCP.Routers[routerName] = tcpRouter
+
+		servers := make([]tcpServer, len(route.Upstreams))
+		for i, upstream := range route.Upstreams {
+			servers[i] = tcpServer{Address: upstream}
+		}
+
+		config.TCP.Services[routerName] = tcpService{
+			LoadBalancer: tcpLoadBalancer{
+				Servers: servers,
+			},
+		}
+	}
+
+	for _, route := range udpRoutes {
+		if len(route.Upstreams) == 0 {
+			continue
+		}
+
+		routerName := fmt.Sprintf("udp_%s_%d", route.ServiceId, route.ExternalPort)
+		entryPoint := fmt.Sprintf("udp-%d", route.ExternalPort)
+
+		config.UDP.Routers[routerName] = udpRouter{
+			EntryPoints: []string{entryPoint},
+			Service:     routerName,
+		}
+
+		servers := make([]udpServer, len(route.Upstreams))
+		for i, upstream := range route.Upstreams {
+			servers[i] = udpServer{Address: upstream}
+		}
+
+		config.UDP.Services[routerName] = udpService{
+			LoadBalancer: udpLoadBalancer{
+				Servers: servers,
+			},
+		}
+	}
+
+	log.Printf("[traefik] updating routes: %d HTTP, %d TCP, %d UDP", len(httpRoutes), len(tcpRoutes), len(udpRoutes))
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal traefik config: %w", err)
+	}
+
+	if err := os.MkdirAll(traefikDynamicDir, 0755); err != nil {
+		return fmt.Errorf("failed to create dynamic config dir: %w", err)
+	}
+
+	routesPath := filepath.Join(traefikDynamicDir, routesFileName)
+	tmpPath := routesPath + ".tmp"
+
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp config: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, routesPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename config file: %w", err)
+	}
+
+	log.Printf("[traefik] routes updated successfully")
+	return nil
+}
+
+func HashTCPRoutes(routes []TraefikTCPRoute) string {
+	sortedRoutes := make([]TraefikTCPRoute, len(routes))
+	copy(sortedRoutes, routes)
+	sort.Slice(sortedRoutes, func(i, j int) bool {
+		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
+	})
+
+	var sb strings.Builder
+	for _, r := range sortedRoutes {
+		sb.WriteString(r.ServiceId)
+		sb.WriteString(":")
+		sb.WriteString(fmt.Sprintf("%d", r.ExternalPort))
+		sb.WriteString(":")
+		sb.WriteString(fmt.Sprintf("%t", r.TLSPassthrough))
+		sb.WriteString(":")
+		sortedUpstreams := make([]string, len(r.Upstreams))
+		copy(sortedUpstreams, r.Upstreams)
+		sort.Strings(sortedUpstreams)
+		for _, u := range sortedUpstreams {
+			sb.WriteString(u)
+			sb.WriteString(",")
+		}
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func HashUDPRoutes(routes []TraefikUDPRoute) string {
+	sortedRoutes := make([]TraefikUDPRoute, len(routes))
+	copy(sortedRoutes, routes)
+	sort.Slice(sortedRoutes, func(i, j int) bool {
+		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
+	})
+
+	var sb strings.Builder
+	for _, r := range sortedRoutes {
+		sb.WriteString(r.ServiceId)
+		sb.WriteString(":")
+		sb.WriteString(fmt.Sprintf("%d", r.ExternalPort))
+		sb.WriteString(":")
+		sortedUpstreams := make([]string, len(r.Upstreams))
+		copy(sortedUpstreams, r.Upstreams)
+		sort.Strings(sortedUpstreams)
+		for _, u := range sortedUpstreams {
+			sb.WriteString(u)
+			sb.WriteString(",")
+		}
+		sb.WriteString("|")
+	}
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func GetCurrentL4ConfigHash() string {
+	config, err := readCurrentFullConfig()
+	if err != nil {
+		log.Printf("[traefik:hash] failed to read config: %v", err)
+		return ""
+	}
+
+	var sb strings.Builder
+
+	var tcpKeys []string
+	for k := range config.TCP.Routers {
+		tcpKeys = append(tcpKeys, k)
+	}
+	sort.Strings(tcpKeys)
+	for _, k := range tcpKeys {
+		router := config.TCP.Routers[k]
+		sb.WriteString(k)
+		sb.WriteString(":")
+		if svc, exists := config.TCP.Services[k]; exists {
+			for _, s := range svc.LoadBalancer.Servers {
+				sb.WriteString(s.Address)
+				sb.WriteString(",")
+			}
+		}
+		if router.TLS != nil {
+			sb.WriteString(fmt.Sprintf("tls:%t", router.TLS.Passthrough))
+		}
+		sb.WriteString("|")
+	}
+
+	var udpKeys []string
+	for k := range config.UDP.Routers {
+		udpKeys = append(udpKeys, k)
+	}
+	sort.Strings(udpKeys)
+	for _, k := range udpKeys {
+		sb.WriteString(k)
+		sb.WriteString(":")
+		if svc, exists := config.UDP.Services[k]; exists {
+			for _, s := range svc.LoadBalancer.Servers {
+				sb.WriteString(s.Address)
+				sb.WriteString(",")
+			}
+		}
+		sb.WriteString("|")
+	}
+
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:])
+}
+
+func readCurrentFullConfig() (*traefikFullConfig, error) {
+	routesPath := filepath.Join(traefikDynamicDir, routesFileName)
+	data, err := os.ReadFile(routesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &traefikFullConfig{
+				HTTP: httpConfig{
+					Routers:  make(map[string]router),
+					Services: make(map[string]service),
+				},
+				TCP: tcpConfig{
+					Routers:  make(map[string]tcpRouter),
+					Services: make(map[string]tcpService),
+				},
+				UDP: udpConfig{
+					Routers:  make(map[string]udpRouter),
+					Services: make(map[string]udpService),
+				},
+			}, nil
+		}
+		return nil, err
+	}
+
+	var config traefikFullConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	if config.HTTP.Routers == nil {
+		config.HTTP.Routers = make(map[string]router)
+	}
+	if config.HTTP.Services == nil {
+		config.HTTP.Services = make(map[string]service)
+	}
+	if config.TCP.Routers == nil {
+		config.TCP.Routers = make(map[string]tcpRouter)
+	}
+	if config.TCP.Services == nil {
+		config.TCP.Services = make(map[string]tcpService)
+	}
+	if config.UDP.Routers == nil {
+		config.UDP.Routers = make(map[string]udpRouter)
+	}
+	if config.UDP.Services == nil {
+		config.UDP.Services = make(map[string]udpService)
+	}
+
+	return &config, nil
+}
+
+type staticConfig struct {
+	EntryPoints map[string]entryPoint `yaml:"entryPoints"`
+}
+
+type entryPoint struct {
+	Address string `yaml:"address"`
+}
+
+func validateStaticConfig(data []byte) error {
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("invalid YAML syntax: %w", err)
+	}
+
+	if ep, ok := config["entryPoints"]; ok {
+		entryPoints, ok := ep.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("entryPoints must be a map")
+		}
+		for name, epConfig := range entryPoints {
+			epMap, ok := epConfig.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("entry point %q must be a map", name)
+			}
+			addr, ok := epMap["address"]
+			if !ok {
+				return fmt.Errorf("entry point %q missing required field 'address'", name)
+			}
+			if _, ok := addr.(string); !ok {
+				return fmt.Errorf("entry point %q address must be a string", name)
+			}
+		}
+	}
+
+	return nil
+}
+
+func EnsureEntryPoints(tcpPorts []int, udpPorts []int) error {
+	for _, port := range tcpPorts {
+		if err := ValidateTCPPort(port); err != nil {
+			return fmt.Errorf("invalid entry point: %w", err)
+		}
+	}
+	for _, port := range udpPorts {
+		if err := ValidateUDPPort(port); err != nil {
+			return fmt.Errorf("invalid entry point: %w", err)
+		}
+	}
+
+	originalData, err := os.ReadFile(traefikStaticConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to read static config: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(originalData, &config); err != nil {
+		return fmt.Errorf("failed to parse static config: %w", err)
+	}
+
+	entryPoints, ok := config["entryPoints"].(map[string]interface{})
+	if !ok {
+		entryPoints = make(map[string]interface{})
+		config["entryPoints"] = entryPoints
+	}
+
+	modified := false
+
+	for _, port := range tcpPorts {
+		name := fmt.Sprintf("tcp-%d", port)
+		if _, exists := entryPoints[name]; !exists {
+			entryPoints[name] = map[string]interface{}{
+				"address": fmt.Sprintf(":%d", port),
+			}
+			modified = true
+			log.Printf("[traefik] adding TCP entry point: %s", name)
+		}
+	}
+
+	for _, port := range udpPorts {
+		name := fmt.Sprintf("udp-%d", port)
+		if _, exists := entryPoints[name]; !exists {
+			entryPoints[name] = map[string]interface{}{
+				"address": fmt.Sprintf(":%d/udp", port),
+			}
+			modified = true
+			log.Printf("[traefik] adding UDP entry point: %s", name)
+		}
+	}
+
+	if !modified {
+		return nil
+	}
+
+	newData, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal static config: %w", err)
+	}
+
+	if err := validateStaticConfig(newData); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
+		return fmt.Errorf("failed to write static config: %w", err)
+	}
+
+	if err := ReloadTraefik(); err != nil {
+		log.Printf("[traefik] reload failed, restoring original config")
+		if restoreErr := atomicWrite(traefikStaticConfigPath, originalData, 0644); restoreErr != nil {
+			return fmt.Errorf("reload failed and restore failed: reload=%w, restore=%v", err, restoreErr)
+		}
+		return fmt.Errorf("reload failed, original config restored: %w", err)
+	}
+
+	return nil
+}
+
+func ReloadTraefik() error {
+	cmd := exec.Command("pkill", "-HUP", "traefik")
+	if err := cmd.Run(); err != nil {
+		log.Printf("[traefik] warning: failed to send SIGHUP to traefik: %v", err)
+	}
+	log.Printf("[traefik] sent SIGHUP for graceful reload")
+	return nil
 }

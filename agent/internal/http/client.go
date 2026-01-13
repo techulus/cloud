@@ -94,6 +94,21 @@ type TraefikRoute struct {
 	ServiceId string     `json:"serviceId"`
 }
 
+type TraefikTCPRoute struct {
+	ID             string   `json:"id"`
+	ServiceId      string   `json:"serviceId"`
+	Upstreams      []string `json:"upstreams"`
+	ExternalPort   int      `json:"externalPort"`
+	TLSPassthrough bool     `json:"tlsPassthrough"`
+}
+
+type TraefikUDPRoute struct {
+	ID           string   `json:"id"`
+	ServiceId    string   `json:"serviceId"`
+	Upstreams    []string `json:"upstreams"`
+	ExternalPort int      `json:"externalPort"`
+}
+
 type Certificate struct {
 	Domain         string `json:"domain"`
 	Certificate    string `json:"certificate"`
@@ -116,7 +131,9 @@ type ExpectedState struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
 	Traefik struct {
-		Routes         []TraefikRoute        `json:"routes"`
+		HttpRoutes     []TraefikRoute        `json:"httpRoutes"`
+		TCPRoutes      []TraefikTCPRoute     `json:"tcpRoutes"`
+		UDPRoutes      []TraefikUDPRoute     `json:"udpRoutes"`
 		Certificates   []Certificate         `json:"certificates,omitempty"`
 		ChallengeRoute *ChallengeRouteConfig `json:"challengeRoute,omitempty"`
 	} `json:"traefik"`

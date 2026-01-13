@@ -10,6 +10,7 @@ import { ReplicasSection } from "@/components/service-details/replicas-section";
 import { VolumesSection } from "@/components/service-details/volumes-section";
 import { SecretsSection } from "@/components/service-details/secrets-section";
 import { PortsSection } from "@/components/service-details/ports-section";
+import { TCPProxySection } from "@/components/service-details/tcp-proxy-section";
 import { HealthCheckSection } from "@/components/service-details/health-check-section";
 import { StartCommandSection } from "@/components/service-details/start-command-section";
 import { ScheduleSection } from "@/components/service-details/schedule-section";
@@ -56,6 +57,8 @@ export default function ConfigurationPage() {
 			<SecretsSection service={service} onUpdate={onUpdate} />
 
 			<PortsSection service={service} onUpdate={onUpdate} />
+
+			<TCPProxySection service={service} onUpdate={onUpdate} />
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
 

@@ -34,25 +34,25 @@ import {
 function ServiceCardSkeleton() {
 	return (
 		<div className="flex flex-col items-center gap-2 w-70">
-			<div className="w-full p-3 rounded-xl border-2 border-zinc-200 dark:border-zinc-700 bg-zinc-100/50 dark:bg-zinc-800/50">
+			<div className="w-full p-3 rounded-xl border-2 border-zinc-200 dark:border-zinc-700 bg-slate-100/50 dark:bg-slate-800/50">
 				<div className="flex items-center gap-2">
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-1.5">
-							<div className="h-4 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-							<div className="h-2 w-2 bg-zinc-200 dark:bg-zinc-700 rounded-full animate-pulse" />
+							<div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+							<div className="h-2 w-2 bg-slate-200 dark:bg-slate-700 rounded-full animate-pulse" />
 						</div>
 					</div>
 				</div>
 				<div className="mt-2 space-y-1.5">
 					<div className="flex items-center gap-1.5">
-						<div className="h-3 w-3 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-						<div className="h-3 w-32 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="h-3 w-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+						<div className="h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 					</div>
 				</div>
 				<div className="mt-2">
 					<div className="flex items-center justify-between">
-						<div className="h-3 w-12 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-						<div className="h-4 w-8 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="h-3 w-12 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+						<div className="h-4 w-8 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 					</div>
 				</div>
 			</div>
@@ -246,7 +246,7 @@ export function ServiceCanvas({
 				className="
           relative -mt-6 -mb-6 p-10
           left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-          bg-zinc-50/50 dark:bg-zinc-900/30
+          bg-slate-50/50 dark:bg-slate-900/30
           flex items-center justify-center
         "
 				style={{
@@ -269,7 +269,7 @@ export function ServiceCanvas({
 				className="
           relative -mt-6 -mb-6
           left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-          bg-zinc-50 dark:bg-zinc-900/50
+          bg-slate-50 dark:bg-slate-900/50
           flex items-center justify-center
         "
 				style={{
@@ -306,7 +306,7 @@ export function ServiceCanvas({
 			className="
         relative -mt-6 -mb-6 p-10
         left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-        bg-zinc-50/50 dark:bg-zinc-900/30
+        bg-slate-50/50 dark:bg-slate-900/30
         flex items-center justify-center overflow-auto
       "
 			style={{

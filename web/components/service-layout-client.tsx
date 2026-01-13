@@ -103,16 +103,16 @@ export function ServiceLayoutClient({
 					{[1, 2, 3, 4].map((i) => (
 						<div
 							key={i}
-							className="h-8 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse mb-1.5"
+							className="h-8 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse mb-1.5"
 						/>
 					))}
 				</nav>
 				<div className="container max-w-7xl mx-auto px-4 py-6">
 					<div className="space-y-6">
-						<div className="h-6 w-48 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="h-6 w-48 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 						<div className="grid gap-4">
-							<div className="h-32 bg-zinc-200 dark:bg-zinc-700 rounded-lg animate-pulse" />
-							<div className="h-32 bg-zinc-200 dark:bg-zinc-700 rounded-lg animate-pulse" />
+							<div className="h-32 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
+							<div className="h-32 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
 						</div>
 					</div>
 				</div>

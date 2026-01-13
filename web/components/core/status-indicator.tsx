@@ -13,7 +13,7 @@ export function StatusIndicator({ status }: { status: string }) {
 			text: "text-rose-600 dark:text-rose-400",
 		},
 		unknown: {
-			dot: "bg-zinc-400",
+			dot: "bg-slate-400",
 			text: "text-zinc-500",
 		},
 	};

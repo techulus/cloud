@@ -66,16 +66,43 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
-func convertToTraefikRoutes(routes []agenthttp.TraefikRoute) []traefik.TraefikRoute {
-	traefikRoutes := make([]traefik.TraefikRoute, len(routes))
+func convertToHttpRoutes(routes []agenthttp.TraefikRoute) []traefik.TraefikRoute {
+	httpRoutes := make([]traefik.TraefikRoute, len(routes))
 	for i, r := range routes {
 		upstreams := make([]traefik.Upstream, len(r.Upstreams))
 		for j, u := range r.Upstreams {
 			upstreams[j] = traefik.Upstream{URL: u.Url, Weight: u.Weight}
 		}
-		traefikRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: upstreams, ServiceId: r.ServiceId}
+		httpRoutes[i] = traefik.TraefikRoute{ID: r.ID, Domain: r.Domain, Upstreams: upstreams, ServiceId: r.ServiceId}
 	}
-	return traefikRoutes
+	return httpRoutes
+}
+
+func convertToTCPRoutes(routes []agenthttp.TraefikTCPRoute) []traefik.TraefikTCPRoute {
+	tcpRoutes := make([]traefik.TraefikTCPRoute, len(routes))
+	for i, r := range routes {
+		tcpRoutes[i] = traefik.TraefikTCPRoute{
+			ID:             r.ID,
+			ServiceId:      r.ServiceId,
+			Upstreams:      r.Upstreams,
+			ExternalPort:   r.ExternalPort,
+			TLSPassthrough: r.TLSPassthrough,
+		}
+	}
+	return tcpRoutes
+}
+
+func convertToUDPRoutes(routes []agenthttp.TraefikUDPRoute) []traefik.TraefikUDPRoute {
+	udpRoutes := make([]traefik.TraefikUDPRoute, len(routes))
+	for i, r := range routes {
+		udpRoutes[i] = traefik.TraefikUDPRoute{
+			ID:           r.ID,
+			ServiceId:    r.ServiceId,
+			Upstreams:    r.Upstreams,
+			ExternalPort: r.ExternalPort,
+		}
+	}
+	return udpRoutes
 }
 
 type Config struct {
@@ -90,6 +117,7 @@ type ActualState struct {
 	Containers            []container.Container
 	DnsConfigHash         string
 	TraefikConfigHash     string
+	L4ConfigHash          string
 	CertificatesHash      string
 	ChallengeRouteWritten bool
 	WireguardHash         string
@@ -326,10 +354,17 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := convertToTraefikRoutes(expected.Traefik.Routes)
-		expectedTraefikHash := traefik.HashRoutes(expectedTraefikRoutes)
+		expectedHttpRoutes := convertToHttpRoutes(expected.Traefik.HttpRoutes)
+		expectedTraefikHash := traefik.HashRoutes(expectedHttpRoutes)
 		if expectedTraefikHash != actual.TraefikConfigHash {
-			changes = append(changes, fmt.Sprintf("UPDATE Traefik (%d routes)", len(expected.Traefik.Routes)))
+			changes = append(changes, fmt.Sprintf("UPDATE Traefik HTTP (%d routes)", len(expected.Traefik.HttpRoutes)))
+		}
+
+		tcpRoutes := convertToTCPRoutes(expected.Traefik.TCPRoutes)
+		udpRoutes := convertToUDPRoutes(expected.Traefik.UDPRoutes)
+		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
+		if expectedL4Hash != actual.L4ConfigHash {
+			changes = append(changes, fmt.Sprintf("UPDATE Traefik L4 (%d TCP, %d UDP routes)", len(tcpRoutes), len(udpRoutes)))
 		}
 
 		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
@@ -408,6 +443,7 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	}
 	if a.isProxy {
 		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
+		state.L4ConfigHash = traefik.GetCurrentL4ConfigHash()
 		state.CertificatesHash = traefik.GetCurrentCertificatesHash()
 		state.ChallengeRouteWritten = traefik.ChallengeRouteExists()
 	}
@@ -428,8 +464,15 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := convertToTraefikRoutes(expected.Traefik.Routes)
-		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
+		expectedHttpRoutes := convertToHttpRoutes(expected.Traefik.HttpRoutes)
+		if traefik.HashRoutes(expectedHttpRoutes) != actual.TraefikConfigHash {
+			return true
+		}
+
+		tcpRoutes := convertToTCPRoutes(expected.Traefik.TCPRoutes)
+		udpRoutes := convertToUDPRoutes(expected.Traefik.UDPRoutes)
+		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
+		if expectedL4Hash != actual.L4ConfigHash {
 			return true
 		}
 
@@ -625,10 +668,32 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 	}
 
 	if a.isProxy {
-		expectedTraefikRoutes := convertToTraefikRoutes(a.expectedState.Traefik.Routes)
-		if traefik.HashRoutes(expectedTraefikRoutes) != actual.TraefikConfigHash {
-			log.Printf("[reconcile] updating Traefik routes")
-			if err := traefik.UpdateTraefikRoutes(expectedTraefikRoutes); err != nil {
+		expectedHttpRoutes := convertToHttpRoutes(a.expectedState.Traefik.HttpRoutes)
+		tcpRoutes := convertToTCPRoutes(a.expectedState.Traefik.TCPRoutes)
+		udpRoutes := convertToUDPRoutes(a.expectedState.Traefik.UDPRoutes)
+
+		httpDrift := traefik.HashRoutes(expectedHttpRoutes) != actual.TraefikConfigHash
+		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
+		l4Drift := expectedL4Hash != actual.L4ConfigHash
+
+		if httpDrift || l4Drift {
+			var tcpPorts, udpPorts []int
+			for _, r := range tcpRoutes {
+				tcpPorts = append(tcpPorts, r.ExternalPort)
+			}
+			for _, r := range udpRoutes {
+				udpPorts = append(udpPorts, r.ExternalPort)
+			}
+
+			if len(tcpPorts) > 0 || len(udpPorts) > 0 {
+				log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
+				if err := traefik.EnsureEntryPoints(tcpPorts, udpPorts); err != nil {
+					return fmt.Errorf("failed to ensure entry points: %w", err)
+				}
+			}
+
+			log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
+			if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes); err != nil {
 				return fmt.Errorf("failed to update Traefik: %w", err)
 			}
 			return nil

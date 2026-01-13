@@ -1,2 +1,3 @@
 export const WIREGUARD_SUBNET_PREFIX = "10.100";
 export const CONTAINER_SUBNET_PREFIX = "10.200";
+export const PROXY_DOMAIN = process.env.NEXT_PUBLIC_PROXY_DOMAIN;

@@ -58,6 +58,9 @@ export const PortsSection = memo(function PortsSection({
 	const [isSaving, setIsSaving] = useState(false);
 
 	const hostname = service.hostname || slugify(service.name);
+	const httpPorts = service.ports.filter(
+		(p) => !p.protocol || p.protocol === "http",
+	);
 
 	const handleHostnameChange = async (newHostname: string) => {
 		await updateServiceHostname(service.id, newHostname);
@@ -68,7 +71,7 @@ export const PortsSection = memo(function PortsSection({
 	const isValidDomain = domain.trim() && domainRegex.test(domain.trim());
 	const canAdd =
 		newPort &&
-		!service.ports.some((p) => p.port === parseInt(newPort, 10)) &&
+		!httpPorts.some((p) => p.port === parseInt(newPort, 10)) &&
 		isValidDomain &&
 		!isSaving;
 
@@ -138,9 +141,9 @@ export const PortsSection = memo(function PortsSection({
 					<span className="text-muted-foreground">.internal</span>
 				</div>
 
-				{service.ports.length > 0 && (
+				{httpPorts.length > 0 && (
 					<div className="space-y-2">
-						{service.ports.map((port) => (
+						{httpPorts.map((port) => (
 							<div
 								key={port.id}
 								className="flex items-center justify-between px-3 py-2 rounded-md text-sm bg-muted"

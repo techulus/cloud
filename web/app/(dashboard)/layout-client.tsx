@@ -150,19 +150,19 @@ export function DashboardLayoutClient({
 				<header className="border-b">
 					<div className="container max-w-full mx-auto px-4 h-14 flex items-center justify-between">
 						<div className="flex items-center gap-3">
-							<div className="h-6 w-6 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-							<div className="h-4 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+							<div className="h-6 w-6 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+							<div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 						</div>
 						<div className="flex items-center gap-4">
-							<div className="hidden sm:block h-4 w-32 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-							<div className="h-8 w-20 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+							<div className="hidden sm:block h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+							<div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 						</div>
 					</div>
 				</header>
 				<main className="container max-w-7xl mx-auto px-4 py-6">
 					<div className="space-y-4">
-						<div className="h-8 w-48 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-						<div className="h-4 w-64 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+						<div className="h-8 w-48 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+						<div className="h-4 w-64 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 					</div>
 				</main>
 			</div>

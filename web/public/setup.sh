@@ -429,13 +429,17 @@ EOF
     firewall-cmd --permanent --add-port=80/tcp 2>/dev/null || true
     firewall-cmd --permanent --add-port=443/tcp 2>/dev/null || true
     firewall-cmd --permanent --add-port=51820/udp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=10000-10999/tcp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=11000-11999/udp 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
-    echo "✓ firewalld rules added (HTTP, HTTPS, WireGuard)"
+    echo "✓ firewalld rules added (HTTP, HTTPS, WireGuard, TCP/UDP proxy)"
   elif command -v iptables &>/dev/null; then
     iptables -I INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null || true
     iptables -I INPUT -p tcp --dport 443 -m state --state NEW -j ACCEPT 2>/dev/null || true
     iptables -I INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || true
-    echo "✓ iptables rules added (HTTP, HTTPS, WireGuard)"
+    iptables -I INPUT -p tcp --dport 10000:10999 -j ACCEPT 2>/dev/null || true
+    iptables -I INPUT -p udp --dport 11000:11999 -j ACCEPT 2>/dev/null || true
+    echo "✓ iptables rules added (HTTP, HTTPS, WireGuard, TCP/UDP proxy)"
 
     if command -v netfilter-persistent &>/dev/null; then
       netfilter-persistent save 2>/dev/null || true
