@@ -1072,10 +1072,10 @@ func EnsureEntryPoints(tcpPorts []int, udpPorts []int) error {
 }
 
 func ReloadTraefik() error {
-	cmd := exec.Command("pkill", "-HUP", "traefik")
+	cmd := exec.Command("systemctl", "restart", "traefik")
 	if err := cmd.Run(); err != nil {
-		log.Printf("[traefik] warning: failed to send SIGHUP to traefik: %v", err)
+		return fmt.Errorf("failed to restart traefik: %w", err)
 	}
-	log.Printf("[traefik] sent SIGHUP for graceful reload")
+	log.Printf("[traefik] restarted traefik to apply static config changes")
 	return nil
 }
