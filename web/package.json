@@ -20,6 +20,7 @@
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.1.1",
+		"cron-parser": "^5.4.0",
 		"croner": "^9.1.0",
 		"cronstrue": "^3.9.0",
 		"drizzle-orm": "^0.45.1",

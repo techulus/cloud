@@ -8,7 +8,7 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { Cron } from "croner";
+import { CronExpressionParser } from "cron-parser";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { deployService } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
@@ -145,14 +145,14 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 		if (!service.schedule) continue;
 
 		try {
-			const cron = new Cron(service.schedule);
 			const now = new Date();
 
 			if (service.lastScheduledDeploymentRunAt) {
-				const nextScheduledRun = cron.nextRun(
-					service.lastScheduledDeploymentRunAt,
-				);
-				if (!nextScheduledRun || nextScheduledRun > now) {
+				const interval = CronExpressionParser.parse(service.schedule, {
+					currentDate: service.lastScheduledDeploymentRunAt,
+				});
+				const nextScheduledRun = interval.next().toDate();
+				if (nextScheduledRun > now) {
 					continue;
 				}
 			}

@@ -17,16 +17,5 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 ## TODO
 
-- [x] HTTP polling for agent communication
-- [x] Traefik reverse proxy
-- [x] Per-machine subnet allocation
-- [x] Local DNS on each machine
-- [x] Health checks
-- [x] Secrets
-- [x] Volumes
-- [x] Deploy Logs
-- [x] GitHub deployments
-- [x] HTTP Logs
-- [x] Rolling updates
 - [ ] Volume backups
 - [ ] TCP / L4 proxying
