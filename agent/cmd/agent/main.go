@@ -685,9 +685,12 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 				udpPorts = append(udpPorts, r.ExternalPort)
 			}
 
+			needsRestart := false
 			if len(tcpPorts) > 0 || len(udpPorts) > 0 {
 				log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
-				if err := traefik.EnsureEntryPoints(tcpPorts, udpPorts); err != nil {
+				var err error
+				needsRestart, err = traefik.EnsureEntryPoints(tcpPorts, udpPorts)
+				if err != nil {
 					return fmt.Errorf("failed to ensure entry points: %w", err)
 				}
 			}
@@ -695,6 +698,13 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 			log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
 			if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes); err != nil {
 				return fmt.Errorf("failed to update Traefik: %w", err)
+			}
+
+			if needsRestart {
+				log.Printf("[reconcile] restarting Traefik to apply new entry points")
+				if err := traefik.ReloadTraefik(); err != nil {
+					return fmt.Errorf("failed to restart Traefik: %w", err)
+				}
 			}
 			return nil
 		}

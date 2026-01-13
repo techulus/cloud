@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -991,26 +992,26 @@ func validateStaticConfig(data []byte) error {
 	return nil
 }
 
-func EnsureEntryPoints(tcpPorts []int, udpPorts []int) error {
+func EnsureEntryPoints(tcpPorts []int, udpPorts []int) (needsRestart bool, err error) {
 	for _, port := range tcpPorts {
 		if err := ValidateTCPPort(port); err != nil {
-			return fmt.Errorf("invalid entry point: %w", err)
+			return false, fmt.Errorf("invalid entry point: %w", err)
 		}
 	}
 	for _, port := range udpPorts {
 		if err := ValidateUDPPort(port); err != nil {
-			return fmt.Errorf("invalid entry point: %w", err)
+			return false, fmt.Errorf("invalid entry point: %w", err)
 		}
 	}
 
 	originalData, err := os.ReadFile(traefikStaticConfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to read static config: %w", err)
+		return false, fmt.Errorf("failed to read static config: %w", err)
 	}
 
 	var config map[string]interface{}
 	if err := yaml.Unmarshal(originalData, &config); err != nil {
-		return fmt.Errorf("failed to parse static config: %w", err)
+		return false, fmt.Errorf("failed to parse static config: %w", err)
 	}
 
 	entryPoints, ok := config["entryPoints"].(map[string]interface{})
@@ -1044,31 +1045,24 @@ func EnsureEntryPoints(tcpPorts []int, udpPorts []int) error {
 	}
 
 	if !modified {
-		return nil
+		return false, nil
 	}
 
 	newData, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to marshal static config: %w", err)
+		return false, fmt.Errorf("failed to marshal static config: %w", err)
 	}
 
 	if err := validateStaticConfig(newData); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return false, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
-		return fmt.Errorf("failed to write static config: %w", err)
+		return false, fmt.Errorf("failed to write static config: %w", err)
 	}
 
-	if err := ReloadTraefik(); err != nil {
-		log.Printf("[traefik] reload failed, restoring original config")
-		if restoreErr := atomicWrite(traefikStaticConfigPath, originalData, 0644); restoreErr != nil {
-			return fmt.Errorf("reload failed and restore failed: reload=%w, restore=%v", err, restoreErr)
-		}
-		return fmt.Errorf("reload failed, original config restored: %w", err)
-	}
-
-	return nil
+	log.Printf("[traefik] static config updated, restart required")
+	return true, nil
 }
 
 func ReloadTraefik() error {
@@ -1077,5 +1071,6 @@ func ReloadTraefik() error {
 		return fmt.Errorf("failed to restart traefik: %w", err)
 	}
 	log.Printf("[traefik] restarted traefik to apply static config changes")
+	time.Sleep(2 * time.Second)
 	return nil
 }
