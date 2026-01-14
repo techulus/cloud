@@ -32,6 +32,7 @@ import { calculateSpreadPlacement } from "@/lib/placement";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
+import { startMigration } from "./migrations";
 
 function parseImageReference(image: string): {
 	registry: string;
@@ -643,10 +644,14 @@ export async function deployService(serviceId: string) {
 			}
 
 			const targetServerId = serverIds[0];
+			// If server is changing, trigger migration instead of normal deployment
 			if (service.lockedServerId && service.lockedServerId !== targetServerId) {
-				throw new Error(
-					"This stateful service is locked to its original server. Volume data cannot be moved between machines.",
-				);
+				if (service.migrationStatus) {
+					throw new Error("Migration already in progress");
+				}
+				await startMigration(serviceId, targetServerId);
+				revalidatePath(`/dashboard/projects`);
+				return { migrationStarted: true };
 			}
 		}
 	}

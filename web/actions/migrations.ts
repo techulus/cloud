@@ -13,11 +13,17 @@ import {
 import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
 import { revalidatePath } from "next/cache";
+import { deployService } from "./projects";
 
-export async function startMigration(serviceId: string, targetServerId: string) {
+export async function startMigration(
+	serviceId: string,
+	targetServerId: string,
+) {
 	const storageConfig = await getBackupStorageConfig();
 	if (!storageConfig) {
-		throw new Error("Backup storage not configured. Configure it in Settings first.");
+		throw new Error(
+			"Backup storage not configured. Configure it in Settings first.",
+		);
 	}
 
 	const service = await db
@@ -55,7 +61,10 @@ export async function startMigration(serviceId: string, targetServerId: string) 
 		})
 		.from(deployments)
 		.where(
-			and(eq(deployments.serviceId, serviceId), eq(deployments.status, "running")),
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "running"),
+			),
 		)
 		.then((r) => r[0]);
 
@@ -137,10 +146,21 @@ export async function startMigration(serviceId: string, targetServerId: string) 
 }
 
 export async function continueMigrationAfterBackup(backupId: string) {
+	const backup = await db
+		.select()
+		.from(volumeBackups)
+		.where(eq(volumeBackups.id, backupId))
+		.then((r) => r[0]);
+
+	// Ignore non-migration backups or unknown backup ids
+	if (!backup || !backup.isMigrationBackup || !backup.serviceId) {
+		return;
+	}
+
 	const service = await db
 		.select()
 		.from(services)
-		.where(eq(services.migrationBackupId, backupId))
+		.where(eq(services.id, backup.serviceId))
 		.then((r) => r[0]);
 
 	if (!service) {
@@ -230,7 +250,9 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		});
 	}
 
-	await db.delete(serviceReplicas).where(eq(serviceReplicas.serviceId, service.id));
+	await db
+		.delete(serviceReplicas)
+		.where(eq(serviceReplicas.serviceId, service.id));
 
 	await db.insert(serviceReplicas).values({
 		id: randomUUID(),
@@ -239,6 +261,8 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		count: 1,
 	});
 
+	// Update lockedServerId before deploying to prevent deployService from triggering another migration
+	// Mark as starting deployment before triggering rollout so UI doesn't falsely show completion
 	await db
 		.update(services)
 		.set({
@@ -247,15 +271,36 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		})
 		.where(eq(services.id, service.id));
 
-	await db
-		.update(services)
-		.set({
-			migrationStatus: null,
-			migrationTargetServerId: null,
-			migrationBackupId: null,
-			migrationError: null,
-		})
-		.where(eq(services.id, service.id));
+	// Auto-trigger deployment after migration completes
+	try {
+		await deployService(service.id);
+		// Clear migration state after successful deployment
+		await db
+			.update(services)
+			.set({
+				migrationStatus: null,
+				migrationTargetServerId: null,
+				migrationBackupId: null,
+				migrationError: null,
+			})
+			.where(eq(services.id, service.id));
+	} catch (error) {
+		console.error(
+			`[migration] failed to trigger deployment for ${service.id}:`,
+			error,
+		);
+		await db
+			.update(services)
+			.set({
+				migrationStatus: "failed",
+				migrationError:
+					error instanceof Error ? error.message : "Deployment failed",
+			})
+			.where(eq(services.id, service.id));
+		throw error;
+	}
+
+	revalidatePath(`/dashboard/projects`);
 }
 
 export async function cancelMigration(serviceId: string) {

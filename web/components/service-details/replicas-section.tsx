@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Server, Lock, Zap } from "lucide-react";
+import { Server, Lock, Zap, AlertTriangle } from "lucide-react";
 import {
 	updateServiceConfig,
 	updateServiceAutoPlace,
@@ -24,7 +24,6 @@ import type {
 	Server as ServerType,
 	ServiceWithDetails as Service,
 } from "@/db/types";
-import { MigrationDialog } from "./migration-dialog";
 
 type ServerInfo = Pick<ServerType, "id" | "name" | "wireguardIp">;
 type ServerWithStatus = ServerInfo & { status: string };
@@ -123,6 +122,17 @@ export const ReplicasSection = memo(function ReplicasSection({
 		service.replicas,
 	]);
 
+	const isChangingServer = useMemo(() => {
+		if (!service.stateful || !service.lockedServerId) return false;
+		const currentServerId =
+			configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
+		return (
+			selectedServerId !== null &&
+			selectedServerId !== service.lockedServerId &&
+			selectedServerId !== currentServerId
+		);
+	}, [service.stateful, service.lockedServerId, configuredReplicas, selectedServerId]);
+
 	const updateReplicas = (serverId: string, value: number) => {
 		setLocalReplicas((prev) => ({
 			...prev,
@@ -181,27 +191,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 					</ItemContent>
 				</Item>
 				<div className="p-4 space-y-4">
-					{service.lockedServerId ? (
-						<div className="space-y-4">
-							<div className="p-3 bg-muted rounded-md">
-								<div className="flex items-center gap-2 mb-1">
-									<Lock className="h-4 w-4 text-muted-foreground" />
-									<span className="font-medium">
-										Locked to:{" "}
-										{service.lockedServer?.name || service.lockedServerId}
-									</span>
-								</div>
-								<p className="text-sm text-muted-foreground">
-									Stateful services can be migrated to another server using the backup system.
-								</p>
-							</div>
-							<MigrationDialog
-								service={service}
-								servers={(servers || []).map((s) => ({ id: s.id, name: s.name, status: "online" }))}
-								onMigrationComplete={onUpdate}
-							/>
-						</div>
-					) : isLoading ? (
+					{isLoading ? (
 						<div className="flex justify-center py-4">
 							<Spinner />
 						</div>
@@ -217,9 +207,34 @@ export const ReplicasSection = memo(function ReplicasSection({
 						</Empty>
 					) : (
 						<>
+							{service.lockedServerId && (
+								<div className="p-3 bg-muted rounded-md">
+									<div className="flex items-center gap-2 mb-1">
+										<Lock className="h-4 w-4 text-muted-foreground" />
+										<span className="font-medium">
+											Currently locked to:{" "}
+											{service.lockedServer?.name || service.lockedServerId}
+										</span>
+									</div>
+									<p className="text-sm text-muted-foreground">
+										Changing the server will trigger a migration. The service will be
+										backed up, moved to the new server, and redeployed.
+									</p>
+								</div>
+							)}
+							{isChangingServer && (
+								<div className="p-3 bg-yellow-500/10 border border-yellow-500/50 rounded-md">
+									<p className="text-sm text-yellow-600 dark:text-yellow-400">
+										<AlertTriangle className="h-4 w-4 inline mr-1" />
+										Changing server will trigger a migration. The service will experience
+										downtime during the migration process.
+									</p>
+								</div>
+							)}
 							<p className="text-sm text-muted-foreground">
-								Select a server for this stateful service. Once deployed, it
-								cannot be moved.
+								{service.lockedServerId
+									? "Select a different server to migrate this service."
+									: "Select a server for this stateful service. Once deployed, it will be locked to this server."}
 							</p>
 							<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 								{servers.map((server) => (

@@ -26,10 +26,17 @@ type StageInfo = {
 };
 
 const STAGES: StageInfo[] = [
+	{ id: "migrating", label: "Migrating" },
 	{ id: "deploying", label: "Starting" },
 	{ id: "health_check", label: "Checking Health" },
 	{ id: "completed", label: "Complete" },
 ];
+
+const MIGRATION_STAGES: Record<string, string> = {
+	stopping: "Stopping service",
+	backing_up: "Creating backup",
+	restoring: "Restoring volumes",
+};
 
 function mapDeploymentStatusToStage(status: DeploymentStatus): string {
 	switch (status) {
@@ -65,6 +72,16 @@ const ACTIVE_BUILD_STATUSES = [
 ];
 
 function getBarState(service: Service, changes: ConfigChange[]): BarState {
+	// Migration takes precedence over builds and deployments
+	if (service.migrationStatus) {
+		return {
+			mode: "deploying",
+			stage: "migrating",
+			stageIndex: 0,
+			rolloutId: "",
+		};
+	}
+
 	if (
 		service.latestBuild &&
 		ACTIVE_BUILD_STATUSES.includes(service.latestBuild.status)
@@ -325,21 +342,29 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 
 	if (barState.mode === "deploying") {
 		const currentStage = STAGES[barState.stageIndex];
+		const isMigrating = service.migrationStatus;
+
+		let status = currentStage?.label || "Deploying";
+		if (isMigrating) {
+			status = MIGRATION_STAGES[service.migrationStatus] || service.migrationStatus;
+		}
 
 		return (
 			<FloatingBar
 				visible
 				loading
-				status={currentStage?.label || "Deploying"}
+				status={status}
 				action={
-					<button
-						type="button"
-						onClick={handleAbort}
-						disabled={isAborting}
-						className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
-					>
-						{isAborting ? "..." : "Abort"}
-					</button>
+					isMigrating ? null : (
+						<button
+							type="button"
+							onClick={handleAbort}
+							disabled={isAborting}
+							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+						>
+							{isAborting ? "..." : "Abort"}
+						</button>
+					)
 				}
 			/>
 		);
