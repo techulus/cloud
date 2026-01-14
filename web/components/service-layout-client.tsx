@@ -73,7 +73,7 @@ export function ServiceLayoutClient({
 	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service?.id}`;
 
 	const isConstrainedTab =
-		pathname.includes("/configuration") || pathname.includes("/builds");
+		pathname.includes("/configuration") || pathname.includes("/builds") || pathname.includes("/backups");
 
 	const hasPublicPorts = service?.ports?.some((p) => p.isPublic);
 
@@ -87,6 +87,7 @@ export function ServiceLayoutClient({
 			? [{ name: "Builds", href: `${basePath}/builds` }]
 			: []),
 		{ name: "Configuration", href: `${basePath}/configuration` },
+		...(service?.stateful ? [{ name: "Backups", href: `${basePath}/backups` }] : []),
 	];
 
 	const isActiveTab = (href: string) => {

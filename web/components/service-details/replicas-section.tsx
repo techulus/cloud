@@ -24,6 +24,7 @@ import type {
 	Server as ServerType,
 	ServiceWithDetails as Service,
 } from "@/db/types";
+import { MigrationDialog } from "./migration-dialog";
 
 type ServerInfo = Pick<ServerType, "id" | "name" | "wireguardIp">;
 type ServerWithStatus = ServerInfo & { status: string };
@@ -181,18 +182,24 @@ export const ReplicasSection = memo(function ReplicasSection({
 				</Item>
 				<div className="p-4 space-y-4">
 					{service.lockedServerId ? (
-						<div className="p-3 bg-muted rounded-md">
-							<div className="flex items-center gap-2 mb-1">
-								<Lock className="h-4 w-4 text-muted-foreground" />
-								<span className="font-medium">
-									Locked to:{" "}
-									{service.lockedServer?.name || service.lockedServerId}
-								</span>
+						<div className="space-y-4">
+							<div className="p-3 bg-muted rounded-md">
+								<div className="flex items-center gap-2 mb-1">
+									<Lock className="h-4 w-4 text-muted-foreground" />
+									<span className="font-medium">
+										Locked to:{" "}
+										{service.lockedServer?.name || service.lockedServerId}
+									</span>
+								</div>
+								<p className="text-sm text-muted-foreground">
+									Stateful services can be migrated to another server using the backup system.
+								</p>
 							</div>
-							<p className="text-sm text-muted-foreground">
-								Stateful services cannot be moved between servers. Volume data
-								is stored on this machine.
-							</p>
+							<MigrationDialog
+								service={service}
+								servers={(servers || []).map((s) => ({ id: s.id, name: s.name, status: "online" }))}
+								onMigrationComplete={onUpdate}
+							/>
 						</div>
 					) : isLoading ? (
 						<div className="flex justify-center py-4">
