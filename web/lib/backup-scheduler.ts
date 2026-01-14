@@ -5,6 +5,7 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_BACKUP_RETENTION_DAYS } from "@/lib/settings-keys";
+import { deleteBackup } from "@/actions/backups";
 
 function shouldRunSchedule(
 	schedule: string,
@@ -173,6 +174,6 @@ export async function cleanupOldBackups() {
 	console.log(`[backup-scheduler] cleaning up ${oldBackups.length} old backups`);
 
 	for (const backup of oldBackups) {
-		await db.delete(volumeBackups).where(eq(volumeBackups.id, backup.id));
+		await deleteBackup(backup.id);
 	}
 }

@@ -13,6 +13,7 @@ import {
 import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
 import { revalidatePath } from "next/cache";
+import { deleteFromS3 } from "@/lib/s3";
 
 export async function createBackup(serviceId: string, volumeId: string) {
 	const storageConfig = await getBackupStorageConfig();
@@ -177,6 +178,23 @@ export async function restoreBackup(
 }
 
 export async function deleteBackup(backupId: string) {
+	const backup = await db
+		.select({ storagePath: volumeBackups.storagePath })
+		.from(volumeBackups)
+		.where(eq(volumeBackups.id, backupId))
+		.then((r) => r[0]);
+
+	if (backup?.storagePath) {
+		const storageConfig = await getBackupStorageConfig();
+		if (storageConfig) {
+			try {
+				await deleteFromS3(storageConfig.bucket, backup.storagePath);
+			} catch (err) {
+				console.error("[deleteBackup] failed to delete from S3:", err);
+			}
+		}
+	}
+
 	await db.delete(volumeBackups).where(eq(volumeBackups.id, backupId));
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };
