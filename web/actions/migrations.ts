@@ -72,6 +72,10 @@ export async function startMigration(
 		throw new Error("No running deployment found");
 	}
 
+	if (!deployment.containerId) {
+		throw new Error("Deployment is missing container ID");
+	}
+
 	if (deployment.serverId === targetServerId) {
 		throw new Error("Service is already running on the target server");
 	}
@@ -128,6 +132,7 @@ export async function startMigration(
 		await enqueueWork(deployment.serverId, "backup_volume", {
 			backupId,
 			serviceId,
+			containerId: deployment.containerId,
 			volumeName: volume.name,
 			storagePath,
 			storageConfig: {

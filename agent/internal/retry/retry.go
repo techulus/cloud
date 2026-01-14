@@ -47,6 +47,14 @@ var ForceRemoveBackoff = BackoffConfig{
 	Jitter:       0.1,
 }
 
+var UnpauseBackoff = BackoffConfig{
+	InitialDelay: 500 * time.Millisecond,
+	MaxDelay:     5 * time.Second,
+	Multiplier:   2.0,
+	MaxRetries:   3,
+	Jitter:       0.1,
+}
+
 func WithBackoff(ctx context.Context, config BackoffConfig, check func() (done bool, err error)) error {
 	delay := config.InitialDelay
 

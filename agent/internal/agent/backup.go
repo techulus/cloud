@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/retry"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -35,6 +37,7 @@ func (a *Agent) ProcessBackupVolume(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		BackupID      string        `json:"backupId"`
 		ServiceID     string        `json:"serviceId"`
+		ContainerID   string        `json:"containerId"`
 		VolumeName    string        `json:"volumeName"`
 		StoragePath   string        `json:"storagePath"`
 		StorageConfig StorageConfig `json:"storageConfig"`
@@ -49,6 +52,36 @@ func (a *Agent) ProcessBackupVolume(item agenthttp.WorkQueueItem) error {
 
 	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
 		return fmt.Errorf("volume path does not exist: %s", volumePath)
+	}
+
+	if payload.ContainerID != "" {
+		running, err := container.IsContainerRunning(payload.ContainerID)
+		if err != nil {
+			return fmt.Errorf("failed to check container status: %w", err)
+		}
+
+		if running {
+			log.Printf("[backup_volume] pausing container %s", Truncate(payload.ContainerID, 12))
+			if err := container.Pause(payload.ContainerID); err != nil {
+				return fmt.Errorf("failed to pause container: %w", err)
+			}
+
+			defer func() {
+				log.Printf("[backup_volume] resuming container %s", Truncate(payload.ContainerID, 12))
+				err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
+					if err := container.Unpause(payload.ContainerID); err != nil {
+						log.Printf("[backup_volume] unpause attempt failed for container %s: %v", Truncate(payload.ContainerID, 12), err)
+						return false, err
+					}
+					return true, nil
+				})
+				if err != nil {
+					log.Printf("[backup_volume] CRITICAL: failed to resume container %s: %v", Truncate(payload.ContainerID, 12), err)
+				}
+			}()
+		} else {
+			log.Printf("[backup_volume] container %s not running; skipping pause", Truncate(payload.ContainerID, 12))
+		}
 	}
 
 	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("backup-%s.tar.gz", payload.BackupID))

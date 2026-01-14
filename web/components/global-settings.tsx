@@ -8,12 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	Empty,
@@ -182,7 +179,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 				secretKey: backupSecretKey,
 				retentionDays: backupRetentionDays,
 			});
-			toast.success("Backup storage settings updated");
+			toast.success("Backup volume settings updated");
 			router.refresh();
 		} catch (error) {
 			toast.error(
@@ -403,7 +400,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 						<HardDrive className="size-5 text-muted-foreground" />
 					</ItemMedia>
 					<ItemContent>
-						<ItemTitle>Backup Storage</ItemTitle>
+						<ItemTitle>Backup Volume</ItemTitle>
 					</ItemContent>
 				</Item>
 				<div className="p-4 space-y-4">
@@ -415,29 +412,17 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div className="space-y-2">
 							<Label htmlFor="backup-provider">Provider</Label>
-							<Select
-								value={backupProvider || undefined}
-								onValueChange={(value) => value && setBackupProvider(value)}
+							<NativeSelect
+								id="backup-provider"
+								value={backupProvider}
+								onChange={(e) => setBackupProvider(e.target.value)}
 							>
-								<SelectTrigger id="backup-provider">
-									<SelectValue>
-										{backupProvider
-											? {
-													s3: "AWS S3",
-													r2: "Cloudflare R2",
-													gcs: "Google Cloud Storage",
-													custom: "Custom S3-Compatible",
-												}[backupProvider]
-											: "Select provider"}
-									</SelectValue>
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="s3">AWS S3</SelectItem>
-									<SelectItem value="r2">Cloudflare R2</SelectItem>
-									<SelectItem value="gcs">Google Cloud Storage</SelectItem>
-									<SelectItem value="custom">Custom S3-Compatible</SelectItem>
-								</SelectContent>
-							</Select>
+								<NativeSelectOption value="">Select provider</NativeSelectOption>
+								<NativeSelectOption value="s3">AWS S3</NativeSelectOption>
+								<NativeSelectOption value="r2">Cloudflare R2</NativeSelectOption>
+								<NativeSelectOption value="gcs">Google Cloud Storage</NativeSelectOption>
+								<NativeSelectOption value="custom">Custom S3-Compatible</NativeSelectOption>
+							</NativeSelect>
 						</div>
 
 						<div className="space-y-2">

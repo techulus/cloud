@@ -353,6 +353,44 @@ func Start(containerID string) error {
 	return nil
 }
 
+func Pause(containerID string) error {
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("container does not exist: %s", containerID)
+	}
+
+	log.Printf("[podman:pause] pausing container %s", containerID)
+	pauseCmd := exec.Command("podman", "pause", containerID)
+	if output, err := pauseCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to pause container: %s: %w", string(output), err)
+	}
+
+	log.Printf("[podman:pause] container %s paused successfully", containerID)
+	return nil
+}
+
+func Unpause(containerID string) error {
+	exists, err := ContainerExists(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("container does not exist: %s", containerID)
+	}
+
+	log.Printf("[podman:unpause] unpausing container %s", containerID)
+	unpauseCmd := exec.Command("podman", "unpause", containerID)
+	if output, err := unpauseCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to unpause container: %s: %w", string(output), err)
+	}
+
+	log.Printf("[podman:unpause] container %s unpaused successfully", containerID)
+	return nil
+}
+
 func GetHealthStatus(containerID string) string {
 	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
 	output, err := cmd.CombinedOutput()

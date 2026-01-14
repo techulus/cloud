@@ -4,12 +4,19 @@ import { useState, useEffect, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
 import {
 	Archive,
 	Download,
@@ -79,6 +86,8 @@ export const BackupTab = memo(function BackupTab({
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 	const [backupEnabled, setBackupEnabled] = useState(
 		service.backupEnabled ?? false,
 	);
@@ -88,6 +97,10 @@ export const BackupTab = memo(function BackupTab({
 	const [savingSettings, setSavingSettings] = useState(false);
 
 	const volumes = service.volumes || [];
+
+	const hasChanges =
+		backupEnabled !== (service.backupEnabled ?? false) ||
+		backupSchedule !== (service.backupSchedule ?? "");
 
 	const loadBackups = async () => {
 		setLoading(true);
@@ -103,7 +116,9 @@ export const BackupTab = memo(function BackupTab({
 
 	useEffect(() => {
 		loadBackups();
-	}, [service.id]);
+		setBackupEnabled(service.backupEnabled ?? false);
+		setBackupSchedule(service.backupSchedule ?? "");
+	}, [service.id, service.backupEnabled, service.backupSchedule]);
 
 	const handleCreateBackup = async (volumeId: string) => {
 		setCreatingBackup(true);
@@ -119,13 +134,7 @@ export const BackupTab = memo(function BackupTab({
 	};
 
 	const handleRestore = async (backupId: string) => {
-		if (
-			!confirm(
-				"Are you sure you want to restore this backup? This will replace current volume data.",
-			)
-		) {
-			return;
-		}
+		setConfirmRestoreId(null);
 		setRestoringId(backupId);
 		setError(null);
 		try {
@@ -139,9 +148,7 @@ export const BackupTab = memo(function BackupTab({
 	};
 
 	const handleDelete = async (backupId: string) => {
-		if (!confirm("Are you sure you want to delete this backup?")) {
-			return;
-		}
+		setConfirmDeleteId(null);
 		setDeletingId(backupId);
 		setError(null);
 		try {
@@ -217,47 +224,38 @@ export const BackupTab = memo(function BackupTab({
 
 					{backupEnabled && (
 						<div className="flex items-center gap-4">
-							<Select
+							<NativeSelect
 								value={backupSchedule}
-								onValueChange={(v) => v && setBackupSchedule(v)}
+								onChange={(e) => setBackupSchedule(e.target.value)}
 							>
-								<SelectTrigger className="w-40">
-									<SelectValue>
-										{backupSchedule || "Select schedule"}
-									</SelectValue>
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="daily">Daily</SelectItem>
-									<SelectItem value="weekly">Weekly</SelectItem>
-								</SelectContent>
-							</Select>
+								<NativeSelectOption value="">Select schedule</NativeSelectOption>
+								<NativeSelectOption value="daily">Daily</NativeSelectOption>
+								<NativeSelectOption value="weekly">Weekly</NativeSelectOption>
+							</NativeSelect>
 						</div>
 					)}
 
-					<Button
-						size="sm"
-						onClick={handleSaveSettings}
-						disabled={savingSettings}
-					>
-						{savingSettings ? "Saving..." : "Save Settings"}
-					</Button>
+					{hasChanges && (
+						<Button
+							size="sm"
+							onClick={handleSaveSettings}
+							disabled={savingSettings}
+						>
+							{savingSettings ? "Saving..." : "Save Settings"}
+						</Button>
+					)}
 				</div>
 			</div>
 
 			<div className="rounded-lg border">
 				<Item className="border-0 border-b rounded-none">
 					<ItemMedia variant="icon">
-						<Archive className="size-5 text-muted-foreground" />
+						<Download className="size-5 text-muted-foreground" />
 					</ItemMedia>
 					<ItemContent>
-						<ItemTitle>Manual Backup</ItemTitle>
+						<ItemTitle>Backups</ItemTitle>
 					</ItemContent>
-				</Item>
-				<div className="p-4 space-y-4">
-					<p className="text-sm text-muted-foreground">
-						Create a backup of any volume immediately.
-					</p>
-					<div className="flex flex-wrap gap-2">
+					<div className="flex items-center gap-2">
 						{volumes.map((volume) => (
 							<Button
 								key={volume.id}
@@ -271,31 +269,20 @@ export const BackupTab = memo(function BackupTab({
 								) : (
 									<Archive className="h-4 w-4 mr-2" />
 								)}
-								Backup {volume.name}
+								Backup volume
 							</Button>
 						))}
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={loadBackups}
+							disabled={loading}
+						>
+							<RefreshCcw
+								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+							/>
+						</Button>
 					</div>
-				</div>
-			</div>
-
-			<div className="rounded-lg border">
-				<Item className="border-0 border-b rounded-none">
-					<ItemMedia variant="icon">
-						<Download className="size-5 text-muted-foreground" />
-					</ItemMedia>
-					<ItemContent>
-						<ItemTitle>Backups</ItemTitle>
-					</ItemContent>
-					<Button
-						variant="ghost"
-						size="icon"
-						onClick={loadBackups}
-						disabled={loading}
-					>
-						<RefreshCcw
-							className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-						/>
-					</Button>
 				</Item>
 				<div className="p-4 space-y-2">
 					{error && (
@@ -336,7 +323,7 @@ export const BackupTab = memo(function BackupTab({
 										<Button
 											variant="ghost"
 											size="icon"
-											onClick={() => handleRestore(backup.id)}
+											onClick={() => setConfirmRestoreId(backup.id)}
 											disabled={restoringId === backup.id}
 											title="Restore this backup"
 										>
@@ -350,7 +337,7 @@ export const BackupTab = memo(function BackupTab({
 									<Button
 										variant="ghost"
 										size="icon"
-										onClick={() => handleDelete(backup.id)}
+										onClick={() => setConfirmDeleteId(backup.id)}
 										disabled={deletingId === backup.id}
 										title="Delete backup"
 									>
@@ -366,6 +353,53 @@ export const BackupTab = memo(function BackupTab({
 					)}
 				</div>
 			</div>
+
+			<AlertDialog
+				open={confirmRestoreId !== null}
+				onOpenChange={(open) => !open && setConfirmRestoreId(null)}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Restore Backup</AlertDialogTitle>
+						<AlertDialogDescription>
+							Are you sure you want to restore this backup? This will replace
+							current volume data.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => confirmRestoreId && handleRestore(confirmRestoreId)}
+						>
+							Restore
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={confirmDeleteId !== null}
+				onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete Backup</AlertDialogTitle>
+						<AlertDialogDescription>
+							Are you sure you want to delete this backup? This action cannot be
+							undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+						>
+							Delete
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 });

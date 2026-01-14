@@ -45,6 +45,7 @@ export async function createBackup(serviceId: string, volumeId: string) {
 		.select({
 			id: deployments.id,
 			serverId: deployments.serverId,
+			containerId: deployments.containerId,
 		})
 		.from(deployments)
 		.where(
@@ -57,6 +58,10 @@ export async function createBackup(serviceId: string, volumeId: string) {
 
 	if (!deployment || !deployment.serverId) {
 		throw new Error("No running deployment found for this service");
+	}
+
+	if (!deployment.containerId) {
+		throw new Error("Deployment is missing container ID");
 	}
 
 	const backupId = randomUUID();
@@ -75,6 +80,7 @@ export async function createBackup(serviceId: string, volumeId: string) {
 	await enqueueWork(deployment.serverId, "backup_volume", {
 		backupId,
 		serviceId,
+		containerId: deployment.containerId,
 		volumeName: volume.name,
 		storagePath,
 		storageConfig: {

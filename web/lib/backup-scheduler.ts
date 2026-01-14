@@ -87,6 +87,7 @@ export async function runScheduledBackups() {
 			const deployment = await db
 				.select({
 					serverId: deployments.serverId,
+					containerId: deployments.containerId,
 				})
 				.from(deployments)
 				.where(
@@ -98,6 +99,13 @@ export async function runScheduledBackups() {
 				.then((r) => r[0]);
 
 			if (!deployment?.serverId) {
+				continue;
+			}
+
+			if (!deployment.containerId) {
+				console.error(
+					`[backup-scheduler] deployment for ${service.name} is missing container ID`,
+				);
 				continue;
 			}
 
@@ -140,6 +148,7 @@ export async function runScheduledBackups() {
 				await enqueueWork(deployment.serverId, "backup_volume", {
 					backupId,
 					serviceId: service.id,
+					containerId: deployment.containerId,
 					volumeName: volume.name,
 					storagePath,
 					storageConfig: {
