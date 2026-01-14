@@ -1039,7 +1039,9 @@ export async function updateServiceConfig(
 			for (const port of config.ports.add) {
 				const protocol = port.protocol || "http";
 
-				if (existing.some((p) => p.port === port.port && p.protocol === protocol)) {
+				if (
+					existing.some((p) => p.port === port.port && p.protocol === protocol)
+				) {
 					throw new Error(`Port ${port.port} (${protocol}) already exists`);
 				}
 

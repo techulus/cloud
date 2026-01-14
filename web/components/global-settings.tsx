@@ -87,7 +87,8 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		initialSettings.backupStorage?.secretKey ?? "",
 	);
 	const [backupRetentionDays, setBackupRetentionDays] = useState(
-		initialSettings.backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
+		initialSettings.backupStorage?.retentionDays ??
+			DEFAULT_BACKUP_RETENTION_DAYS,
 	);
 	const [isSavingBackup, setIsSavingBackup] = useState(false);
 
@@ -161,7 +162,12 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	};
 
 	const handleSaveBackupStorage = async () => {
-		if (!backupProvider || !backupBucket || !backupAccessKey || !backupSecretKey) {
+		if (
+			!backupProvider ||
+			!backupBucket ||
+			!backupAccessKey ||
+			!backupSecretKey
+		) {
 			toast.error("Please fill in all required fields");
 			return;
 		}
@@ -205,7 +211,9 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		backupEndpoint !== (initialSettings.backupStorage?.endpoint ?? "") ||
 		backupAccessKey !== (initialSettings.backupStorage?.accessKey ?? "") ||
 		backupSecretKey !== (initialSettings.backupStorage?.secretKey ?? "") ||
-		backupRetentionDays !== (initialSettings.backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS);
+		backupRetentionDays !==
+			(initialSettings.backupStorage?.retentionDays ??
+				DEFAULT_BACKUP_RETENTION_DAYS);
 
 	if (servers.length === 0) {
 		return (
@@ -444,8 +452,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 
 						<div className="space-y-2">
 							<Label htmlFor="backup-region">
-								Region{" "}
-								<span className="text-muted-foreground">(optional)</span>
+								Region <span className="text-muted-foreground">(optional)</span>
 							</Label>
 							<Input
 								id="backup-region"
@@ -458,9 +465,7 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 						<div className="space-y-2">
 							<Label htmlFor="backup-endpoint">
 								Endpoint{" "}
-								<span className="text-muted-foreground">
-									(for R2/custom)
-								</span>
+								<span className="text-muted-foreground">(for R2/custom)</span>
 							</Label>
 							<Input
 								id="backup-endpoint"
@@ -502,15 +507,17 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 								max={MAX_BACKUP_RETENTION_DAYS}
 								value={backupRetentionDays}
 								onChange={(e) =>
-									setBackupRetentionDays(parseInt(e.target.value, 10) || MIN_BACKUP_RETENTION_DAYS)
+									setBackupRetentionDays(
+										parseInt(e.target.value, 10) || MIN_BACKUP_RETENTION_DAYS,
+									)
 								}
 								className="w-24"
 							/>
 							<span className="text-sm text-muted-foreground">days</span>
 						</div>
 						<p className="text-xs text-muted-foreground">
-							Backups older than this will be automatically deleted.
-							Range: {MIN_BACKUP_RETENTION_DAYS}-{MAX_BACKUP_RETENTION_DAYS} days.
+							Backups older than this will be automatically deleted. Range:{" "}
+							{MIN_BACKUP_RETENTION_DAYS}-{MAX_BACKUP_RETENTION_DAYS} days.
 						</p>
 					</div>
 

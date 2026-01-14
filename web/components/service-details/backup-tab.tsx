@@ -79,8 +79,12 @@ export const BackupTab = memo(function BackupTab({
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [backupEnabled, setBackupEnabled] = useState(service.backupEnabled ?? false);
-	const [backupSchedule, setBackupSchedule] = useState(service.backupSchedule ?? "");
+	const [backupEnabled, setBackupEnabled] = useState(
+		service.backupEnabled ?? false,
+	);
+	const [backupSchedule, setBackupSchedule] = useState(
+		service.backupSchedule ?? "",
+	);
 	const [savingSettings, setSavingSettings] = useState(false);
 
 	const volumes = service.volumes || [];
@@ -115,7 +119,11 @@ export const BackupTab = memo(function BackupTab({
 	};
 
 	const handleRestore = async (backupId: string) => {
-		if (!confirm("Are you sure you want to restore this backup? This will replace current volume data.")) {
+		if (
+			!confirm(
+				"Are you sure you want to restore this backup? This will replace current volume data.",
+			)
+		) {
 			return;
 		}
 		setRestoringId(backupId);
@@ -150,7 +158,11 @@ export const BackupTab = memo(function BackupTab({
 		setSavingSettings(true);
 		setError(null);
 		try {
-			await updateServiceBackupSettings(service.id, backupEnabled, backupSchedule || null);
+			await updateServiceBackupSettings(
+				service.id,
+				backupEnabled,
+				backupSchedule || null,
+			);
 			onUpdate();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to save settings");
@@ -205,9 +217,14 @@ export const BackupTab = memo(function BackupTab({
 
 					{backupEnabled && (
 						<div className="flex items-center gap-4">
-							<Select value={backupSchedule} onValueChange={(v) => v && setBackupSchedule(v)}>
+							<Select
+								value={backupSchedule}
+								onValueChange={(v) => v && setBackupSchedule(v)}
+							>
 								<SelectTrigger className="w-40">
-									<SelectValue>{backupSchedule || "Select schedule"}</SelectValue>
+									<SelectValue>
+										{backupSchedule || "Select schedule"}
+									</SelectValue>
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="daily">Daily</SelectItem>
@@ -275,12 +292,16 @@ export const BackupTab = memo(function BackupTab({
 						onClick={loadBackups}
 						disabled={loading}
 					>
-						<RefreshCcw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+						<RefreshCcw
+							className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+						/>
 					</Button>
 				</Item>
 				<div className="p-4 space-y-2">
 					{error && (
-						<p className="text-sm text-red-600 dark:text-red-400 mb-2">{error}</p>
+						<p className="text-sm text-red-600 dark:text-red-400 mb-2">
+							{error}
+						</p>
 					)}
 
 					{loading ? (
@@ -299,11 +320,14 @@ export const BackupTab = memo(function BackupTab({
 										<p className="font-medium text-sm">{backup.volumeName}</p>
 										<p className="text-xs text-muted-foreground">
 											{formatDate(backup.createdAt)}
-											{backup.sizeBytes && ` · ${formatBytes(backup.sizeBytes)}`}
+											{backup.sizeBytes &&
+												` · ${formatBytes(backup.sizeBytes)}`}
 											{backup.serverName && ` · ${backup.serverName}`}
 										</p>
 										{backup.errorMessage && (
-											<p className="text-xs text-red-500">{backup.errorMessage}</p>
+											<p className="text-xs text-red-500">
+												{backup.errorMessage}
+											</p>
 										)}
 									</div>
 								</div>

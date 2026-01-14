@@ -1,5 +1,10 @@
 import { db } from "@/db";
-import { services, serviceVolumes, volumeBackups, deployments } from "@/db/schema";
+import {
+	services,
+	serviceVolumes,
+	volumeBackups,
+	deployments,
+} from "@/db/schema";
 import { eq, and, lt, desc } from "drizzle-orm";
 import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
@@ -21,7 +26,8 @@ function shouldRunSchedule(
 		}
 
 		if (lastBackupTime) {
-			const hoursSince = (now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60);
+			const hoursSince =
+				(now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60);
 			if (hoursSince < 20) {
 				return false;
 			}
@@ -36,7 +42,8 @@ function shouldRunSchedule(
 		}
 
 		if (lastBackupTime) {
-			const daysSince = (now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60 * 24);
+			const daysSince =
+				(now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60 * 24);
 			if (daysSince < 6) {
 				return false;
 			}
@@ -108,7 +115,12 @@ export async function runScheduledBackups() {
 					.limit(1)
 					.then((r) => r[0]);
 
-				if (!shouldRunSchedule(service.backupSchedule, lastBackup?.createdAt ?? null)) {
+				if (
+					!shouldRunSchedule(
+						service.backupSchedule,
+						lastBackup?.createdAt ?? null,
+					)
+				) {
 					continue;
 				}
 
@@ -145,14 +157,18 @@ export async function runScheduledBackups() {
 				);
 			}
 		} catch (err) {
-			console.error(`[backup-scheduler] error scheduling backup for ${service.name}:`, err);
+			console.error(
+				`[backup-scheduler] error scheduling backup for ${service.name}:`,
+				err,
+			);
 		}
 	}
 }
 
 export async function cleanupOldBackups() {
 	const storageConfig = await getBackupStorageConfig();
-	const retentionDays = storageConfig?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS;
+	const retentionDays =
+		storageConfig?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS;
 
 	const cutoffDate = new Date();
 	cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
@@ -171,7 +187,9 @@ export async function cleanupOldBackups() {
 		return;
 	}
 
-	console.log(`[backup-scheduler] cleaning up ${oldBackups.length} old backups`);
+	console.log(
+		`[backup-scheduler] cleaning up ${oldBackups.length} old backups`,
+	);
 
 	for (const backup of oldBackups) {
 		await deleteBackup(backup.id);

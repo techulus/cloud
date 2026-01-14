@@ -151,7 +151,9 @@ export const TCPProxySection = memo(function TCPProxySection({
 												variant="ghost"
 												size="sm"
 												className="h-6 px-2"
-												onClick={() => copyToClipboard(connectionString, port.id)}
+												onClick={() =>
+													copyToClipboard(connectionString, port.id)
+												}
 											>
 												{copiedPort === port.id ? (
 													<Check className="h-3 w-3" />

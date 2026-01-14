@@ -227,7 +227,11 @@ export async function GET(request: NextRequest) {
 							serviceId: service.id,
 						});
 					}
-				} else if (port.isPublic && port.protocol === "tcp" && port.externalPort) {
+				} else if (
+					port.isPublic &&
+					port.protocol === "tcp" &&
+					port.externalPort
+				) {
 					const upstreams = routableDeployments
 						.filter((d) => d.ipAddress)
 						.map((d) => `${d.ipAddress}:${port.port}`);
@@ -241,7 +245,11 @@ export async function GET(request: NextRequest) {
 							tlsPassthrough: port.tlsPassthrough,
 						});
 					}
-				} else if (port.isPublic && port.protocol === "udp" && port.externalPort) {
+				} else if (
+					port.isPublic &&
+					port.protocol === "udp" &&
+					port.externalPort
+				) {
 					const upstreams = routableDeployments
 						.filter((d) => d.ipAddress)
 						.map((d) => `${d.ipAddress}:${port.port}`);

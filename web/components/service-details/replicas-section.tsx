@@ -131,7 +131,12 @@ export const ReplicasSection = memo(function ReplicasSection({
 			selectedServerId !== service.lockedServerId &&
 			selectedServerId !== currentServerId
 		);
-	}, [service.stateful, service.lockedServerId, configuredReplicas, selectedServerId]);
+	}, [
+		service.stateful,
+		service.lockedServerId,
+		configuredReplicas,
+		selectedServerId,
+	]);
 
 	const updateReplicas = (serverId: string, value: number) => {
 		setLocalReplicas((prev) => ({
@@ -217,8 +222,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 										</span>
 									</div>
 									<p className="text-sm text-muted-foreground">
-										Changing the server will trigger a migration. The service will be
-										backed up, moved to the new server, and redeployed.
+										Changing the server will trigger a migration. The service
+										will be backed up, moved to the new server, and redeployed.
 									</p>
 								</div>
 							)}
@@ -226,8 +231,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 								<div className="p-3 bg-yellow-500/10 border border-yellow-500/50 rounded-md">
 									<p className="text-sm text-yellow-600 dark:text-yellow-400">
 										<AlertTriangle className="h-4 w-4 inline mr-1" />
-										Changing server will trigger a migration. The service will experience
-										downtime during the migration process.
+										Changing server will trigger a migration. The service will
+										experience downtime during the migration process.
 									</p>
 								</div>
 							)}

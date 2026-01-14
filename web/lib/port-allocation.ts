@@ -7,9 +7,7 @@ const TCP_PORT_END = 10999;
 const UDP_PORT_START = 11000;
 const UDP_PORT_END = 11999;
 
-export async function allocatePort(
-	protocol: "tcp" | "udp",
-): Promise<number> {
+export async function allocatePort(protocol: "tcp" | "udp"): Promise<number> {
 	const portStart = protocol === "tcp" ? TCP_PORT_START : UDP_PORT_START;
 	const portEnd = protocol === "tcp" ? TCP_PORT_END : UDP_PORT_END;
 

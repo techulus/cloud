@@ -4,7 +4,11 @@ import { getBackupStorageConfig } from "@/db/queries";
 let cachedClient: S3Client | null = null;
 let cachedConfigHash: string | null = null;
 
-function hashConfig(config: { region: string; endpoint: string | null; accessKey: string }): string {
+function hashConfig(config: {
+	region: string;
+	endpoint: string | null;
+	accessKey: string;
+}): string {
 	return `${config.region}-${config.endpoint}-${config.accessKey}`;
 }
 

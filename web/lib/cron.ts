@@ -7,10 +7,7 @@ import {
 	renewExpiringCertificates,
 	cleanupExpiredChallenges,
 } from "@/lib/acme-manager";
-import {
-	runScheduledBackups,
-	cleanupOldBackups,
-} from "@/lib/backup-scheduler";
+import { runScheduledBackups, cleanupOldBackups } from "@/lib/backup-scheduler";
 
 export function startCronEngine() {
 	console.log("[cron] starting cron engine");

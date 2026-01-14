@@ -223,7 +223,12 @@ type BackupStorageConfig = {
 export async function getBackupStorageConfig() {
 	const config = await getSetting<BackupStorageConfig>("backup_storage_config");
 
-	if (!config?.provider || !config?.bucket || !config?.accessKey || !config?.secretKey) {
+	if (
+		!config?.provider ||
+		!config?.bucket ||
+		!config?.accessKey ||
+		!config?.secretKey
+	) {
 		return null;
 	}
 

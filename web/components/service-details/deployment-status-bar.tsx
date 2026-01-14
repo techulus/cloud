@@ -36,6 +36,8 @@ const MIGRATION_STAGES: Record<string, string> = {
 	stopping: "Stopping service",
 	backing_up: "Creating backup",
 	restoring: "Restoring volumes",
+	starting: "Starting on new server",
+	failed: "Migration failed",
 };
 
 function mapDeploymentStatusToStage(status: DeploymentStatus): string {
@@ -342,11 +344,14 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 
 	if (barState.mode === "deploying") {
 		const currentStage = STAGES[barState.stageIndex];
-		const isMigrating = service.migrationStatus;
+		const isMigrating = !!service.migrationStatus;
 
 		let status = currentStage?.label || "Deploying";
-		if (isMigrating) {
-			status = MIGRATION_STAGES[service.migrationStatus] || service.migrationStatus;
+		if (isMigrating && service.migrationStatus) {
+			status =
+				MIGRATION_STAGES[service.migrationStatus] ||
+				service.migrationStatus ||
+				"Migrating";
 		}
 
 		return (

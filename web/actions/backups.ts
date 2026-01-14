@@ -48,7 +48,10 @@ export async function createBackup(serviceId: string, volumeId: string) {
 		})
 		.from(deployments)
 		.where(
-			and(eq(deployments.serviceId, serviceId), eq(deployments.status, "running")),
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "running"),
+			),
 		)
 		.then((r) => r[0]);
 
