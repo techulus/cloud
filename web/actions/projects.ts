@@ -18,6 +18,7 @@ import {
 	serviceVolumes,
 	workQueue,
 } from "@/db/schema";
+import { revalidatePath } from "next/cache";
 import { enqueueWork } from "@/lib/work-queue";
 import {
 	buildCurrentConfig,
@@ -1355,5 +1356,35 @@ export async function updateServiceReplicas(
 
 	await db.update(services).set({ replicas }).where(eq(services.id, serviceId));
 
+	return { success: true };
+}
+
+export async function updateServiceBackupSettings(
+	serviceId: string,
+	backupEnabled: boolean,
+	backupSchedule: string | null,
+) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (!service.stateful) {
+		throw new Error("Backup settings are only available for stateful services");
+	}
+
+	if (backupEnabled && !backupSchedule) {
+		throw new Error("Schedule is required when backups are enabled");
+	}
+
+	await db
+		.update(services)
+		.set({
+			backupEnabled,
+			backupSchedule: backupEnabled ? backupSchedule : null,
+		})
+		.where(eq(services.id, serviceId));
+
+	revalidatePath("/dashboard/projects");
 	return { success: true };
 }

@@ -445,3 +445,37 @@ func (c *Client) GetBuildStatus(buildID string) (string, error) {
 
 	return result.Status, nil
 }
+
+func (c *Client) ReportBackupComplete(backupID string, sizeBytes int64, checksum string) error {
+	payload := map[string]interface{}{
+		"backupId":  backupID,
+		"sizeBytes": sizeBytes,
+		"checksum":  checksum,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal backup complete: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/backup/complete", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to report backup complete: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("backup complete report failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}

@@ -194,17 +194,40 @@ export async function getSetting<T>(key: string): Promise<T | null> {
 }
 
 export async function getGlobalSettings() {
-	const [buildServers, excludedServers, buildTimeout] = await Promise.all([
-		getSetting<string[]>("servers_allowed_for_builds"),
-		getSetting<string[]>("servers_excluded_from_workload_placement"),
-		getSetting<number>("build_timeout_minutes"),
-	]);
+	const [buildServers, excludedServers, buildTimeout, backupConfig] =
+		await Promise.all([
+			getSetting<string[]>("servers_allowed_for_builds"),
+			getSetting<string[]>("servers_excluded_from_workload_placement"),
+			getSetting<number>("build_timeout_minutes"),
+			getSetting<BackupStorageConfig>("backup_storage_config"),
+		]);
 
 	return {
 		buildServerIds: buildServers ?? [],
 		excludedServerIds: excludedServers ?? [],
 		buildTimeoutMinutes: buildTimeout ?? 30,
+		backupStorage: backupConfig ?? null,
 	};
+}
+
+type BackupStorageConfig = {
+	provider: string;
+	bucket: string;
+	region: string;
+	endpoint: string;
+	accessKey: string;
+	secretKey: string;
+	retentionDays: number;
+};
+
+export async function getBackupStorageConfig() {
+	const config = await getSetting<BackupStorageConfig>("backup_storage_config");
+
+	if (!config?.provider || !config?.bucket || !config?.accessKey || !config?.secretKey) {
+		return null;
+	}
+
+	return config;
 }
 
 export async function setSetting<T>(key: string, value: T): Promise<void> {

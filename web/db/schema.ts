@@ -197,6 +197,17 @@ export const services = pgTable("services", {
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
 		withTimezone: true,
 	}),
+	backupEnabled: boolean("backup_enabled").default(false),
+	backupSchedule: text("backup_schedule"),
+	migrationStatus: text("migration_status", {
+		enum: ["stopping", "backing_up", "restoring", "starting", "failed"],
+	}),
+	migrationTargetServerId: text("migration_target_server_id").references(
+		() => servers.id,
+		{ onDelete: "set null" },
+	),
+	migrationBackupId: text("migration_backup_id"),
+	migrationError: text("migration_error"),
 	createdAt: timestamp("created_at", { withTimezone: true })
 		.defaultNow()
 		.notNull(),
@@ -242,6 +253,42 @@ export const serviceVolumes = pgTable("service_volumes", {
 		.defaultNow()
 		.notNull(),
 });
+
+export const volumeBackups = pgTable(
+	"volume_backups",
+	{
+		id: text("id").primaryKey(),
+		volumeId: text("volume_id")
+			.notNull()
+			.references(() => serviceVolumes.id, { onDelete: "cascade" }),
+		volumeName: text("volume_name").notNull(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id),
+		status: text("status", {
+			enum: ["pending", "uploading", "completed", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		storagePath: text("storage_path"),
+		sizeBytes: bigint("size_bytes", { mode: "number" }),
+		checksum: text("checksum"),
+		errorMessage: text("error_message"),
+		isMigrationBackup: boolean("is_migration_backup").default(false),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("volume_backups_volume_id_idx").on(table.volumeId),
+		index("volume_backups_service_id_idx").on(table.serviceId),
+		index("volume_backups_created_at_idx").on(table.createdAt),
+	],
+);
 
 export const secrets = pgTable("secrets", {
 	id: text("id").primaryKey(),
@@ -356,6 +403,8 @@ export const workQueue = pgTable(
 				"force_cleanup",
 				"cleanup_volumes",
 				"build",
+				"backup_volume",
+				"restore_volume",
 			],
 		}).notNull(),
 		payload: text("payload").notNull(),

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/paths"
 )
 
 type Config struct {

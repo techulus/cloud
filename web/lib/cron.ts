@@ -7,6 +7,10 @@ import {
 	renewExpiringCertificates,
 	cleanupExpiredChallenges,
 } from "@/lib/acme-manager";
+import {
+	runScheduledBackups,
+	cleanupOldBackups,
+} from "@/lib/backup-scheduler";
 
 export function startCronEngine() {
 	console.log("[cron] starting cron engine");
@@ -28,5 +32,15 @@ export function startCronEngine() {
 
 	new Cron("*/10 * * * *", async () => {
 		await cleanupExpiredChallenges();
+	});
+
+	new Cron("*/15 * * * *", async () => {
+		console.log("[cron] checking scheduled backups");
+		await runScheduledBackups();
+	});
+
+	new Cron("0 3 * * *", async () => {
+		console.log("[cron] cleaning up old backups");
+		await cleanupOldBackups();
 	});
 }

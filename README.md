@@ -15,7 +15,3 @@ A stateless container deployment platform with private-first networking.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
-## TODO
-
-- [ ] Volume backups
-- [ ] TCP / L4 proxying

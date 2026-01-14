@@ -13,6 +13,7 @@ import type {
 	services,
 	serviceVolumes,
 	servers,
+	volumeBackups,
 	workQueue,
 } from "./schema";
 
@@ -30,6 +31,7 @@ export type Rollout = typeof rollouts.$inferSelect;
 export type GithubRepo = typeof githubRepos.$inferSelect;
 export type GithubInstallation = typeof githubInstallations.$inferSelect;
 export type Build = typeof builds.$inferSelect;
+export type VolumeBackup = typeof volumeBackups.$inferSelect;
 export type WorkQueue = typeof workQueue.$inferSelect;
 
 export type DeploymentStatus = NonNullable<Deployment["status"]>;

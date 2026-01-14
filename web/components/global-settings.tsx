@@ -3,9 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Hammer, Server, Ban, Clock } from "lucide-react";
+import { Hammer, Server, Ban, Clock, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	Empty,
@@ -17,8 +25,15 @@ import {
 	updateBuildServers,
 	updateExcludedServers,
 	updateBuildTimeout,
+	updateBackupStorageConfig,
 } from "@/actions/settings";
 import type { Server as ServerType } from "@/db/types";
+import {
+	MIN_BACKUP_RETENTION_DAYS,
+	MAX_BACKUP_RETENTION_DAYS,
+	DEFAULT_BACKUP_RETENTION_DAYS,
+	type BackupStorageProvider,
+} from "@/lib/settings-keys";
 
 type Props = {
 	servers: ServerType[];
@@ -26,6 +41,15 @@ type Props = {
 		buildServerIds: string[];
 		excludedServerIds: string[];
 		buildTimeoutMinutes: number;
+		backupStorage: {
+			provider: string;
+			bucket: string;
+			region: string;
+			endpoint: string;
+			accessKey: string;
+			secretKey: string;
+			retentionDays: number;
+		} | null;
 	};
 };
 
@@ -43,6 +67,29 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const [isSavingBuild, setIsSavingBuild] = useState(false);
 	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
 	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
+
+	const [backupProvider, setBackupProvider] = useState(
+		initialSettings.backupStorage?.provider ?? "",
+	);
+	const [backupBucket, setBackupBucket] = useState(
+		initialSettings.backupStorage?.bucket ?? "",
+	);
+	const [backupRegion, setBackupRegion] = useState(
+		initialSettings.backupStorage?.region ?? "",
+	);
+	const [backupEndpoint, setBackupEndpoint] = useState(
+		initialSettings.backupStorage?.endpoint ?? "",
+	);
+	const [backupAccessKey, setBackupAccessKey] = useState(
+		initialSettings.backupStorage?.accessKey ?? "",
+	);
+	const [backupSecretKey, setBackupSecretKey] = useState(
+		initialSettings.backupStorage?.secretKey ?? "",
+	);
+	const [backupRetentionDays, setBackupRetentionDays] = useState(
+		initialSettings.backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
+	);
+	const [isSavingBackup, setIsSavingBackup] = useState(false);
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -113,6 +160,33 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		}
 	};
 
+	const handleSaveBackupStorage = async () => {
+		if (!backupProvider || !backupBucket || !backupAccessKey || !backupSecretKey) {
+			toast.error("Please fill in all required fields");
+			return;
+		}
+		setIsSavingBackup(true);
+		try {
+			await updateBackupStorageConfig({
+				provider: backupProvider as BackupStorageProvider,
+				bucket: backupBucket,
+				region: backupRegion,
+				endpoint: backupEndpoint,
+				accessKey: backupAccessKey,
+				secretKey: backupSecretKey,
+				retentionDays: backupRetentionDays,
+			});
+			toast.success("Backup storage settings updated");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to update settings",
+			);
+		} finally {
+			setIsSavingBackup(false);
+		}
+	};
+
 	const buildServersChanged =
 		buildServerIds.size !== initialSettings.buildServerIds.length ||
 		!initialSettings.buildServerIds.every((id) => buildServerIds.has(id));
@@ -123,6 +197,15 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 
 	const buildTimeoutChanged =
 		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
+
+	const backupStorageChanged =
+		backupProvider !== (initialSettings.backupStorage?.provider ?? "") ||
+		backupBucket !== (initialSettings.backupStorage?.bucket ?? "") ||
+		backupRegion !== (initialSettings.backupStorage?.region ?? "") ||
+		backupEndpoint !== (initialSettings.backupStorage?.endpoint ?? "") ||
+		backupAccessKey !== (initialSettings.backupStorage?.accessKey ?? "") ||
+		backupSecretKey !== (initialSettings.backupStorage?.secretKey ?? "") ||
+		backupRetentionDays !== (initialSettings.backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS);
 
 	if (servers.length === 0) {
 		return (
@@ -300,6 +383,145 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 								size="sm"
 							>
 								{isSavingTimeout ? "Saving..." : "Save"}
+							</Button>
+						</div>
+					)}
+				</div>
+			</div>
+
+			<div className="rounded-lg border">
+				<Item className="border-0 border-b rounded-none">
+					<ItemMedia variant="icon">
+						<HardDrive className="size-5 text-muted-foreground" />
+					</ItemMedia>
+					<ItemContent>
+						<ItemTitle>Backup Storage</ItemTitle>
+					</ItemContent>
+				</Item>
+				<div className="p-4 space-y-4">
+					<p className="text-sm text-muted-foreground">
+						Configure S3-compatible storage for volume backups. This is required
+						for backing up stateful services and migrating them between servers.
+					</p>
+
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<div className="space-y-2">
+							<Label htmlFor="backup-provider">Provider</Label>
+							<Select
+								value={backupProvider || undefined}
+								onValueChange={(value) => value && setBackupProvider(value)}
+							>
+								<SelectTrigger id="backup-provider">
+									<SelectValue>
+										{backupProvider
+											? {
+													s3: "AWS S3",
+													r2: "Cloudflare R2",
+													gcs: "Google Cloud Storage",
+													custom: "Custom S3-Compatible",
+												}[backupProvider]
+											: "Select provider"}
+									</SelectValue>
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="s3">AWS S3</SelectItem>
+									<SelectItem value="r2">Cloudflare R2</SelectItem>
+									<SelectItem value="gcs">Google Cloud Storage</SelectItem>
+									<SelectItem value="custom">Custom S3-Compatible</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="backup-bucket">Bucket Name</Label>
+							<Input
+								id="backup-bucket"
+								value={backupBucket}
+								onChange={(e) => setBackupBucket(e.target.value)}
+								placeholder="my-backup-bucket"
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="backup-region">
+								Region{" "}
+								<span className="text-muted-foreground">(optional)</span>
+							</Label>
+							<Input
+								id="backup-region"
+								value={backupRegion}
+								onChange={(e) => setBackupRegion(e.target.value)}
+								placeholder="us-east-1"
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="backup-endpoint">
+								Endpoint{" "}
+								<span className="text-muted-foreground">
+									(for R2/custom)
+								</span>
+							</Label>
+							<Input
+								id="backup-endpoint"
+								value={backupEndpoint}
+								onChange={(e) => setBackupEndpoint(e.target.value)}
+								placeholder="https://..."
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="backup-access-key">Access Key</Label>
+							<Input
+								id="backup-access-key"
+								value={backupAccessKey}
+								onChange={(e) => setBackupAccessKey(e.target.value)}
+								placeholder="AKIA..."
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="backup-secret-key">Secret Key</Label>
+							<Input
+								id="backup-secret-key"
+								type="password"
+								value={backupSecretKey}
+								onChange={(e) => setBackupSecretKey(e.target.value)}
+								placeholder="••••••••"
+							/>
+						</div>
+					</div>
+
+					<div className="space-y-2 pt-2">
+						<Label htmlFor="backup-retention">Retention Period</Label>
+						<div className="flex items-center gap-3">
+							<Input
+								id="backup-retention"
+								type="number"
+								min={MIN_BACKUP_RETENTION_DAYS}
+								max={MAX_BACKUP_RETENTION_DAYS}
+								value={backupRetentionDays}
+								onChange={(e) =>
+									setBackupRetentionDays(parseInt(e.target.value, 10) || MIN_BACKUP_RETENTION_DAYS)
+								}
+								className="w-24"
+							/>
+							<span className="text-sm text-muted-foreground">days</span>
+						</div>
+						<p className="text-xs text-muted-foreground">
+							Backups older than this will be automatically deleted.
+							Range: {MIN_BACKUP_RETENTION_DAYS}-{MAX_BACKUP_RETENTION_DAYS} days.
+						</p>
+					</div>
+
+					{backupStorageChanged && (
+						<div className="pt-3 border-t">
+							<Button
+								onClick={handleSaveBackupStorage}
+								disabled={isSavingBackup}
+								size="sm"
+							>
+								{isSavingBackup ? "Saving..." : "Save"}
 							</Button>
 						</div>
 					)}
