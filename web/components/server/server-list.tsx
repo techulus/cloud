@@ -23,17 +23,49 @@ import {
 import type { Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
-type ServerWithIp = Pick<
+type ServerWithResources = Pick<
 	Server,
-	"id" | "name" | "publicIp" | "wireguardIp" | "status" | "isProxy"
+	| "id"
+	| "name"
+	| "publicIp"
+	| "wireguardIp"
+	| "status"
+	| "isProxy"
+	| "resourcesCpu"
+	| "resourcesMemory"
+	| "resourcesDisk"
+	| "meta"
 >;
+
+function formatResources(server: ServerWithResources): string | null {
+	const parts: string[] = [];
+
+	if (server.resourcesCpu !== null) {
+		parts.push(`${server.resourcesCpu} cores`);
+	}
+	if (server.resourcesMemory !== null) {
+		parts.push(`${Math.round((server.resourcesMemory / 1024) * 10) / 10} GB`);
+	}
+	if (server.resourcesDisk !== null) {
+		parts.push(`${server.resourcesDisk} GB`);
+	}
+
+	return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function formatOsArch(server: ServerWithResources): string | null {
+	if (server.meta?.os && server.meta?.arch) {
+		return `${server.meta.os}/${server.meta.arch}`;
+	}
+	return null;
+}
 
 export function ServerList({
 	initialServers,
 }: {
-	initialServers: ServerWithIp[];
+	initialServers: ServerWithResources[];
 }) {
-	const { data: servers } = useSWR<ServerWithIp[]>("/api/servers", fetcher, {
+	const { data: servers } = useSWR<ServerWithResources[]>("/api/servers", fetcher, {
 		fallbackData: initialServers,
 		refreshInterval: 10000,
 		revalidateOnFocus: true,
@@ -85,7 +117,14 @@ export function ServerList({
 									<StatusIndicator status={server.status} />
 								</div>
 								<ItemDescription>
-									{server.wireguardIp || "Not registered"}
+									{formatResources(server) || formatOsArch(server) ? (
+										<>
+											{formatResources(server) && <span>{formatResources(server)}</span>}
+											{formatOsArch(server) && <span className="block">{formatOsArch(server)}</span>}
+										</>
+									) : (
+										"Not registered"
+									)}
 								</ItemDescription>
 							</ItemContent>
 						</Item>

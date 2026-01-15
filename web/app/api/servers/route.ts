@@ -36,6 +36,10 @@ export async function GET(request: Request) {
 			wireguardIp: servers.wireguardIp,
 			publicIp: servers.publicIp,
 			isProxy: servers.isProxy,
+			resourcesCpu: servers.resourcesCpu,
+			resourcesMemory: servers.resourcesMemory,
+			resourcesDisk: servers.resourcesDisk,
+			meta: servers.meta,
 		})
 		.from(servers);
 

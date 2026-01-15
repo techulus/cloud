@@ -32,9 +32,6 @@ export function StatusIndicator({ status }: { status: string }) {
 					className={`relative inline-flex rounded-full h-2 w-2 ${color.dot}`}
 				/>
 			</span>
-			<span className={`text-xs font-medium capitalize ${color.text}`}>
-				{status}
-			</span>
 		</div>
 	);
 }
