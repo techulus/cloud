@@ -80,7 +80,7 @@ export default function ArchitecturePage() {
 	return (
 		<div className="relative space-y-4">
 			{service.deployments.length > 0 && (
-				<div className="absolute top-4 left-4 z-10">
+				<div className="fixed bottom-4 right-4 z-10 md:absolute md:bottom-auto md:top-4 md:left-4 md:right-auto">
 					{hasRunningDeployments && (
 						<ButtonGroup>
 							<Button

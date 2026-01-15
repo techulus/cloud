@@ -41,15 +41,16 @@ func ValidateL4Routes(tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute) 
 	return nil
 }
 
-func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute) error {
+func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute, serverName string) error {
 	if err := ValidateL4Routes(tcpRoutes, udpRoutes); err != nil {
 		return fmt.Errorf("port validation failed: %w", err)
 	}
 
-	config := traefikFullConfig{
-		HTTP: httpConfig{
-			Routers:  make(map[string]router),
-			Services: make(map[string]service),
+	config := traefikFullConfigWithMiddlewares{
+		HTTP: httpConfigWithMiddlewares{
+			Routers:     make(map[string]routerWithMiddleware),
+			Services:    make(map[string]service),
+			Middlewares: make(map[string]middleware),
 		},
 		TCP: tcpConfig{
 			Routers:  make(map[string]tcpRouter),
@@ -61,16 +62,29 @@ func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRou
 		},
 	}
 
+	var middlewareNames []string
+	if serverName != "" {
+		config.HTTP.Middlewares["forwarded_server"] = middleware{
+			Headers: &headersMiddleware{
+				CustomRequestHeaders: map[string]string{
+					"X-Forwarded-Server": serverName,
+				},
+			},
+		}
+		middlewareNames = []string{"forwarded_server@file"}
+	}
+
 	for _, route := range httpRoutes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
 
-		config.HTTP.Routers[route.ServiceId] = router{
+		config.HTTP.Routers[route.ServiceId] = routerWithMiddleware{
 			Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
 			EntryPoints: []string{"websecure"},
 			Service:     route.ServiceId,
 			TLS:         &tlsConfig{},
+			Middlewares: middlewareNames,
 		}
 
 		servers := make([]server, len(route.Upstreams))
@@ -238,6 +252,7 @@ func GetCurrentL4ConfigHash() string {
 	for routerName, rtr := range config.TCP.Routers {
 		var externalPort int
 		var serviceId string
+
 		fmt.Sscanf(routerName, "tcp_%s_%d", &serviceId, &externalPort)
 
 		for _, ep := range rtr.EntryPoints {
@@ -302,15 +317,16 @@ func GetCurrentL4ConfigHash() string {
 	return HashTCPRoutes(tcpRoutes) + HashUDPRoutes(udpRoutes)
 }
 
-func readCurrentFullConfig() (*traefikFullConfig, error) {
+func readCurrentFullConfig() (*traefikFullConfigWithMiddlewares, error) {
 	routesPath := filepath.Join(traefikDynamicDir, routesFileName)
 	data, err := os.ReadFile(routesPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &traefikFullConfig{
-				HTTP: httpConfig{
-					Routers:  make(map[string]router),
-					Services: make(map[string]service),
+			return &traefikFullConfigWithMiddlewares{
+				HTTP: httpConfigWithMiddlewares{
+					Routers:     make(map[string]routerWithMiddleware),
+					Services:    make(map[string]service),
+					Middlewares: make(map[string]middleware),
 				},
 				TCP: tcpConfig{
 					Routers:  make(map[string]tcpRouter),
@@ -325,16 +341,19 @@ func readCurrentFullConfig() (*traefikFullConfig, error) {
 		return nil, err
 	}
 
-	var config traefikFullConfig
+	var config traefikFullConfigWithMiddlewares
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 
 	if config.HTTP.Routers == nil {
-		config.HTTP.Routers = make(map[string]router)
+		config.HTTP.Routers = make(map[string]routerWithMiddleware)
 	}
 	if config.HTTP.Services == nil {
 		config.HTTP.Services = make(map[string]service)
+	}
+	if config.HTTP.Middlewares == nil {
+		config.HTTP.Middlewares = make(map[string]middleware)
 	}
 	if config.TCP.Routers == nil {
 		config.TCP.Routers = make(map[string]tcpRouter)

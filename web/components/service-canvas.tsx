@@ -3,26 +3,14 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import {
-	Box,
-	ChevronDownIcon,
-	Globe,
-	HardDrive,
-	Lock,
-	Settings,
-} from "lucide-react";
+import { Box, Globe, HardDrive, Lock, Settings } from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
 import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
-import { Button, buttonVariants } from "./ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+import { buttonVariants } from "./ui/button";
+import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import {
 	Empty,
 	EmptyContent,
@@ -33,7 +21,7 @@ import {
 
 function ServiceCardSkeleton() {
 	return (
-		<div className="flex flex-col items-center gap-2 w-70">
+		<div className="flex flex-col items-center gap-2 w-full md:w-70">
 			<div className="w-full p-3 rounded-xl border-2 border-zinc-200 dark:border-zinc-700 bg-slate-100/50 dark:bg-slate-800/50">
 				<div className="flex items-center gap-2">
 					<div className="flex-1 min-w-0">
@@ -64,33 +52,30 @@ function EnvironmentSelector({
 	environments,
 	selectedEnvName,
 	projectSlug,
+	className,
 }: {
 	environments: Environment[];
 	selectedEnvName: string;
 	projectSlug: string;
+	className?: string;
 }) {
 	const router = useRouter();
 
 	return (
-		<div className="absolute top-4 left-4 flex items-center gap-2">
-			<DropdownMenu>
-				<DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-					{selectedEnvName}
-					<ChevronDownIcon />
-				</DropdownMenuTrigger>
-				<DropdownMenuContent side="bottom" align="start">
-					{environments.map((env) => (
-						<DropdownMenuItem
-							key={env.id}
-							onClick={() =>
-								router.push(`/dashboard/projects/${projectSlug}/${env.name}`)
-							}
-						>
-							{env.name}
-						</DropdownMenuItem>
-					))}
-				</DropdownMenuContent>
-			</DropdownMenu>
+		<div className={cn("flex items-center gap-2", className)}>
+			<NativeSelect
+				size="sm"
+				value={selectedEnvName}
+				onChange={(e) =>
+					router.push(`/dashboard/projects/${projectSlug}/${e.target.value}`)
+				}
+			>
+				{environments.map((env) => (
+					<NativeSelectOption key={env.id} value={env.name}>
+						{env.name}
+					</NativeSelectOption>
+				))}
+			</NativeSelect>
 			<Link
 				href={`/dashboard/projects/${projectSlug}/settings`}
 				className={cn(
@@ -126,7 +111,7 @@ function ServiceCard({
 	const hasEndpoints = publicPorts.length > 0 || hasInternalDns;
 
 	return (
-		<div className="flex flex-col items-center gap-2 w-70">
+		<div className="flex flex-col items-center gap-2 w-full md:w-70">
 			<Link
 				href={`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`}
 				className={`
@@ -242,101 +227,167 @@ export function ServiceCanvas({
 
 	if (!environments || isLoading) {
 		return (
+			<>
+				<div className="flex flex-col gap-4 py-4 md:hidden">
+					<ServiceCardSkeleton />
+					<ServiceCardSkeleton />
+				</div>
+				<div
+					className="
+						hidden md:flex
+						relative -mt-6 -mb-6 p-10
+						left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
+						bg-slate-50/50 dark:bg-slate-900/30
+						items-center justify-center
+					"
+					style={{
+						height: "calc(100vh - 3.5rem)",
+						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
+						backgroundSize: "24px 24px",
+					}}
+				>
+					<div className="flex flex-wrap gap-10 justify-center items-center">
+						<ServiceCardSkeleton />
+						<ServiceCardSkeleton />
+					</div>
+				</div>
+			</>
+		);
+	}
+
+	if (!services || services.length === 0) {
+		return (
+			<>
+				<div className="flex flex-col gap-4 py-4 md:hidden">
+					<div className="flex items-center gap-2">
+						<EnvironmentSelector
+							environments={environments}
+							selectedEnvName={envName}
+							projectSlug={projectSlug}
+						/>
+					</div>
+					<Empty>
+						<EmptyMedia variant="icon">
+							<Box className="size-5" />
+						</EmptyMedia>
+						<EmptyTitle>No services yet</EmptyTitle>
+						<EmptyDescription>
+							Add your first service to deploy.
+						</EmptyDescription>
+						<EmptyContent>
+							<CreateServiceDialog
+								projectId={projectId}
+								environmentId={envId}
+								onSuccess={() => mutate()}
+							/>
+						</EmptyContent>
+					</Empty>
+				</div>
+				<div
+					className="
+						hidden md:flex
+						relative -mt-6 -mb-6
+						left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
+						bg-slate-50 dark:bg-slate-900/50
+						items-center justify-center
+					"
+					style={{
+						height: "calc(100vh - 5rem)",
+						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
+						backgroundSize: "20px 20px",
+					}}
+				>
+					<EnvironmentSelector
+						environments={environments}
+						selectedEnvName={envName}
+						projectSlug={projectSlug}
+						className="absolute top-4 left-4"
+					/>
+					<Empty>
+						<EmptyMedia variant="icon">
+							<Box className="size-5" />
+						</EmptyMedia>
+						<EmptyTitle>No services yet</EmptyTitle>
+						<EmptyDescription>
+							Add your first service to deploy.
+						</EmptyDescription>
+						<EmptyContent>
+							<CreateServiceDialog
+								projectId={projectId}
+								environmentId={envId}
+								onSuccess={() => mutate()}
+							/>
+						</EmptyContent>
+					</Empty>
+				</div>
+			</>
+		);
+	}
+
+	return (
+		<>
+			<div className="flex flex-col gap-4 py-4 md:hidden">
+				<div className="flex items-center justify-between gap-2">
+					<EnvironmentSelector
+						environments={environments}
+						selectedEnvName={envName}
+						projectSlug={projectSlug}
+					/>
+					<CreateServiceDialog
+						projectId={projectId}
+						environmentId={envId}
+						onSuccess={() => mutate()}
+					/>
+				</div>
+				<div className="flex flex-col gap-4">
+					{services.map((service) => (
+						<ServiceCard
+							key={service.id}
+							service={service}
+							projectSlug={projectSlug}
+							envName={envName}
+						/>
+					))}
+				</div>
+			</div>
 			<div
 				className="
-          relative -mt-6 -mb-6 p-10
-          left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-          bg-slate-50/50 dark:bg-slate-900/30
-          flex items-center justify-center
-        "
+					hidden md:flex
+					relative -mt-6 -mb-6 p-10
+					left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
+					bg-slate-50/50 dark:bg-slate-900/30
+					items-center justify-center overflow-auto
+				"
 				style={{
 					height: "calc(100vh - 3.5rem)",
 					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
 					backgroundSize: "24px 24px",
 				}}
 			>
-				<div className="flex flex-wrap gap-10 justify-center items-center">
-					<ServiceCardSkeleton />
-					<ServiceCardSkeleton />
-				</div>
-			</div>
-		);
-	}
-
-	if (!services || services.length === 0) {
-		return (
-			<div
-				className="
-          relative -mt-6 -mb-6
-          left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-          bg-slate-50 dark:bg-slate-900/50
-          flex items-center justify-center
-        "
-				style={{
-					height: "calc(100vh - 5rem)",
-					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
-					backgroundSize: "20px 20px",
-				}}
-			>
 				<EnvironmentSelector
 					environments={environments}
 					selectedEnvName={envName}
 					projectSlug={projectSlug}
+					className="absolute top-4 left-4"
 				/>
-				<Empty>
-					<EmptyMedia variant="icon">
-						<Box className="size-5" />
-					</EmptyMedia>
-					<EmptyTitle>No services yet</EmptyTitle>
-					<EmptyDescription>Add your first service to deploy.</EmptyDescription>
-					<EmptyContent>
-						<CreateServiceDialog
-							projectId={projectId}
-							environmentId={envId}
-							onSuccess={() => mutate()}
-						/>
-					</EmptyContent>
-				</Empty>
-			</div>
-		);
-	}
-
-	return (
-		<div
-			className="
-        relative -mt-6 -mb-6 p-10
-        left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-        bg-slate-50/50 dark:bg-slate-900/30
-        flex items-center justify-center overflow-auto
-      "
-			style={{
-				height: "calc(100vh - 3.5rem)",
-				backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
-				backgroundSize: "24px 24px",
-			}}
-		>
-			<EnvironmentSelector
-				environments={environments}
-				selectedEnvName={envName}
-				projectSlug={projectSlug}
-			/>
-			<div className="absolute top-4 right-4">
-				<CreateServiceDialog
-					projectId={projectId}
-					environmentId={envId}
-					onSuccess={() => mutate()}
-				/>
-			</div>
-			<div className="flex flex-wrap gap-10 justify-center items-center">
-				{services.map((service) => (
-					<ServiceCard
-						key={service.id}
-						service={service}
-						projectSlug={projectSlug}
-						envName={envName}
+				<div className="absolute top-4 right-4">
+					<CreateServiceDialog
+						projectId={projectId}
+						environmentId={envId}
+						onSuccess={() => mutate()}
 					/>
-				))}
+				</div>
+				<div className="flex flex-wrap gap-10 justify-center items-center">
+					{services.map((service) => (
+						<ServiceCard
+							key={service.id}
+							service={service}
+							projectSlug={projectSlug}
+							envName={envName}
+						/>
+					))}
+				</div>
 			</div>
-		</div>
+		</>
 	);
 }

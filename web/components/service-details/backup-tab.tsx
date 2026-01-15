@@ -228,7 +228,9 @@ export const BackupTab = memo(function BackupTab({
 								value={backupSchedule}
 								onChange={(e) => setBackupSchedule(e.target.value)}
 							>
-								<NativeSelectOption value="">Select schedule</NativeSelectOption>
+								<NativeSelectOption value="">
+									Select schedule
+								</NativeSelectOption>
 								<NativeSelectOption value="daily">Daily</NativeSelectOption>
 								<NativeSelectOption value="weekly">Weekly</NativeSelectOption>
 							</NativeSelect>
@@ -369,7 +371,9 @@ export const BackupTab = memo(function BackupTab({
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={() => confirmRestoreId && handleRestore(confirmRestoreId)}
+							onClick={() =>
+								confirmRestoreId && handleRestore(confirmRestoreId)
+							}
 						>
 							Restore
 						</AlertDialogAction>

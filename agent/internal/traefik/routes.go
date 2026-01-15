@@ -151,8 +151,14 @@ func HashRoutes(routes []TraefikRoute) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func HashRoutesWithServerName(routes []TraefikRoute, serverName string) string {
+	base := HashRoutes(routes)
+	hash := sha256.Sum256([]byte(base + "|server:" + serverName))
+	return hex.EncodeToString(hash[:])
+}
+
 func GetCurrentConfigHash() string {
-	config, err := readCurrentConfig()
+	config, err := readCurrentFullConfig()
 	if err != nil {
 		log.Printf("[traefik:hash] failed to read config: %v", err)
 		return ""
@@ -185,7 +191,18 @@ func GetCurrentConfigHash() string {
 		})
 	}
 
-	return HashRoutes(routes)
+	serverName := extractForwardedServerName(config.HTTP.Middlewares)
+
+	return HashRoutesWithServerName(routes, serverName)
+}
+
+func extractForwardedServerName(middlewares map[string]middleware) string {
+	if mw, exists := middlewares["forwarded_server"]; exists && mw.Headers != nil {
+		if value, ok := mw.Headers.CustomRequestHeaders["X-Forwarded-Server"]; ok {
+			return value
+		}
+	}
+	return ""
 }
 
 func extractDomainFromRule(rule string) string {

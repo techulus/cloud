@@ -126,6 +126,7 @@ type WireGuardPeer struct {
 }
 
 type ExpectedState struct {
+	ServerName string              `json:"serverName"`
 	Containers []ExpectedContainer `json:"containers"`
 	Dns        struct {
 		Records []DnsRecord `json:"records"`

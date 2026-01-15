@@ -125,7 +125,7 @@ function ServerBox({
 	return (
 		<div
 			className={`
-				w-[280px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
+				w-full md:w-[280px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
 				bg-white/50 dark:bg-slate-900/50
 				backdrop-blur-sm
 				transition-all duration-300 ease-in-out
@@ -191,32 +191,38 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	if (service.deployments.length === 0) {
 		return (
-			<CanvasWrapper
-				height="70vh"
-				isEmpty
-				emptyContent={
-					<div className="text-center space-y-4">
-						<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-							<Box className="h-8 w-8 text-zinc-400" />
-						</div>
-						<p className="text-muted-foreground">No deployments yet.</p>
+			<>
+				<div className="flex flex-col items-center justify-center py-12 md:hidden">
+					<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+						<Box className="h-8 w-8 text-zinc-400" />
 					</div>
-				}
-			/>
+					<p className="text-muted-foreground mt-4">No deployments yet.</p>
+				</div>
+				<CanvasWrapper
+					height="70vh"
+					isEmpty
+					className="hidden md:flex"
+					emptyContent={
+						<div className="text-center space-y-4">
+							<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+								<Box className="h-8 w-8 text-zinc-400" />
+							</div>
+							<p className="text-muted-foreground">No deployments yet.</p>
+						</div>
+					}
+				/>
+			</>
 		);
 	}
 
 	const hasEndpoints = hasPublicIngress || hasRunningDeployments;
 
 	return (
-		<CanvasWrapper
-			height="auto"
-			className="flex items-center justify-center min-h-[84vh]"
-		>
-			<div className="flex flex-col items-center gap-4">
+		<>
+			<div className="flex flex-col items-center gap-4 py-4 pb-16 md:hidden">
 				{hasEndpoints && (
 					<>
-						<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
+						<div className="flex flex-col gap-2 w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
 							{publicPorts.map((port) => (
 								<a
 									key={port.id}
@@ -243,22 +249,68 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 						<ArrowDown className="h-5 w-5 text-zinc-400" />
 					</>
 				)}
-
-				<div className="flex flex-wrap gap-6 justify-center max-w-[900px]">
+				<div className="flex flex-col gap-4 w-full">
 					{serverGroups.map((group) => (
-						<div
+						<ServerBox
 							key={group.serverName}
-							className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-						>
-							<ServerBox
-								serverName={group.serverName}
-								deployments={group.deployments}
-								volumes={service.volumes}
-							/>
-						</div>
+							serverName={group.serverName}
+							deployments={group.deployments}
+							volumes={service.volumes}
+						/>
 					))}
 				</div>
 			</div>
-		</CanvasWrapper>
+			<CanvasWrapper
+				height="auto"
+				className="hidden md:flex items-center justify-center min-h-[84vh]"
+			>
+				<div className="flex flex-col items-center gap-4">
+					{hasEndpoints && (
+						<>
+							<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
+								{publicPorts.map((port) => (
+									<a
+										key={port.id}
+										href={`https://${port.domain}`}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
+									>
+										<Globe className="h-3 w-3 text-sky-500" />
+										<span className="text-sky-600 dark:text-sky-400">
+											{port.domain}
+										</span>
+									</a>
+								))}
+								{hasRunningDeployments && (
+									<div className="flex items-center gap-1.5 text-xs">
+										<Lock className="h-3 w-3 text-zinc-500" />
+										<span className="text-zinc-600 dark:text-zinc-400">
+											{service.hostname || service.name}.internal
+										</span>
+									</div>
+								)}
+							</div>
+							<ArrowDown className="h-5 w-5 text-zinc-400" />
+						</>
+					)}
+
+					<div className="flex flex-wrap gap-6 justify-center max-w-[900px]">
+						{serverGroups.map((group) => (
+							<div
+								key={group.serverName}
+								className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+							>
+								<ServerBox
+									serverName={group.serverName}
+									deployments={group.deployments}
+									volumes={service.volumes}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+			</CanvasWrapper>
+		</>
 	);
 }

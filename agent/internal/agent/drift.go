@@ -171,7 +171,7 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 
 	if a.IsProxy {
 		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-		expectedTraefikHash := traefik.HashRoutes(expectedHttpRoutes)
+		expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName)
 		if expectedTraefikHash != actual.TraefikConfigHash {
 			changes = append(changes, fmt.Sprintf("UPDATE Traefik HTTP (%d routes)", len(expected.Traefik.HttpRoutes)))
 		}
@@ -228,7 +228,7 @@ func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState)
 
 	if a.IsProxy {
 		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-		if traefik.HashRoutes(expectedHttpRoutes) != actual.TraefikConfigHash {
+		if traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName) != actual.TraefikConfigHash {
 			return true
 		}
 
@@ -435,7 +435,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		tcpRoutes := ConvertToTCPRoutes(a.expectedState.Traefik.TCPRoutes)
 		udpRoutes := ConvertToUDPRoutes(a.expectedState.Traefik.UDPRoutes)
 
-		httpDrift := traefik.HashRoutes(expectedHttpRoutes) != actual.TraefikConfigHash
+		httpDrift := traefik.HashRoutesWithServerName(expectedHttpRoutes, a.expectedState.ServerName) != actual.TraefikConfigHash
 		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
 		l4Drift := expectedL4Hash != actual.L4ConfigHash
 
@@ -459,7 +459,7 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 			}
 
 			log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
-			if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes); err != nil {
+			if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
 				return fmt.Errorf("failed to update Traefik: %w", err)
 			}
 

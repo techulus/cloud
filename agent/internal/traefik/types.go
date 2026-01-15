@@ -114,11 +114,12 @@ type httpConfigWithMiddlewares struct {
 }
 
 type routerWithMiddleware struct {
-	Rule        string   `yaml:"rule"`
-	EntryPoints []string `yaml:"entryPoints"`
-	Service     string   `yaml:"service,omitempty"`
-	Priority    int      `yaml:"priority,omitempty"`
-	Middlewares []string `yaml:"middlewares,omitempty"`
+	Rule        string     `yaml:"rule"`
+	EntryPoints []string   `yaml:"entryPoints"`
+	Service     string     `yaml:"service,omitempty"`
+	TLS         *tlsConfig `yaml:"tls,omitempty"`
+	Priority    int        `yaml:"priority,omitempty"`
+	Middlewares []string   `yaml:"middlewares,omitempty"`
 }
 
 type challengeConfig struct {
@@ -179,6 +180,12 @@ type traefikFullConfig struct {
 	HTTP httpConfig `yaml:"http,omitempty"`
 	TCP  tcpConfig  `yaml:"tcp,omitempty"`
 	UDP  udpConfig  `yaml:"udp,omitempty"`
+}
+
+type traefikFullConfigWithMiddlewares struct {
+	HTTP httpConfigWithMiddlewares `yaml:"http,omitempty"`
+	TCP  tcpConfig                 `yaml:"tcp,omitempty"`
+	UDP  udpConfig                 `yaml:"udp,omitempty"`
 }
 
 type staticConfig struct {
