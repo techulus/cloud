@@ -91,6 +91,7 @@ export function GitHubAppSetup() {
 				unknown: "An unknown error occurred",
 			};
 			toast.error(messages[errorParam] || "GitHub setup failed");
+			setLoading(false);
 			router.replace("/dashboard/settings?tab=github", { scroll: false });
 		}
 	}, [searchParams, router]);
@@ -160,7 +161,6 @@ export function GitHubAppSetup() {
 			return;
 		}
 		setStoredHostname(hostname.trim().toLowerCase());
-		setLoading(true);
 	};
 
 	const envOutput = credentials

@@ -3,15 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-	Hammer,
-	Server,
-	Rocket,
-	Ban,
-	Clock,
-	HardDrive,
-	Github,
-} from "lucide-react";
+import { Hammer, Server, Ban, Clock, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -245,19 +237,15 @@ export function GlobalSettings({
 		<Tabs defaultValue={initialTab}>
 			<TabsList className="w-full justify-start overflow-x-auto">
 				<TabsTrigger value="build" className="px-4 py-2 shrink-0">
-					<Hammer className="size-4" />
 					Build
 				</TabsTrigger>
 				<TabsTrigger value="deployment" className="px-4 py-2 shrink-0">
-					<Rocket className="size-4" />
 					Deployment
 				</TabsTrigger>
 				<TabsTrigger value="backup" className="px-4 py-2 shrink-0">
-					<HardDrive className="size-4" />
 					Backup
 				</TabsTrigger>
 				<TabsTrigger value="github" className="px-4 py-2 shrink-0">
-					<Github className="size-4" />
 					GitHub
 				</TabsTrigger>
 			</TabsList>
