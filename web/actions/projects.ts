@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -941,6 +942,42 @@ export async function updateServiceStartCommand(
 	await db
 		.update(services)
 		.set({ startCommand })
+		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
+const resourceLimitsSchema = z
+	.object({
+		cpuCores: z.number().min(0.1).max(64).nullable(),
+		memoryMb: z.number().int().min(64).max(65536).nullable(),
+	})
+	.refine(
+		(data) => {
+			const hasCpu = data.cpuCores !== null;
+			const hasMem = data.memoryMb !== null;
+			return hasCpu === hasMem;
+		},
+		{ message: "Both CPU and memory must be set together, or both must be null" },
+	);
+
+export async function updateServiceResourceLimits(
+	serviceId: string,
+	limits: { cpuCores: number | null; memoryMb: number | null },
+) {
+	const validated = resourceLimitsSchema.parse(limits);
+
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	await db
+		.update(services)
+		.set({
+			resourceCpuLimit: validated.cpuCores,
+			resourceMemoryLimitMb: validated.memoryMb,
+		})
 		.where(eq(services.id, serviceId));
 
 	return { success: true };

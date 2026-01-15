@@ -35,12 +35,18 @@ export type VolumeConfig = {
 	containerPath: string;
 };
 
+export type ResourceLimitsConfig = {
+	cpuCores?: number | null;
+	memoryMb?: number | null;
+};
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	hostname?: string;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	startCommand?: string | null;
+	resourceLimits?: ResourceLimitsConfig;
 	ports: PortConfig[];
 	secretKeys?: string[];
 	secrets?: SecretConfig[];
@@ -63,12 +69,17 @@ export function buildCurrentConfig(
 		healthCheckRetries: number | null;
 		healthCheckStartPeriod: number | null;
 		startCommand: string | null;
+		resourceCpuLimit: number | null;
+		resourceMemoryLimitMb: number | null;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
 	secrets?: { key: string; updatedAt: Date | string }[],
 	volumes?: { name: string; containerPath: string }[],
 ): DeployedConfig {
+	const hasResourceLimits =
+		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
+
 	return {
 		source: {
 			type: "image",
@@ -90,6 +101,12 @@ export function buildCurrentConfig(
 				}
 			: null,
 		startCommand: service.startCommand,
+		resourceLimits: hasResourceLimits
+			? {
+					cpuCores: service.resourceCpuLimit,
+					memoryMb: service.resourceMemoryLimitMb,
+				}
+			: undefined,
 		ports: ports.map((p) => ({
 			port: p.port,
 			isPublic: p.isPublic,
@@ -140,6 +157,20 @@ export function diffConfigs(
 				field: "Start command",
 				from: "(default)",
 				to: current.startCommand,
+			});
+		}
+		if (current.resourceLimits?.cpuCores) {
+			changes.push({
+				field: "CPU limit",
+				from: "(no limit)",
+				to: `${current.resourceLimits.cpuCores} cores`,
+			});
+		}
+		if (current.resourceLimits?.memoryMb) {
+			changes.push({
+				field: "Memory limit",
+				from: "(no limit)",
+				to: `${current.resourceLimits.memoryMb} MB`,
 			});
 		}
 		for (const port of current.ports) {
@@ -275,6 +306,26 @@ export function diffConfigs(
 			field: "Start command",
 			from: deployed.startCommand || "(default)",
 			to: current.startCommand || "(default)",
+		});
+	}
+
+	const deployedCpu = deployed.resourceLimits?.cpuCores;
+	const currentCpu = current.resourceLimits?.cpuCores;
+	if (deployedCpu !== currentCpu) {
+		changes.push({
+			field: "CPU limit",
+			from: deployedCpu ? `${deployedCpu} cores` : "(no limit)",
+			to: currentCpu ? `${currentCpu} cores` : "(no limit)",
+		});
+	}
+
+	const deployedMemory = deployed.resourceLimits?.memoryMb;
+	const currentMemory = current.resourceLimits?.memoryMb;
+	if (deployedMemory !== currentMemory) {
+		changes.push({
+			field: "Memory limit",
+			from: deployedMemory ? `${deployedMemory} MB` : "(no limit)",
+			to: currentMemory ? `${currentMemory} MB` : "(no limit)",
 		});
 	}
 

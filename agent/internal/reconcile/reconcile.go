@@ -64,18 +64,20 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	}
 
 	_, err := container.Deploy(&container.DeployConfig{
-		Name:         exp.Name,
-		Image:        exp.Image,
-		ServiceID:    exp.ServiceID,
-		ServiceName:  exp.ServiceName,
-		DeploymentID: exp.DeploymentID,
-		IPAddress:    exp.IPAddress,
-		PortMappings: portMappings,
-		HealthCheck:  healthCheck,
-		Env:          decryptedEnv,
-		VolumeMounts: volumeMounts,
-		StartCommand: exp.StartCommand,
-		LogFunc:      func(stream, message string) { log.Printf("[deploy:%s] %s", stream, message) },
+		Name:          exp.Name,
+		Image:         exp.Image,
+		ServiceID:     exp.ServiceID,
+		ServiceName:   exp.ServiceName,
+		DeploymentID:  exp.DeploymentID,
+		IPAddress:     exp.IPAddress,
+		PortMappings:  portMappings,
+		HealthCheck:   healthCheck,
+		Env:           decryptedEnv,
+		VolumeMounts:  volumeMounts,
+		StartCommand:  exp.StartCommand,
+		CPULimit:      exp.ResourceCPULimit,
+		MemoryLimitMb: exp.ResourceMemoryLimitMb,
+		LogFunc:       func(stream, message string) { log.Printf("[deploy:%s] %s", stream, message) },
 	})
 
 	return err

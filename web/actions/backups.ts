@@ -145,30 +145,30 @@ export async function restoreBackup(
 		throw new Error("Backup data is incomplete");
 	}
 
-	let serverId = targetServerId;
-	if (!serverId) {
-		const deployment = await db
-			.select({
-				serverId: deployments.serverId,
-			})
-			.from(deployments)
-			.where(
-				and(
-					eq(deployments.serviceId, serviceId),
-					eq(deployments.status, "running"),
-				),
-			)
-			.then((r) => r[0]);
+	const deployment = await db
+		.select({
+			serverId: deployments.serverId,
+			containerId: deployments.containerId,
+		})
+		.from(deployments)
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "running"),
+			),
+		)
+		.then((r) => r[0]);
 
-		if (!deployment || !deployment.serverId) {
-			throw new Error("No running deployment found for this service");
-		}
-		serverId = deployment.serverId;
+	if (!deployment || !deployment.serverId) {
+		throw new Error("No running deployment found for this service");
 	}
+
+	const serverId = targetServerId ?? deployment.serverId;
 
 	await enqueueWork(serverId, "restore_volume", {
 		backupId,
 		serviceId,
+		containerId: deployment.containerId,
 		volumeName: backup.volumeName,
 		storagePath: backup.storagePath,
 		expectedChecksum: backup.checksum,

@@ -323,22 +323,21 @@ export const BackupTab = memo(function BackupTab({
 								<div className="flex items-center gap-1">
 									{backup.status === "completed" && (
 										<Button
-											variant="ghost"
-											size="icon"
+											variant="outline"
+											size="sm"
 											onClick={() => setConfirmRestoreId(backup.id)}
 											disabled={restoringId === backup.id}
-											title="Restore this backup"
 										>
 											{restoringId === backup.id ? (
 												<Loader2 className="h-4 w-4 animate-spin" />
 											) : (
-												<Download className="h-4 w-4" />
+												"Restore"
 											)}
 										</Button>
 									)}
 									<Button
-										variant="ghost"
-										size="icon"
+										variant="outline"
+										size="icon-sm"
 										onClick={() => setConfirmDeleteId(backup.id)}
 										disabled={deletingId === backup.id}
 										title="Delete backup"

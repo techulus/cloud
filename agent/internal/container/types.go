@@ -26,19 +26,21 @@ type VolumeMount struct {
 type BuildLogFunc func(stream string, message string)
 
 type DeployConfig struct {
-	Name         string
-	Image        string
-	ServiceID    string
-	ServiceName  string
-	DeploymentID string
-	WireGuardIP  string
-	IPAddress    string
-	PortMappings []PortMapping
-	HealthCheck  *HealthCheck
-	Env          map[string]string
-	VolumeMounts []VolumeMount
-	StartCommand string
-	LogFunc      BuildLogFunc
+	Name          string
+	Image         string
+	ServiceID     string
+	ServiceName   string
+	DeploymentID  string
+	WireGuardIP   string
+	IPAddress     string
+	PortMappings  []PortMapping
+	HealthCheck   *HealthCheck
+	Env           map[string]string
+	VolumeMounts  []VolumeMount
+	StartCommand  string
+	CPULimit      *float64
+	MemoryLimitMb *int
+	LogFunc       BuildLogFunc
 }
 
 type DeployResult struct {

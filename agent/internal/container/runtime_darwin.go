@@ -135,6 +135,13 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
 	}
 
+	if config.MemoryLimitMb != nil && *config.MemoryLimitMb > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", *config.MemoryLimitMb))
+	}
+	if config.CPULimit != nil && *config.CPULimit > 0 {
+		args = append(args, "--cpus", fmt.Sprintf("%.2f", *config.CPULimit))
+	}
+
 	for _, vm := range config.VolumeMounts {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", vm.HostPath, vm.ContainerPath))
 	}

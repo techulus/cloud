@@ -12,6 +12,7 @@ import { SecretsSection } from "@/components/service/details/secrets-section";
 import { PortsSection } from "@/components/service/details/ports-section";
 import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
+import { ResourceLimitsSection } from "@/components/service/details/resource-limits-section";
 import { StartCommandSection } from "@/components/service/details/start-command-section";
 import { ScheduleSection } from "@/components/service/details/schedule-section";
 import {
@@ -61,6 +62,8 @@ export default function ConfigurationPage() {
 			<TCPProxySection service={service} onUpdate={onUpdate} />
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
+
+			<ResourceLimitsSection service={service} onUpdate={onUpdate} />
 
 			<StartCommandSection service={service} onUpdate={onUpdate} />
 

@@ -116,6 +116,7 @@ func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		BackupID         string        `json:"backupId"`
 		ServiceID        string        `json:"serviceId"`
+		ContainerID      string        `json:"containerId"`
 		VolumeName       string        `json:"volumeName"`
 		StoragePath      string        `json:"storagePath"`
 		ExpectedChecksum string        `json:"expectedChecksum"`
@@ -128,6 +129,31 @@ func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 
 	volumePath := filepath.Join(a.DataDir, "volumes", payload.ServiceID, payload.VolumeName)
 	log.Printf("[restore_volume] restoring volume %s to %s", payload.VolumeName, volumePath)
+
+	if payload.ContainerID == "" {
+		return fmt.Errorf("containerId is required for restore operation")
+	}
+
+	running, err := container.IsContainerRunning(payload.ContainerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container status: %w", err)
+	}
+
+	if running {
+		log.Printf("[restore_volume] stopping container %s before restore", Truncate(payload.ContainerID, 12))
+		if err := container.Stop(payload.ContainerID); err != nil {
+			return fmt.Errorf("failed to stop container: %w", err)
+		}
+
+		defer func() {
+			log.Printf("[restore_volume] starting container %s after restore", Truncate(payload.ContainerID, 12))
+			if err := container.Start(payload.ContainerID); err != nil {
+				log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(payload.ContainerID, 12), err)
+			}
+		}()
+	} else {
+		log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(payload.ContainerID, 12))
+	}
 
 	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", payload.BackupID))
 	defer os.Remove(tarPath)

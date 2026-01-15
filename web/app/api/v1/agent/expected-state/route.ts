@@ -129,6 +129,8 @@ export async function GET(request: NextRequest) {
 					}
 				: null,
 			volumes: volumeMounts,
+			resourceCpuLimit: service.resourceCpuLimit,
+			resourceMemoryLimitMb: service.resourceMemoryLimitMb,
 		});
 	}
 

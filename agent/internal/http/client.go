@@ -64,17 +64,19 @@ type VolumeMount struct {
 }
 
 type ExpectedContainer struct {
-	DeploymentID string            `json:"deploymentId"`
-	ServiceID    string            `json:"serviceId"`
-	ServiceName  string            `json:"serviceName"`
-	Name         string            `json:"name"`
-	Image        string            `json:"image"`
-	IPAddress    string            `json:"ipAddress"`
-	Ports        []PortMapping     `json:"ports"`
-	Env          map[string]string `json:"env"`
-	StartCommand string            `json:"startCommand"`
-	HealthCheck  *HealthCheck      `json:"healthCheck"`
-	Volumes      []VolumeMount     `json:"volumes"`
+	DeploymentID          string            `json:"deploymentId"`
+	ServiceID             string            `json:"serviceId"`
+	ServiceName           string            `json:"serviceName"`
+	Name                  string            `json:"name"`
+	Image                 string            `json:"image"`
+	IPAddress             string            `json:"ipAddress"`
+	Ports                 []PortMapping     `json:"ports"`
+	Env                   map[string]string `json:"env"`
+	StartCommand          string            `json:"startCommand"`
+	HealthCheck           *HealthCheck      `json:"healthCheck"`
+	Volumes               []VolumeMount     `json:"volumes"`
+	ResourceCPULimit      *float64          `json:"resourceCpuLimit"`
+	ResourceMemoryLimitMb *int              `json:"resourceMemoryLimitMb"`
 }
 
 type DnsRecord struct {

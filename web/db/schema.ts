@@ -6,6 +6,7 @@ import {
 	integer,
 	jsonb,
 	pgTable,
+	real,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -192,6 +193,8 @@ export const services = pgTable("services", {
 	healthCheckRetries: integer("health_check_retries").default(3),
 	healthCheckStartPeriod: integer("health_check_start_period").default(30),
 	startCommand: text("start_command"),
+	resourceCpuLimit: real("resource_cpu_limit"),
+	resourceMemoryLimitMb: integer("resource_memory_limit_mb"),
 	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
