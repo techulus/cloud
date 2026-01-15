@@ -12,7 +12,7 @@ import {
 	parseDeployedConfig,
 } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
-import { DeploymentStatusBar } from "./service-details/deployment-status-bar";
+import { DeploymentStatusBar } from "./details/deployment-status-bar";
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -104,15 +104,17 @@ export function ServiceLayoutClient({
 	if (isLoading || !service) {
 		return (
 			<>
-				<nav className="flex gap-1 border-b px-4 pt-1.5">
-					{[1, 2, 3, 4].map((i) => (
-						<div
-							key={i}
-							className="h-8 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse mb-1.5"
-						/>
-					))}
-				</nav>
-				<div className="container max-w-7xl mx-auto px-4 py-6">
+				<div className="px-4 py-3 overflow-x-auto">
+					<nav className="inline-flex items-center gap-1 rounded-lg bg-muted p-[3px] w-max">
+						{[1, 2, 3, 4].map((i) => (
+							<div
+								key={i}
+								className="h-7 w-24 bg-background/50 rounded-md animate-pulse"
+							/>
+						))}
+					</nav>
+				</div>
+				<div className="container max-w-7xl mx-auto px-4 py-2">
 					<div className="space-y-6">
 						<div className="h-6 w-48 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
 						<div className="grid gap-4">
@@ -127,26 +129,28 @@ export function ServiceLayoutClient({
 
 	return (
 		<>
-			<nav className="flex gap-1 border-b overflow-x-auto overflow-y-hidden scrollbar-none px-4 py-1.5">
-				{tabs.map((tab) => (
-					<Link
-						key={tab.href}
-						href={tab.href}
-						className={cn(
-							"px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap shrink-0",
-							isActiveTab(tab.href)
-								? "bg-accent text-foreground"
-								: "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-						)}
-					>
-						{tab.name}
-					</Link>
-				))}
-			</nav>
+			<div className="px-4 py-3 overflow-x-auto">
+				<nav className="inline-flex items-center rounded-lg bg-muted p-[3px] w-max">
+					{tabs.map((tab) => (
+						<Link
+							key={tab.href}
+							href={tab.href}
+							className={cn(
+								"px-3 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap shrink-0 border border-transparent",
+								isActiveTab(tab.href)
+									? "bg-background text-foreground shadow-sm dark:bg-input/30 dark:border-input"
+									: "text-muted-foreground hover:text-foreground",
+							)}
+						>
+							{tab.name}
+						</Link>
+					))}
+				</nav>
+			</div>
 
 			<div
 				className={cn(
-					"px-4 py-6",
+					"px-4 py-2",
 					isConstrainedTab && "container max-w-7xl mx-auto",
 				)}
 			>

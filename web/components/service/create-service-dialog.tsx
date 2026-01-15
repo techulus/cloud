@@ -15,7 +15,7 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { GitHubRepoSelector } from "@/components/github-repo-selector";
+import { GitHubRepoSelector } from "@/components/github/github-repo-selector";
 
 type SelectedRepo = {
 	id?: number;

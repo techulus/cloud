@@ -8,16 +8,16 @@ import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
-import { getStatusColorFromDeployments } from "./ui/canvas-wrapper";
-import { buttonVariants } from "./ui/button";
-import { NativeSelect, NativeSelectOption } from "./ui/native-select";
+import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
+import { buttonVariants } from "@/components/ui/button";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
 	Empty,
 	EmptyContent,
 	EmptyDescription,
 	EmptyMedia,
 	EmptyTitle,
-} from "./ui/empty";
+} from "@/components/ui/empty";
 
 function ServiceCardSkeleton() {
 	return (

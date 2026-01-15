@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { updateServerName } from "@/actions/servers";
-import { EditableText } from "@/components/editable-text";
+import { EditableText } from "@/components/core/editable-text";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import { Badge } from "@/components/ui/badge";
 

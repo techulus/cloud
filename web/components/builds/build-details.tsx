@@ -29,7 +29,7 @@ import {
 import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
-import { LogViewer } from "./log-viewer";
+import { LogViewer } from "@/components/logs/log-viewer";
 
 type BuildWithDates = Omit<
 	Build,

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
-import { ServiceCanvas } from "@/components/service-canvas";
+import { ServiceCanvas } from "@/components/service/service-canvas";
 import { getProjectBySlug, getEnvironmentByName } from "@/db/queries";
 
 export default async function ProjectEnvironmentPage({

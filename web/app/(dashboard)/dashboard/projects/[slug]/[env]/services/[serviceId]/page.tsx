@@ -16,8 +16,8 @@ import {
 	restartService,
 	stopService,
 } from "@/actions/projects";
-import { useService } from "@/components/service-layout-client";
-import { DeploymentCanvas } from "@/components/service-details/deployment-canvas";
+import { useService } from "@/components/service/service-layout-client";
+import { DeploymentCanvas } from "@/components/service/details/deployment-canvas";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {

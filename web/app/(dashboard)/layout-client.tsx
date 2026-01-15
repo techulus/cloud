@@ -9,7 +9,7 @@ import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
-import { OfflineServersBanner } from "@/components/offline-servers-banner";
+import { OfflineServersBanner } from "@/components/server/offline-servers-banner";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,

@@ -14,7 +14,7 @@ import {
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
 import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
-import { EditableText } from "@/components/editable-text";
+import { EditableText } from "@/components/core/editable-text";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
 

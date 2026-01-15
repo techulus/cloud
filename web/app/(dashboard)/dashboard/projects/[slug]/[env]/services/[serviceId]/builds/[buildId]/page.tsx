@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
 import { builds, projects, services, githubRepos } from "@/db/schema";
-import { BuildDetails } from "@/components/build-details";
+import { BuildDetails } from "@/components/builds/build-details";
 
 async function getBuild(
 	projectSlug: string,

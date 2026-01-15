@@ -40,7 +40,7 @@ import {
 	DEFAULT_BACKUP_RETENTION_DAYS,
 	type BackupStorageProvider,
 } from "@/lib/settings-keys";
-import { GitHubAppSetup } from "@/components/github-app-setup";
+import { GitHubAppSetup } from "@/components/github/github-app-setup";
 
 type Props = {
 	servers: ServerType[];
@@ -243,20 +243,20 @@ export function GlobalSettings({
 
 	return (
 		<Tabs defaultValue={initialTab}>
-			<TabsList>
-				<TabsTrigger value="build" className="px-4 py-2">
+			<TabsList className="w-full justify-start overflow-x-auto">
+				<TabsTrigger value="build" className="px-4 py-2 shrink-0">
 					<Hammer className="size-4" />
 					Build
 				</TabsTrigger>
-				<TabsTrigger value="deployment" className="px-4 py-2">
+				<TabsTrigger value="deployment" className="px-4 py-2 shrink-0">
 					<Rocket className="size-4" />
 					Deployment
 				</TabsTrigger>
-				<TabsTrigger value="backup" className="px-4 py-2">
+				<TabsTrigger value="backup" className="px-4 py-2 shrink-0">
 					<HardDrive className="size-4" />
 					Backup
 				</TabsTrigger>
-				<TabsTrigger value="github" className="px-4 py-2">
+				<TabsTrigger value="github" className="px-4 py-2 shrink-0">
 					<Github className="size-4" />
 					GitHub
 				</TabsTrigger>

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
-import { ServiceLayoutClient } from "@/components/service-layout-client";
+import { ServiceLayoutClient } from "@/components/service/service-layout-client";
 import { getProjectBySlug, getService } from "@/db/queries";
 
 export default async function ServiceLayout({

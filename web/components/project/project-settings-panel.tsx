@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { EditableText } from "@/components/editable-text";
+import { EditableText } from "@/components/core/editable-text";
 
 type Project = {
 	id: string;

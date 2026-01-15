@@ -4,7 +4,7 @@ import { Globe, Server as ServerIcon } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
-import { CreateServerDialog } from "@/components/create-server-dialog";
+import { CreateServerDialog } from "@/components/server/create-server-dialog";
 import {
 	Empty,
 	EmptyContent,

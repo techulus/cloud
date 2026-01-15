@@ -1,5 +1,5 @@
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
-import { GlobalSettings } from "@/components/global-settings";
+import { GlobalSettings } from "@/components/settings/global-settings";
 import { listServers, getGlobalSettings } from "@/db/queries";
 
 type Props = {

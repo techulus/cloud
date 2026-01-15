@@ -49,7 +49,7 @@
 	--radius-2xl: calc(var(--radius) + 8px);
 	--radius-3xl: calc(var(--radius) + 12px);
 	--radius-4xl: calc(var(--radius) + 16px);
-	--radius: 0.45rem;
+	--radius: 0.6rem;
 	--tracking-tighter: calc(var(--tracking-normal) - 0.05em);
 	--tracking-tight: calc(var(--tracking-normal) - 0.025em);
 	--tracking-wide: calc(var(--tracking-normal) + 0.025em);
@@ -99,7 +99,7 @@
 	--chart-3: oklch(0.4882 0.2172 264.3763);
 	--chart-4: oklch(0.4244 0.1809 265.6377);
 	--chart-5: oklch(0.3791 0.1378 265.5222);
-	--radius: 0.45rem;
+	--radius: 0.6rem;
 	--sidebar: oklch(0.968 0.007 247);
 	--sidebar-foreground: oklch(0.279 0.041 260);
 	--sidebar-primary: oklch(0.6231 0.188 259.8145);
@@ -165,7 +165,7 @@
 	--sidebar-border: oklch(0.279 0.041 260);
 	--sidebar-ring: oklch(0.6231 0.188 259.8145);
 	--destructive-foreground: oklch(1 0 0);
-	--radius: 0.45rem;
+	--radius: 0.6rem;
 	--shadow-color: oklch(0 0 0);
 	--shadow-opacity: 0.1;
 	--shadow-blur: 3px;

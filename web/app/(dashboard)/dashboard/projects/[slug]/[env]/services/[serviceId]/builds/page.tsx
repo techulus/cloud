@@ -1,7 +1,7 @@
 "use client";
 
-import { useService } from "@/components/service-layout-client";
-import { BuildsViewer } from "@/components/service-details/builds-viewer";
+import { useService } from "@/components/service/service-layout-client";
+import { BuildsViewer } from "@/components/builds/builds-viewer";
 
 export default function BuildsPage() {
 	const { service, projectSlug, envName } = useService();
