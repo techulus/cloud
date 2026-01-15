@@ -57,6 +57,7 @@ export default async function DashboardPage() {
 							<Item
 								key={project.id}
 								variant="outline"
+								className="min-h-[80px]"
 								render={
 									<Link
 										href={`/dashboard/projects/${project.slug}/production`}
@@ -66,7 +67,7 @@ export default async function DashboardPage() {
 								<ItemMedia variant="icon">
 									<Box className="size-5 text-muted-foreground" />
 								</ItemMedia>
-								<ItemContent>
+								<ItemContent className="h-full justify-between">
 									<ItemTitle>{project.name}</ItemTitle>
 									<ItemDescription>
 										{project.serviceCount === 0

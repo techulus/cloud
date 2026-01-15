@@ -80,7 +80,7 @@ export function ServiceLayoutClient({
 	const hasPublicPorts = service?.ports?.some((p) => p.isPublic);
 
 	const tabs = [
-		{ name: "Architecture", href: basePath },
+		{ name: "Deployment", href: basePath },
 		{ name: "Logs", href: `${basePath}/logs` },
 		...(hasPublicPorts
 			? [{ name: "Requests", href: `${basePath}/requests` }]

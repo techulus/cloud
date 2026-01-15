@@ -32,7 +32,7 @@ export default async function ProjectEnvironmentPage({
 					},
 				]}
 			/>
-			<div className="container max-w-7xl mx-auto px-4 py-6">
+			<div className="container max-w-7xl mx-auto px-4 md:py-6">
 				<ServiceCanvas
 					projectId={project.id}
 					projectSlug={slug}
