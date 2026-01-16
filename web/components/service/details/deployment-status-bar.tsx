@@ -248,6 +248,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 	);
 
 	const prevBarStateRef = useRef<BarState["mode"]>(barState.mode);
+	const toastShownForRolloutRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const wasDeploying = prevBarStateRef.current === "deploying";
@@ -257,11 +258,17 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 
 		if (barState.mode === "ready" || barState.mode === "hidden") {
 			const latestRollout = service.rollouts?.[0];
-			if (latestRollout?.status === "completed") {
+			if (!latestRollout || toastShownForRolloutRef.current === latestRollout.id) {
+				return;
+			}
+
+			toastShownForRolloutRef.current = latestRollout.id;
+
+			if (latestRollout.status === "completed") {
 				toast.success("Deployment completed successfully");
-			} else if (latestRollout?.status === "failed") {
+			} else if (latestRollout.status === "failed") {
 				toast.error("Deployment failed");
-			} else if (latestRollout?.status === "rolled_back") {
+			} else if (latestRollout.status === "rolled_back") {
 				toast.error("Deployment rolled back");
 			}
 		}

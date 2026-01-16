@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { detectDatabaseType } from "@/lib/database-utils";
 import {
 	serviceVolumes,
 	volumeBackups,
@@ -115,15 +116,6 @@ function getDbBackupExtension(image: string): string {
 	return ".backup";
 }
 
-export function detectDatabaseType(image: string): string | null {
-	const imageLower = image.toLowerCase();
-	if (imageLower.includes("postgres")) return "postgres";
-	if (imageLower.includes("mysql")) return "mysql";
-	if (imageLower.includes("mariadb")) return "mariadb";
-	if (imageLower.includes("mongo")) return "mongodb";
-	if (imageLower.includes("redis")) return "redis";
-	return null;
-}
 
 export async function listBackups(serviceId: string) {
 	const backups = await db

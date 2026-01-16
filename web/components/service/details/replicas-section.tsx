@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, memo } from "react";
+import { useState, useMemo, useEffect, memo, useCallback } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,7 +58,10 @@ export const ReplicasSection = memo(function ReplicasSection({
 		service.replicas ?? 1,
 	);
 
-	const configuredReplicas = service.configuredReplicas || [];
+	const configuredReplicas = useMemo(
+		() => service.configuredReplicas || [],
+		[service.configuredReplicas],
+	);
 
 	useEffect(() => {
 		if (!servers) return;
@@ -138,12 +141,12 @@ export const ReplicasSection = memo(function ReplicasSection({
 		selectedServerId,
 	]);
 
-	const updateReplicas = (serverId: string, value: number) => {
+	const updateReplicas = useCallback((serverId: string, value: number) => {
 		setLocalReplicas((prev) => ({
 			...prev,
 			[serverId]: Math.max(0, Math.min(10, value)),
 		}));
-	};
+	}, []);
 
 	const handleAutoPlaceToggle = async (checked: boolean) => {
 		setAutoPlace(checked);

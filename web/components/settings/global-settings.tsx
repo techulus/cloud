@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Hammer, Server, Ban, Clock, HardDrive } from "lucide-react";
@@ -53,6 +53,66 @@ type Props = {
 	initialTab?: string;
 };
 
+type BackupStorageState = {
+	provider: string;
+	bucket: string;
+	region: string;
+	endpoint: string;
+	accessKey: string;
+	secretKey: string;
+	retentionDays: number;
+	isSaving: boolean;
+};
+
+type BackupStorageAction =
+	| { type: "SET_PROVIDER"; payload: string }
+	| { type: "SET_BUCKET"; payload: string }
+	| { type: "SET_REGION"; payload: string }
+	| { type: "SET_ENDPOINT"; payload: string }
+	| { type: "SET_ACCESS_KEY"; payload: string }
+	| { type: "SET_SECRET_KEY"; payload: string }
+	| { type: "SET_RETENTION_DAYS"; payload: number }
+	| { type: "SET_SAVING"; payload: boolean };
+
+function backupStorageReducer(
+	state: BackupStorageState,
+	action: BackupStorageAction,
+): BackupStorageState {
+	switch (action.type) {
+		case "SET_PROVIDER":
+			return { ...state, provider: action.payload };
+		case "SET_BUCKET":
+			return { ...state, bucket: action.payload };
+		case "SET_REGION":
+			return { ...state, region: action.payload };
+		case "SET_ENDPOINT":
+			return { ...state, endpoint: action.payload };
+		case "SET_ACCESS_KEY":
+			return { ...state, accessKey: action.payload };
+		case "SET_SECRET_KEY":
+			return { ...state, secretKey: action.payload };
+		case "SET_RETENTION_DAYS":
+			return { ...state, retentionDays: action.payload };
+		case "SET_SAVING":
+			return { ...state, isSaving: action.payload };
+	}
+}
+
+function createInitialBackupState(
+	backupStorage: Props["initialSettings"]["backupStorage"],
+): BackupStorageState {
+	return {
+		provider: backupStorage?.provider ?? "",
+		bucket: backupStorage?.bucket ?? "",
+		region: backupStorage?.region ?? "",
+		endpoint: backupStorage?.endpoint ?? "",
+		accessKey: backupStorage?.accessKey ?? "",
+		secretKey: backupStorage?.secretKey ?? "",
+		retentionDays: backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
+		isSaving: false,
+	};
+}
+
 export function GlobalSettings({
 	servers,
 	initialSettings,
@@ -72,29 +132,22 @@ export function GlobalSettings({
 	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
 	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
 
-	const [backupProvider, setBackupProvider] = useState(
-		initialSettings.backupStorage?.provider ?? "",
+	const [backupState, dispatchBackup] = useReducer(
+		backupStorageReducer,
+		initialSettings.backupStorage,
+		createInitialBackupState,
 	);
-	const [backupBucket, setBackupBucket] = useState(
-		initialSettings.backupStorage?.bucket ?? "",
-	);
-	const [backupRegion, setBackupRegion] = useState(
-		initialSettings.backupStorage?.region ?? "",
-	);
-	const [backupEndpoint, setBackupEndpoint] = useState(
-		initialSettings.backupStorage?.endpoint ?? "",
-	);
-	const [backupAccessKey, setBackupAccessKey] = useState(
-		initialSettings.backupStorage?.accessKey ?? "",
-	);
-	const [backupSecretKey, setBackupSecretKey] = useState(
-		initialSettings.backupStorage?.secretKey ?? "",
-	);
-	const [backupRetentionDays, setBackupRetentionDays] = useState(
-		initialSettings.backupStorage?.retentionDays ??
-			DEFAULT_BACKUP_RETENTION_DAYS,
-	);
-	const [isSavingBackup, setIsSavingBackup] = useState(false);
+
+	const {
+		provider: backupProvider,
+		bucket: backupBucket,
+		region: backupRegion,
+		endpoint: backupEndpoint,
+		accessKey: backupAccessKey,
+		secretKey: backupSecretKey,
+		retentionDays: backupRetentionDays,
+		isSaving: isSavingBackup,
+	} = backupState;
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -175,7 +228,7 @@ export function GlobalSettings({
 			toast.error("Please fill in all required fields");
 			return;
 		}
-		setIsSavingBackup(true);
+		dispatchBackup({ type: "SET_SAVING", payload: true });
 		try {
 			await updateBackupStorageConfig({
 				provider: backupProvider as BackupStorageProvider,
@@ -193,7 +246,7 @@ export function GlobalSettings({
 				error instanceof Error ? error.message : "Failed to update settings",
 			);
 		} finally {
-			setIsSavingBackup(false);
+			dispatchBackup({ type: "SET_SAVING", payload: false });
 		}
 	};
 
@@ -208,16 +261,16 @@ export function GlobalSettings({
 	const buildTimeoutChanged =
 		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
 
+	const initialBackup = initialSettings.backupStorage;
 	const backupStorageChanged =
-		backupProvider !== (initialSettings.backupStorage?.provider ?? "") ||
-		backupBucket !== (initialSettings.backupStorage?.bucket ?? "") ||
-		backupRegion !== (initialSettings.backupStorage?.region ?? "") ||
-		backupEndpoint !== (initialSettings.backupStorage?.endpoint ?? "") ||
-		backupAccessKey !== (initialSettings.backupStorage?.accessKey ?? "") ||
-		backupSecretKey !== (initialSettings.backupStorage?.secretKey ?? "") ||
+		backupProvider !== (initialBackup?.provider ?? "") ||
+		backupBucket !== (initialBackup?.bucket ?? "") ||
+		backupRegion !== (initialBackup?.region ?? "") ||
+		backupEndpoint !== (initialBackup?.endpoint ?? "") ||
+		backupAccessKey !== (initialBackup?.accessKey ?? "") ||
+		backupSecretKey !== (initialBackup?.secretKey ?? "") ||
 		backupRetentionDays !==
-			(initialSettings.backupStorage?.retentionDays ??
-				DEFAULT_BACKUP_RETENTION_DAYS);
+			(initialBackup?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS);
 
 	if (servers.length === 0) {
 		return (
@@ -443,7 +496,12 @@ export function GlobalSettings({
 								<NativeSelect
 									id="backup-provider"
 									value={backupProvider}
-									onChange={(e) => setBackupProvider(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_PROVIDER",
+											payload: e.target.value,
+										})
+									}
 								>
 									<NativeSelectOption value="">
 										Select provider
@@ -466,7 +524,12 @@ export function GlobalSettings({
 								<Input
 									id="backup-bucket"
 									value={backupBucket}
-									onChange={(e) => setBackupBucket(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_BUCKET",
+											payload: e.target.value,
+										})
+									}
 									placeholder="my-backup-bucket"
 								/>
 							</div>
@@ -479,7 +542,12 @@ export function GlobalSettings({
 								<Input
 									id="backup-region"
 									value={backupRegion}
-									onChange={(e) => setBackupRegion(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_REGION",
+											payload: e.target.value,
+										})
+									}
 									placeholder="us-east-1"
 								/>
 							</div>
@@ -492,7 +560,12 @@ export function GlobalSettings({
 								<Input
 									id="backup-endpoint"
 									value={backupEndpoint}
-									onChange={(e) => setBackupEndpoint(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_ENDPOINT",
+											payload: e.target.value,
+										})
+									}
 									placeholder="https://..."
 								/>
 							</div>
@@ -502,7 +575,12 @@ export function GlobalSettings({
 								<Input
 									id="backup-access-key"
 									value={backupAccessKey}
-									onChange={(e) => setBackupAccessKey(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_ACCESS_KEY",
+											payload: e.target.value,
+										})
+									}
 									placeholder="AKIA..."
 								/>
 							</div>
@@ -513,7 +591,12 @@ export function GlobalSettings({
 									id="backup-secret-key"
 									type="password"
 									value={backupSecretKey}
-									onChange={(e) => setBackupSecretKey(e.target.value)}
+									onChange={(e) =>
+										dispatchBackup({
+											type: "SET_SECRET_KEY",
+											payload: e.target.value,
+										})
+									}
 									placeholder="••••••••"
 								/>
 							</div>
@@ -529,9 +612,12 @@ export function GlobalSettings({
 									max={MAX_BACKUP_RETENTION_DAYS}
 									value={backupRetentionDays}
 									onChange={(e) =>
-										setBackupRetentionDays(
-											parseInt(e.target.value, 10) || MIN_BACKUP_RETENTION_DAYS,
-										)
+										dispatchBackup({
+											type: "SET_RETENTION_DAYS",
+											payload:
+												parseInt(e.target.value, 10) ||
+												MIN_BACKUP_RETENTION_DAYS,
+										})
 									}
 									className="w-24"
 								/>

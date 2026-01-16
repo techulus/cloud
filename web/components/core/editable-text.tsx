@@ -1,7 +1,7 @@
 "use client";
 
 import { Edit } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
@@ -33,18 +33,11 @@ export function EditableText({
 	const [inputValue, setInputValue] = useState(value);
 	const inputRef = useRef<HTMLInputElement>(null);
 
-	useEffect(() => {
-		if (isOpen) {
-			setTimeout(() => {
-				if (inputRef.current) {
-					inputRef.current.focus();
-					inputRef.current.select();
-				}
-			}, 50);
-		}
-	}, [isOpen]);
+	const handleFocus = () => {
+		inputRef.current?.select();
+	};
 
-	const handleSave = useCallback(async () => {
+	const handleSave = async () => {
 		if (isSaving || inputValue === value) {
 			setIsOpen(false);
 			return;
@@ -56,7 +49,7 @@ export function EditableText({
 		} finally {
 			setIsSaving(false);
 		}
-	}, [isSaving, onChange, inputValue, value]);
+	};
 
 	const handleOpenChange = (open: boolean) => {
 		setIsOpen(open);
@@ -92,6 +85,8 @@ export function EditableText({
 					type={type}
 					value={inputValue}
 					onChange={(e) => setInputValue(e.target.value)}
+					onFocus={handleFocus}
+					autoFocus
 					onKeyDown={(e) => {
 						if (e.key === "Enter" && !e.shiftKey) {
 							e.preventDefault();
