@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
@@ -33,6 +34,96 @@ type StorageConfig struct {
 	SecretKey string `json:"secretKey"`
 }
 
+func detectDatabaseType(image string) string {
+	image = strings.ToLower(image)
+	switch {
+	case strings.Contains(image, "postgres"):
+		return "postgres"
+	case strings.Contains(image, "mysql"):
+		return "mysql"
+	case strings.Contains(image, "mariadb"):
+		return "mariadb"
+	case strings.Contains(image, "mongo"):
+		return "mongodb"
+	case strings.Contains(image, "redis"):
+		return "redis"
+	default:
+		return ""
+	}
+}
+
+func getDatabaseBackupCommand(dbType string) []string {
+	switch dbType {
+	case "postgres":
+		return []string{"sh", "-c", "pg_dump -Fc --no-acl --no-owner -U ${POSTGRES_USER:-postgres} ${POSTGRES_DB:-postgres}"}
+	case "mysql":
+		return []string{"sh", "-c", "mysqldump -u root -p$MYSQL_ROOT_PASSWORD --all-databases --single-transaction"}
+	case "mariadb":
+		return []string{"sh", "-c", "mariadb-dump -u root -p$MARIADB_ROOT_PASSWORD --all-databases --single-transaction"}
+	case "mongodb":
+		return []string{"sh", "-c", "mongodump --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --archive --gzip"}
+	case "redis":
+		return []string{"redis-cli", "BGSAVE"}
+	default:
+		return nil
+	}
+}
+
+func getDatabaseRestoreCommand(dbType string) []string {
+	switch dbType {
+	case "postgres":
+		return []string{"sh", "-c", "pg_restore -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres} --clean --if-exists"}
+	case "mysql":
+		return []string{"sh", "-c", "mysql -u root -p$MYSQL_ROOT_PASSWORD"}
+	case "mariadb":
+		return []string{"sh", "-c", "mariadb -u root -p$MARIADB_ROOT_PASSWORD"}
+	case "mongodb":
+		return []string{"sh", "-c", "mongorestore --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --archive --gzip"}
+	default:
+		return nil
+	}
+}
+
+func getBackupFileExtension(dbType string) string {
+	switch dbType {
+	case "postgres":
+		return ".dump"
+	case "mysql", "mariadb":
+		return ".sql"
+	case "mongodb":
+		return ".archive.gz"
+	case "redis":
+		return ".rdb"
+	default:
+		return ".backup"
+	}
+}
+
+var credentialErrors = map[string]string{
+	"postgres": "PostgreSQL backup failed. Ensure POSTGRES_USER and POSTGRES_PASSWORD env vars are set, or that local trust authentication is enabled.",
+	"mysql":    "MySQL backup failed. Ensure MYSQL_ROOT_PASSWORD env var is set in your container.",
+	"mariadb":  "MariaDB backup failed. Ensure MARIADB_ROOT_PASSWORD or MYSQL_ROOT_PASSWORD env var is set.",
+	"mongodb":  "MongoDB backup failed. Ensure MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD env vars are set, or that auth is disabled.",
+	"redis":    "Redis backup failed.",
+}
+
+func isAuthError(output string) bool {
+	authPatterns := []string{
+		"password authentication failed",
+		"Access denied",
+		"authentication failed",
+		"NOAUTH",
+		"auth failed",
+	}
+	outputLower := strings.ToLower(output)
+	for _, pattern := range authPatterns {
+		if strings.Contains(outputLower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Agent) ProcessBackupVolume(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		BackupID      string        `json:"backupId"`
@@ -41,50 +132,60 @@ func (a *Agent) ProcessBackupVolume(item agenthttp.WorkQueueItem) error {
 		VolumeName    string        `json:"volumeName"`
 		StoragePath   string        `json:"storagePath"`
 		StorageConfig StorageConfig `json:"storageConfig"`
+		BackupType    string        `json:"backupType"`
+		ServiceImage  string        `json:"serviceImage"`
 	}
 
 	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
 		return fmt.Errorf("failed to parse backup_volume payload: %w", err)
 	}
 
-	volumePath := filepath.Join(a.DataDir, "volumes", payload.ServiceID, payload.VolumeName)
-	log.Printf("[backup_volume] backing up volume %s from %s", payload.VolumeName, volumePath)
+	if payload.BackupType == "database" {
+		return a.processDatabaseBackup(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.ServiceImage, payload.StoragePath, payload.StorageConfig)
+	}
+
+	return a.processVolumeBackup(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.VolumeName, payload.StoragePath, payload.StorageConfig)
+}
+
+func (a *Agent) processVolumeBackup(backupID, serviceID, containerID, volumeName, storagePath string, storageConfig StorageConfig) error {
+	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, volumeName)
+	log.Printf("[backup_volume] backing up volume %s from %s", volumeName, volumePath)
 
 	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
 		return fmt.Errorf("volume path does not exist: %s", volumePath)
 	}
 
-	if payload.ContainerID != "" {
-		running, err := container.IsContainerRunning(payload.ContainerID)
+	if containerID != "" {
+		running, err := container.IsContainerRunning(containerID)
 		if err != nil {
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
 
 		if running {
-			log.Printf("[backup_volume] pausing container %s", Truncate(payload.ContainerID, 12))
-			if err := container.Pause(payload.ContainerID); err != nil {
+			log.Printf("[backup_volume] pausing container %s", Truncate(containerID, 12))
+			if err := container.Pause(containerID); err != nil {
 				return fmt.Errorf("failed to pause container: %w", err)
 			}
 
 			defer func() {
-				log.Printf("[backup_volume] resuming container %s", Truncate(payload.ContainerID, 12))
+				log.Printf("[backup_volume] resuming container %s", Truncate(containerID, 12))
 				err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
-					if err := container.Unpause(payload.ContainerID); err != nil {
-						log.Printf("[backup_volume] unpause attempt failed for container %s: %v", Truncate(payload.ContainerID, 12), err)
+					if err := container.Unpause(containerID); err != nil {
+						log.Printf("[backup_volume] unpause attempt failed for container %s: %v", Truncate(containerID, 12), err)
 						return false, err
 					}
 					return true, nil
 				})
 				if err != nil {
-					log.Printf("[backup_volume] CRITICAL: failed to resume container %s: %v", Truncate(payload.ContainerID, 12), err)
+					log.Printf("[backup_volume] CRITICAL: failed to resume container %s: %v", Truncate(containerID, 12), err)
 				}
 			}()
 		} else {
-			log.Printf("[backup_volume] container %s not running; skipping pause", Truncate(payload.ContainerID, 12))
+			log.Printf("[backup_volume] container %s not running; skipping pause", Truncate(containerID, 12))
 		}
 	}
 
-	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("backup-%s.tar.gz", payload.BackupID))
+	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("backup-%s.tar.gz", backupID))
 	defer os.Remove(tarPath)
 
 	size, checksum, err := createTarGzWithChecksum(volumePath, tarPath)
@@ -94,23 +195,210 @@ func (a *Agent) ProcessBackupVolume(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[backup_volume] created archive: size=%d, checksum=%s", size, checksum)
 
-	s3Client, err := createS3Client(payload.StorageConfig)
+	s3Client, err := createS3Client(storageConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	if err := uploadToS3(s3Client, payload.StorageConfig.Bucket, payload.StoragePath, tarPath); err != nil {
+	if err := uploadToS3(s3Client, storageConfig.Bucket, storagePath, tarPath); err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
-	log.Printf("[backup_volume] uploaded to S3: %s/%s", payload.StorageConfig.Bucket, payload.StoragePath)
+	log.Printf("[backup_volume] uploaded to S3: %s/%s", storageConfig.Bucket, storagePath)
 
-	if err := a.Client.ReportBackupComplete(payload.BackupID, size, checksum); err != nil {
+	if err := a.Client.ReportBackupComplete(backupID, size, checksum); err != nil {
 		return fmt.Errorf("failed to report backup complete: %w", err)
 	}
 
 	return nil
 }
+
+func (a *Agent) processDatabaseBackup(backupID, serviceID, containerID, serviceImage, storagePath string, storageConfig StorageConfig) error {
+	dbType := detectDatabaseType(serviceImage)
+	if dbType == "" {
+		log.Printf("[backup_database] unknown database type for image %s, falling back to volume backup", serviceImage)
+		return fmt.Errorf("database backup not supported for image: %s", serviceImage)
+	}
+
+	log.Printf("[backup_database] detected database type: %s for image %s", dbType, serviceImage)
+
+	if containerID == "" {
+		return fmt.Errorf("containerId is required for database backup")
+	}
+
+	running, err := container.IsContainerRunning(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container status: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("container %s is not running", containerID)
+	}
+
+	if dbType == "redis" {
+		return a.processRedisBackup(backupID, serviceID, containerID, storagePath, storageConfig)
+	}
+
+	cmd := getDatabaseBackupCommand(dbType)
+	if cmd == nil {
+		return fmt.Errorf("no backup command for database type: %s", dbType)
+	}
+
+	log.Printf("[backup_database] executing backup command in container %s", Truncate(containerID, 12))
+
+	output, err := container.Exec(containerID, cmd)
+	if err != nil {
+		outputStr := string(output)
+		if isAuthError(outputStr) {
+			if errMsg, ok := credentialErrors[dbType]; ok {
+				return fmt.Errorf("%s\n\nOriginal error: %s", errMsg, outputStr)
+			}
+		}
+		return fmt.Errorf("database backup failed: %s: %w", outputStr, err)
+	}
+
+	backupPath := filepath.Join(os.TempDir(), fmt.Sprintf("dbbackup-%s%s", backupID, getBackupFileExtension(dbType)))
+	defer os.Remove(backupPath)
+
+	if err := os.WriteFile(backupPath, output, 0600); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	stat, err := os.Stat(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat backup file: %w", err)
+	}
+
+	checksum, err := calculateChecksum(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	size := stat.Size()
+
+	log.Printf("[backup_database] created backup: size=%d, checksum=%s", size, checksum)
+
+	s3Client, err := createS3Client(storageConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	if err := uploadToS3(s3Client, storageConfig.Bucket, storagePath, backupPath); err != nil {
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	log.Printf("[backup_database] uploaded to S3: %s/%s", storageConfig.Bucket, storagePath)
+
+	if err := a.Client.ReportBackupComplete(backupID, size, checksum); err != nil {
+		return fmt.Errorf("failed to report backup complete: %w", err)
+	}
+
+	return nil
+}
+
+func (a *Agent) processRedisBackup(backupID, serviceID, containerID, storagePath string, storageConfig StorageConfig) error {
+	log.Printf("[backup_database] getting Redis dump path from container %s", Truncate(containerID, 12))
+
+	rdbPath, err := getRedisRDBPath(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to get Redis RDB path: %w", err)
+	}
+
+	lastSaveOutput, err := container.Exec(containerID, []string{"redis-cli", "LASTSAVE"})
+	if err != nil {
+		return fmt.Errorf("failed to get LASTSAVE: %w", err)
+	}
+	lastSaveBefore := strings.TrimSpace(string(lastSaveOutput))
+
+	log.Printf("[backup_database] triggering Redis BGSAVE in container %s", Truncate(containerID, 12))
+
+	output, err := container.Exec(containerID, []string{"redis-cli", "BGSAVE"})
+	if err != nil {
+		return fmt.Errorf("redis BGSAVE failed: %s: %w", string(output), err)
+	}
+
+	log.Printf("[backup_database] waiting for BGSAVE to complete")
+	for i := 0; i < 60; i++ {
+		time.Sleep(time.Second)
+		lastSaveOutput, err := container.Exec(containerID, []string{"redis-cli", "LASTSAVE"})
+		if err != nil {
+			continue
+		}
+		lastSaveAfter := strings.TrimSpace(string(lastSaveOutput))
+		if lastSaveAfter != lastSaveBefore {
+			log.Printf("[backup_database] BGSAVE completed")
+			break
+		}
+		if i == 59 {
+			return fmt.Errorf("BGSAVE did not complete within 60 seconds")
+		}
+	}
+
+	log.Printf("[backup_database] copying %s from container", rdbPath)
+
+	rdbOutput, err := container.Exec(containerID, []string{"cat", rdbPath})
+	if err != nil {
+		return fmt.Errorf("failed to read Redis dump file: %s: %w", string(rdbOutput), err)
+	}
+
+	backupPath := filepath.Join(os.TempDir(), fmt.Sprintf("dbbackup-%s.rdb", backupID))
+	defer os.Remove(backupPath)
+
+	if err := os.WriteFile(backupPath, rdbOutput, 0600); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	stat, err := os.Stat(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat backup file: %w", err)
+	}
+
+	checksum, err := calculateChecksum(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	s3Client, err := createS3Client(storageConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	if err := uploadToS3(s3Client, storageConfig.Bucket, storagePath, backupPath); err != nil {
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	log.Printf("[backup_database] uploaded to S3: %s/%s", storageConfig.Bucket, storagePath)
+
+	if err := a.Client.ReportBackupComplete(backupID, stat.Size(), checksum); err != nil {
+		return fmt.Errorf("failed to report backup complete: %w", err)
+	}
+
+	return nil
+}
+
+func getRedisRDBPath(containerID string) (string, error) {
+	dirOutput, err := container.Exec(containerID, []string{"redis-cli", "CONFIG", "GET", "dir"})
+	if err != nil {
+		return "/data/dump.rdb", nil
+	}
+	dirParts := strings.Split(strings.TrimSpace(string(dirOutput)), "\n")
+	dir := "/data"
+	if len(dirParts) >= 2 {
+		dir = strings.TrimSpace(dirParts[1])
+	}
+
+	fileOutput, err := container.Exec(containerID, []string{"redis-cli", "CONFIG", "GET", "dbfilename"})
+	if err != nil {
+		return filepath.Join(dir, "dump.rdb"), nil
+	}
+	fileParts := strings.Split(strings.TrimSpace(string(fileOutput)), "\n")
+	filename := "dump.rdb"
+	if len(fileParts) >= 2 {
+		filename = strings.TrimSpace(fileParts[1])
+	}
+
+	return filepath.Join(dir, filename), nil
+}
+
 
 func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 	var payload struct {
@@ -121,61 +409,71 @@ func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 		StoragePath      string        `json:"storagePath"`
 		ExpectedChecksum string        `json:"expectedChecksum"`
 		StorageConfig    StorageConfig `json:"storageConfig"`
+		BackupType       string        `json:"backupType"`
+		ServiceImage     string        `json:"serviceImage"`
 	}
 
 	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
 		return fmt.Errorf("failed to parse restore_volume payload: %w", err)
 	}
 
-	volumePath := filepath.Join(a.DataDir, "volumes", payload.ServiceID, payload.VolumeName)
-	log.Printf("[restore_volume] restoring volume %s to %s", payload.VolumeName, volumePath)
+	if payload.BackupType == "database" {
+		return a.processDatabaseRestore(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.ServiceImage, payload.StoragePath, payload.ExpectedChecksum, payload.StorageConfig)
+	}
 
-	if payload.ContainerID == "" {
+	return a.processVolumeRestore(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.VolumeName, payload.StoragePath, payload.ExpectedChecksum, payload.StorageConfig)
+}
+
+func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeName, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
+	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, volumeName)
+	log.Printf("[restore_volume] restoring volume %s to %s", volumeName, volumePath)
+
+	if containerID == "" {
 		return fmt.Errorf("containerId is required for restore operation")
 	}
 
-	running, err := container.IsContainerRunning(payload.ContainerID)
+	running, err := container.IsContainerRunning(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to check container status: %w", err)
 	}
 
 	if running {
-		log.Printf("[restore_volume] stopping container %s before restore", Truncate(payload.ContainerID, 12))
-		if err := container.Stop(payload.ContainerID); err != nil {
+		log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
+		if err := container.Stop(containerID); err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 
 		defer func() {
-			log.Printf("[restore_volume] starting container %s after restore", Truncate(payload.ContainerID, 12))
-			if err := container.Start(payload.ContainerID); err != nil {
-				log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(payload.ContainerID, 12), err)
+			log.Printf("[restore_volume] starting container %s after restore", Truncate(containerID, 12))
+			if err := container.Start(containerID); err != nil {
+				log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
 			}
 		}()
 	} else {
-		log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(payload.ContainerID, 12))
+		log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
 	}
 
-	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", payload.BackupID))
+	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", backupID))
 	defer os.Remove(tarPath)
 
-	s3Client, err := createS3Client(payload.StorageConfig)
+	s3Client, err := createS3Client(storageConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	if err := downloadFromS3(s3Client, payload.StorageConfig.Bucket, payload.StoragePath, tarPath); err != nil {
+	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, tarPath); err != nil {
 		return fmt.Errorf("failed to download from S3: %w", err)
 	}
 
-	log.Printf("[restore_volume] downloaded from S3: %s/%s", payload.StorageConfig.Bucket, payload.StoragePath)
+	log.Printf("[restore_volume] downloaded from S3: %s/%s", storageConfig.Bucket, storagePath)
 
 	checksum, err := calculateChecksum(tarPath)
 	if err != nil {
 		return fmt.Errorf("failed to calculate checksum: %w", err)
 	}
 
-	if checksum != payload.ExpectedChecksum {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", payload.ExpectedChecksum, checksum)
+	if checksum != expectedChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum)
 	}
 
 	if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
@@ -190,9 +488,128 @@ func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 		return fmt.Errorf("failed to extract archive: %w", err)
 	}
 
-	log.Printf("[restore_volume] restored volume %s successfully", payload.VolumeName)
+	log.Printf("[restore_volume] restored volume %s successfully", volumeName)
 
 	return nil
+}
+
+func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, serviceImage, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
+	dbType := detectDatabaseType(serviceImage)
+	if dbType == "" {
+		return fmt.Errorf("database restore not supported for image: %s", serviceImage)
+	}
+
+	log.Printf("[restore_database] detected database type: %s for image %s", dbType, serviceImage)
+
+	if containerID == "" {
+		return fmt.Errorf("containerId is required for database restore")
+	}
+
+	running, err := container.IsContainerRunning(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to check container status: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("container %s is not running", containerID)
+	}
+
+	restorePath := filepath.Join(os.TempDir(), fmt.Sprintf("dbrestore-%s%s", backupID, getBackupFileExtension(dbType)))
+	defer os.Remove(restorePath)
+
+	s3Client, err := createS3Client(storageConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, restorePath); err != nil {
+		return fmt.Errorf("failed to download from S3: %w", err)
+	}
+
+	log.Printf("[restore_database] downloaded from S3: %s/%s", storageConfig.Bucket, storagePath)
+
+	checksum, err := calculateChecksum(restorePath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	if checksum != expectedChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum)
+	}
+
+	if dbType == "redis" {
+		return a.processRedisRestore(containerID, restorePath)
+	}
+
+	log.Printf("[restore_database] copying backup file to container %s", Truncate(containerID, 12))
+
+	containerRestorePath := fmt.Sprintf("/tmp/restore%s", getBackupFileExtension(dbType))
+	if err := copyFileToContainer(containerID, restorePath, containerRestorePath); err != nil {
+		return fmt.Errorf("failed to copy backup to container: %w", err)
+	}
+
+	defer container.Exec(containerID, []string{"rm", "-f", containerRestorePath})
+
+	log.Printf("[restore_database] executing restore command in container %s", Truncate(containerID, 12))
+
+	var restoreCmd []string
+	switch dbType {
+	case "postgres":
+		restoreCmd = []string{"sh", "-c", fmt.Sprintf("pg_restore -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres} --clean --if-exists %s", containerRestorePath)}
+	case "mysql":
+		restoreCmd = []string{"sh", "-c", fmt.Sprintf("mysql -u root -p$MYSQL_ROOT_PASSWORD < %s", containerRestorePath)}
+	case "mariadb":
+		restoreCmd = []string{"sh", "-c", fmt.Sprintf("mariadb -u root -p$MARIADB_ROOT_PASSWORD < %s", containerRestorePath)}
+	case "mongodb":
+		restoreCmd = []string{"sh", "-c", fmt.Sprintf("mongorestore --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --archive=%s --gzip", containerRestorePath)}
+	default:
+		return fmt.Errorf("unsupported database type for restore: %s", dbType)
+	}
+
+	output, err := container.Exec(containerID, restoreCmd)
+	if err != nil {
+		outputStr := string(output)
+		if isAuthError(outputStr) {
+			if errMsg, ok := credentialErrors[dbType]; ok {
+				return fmt.Errorf("%s\n\nOriginal error: %s", errMsg, outputStr)
+			}
+		}
+		return fmt.Errorf("database restore failed: %s: %w", outputStr, err)
+	}
+
+	log.Printf("[restore_database] restored database successfully")
+	return nil
+}
+
+func (a *Agent) processRedisRestore(containerID, restorePath string) error {
+	log.Printf("[restore_database] restoring Redis from %s", restorePath)
+
+	rdbPath, err := getRedisRDBPath(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to get Redis RDB path: %w", err)
+	}
+
+	log.Printf("[restore_database] stopping Redis container %s", Truncate(containerID, 12))
+	if err := container.Stop(containerID); err != nil {
+		return fmt.Errorf("failed to stop container for restore: %w", err)
+	}
+
+	log.Printf("[restore_database] copying RDB file to %s", rdbPath)
+	if err := copyFileToContainer(containerID, restorePath, rdbPath); err != nil {
+		container.Start(containerID)
+		return fmt.Errorf("failed to copy RDB to container: %w", err)
+	}
+
+	log.Printf("[restore_database] starting Redis container %s", Truncate(containerID, 12))
+	if err := container.Start(containerID); err != nil {
+		return fmt.Errorf("failed to start container after restore: %w", err)
+	}
+
+	log.Printf("[restore_database] restored Redis successfully")
+	return nil
+}
+
+func copyFileToContainer(containerID, srcPath, destPath string) error {
+	return container.CopyToContainer(containerID, srcPath, destPath)
 }
 
 func createS3Client(cfg StorageConfig) (*s3.Client, error) {

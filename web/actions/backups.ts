@@ -15,7 +15,11 @@ import { enqueueWork } from "@/lib/work-queue";
 import { revalidatePath } from "next/cache";
 import { deleteFromS3 } from "@/lib/s3";
 
-export async function createBackup(serviceId: string, volumeId: string) {
+export async function createBackup(
+	serviceId: string,
+	volumeId: string,
+	backupTypeOverride?: "volume" | "database",
+) {
 	const storageConfig = await getBackupStorageConfig();
 	if (!storageConfig) {
 		throw new Error("Backup storage not configured");
@@ -64,8 +68,10 @@ export async function createBackup(serviceId: string, volumeId: string) {
 		throw new Error("Deployment is missing container ID");
 	}
 
+	const backupType = backupTypeOverride ?? (detectDatabaseType(service.image) ? "database" : "volume");
 	const backupId = randomUUID();
-	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}.tar.gz`;
+	const fileExtension = backupType === "database" ? getDbBackupExtension(service.image) : ".tar.gz";
+	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}${fileExtension}`;
 
 	await db.insert(volumeBackups).values({
 		id: backupId,
@@ -83,6 +89,8 @@ export async function createBackup(serviceId: string, volumeId: string) {
 		containerId: deployment.containerId,
 		volumeName: volume.name,
 		storagePath,
+		backupType,
+		serviceImage: service.image,
 		storageConfig: {
 			provider: storageConfig.provider,
 			bucket: storageConfig.bucket,
@@ -95,6 +103,26 @@ export async function createBackup(serviceId: string, volumeId: string) {
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true, backupId };
+}
+
+function getDbBackupExtension(image: string): string {
+	const imageLower = image.toLowerCase();
+	if (imageLower.includes("postgres")) return ".dump";
+	if (imageLower.includes("mysql")) return ".sql";
+	if (imageLower.includes("mariadb")) return ".sql";
+	if (imageLower.includes("mongo")) return ".archive.gz";
+	if (imageLower.includes("redis")) return ".rdb";
+	return ".backup";
+}
+
+export function detectDatabaseType(image: string): string | null {
+	const imageLower = image.toLowerCase();
+	if (imageLower.includes("postgres")) return "postgres";
+	if (imageLower.includes("mysql")) return "mysql";
+	if (imageLower.includes("mariadb")) return "mariadb";
+	if (imageLower.includes("mongo")) return "mongodb";
+	if (imageLower.includes("redis")) return "redis";
+	return null;
 }
 
 export async function listBackups(serviceId: string) {
@@ -145,6 +173,16 @@ export async function restoreBackup(
 		throw new Error("Backup data is incomplete");
 	}
 
+	const service = await db
+		.select()
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.then((r) => r[0]);
+
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
 	const deployment = await db
 		.select({
 			serverId: deployments.serverId,
@@ -164,6 +202,7 @@ export async function restoreBackup(
 	}
 
 	const serverId = targetServerId ?? deployment.serverId;
+	const backupType = detectBackupTypeFromPath(backup.storagePath);
 
 	await enqueueWork(serverId, "restore_volume", {
 		backupId,
@@ -172,6 +211,8 @@ export async function restoreBackup(
 		volumeName: backup.volumeName,
 		storagePath: backup.storagePath,
 		expectedChecksum: backup.checksum,
+		backupType,
+		serviceImage: service.image,
 		storageConfig: {
 			provider: storageConfig.provider,
 			bucket: storageConfig.bucket,
@@ -184,6 +225,15 @@ export async function restoreBackup(
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };
+}
+
+function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
+	if (storagePath.endsWith(".tar.gz")) return "volume";
+	if (storagePath.endsWith(".dump")) return "database";
+	if (storagePath.endsWith(".sql")) return "database";
+	if (storagePath.endsWith(".archive.gz")) return "database";
+	if (storagePath.endsWith(".rdb")) return "database";
+	return "volume";
 }
 
 export async function deleteBackup(backupId: string) {

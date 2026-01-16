@@ -32,6 +32,7 @@ import {
 	listBackups,
 	restoreBackup,
 	deleteBackup,
+	detectDatabaseType,
 } from "@/actions/backups";
 import { updateServiceBackupSettings } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -97,6 +98,8 @@ export const BackupTab = memo(function BackupTab({
 	const [savingSettings, setSavingSettings] = useState(false);
 
 	const volumes = service.volumes || [];
+	const detectedDbType = detectDatabaseType(service.image);
+	const isDatabaseService = detectedDbType !== null;
 
 	const hasChanges =
 		backupEnabled !== (service.backupEnabled ?? false) ||
@@ -223,17 +226,25 @@ export const BackupTab = memo(function BackupTab({
 					</div>
 
 					{backupEnabled && (
-						<div className="flex items-center gap-4">
-							<NativeSelect
-								value={backupSchedule}
-								onChange={(e) => setBackupSchedule(e.target.value)}
-							>
-								<NativeSelectOption value="">
-									Select schedule
-								</NativeSelectOption>
-								<NativeSelectOption value="daily">Daily</NativeSelectOption>
-								<NativeSelectOption value="weekly">Weekly</NativeSelectOption>
-							</NativeSelect>
+						<div className="space-y-4">
+							<div className="flex items-center gap-4">
+								<NativeSelect
+									value={backupSchedule}
+									onChange={(e) => setBackupSchedule(e.target.value)}
+								>
+									<NativeSelectOption value="">
+										Select schedule
+									</NativeSelectOption>
+									<NativeSelectOption value="daily">Daily</NativeSelectOption>
+									<NativeSelectOption value="weekly">Weekly</NativeSelectOption>
+								</NativeSelect>
+							</div>
+
+							{isDatabaseService && (
+								<p className="text-xs text-muted-foreground">
+									Database detected ({detectedDbType}). Scheduled backups will use native database tools for portable backups.
+								</p>
+							)}
 						</div>
 					)}
 
@@ -271,7 +282,7 @@ export const BackupTab = memo(function BackupTab({
 								) : (
 									<Archive className="h-4 w-4 mr-2" />
 								)}
-								Backup volume
+								Backup
 							</Button>
 						))}
 						<Button

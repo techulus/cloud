@@ -489,6 +489,21 @@ func parseDockerLabels(labelsStr string) map[string]string {
 	return labels
 }
 
+func Exec(containerID string, cmd []string) ([]byte, error) {
+	args := append([]string{"exec", containerID}, cmd...)
+	output, err := exec.Command("docker", args...).CombinedOutput()
+	return output, err
+}
+
+func CopyToContainer(containerID, srcPath, destPath string) error {
+	cmd := exec.Command("docker", "cp", srcPath, fmt.Sprintf("%s:%s", containerID, destPath))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to copy to container: %s: %w", string(output), err)
+	}
+	return nil
+}
+
 func EnsureNetwork(subnetId int) error {
 	subnet := fmt.Sprintf("10.200.%d.0/24", subnetId)
 	gateway := fmt.Sprintf("10.200.%d.1", subnetId)
