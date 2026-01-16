@@ -210,7 +210,7 @@ GITHUB_WEBHOOK_SECRET="${credentials.webhookSecret}"`
 					</ItemContent>
 				</Item>
 				<div className="p-4 space-y-4">
-					<p className="text-sm text-muted-foreground">
+					<p className="text-base text-muted-foreground">
 						Copy the following environment variables into your{" "}
 						<code className="bg-muted px-1 rounded">.env</code> file.
 					</p>
@@ -246,7 +246,7 @@ GITHUB_WEBHOOK_SECRET="${credentials.webhookSecret}"`
 							)}
 
 							<textarea
-								className="w-full h-48 p-3 font-mono text-sm border rounded-md bg-muted/30 resize-none"
+								className="w-full h-48 p-3 font-mono text-base border rounded-md bg-muted/30 resize-none"
 								value={envOutput}
 								readOnly
 							/>
@@ -295,7 +295,7 @@ GITHUB_WEBHOOK_SECRET="${credentials.webhookSecret}"`
 				</ItemContent>
 			</Item>
 			<div className="p-4 space-y-4">
-				<p className="text-sm text-muted-foreground">
+				<p className="text-base text-muted-foreground">
 					Create a GitHub App to enable repository access and webhook
 					integration. You will be redirected to GitHub to confirm, then back
 					here to copy the configuration. You must be logged into GitHub before
@@ -320,7 +320,7 @@ GITHUB_WEBHOOK_SECRET="${credentials.webhookSecret}"`
 							placeholder="e.g., cloud.example.com"
 							required
 						/>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							Enter the domain without{" "}
 							<code className="bg-muted px-1 rounded">https://</code>
 						</p>
@@ -351,7 +351,7 @@ GITHUB_WEBHOOK_SECRET="${credentials.webhookSecret}"`
 								placeholder="e.g., acme-inc"
 								required={useOrg}
 							/>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								Find this on your organization's GitHub settings page.
 							</p>
 						</div>

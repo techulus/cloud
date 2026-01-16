@@ -204,12 +204,12 @@ export function BuildDetails({
 				<div className="flex-1">
 					<div className="flex items-center gap-3">
 						<span
-							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${config.color} ${config.bgColor}`}
+							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-base font-medium ${config.color} ${config.bgColor}`}
 						>
 							<Icon className={`size-4 ${isAnimated ? "animate-spin" : ""}`} />
 							{config.label}
 						</span>
-						<code className="font-mono text-sm">
+						<code className="font-mono text-base">
 							{build.commitSha.slice(0, 7)}
 						</code>
 					</div>
@@ -252,7 +252,7 @@ export function BuildDetails({
 				<Item variant="outline">
 					<ItemContent>
 						<ItemTitle>
-							<code className="font-mono text-sm">
+							<code className="font-mono text-base">
 								{build.commitSha.slice(0, 7)}
 							</code>
 							{githubRepo && (
@@ -268,7 +268,7 @@ export function BuildDetails({
 						<ItemDescription>
 							{build.commitMessage?.split("\n")[0] || "No message"}
 						</ItemDescription>
-						<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+						<div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
 							<span className="flex items-center gap-1">
 								<GitBranch className="size-3" />
 								{build.branch}
@@ -314,7 +314,7 @@ export function BuildDetails({
 			)}
 
 			<div className="space-y-2">
-				<h3 className="text-sm font-medium">Build Logs</h3>
+				<h3 className="text-base font-medium">Build Logs</h3>
 				<LogViewer
 					variant="build-logs"
 					buildId={build.id}

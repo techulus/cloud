@@ -314,7 +314,7 @@ export function GlobalSettings({
 						</ItemContent>
 					</Item>
 					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
+						<p className="text-base text-muted-foreground">
 							Select which servers can run builds. If none are selected, all
 							online servers can run builds.
 						</p>
@@ -333,7 +333,7 @@ export function GlobalSettings({
 									<div className="flex-1 min-w-0">
 										<p className="font-medium truncate">{server.name}</p>
 										<p
-											className={`text-xs font-mono ${
+											className={`text-sm font-mono ${
 												buildServerIds.has(server.id)
 													? "text-primary-foreground/70"
 													: "text-muted-foreground"
@@ -345,7 +345,7 @@ export function GlobalSettings({
 								</button>
 							))}
 						</div>
-						<div className="flex items-center justify-between text-sm">
+						<div className="flex items-center justify-between text-base">
 							<span>
 								{buildServerIds.size === 0
 									? "All servers can build"
@@ -376,7 +376,7 @@ export function GlobalSettings({
 						</ItemContent>
 					</Item>
 					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
+						<p className="text-base text-muted-foreground">
 							Maximum time allowed for builds to complete. Builds exceeding this
 							limit will be automatically cancelled.
 						</p>
@@ -389,9 +389,9 @@ export function GlobalSettings({
 								onChange={(e) => setBuildTimeoutMinutes(e.target.value)}
 								className="w-24"
 							/>
-							<span className="text-sm text-muted-foreground">minutes</span>
+							<span className="text-base text-muted-foreground">minutes</span>
 						</div>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							Minimum: 5 minutes, Maximum: 120 minutes
 						</p>
 						{buildTimeoutChanged && (
@@ -420,7 +420,7 @@ export function GlobalSettings({
 						</ItemContent>
 					</Item>
 					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
+						<p className="text-base text-muted-foreground">
 							Select servers to exclude from workload placement. These servers
 							will not receive any new deployments.
 						</p>
@@ -439,7 +439,7 @@ export function GlobalSettings({
 									<div className="flex-1 min-w-0">
 										<p className="font-medium truncate">{server.name}</p>
 										<p
-											className={`text-xs font-mono ${
+											className={`text-sm font-mono ${
 												excludedServerIds.has(server.id)
 													? "text-destructive-foreground/70"
 													: "text-muted-foreground"
@@ -451,7 +451,7 @@ export function GlobalSettings({
 								</button>
 							))}
 						</div>
-						<div className="flex items-center justify-between text-sm">
+						<div className="flex items-center justify-between text-base">
 							<span>
 								{excludedServerIds.size === 0
 									? "No servers excluded"
@@ -484,7 +484,7 @@ export function GlobalSettings({
 						</ItemContent>
 					</Item>
 					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
+						<p className="text-base text-muted-foreground">
 							Configure S3-compatible storage for volume backups. This is
 							required for backing up stateful services and migrating them
 							between servers.
@@ -621,9 +621,9 @@ export function GlobalSettings({
 									}
 									className="w-24"
 								/>
-								<span className="text-sm text-muted-foreground">days</span>
+								<span className="text-base text-muted-foreground">days</span>
 							</div>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								Backups older than this will be automatically deleted. Range:{" "}
 								{MIN_BACKUP_RETENTION_DAYS}-{MAX_BACKUP_RETENTION_DAYS} days.
 							</p>

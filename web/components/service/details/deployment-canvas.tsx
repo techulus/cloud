@@ -83,7 +83,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 						/>
 					</span>
 					<span
-						className={`text-xs font-medium ${colors.text} transition-colors duration-300`}
+						className={`text-sm font-medium ${colors.text} transition-colors duration-300`}
 					>
 						{getStatusLabel(deployment.status)}
 					</span>
@@ -97,7 +97,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 						className={`h-3 w-3 ${healthColor.text} transition-colors duration-300`}
 					/>
 					<span
-						className={`text-xs font-medium capitalize ${healthColor.text} transition-colors duration-300`}
+						className={`text-sm font-medium capitalize ${healthColor.text} transition-colors duration-300`}
 					>
 						{deployment.healthStatus}
 					</span>
@@ -133,7 +133,7 @@ function ServerBox({
 			`}
 		>
 			<div className="flex items-center gap-2 mb-2">
-				<h3 className="font-semibold text-sm text-foreground truncate">
+				<h3 className="font-semibold text-base text-foreground truncate">
 					{serverName}
 				</h3>
 
@@ -142,7 +142,7 @@ function ServerBox({
 						{volumes?.map((volume) => (
 							<div
 								key={volume.id}
-								className="flex items-center gap-2 text-xs text-muted-foreground"
+								className="flex items-center gap-2 text-sm text-muted-foreground"
 							>
 								<HardDrive className="h-3.5 w-3.5" />
 								<span>{volume.name}</span>
@@ -229,7 +229,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 									href={`https://${port.domain}`}
 									target="_blank"
 									rel="noopener noreferrer"
-									className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
+									className="flex items-center gap-1.5 text-sm hover:opacity-70 transition-opacity"
 								>
 									<Globe className="h-3 w-3 text-sky-500" />
 									<span className="text-sky-600 dark:text-sky-400">
@@ -238,7 +238,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 								</a>
 							))}
 							{hasRunningDeployments && (
-								<div className="flex items-center gap-1.5 text-xs">
+								<div className="flex items-center gap-1.5 text-sm">
 									<Lock className="h-3 w-3 text-zinc-500" />
 									<span className="text-zinc-600 dark:text-zinc-400">
 										{service.hostname || service.name}.internal
@@ -274,7 +274,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 										href={`https://${port.domain}`}
 										target="_blank"
 										rel="noopener noreferrer"
-										className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
+										className="flex items-center gap-1.5 text-sm hover:opacity-70 transition-opacity"
 									>
 										<Globe className="h-3 w-3 text-sky-500" />
 										<span className="text-sky-600 dark:text-sky-400">
@@ -283,7 +283,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 									</a>
 								))}
 								{hasRunningDeployments && (
-									<div className="flex items-center gap-1.5 text-xs">
+									<div className="flex items-center gap-1.5 text-sm">
 										<Lock className="h-3 w-3 text-zinc-500" />
 										<span className="text-zinc-600 dark:text-zinc-400">
 											{service.hostname || service.name}.internal

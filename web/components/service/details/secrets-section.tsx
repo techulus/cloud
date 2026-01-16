@@ -141,7 +141,7 @@ export const SecretsSection = memo(function SecretsSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				{isLoading ? (
-					<div className="text-sm text-muted-foreground">Loading...</div>
+					<div className="text-base text-muted-foreground">Loading...</div>
 				) : secrets && secrets.length > 0 ? (
 					<div className="space-y-2">
 						{secrets.map((secret) => {
@@ -149,7 +149,7 @@ export const SecretsSection = memo(function SecretsSection({
 							return (
 								<div
 									key={secret.id}
-									className={`flex items-center justify-between px-3 py-2 rounded-md text-sm bg-muted ${isDeleting ? "opacity-50" : ""}`}
+									className={`flex items-center justify-between px-3 py-2 rounded-md text-base bg-muted ${isDeleting ? "opacity-50" : ""}`}
 								>
 									<div className="flex items-center gap-2">
 										<span
@@ -163,7 +163,7 @@ export const SecretsSection = memo(function SecretsSection({
 										<button
 											type="button"
 											onClick={() => handleUndoDelete(secret.id)}
-											className="text-xs text-muted-foreground hover:text-foreground"
+											className="text-sm text-muted-foreground hover:text-foreground"
 										>
 											Undo
 										</button>
@@ -181,7 +181,7 @@ export const SecretsSection = memo(function SecretsSection({
 						})}
 					</div>
 				) : pendingVars.length === 0 ? (
-					<div className="text-sm text-muted-foreground">
+					<div className="text-base text-muted-foreground">
 						No environment variables configured
 					</div>
 				) : null}
@@ -189,14 +189,14 @@ export const SecretsSection = memo(function SecretsSection({
 				{pendingVars.length > 0 && (
 					<div className="space-y-2">
 						{secrets && secrets.length > 0 && (
-							<div className="text-xs text-muted-foreground font-medium pt-2">
+							<div className="text-sm text-muted-foreground font-medium pt-2">
 								New variables
 							</div>
 						)}
 						{pendingVars.map((variable, index) => (
 							<div
 								key={`${variable.key}-${index}`}
-								className="flex items-center justify-between px-3 py-2 rounded-md text-sm bg-green-500/10 border border-green-500/20"
+								className="flex items-center justify-between px-3 py-2 rounded-md text-base bg-green-500/10 border border-green-500/20"
 							>
 								<div className="flex items-center gap-2 min-w-0 flex-1">
 									<span className="font-mono font-medium">{variable.key}</span>
@@ -245,7 +245,7 @@ export const SecretsSection = memo(function SecretsSection({
 						</Button>
 					</div>
 					{newKey && !isValidKey && (
-						<p className="text-xs text-destructive">
+						<p className="text-sm text-destructive">
 							Key must start with a letter or underscore, contain only uppercase
 							letters, numbers, and underscores
 						</p>
@@ -254,7 +254,7 @@ export const SecretsSection = memo(function SecretsSection({
 
 				{hasChanges && (
 					<div className="flex items-center justify-between pt-2 border-t">
-						<p className="text-xs text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							{pendingVars.length > 0 && `${pendingVars.length} to add`}
 							{pendingVars.length > 0 && pendingDeletes.length > 0 && ", "}
 							{pendingDeletes.length > 0 &&
@@ -268,7 +268,7 @@ export const SecretsSection = memo(function SecretsSection({
 				)}
 
 				{(secrets?.length ?? 0) > 0 && !hasChanges && (
-					<p className="text-xs text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						Changes take effect on next deployment
 					</p>
 				)}

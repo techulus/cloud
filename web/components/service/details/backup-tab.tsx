@@ -277,7 +277,7 @@ export const BackupTab = memo(function BackupTab({
 	if (!service.stateful) {
 		return (
 			<div className="rounded-lg border p-4">
-				<p className="text-sm text-muted-foreground">
+				<p className="text-base text-muted-foreground">
 					Backups are only available for stateful services.
 				</p>
 			</div>
@@ -287,7 +287,7 @@ export const BackupTab = memo(function BackupTab({
 	if (volumes.length === 0) {
 		return (
 			<div className="rounded-lg border p-4">
-				<p className="text-sm text-muted-foreground">
+				<p className="text-base text-muted-foreground">
 					No volumes configured. Add volumes to enable backups.
 				</p>
 			</div>
@@ -319,7 +319,7 @@ export const BackupTab = memo(function BackupTab({
 								}
 								className="rounded"
 							/>
-							<span className="text-sm">Enable scheduled backups</span>
+							<span className="text-base">Enable scheduled backups</span>
 						</label>
 					</div>
 
@@ -344,7 +344,7 @@ export const BackupTab = memo(function BackupTab({
 							</div>
 
 							{isDatabaseService && (
-								<p className="text-xs text-muted-foreground">
+								<p className="text-sm text-muted-foreground">
 									Database detected ({detectedDbType}). Scheduled backups will use native database tools for portable backups.
 								</p>
 							)}
@@ -402,15 +402,15 @@ export const BackupTab = memo(function BackupTab({
 				</Item>
 				<div className="p-4 space-y-2">
 					{error && (
-						<p className="text-sm text-red-600 dark:text-red-400 mb-2">
+						<p className="text-base text-red-600 dark:text-red-400 mb-2">
 							{error}
 						</p>
 					)}
 
 					{loading ? (
-						<p className="text-sm text-muted-foreground">Loading backups...</p>
+						<p className="text-base text-muted-foreground">Loading backups...</p>
 					) : backups.length === 0 ? (
-						<p className="text-sm text-muted-foreground">No backups found.</p>
+						<p className="text-base text-muted-foreground">No backups found.</p>
 					) : (
 						backups.map((backup) => (
 							<div
@@ -420,15 +420,15 @@ export const BackupTab = memo(function BackupTab({
 								<div className="flex items-center gap-3">
 									{getStatusIcon(backup.status)}
 									<div>
-										<p className="font-medium text-sm">{backup.volumeName}</p>
-										<p className="text-xs text-muted-foreground">
+										<p className="font-medium text-base">{backup.volumeName}</p>
+										<p className="text-sm text-muted-foreground">
 											{formatDate(backup.createdAt)}
 											{backup.sizeBytes &&
 												` · ${formatBytes(backup.sizeBytes)}`}
 											{backup.serverName && ` · ${backup.serverName}`}
 										</p>
 										{backup.errorMessage && (
-											<p className="text-xs text-red-500">
+											<p className="text-sm text-red-500">
 												{backup.errorMessage}
 											</p>
 										)}

@@ -195,7 +195,7 @@ function PendingChangesModal({
 					{changes.map((change, i) => (
 						<div
 							key={`change-${change.field}-${i}`}
-							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-sm"
+							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-base"
 						>
 							<span className="font-medium shrink-0">{change.field}:</span>
 							<div className="flex items-center gap-2 min-w-0">
@@ -340,7 +340,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 								`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
 							)
 						}
-						className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors"
+						className="text-base font-medium text-blue-400 hover:text-blue-300 transition-colors"
 					>
 						View Logs
 					</button>
@@ -372,7 +372,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							type="button"
 							onClick={handleAbort}
 							disabled={isAborting}
-							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+							className="text-base font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
 						>
 							{isAborting ? "..." : "Abort"}
 						</button>
@@ -397,7 +397,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							<button
 								type="button"
 								onClick={() => setShowModal(true)}
-								className="text-sm font-medium text-white/70 hover:text-white transition-colors"
+								className="text-base font-medium text-white/70 hover:text-white transition-colors"
 							>
 								View
 							</button>
@@ -406,7 +406,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							type="button"
 							onClick={handleDeploy}
 							disabled={isDeploying || totalReplicas === 0}
-							className="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
+							className="text-base font-medium text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
 						>
 							{isDeploying ? "..." : "Deploy"}
 						</button>

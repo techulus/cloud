@@ -22,13 +22,13 @@ export function OfflineServersBanner() {
 	const serverNames = offlineServers.map((s) => s.name).join(", ");
 
 	return (
-		<div className="bg-destructive/10 border-b border-destructive/20 text-destructive px-4 py-2 flex items-center justify-center gap-3 text-sm">
+		<div className="bg-destructive/10 border-b border-destructive/20 text-destructive px-4 py-2 flex items-center justify-center gap-3 text-base">
 			<AlertTriangle className="h-4 w-4 shrink-0" />
 			<span>
 				{offlineServers.length === 1 ? "Server" : "Servers"} offline:{" "}
 				<strong>{serverNames}</strong>
 			</span>
-			<Link href="/dashboard" className="text-xs underline hover:no-underline">
+			<Link href="/dashboard" className="text-sm underline hover:no-underline">
 				View
 			</Link>
 		</div>

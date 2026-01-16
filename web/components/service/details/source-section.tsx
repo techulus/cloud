@@ -135,7 +135,7 @@ export const SourceSection = memo(function SourceSection({
 									value={rootDir}
 									onChange={(e) => setRootDir(e.target.value)}
 								/>
-								<p className="text-xs text-muted-foreground">
+								<p className="text-sm text-muted-foreground">
 									Subdirectory containing the app (leave empty for repo root)
 								</p>
 							</div>
@@ -159,33 +159,33 @@ export const SourceSection = memo(function SourceSection({
 					) : (
 						<div className="grid gap-4 sm:grid-cols-3">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">
+								<p className="text-sm font-medium text-muted-foreground">
 									Repository
 								</p>
 								<a
 									href={service.githubRepoUrl}
 									target="_blank"
 									rel="noopener noreferrer"
-									className="text-sm font-mono text-primary hover:underline"
+									className="text-base font-mono text-primary hover:underline"
 								>
 									{service.githubRepoUrl.replace("https://github.com/", "")}
 								</a>
 							</div>
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+								<p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
 									<GitBranch className="size-3" />
 									Branch
 								</p>
-								<p className="text-sm font-mono">
+								<p className="text-base font-mono">
 									{service.githubBranch || "main"}
 								</p>
 							</div>
 							{service.githubRootDir && (
 								<div className="space-y-1">
-									<p className="text-xs font-medium text-muted-foreground">
+									<p className="text-sm font-medium text-muted-foreground">
 										Root Directory
 									</p>
-									<p className="text-sm font-mono">{service.githubRootDir}</p>
+									<p className="text-base font-mono">{service.githubRootDir}</p>
 								</div>
 							)}
 						</div>
@@ -227,7 +227,7 @@ export const SourceSection = memo(function SourceSection({
 								value={repoUrl}
 								onChange={(e) => setRepoUrl(e.target.value)}
 							/>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								Enter a public GitHub repository URL to enable automatic builds.
 							</p>
 						</div>
@@ -248,7 +248,7 @@ export const SourceSection = memo(function SourceSection({
 								value={rootDir}
 								onChange={(e) => setRootDir(e.target.value)}
 							/>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								Subdirectory containing the app (leave empty for repo root)
 							</p>
 						</div>
@@ -274,20 +274,20 @@ export const SourceSection = memo(function SourceSection({
 				) : (
 					<div className="grid gap-4 sm:grid-cols-3">
 						<div className="space-y-1">
-							<p className="text-xs font-medium text-muted-foreground">
+							<p className="text-sm font-medium text-muted-foreground">
 								Registry
 							</p>
-							<p className="text-sm font-mono">{registry}</p>
+							<p className="text-base font-mono">{registry}</p>
 						</div>
 						<div className="space-y-1">
-							<p className="text-xs font-medium text-muted-foreground">
+							<p className="text-sm font-medium text-muted-foreground">
 								Repository
 							</p>
-							<p className="text-sm font-mono">{repository}</p>
+							<p className="text-base font-mono">{repository}</p>
 						</div>
 						<div className="space-y-1">
-							<p className="text-xs font-medium text-muted-foreground">Tag</p>
-							<p className="text-sm font-mono">{tag}</p>
+							<p className="text-sm font-medium text-muted-foreground">Tag</p>
+							<p className="text-base font-mono">{tag}</p>
 						</div>
 					</div>
 				)}

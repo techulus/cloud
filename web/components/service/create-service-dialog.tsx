@@ -170,8 +170,8 @@ export function CreateServiceDialog({
 									}}
 									placeholder="nginx:latest"
 								/>
-								{error && <p className="text-sm text-red-500">{error}</p>}
-								<p className="text-xs text-muted-foreground">
+								{error && <p className="text-base text-red-500">{error}</p>}
+								<p className="text-sm text-muted-foreground">
 									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or
 									any public registry
 								</p>
@@ -179,7 +179,7 @@ export function CreateServiceDialog({
 							<div className="flex items-center justify-between rounded-lg border p-3">
 								<div className="space-y-0.5">
 									<Label htmlFor="stateful-toggle">Stateful Service</Label>
-									<p className="text-xs text-muted-foreground">
+									<p className="text-sm text-muted-foreground">
 										Enable to add persistent volumes. Limited to 1 replica and
 										locked to a single server.
 									</p>
@@ -232,7 +232,7 @@ export function CreateServiceDialog({
 									}}
 									disabled={isLoading}
 								/>
-								{error && <p className="text-sm text-red-500">{error}</p>}
+								{error && <p className="text-base text-red-500">{error}</p>}
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="gh-branch">Branch</Label>
@@ -251,14 +251,14 @@ export function CreateServiceDialog({
 									onChange={(e) => setRootDir(e.target.value)}
 									placeholder="apps/web"
 								/>
-								<p className="text-xs text-muted-foreground">
+								<p className="text-sm text-muted-foreground">
 									Subdirectory containing the app (leave empty for repo root)
 								</p>
 							</div>
 							<div className="flex items-center justify-between rounded-lg border p-3">
 								<div className="space-y-0.5">
 									<Label htmlFor="gh-stateful-toggle">Stateful Service</Label>
-									<p className="text-xs text-muted-foreground">
+									<p className="text-sm text-muted-foreground">
 										Enable to add persistent volumes. Limited to 1 replica and
 										locked to a single server.
 									</p>

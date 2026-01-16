@@ -136,7 +136,7 @@ export function ServiceLayoutClient({
 							key={tab.href}
 							href={tab.href}
 							className={cn(
-								"px-3 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap shrink-0 border border-transparent",
+								"px-3 py-1.5 text-base font-medium rounded-md transition-all whitespace-nowrap shrink-0 border border-transparent",
 								isActiveTab(tab.href)
 									? "bg-background text-foreground shadow-sm dark:bg-input/30 dark:border-input"
 									: "text-muted-foreground hover:text-foreground",

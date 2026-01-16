@@ -125,7 +125,7 @@ function ServiceCard({
 				<div className="flex items-center gap-2">
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-1.5">
-							<h3 className="font-semibold text-sm text-foreground truncate">
+							<h3 className="font-semibold text-base text-foreground truncate">
 								{service.name}
 							</h3>
 							<span className={`relative flex h-2 w-2`}>
@@ -143,7 +143,7 @@ function ServiceCard({
 				{hasEndpoints && (
 					<div className="mt-2 space-y-1.5">
 						{publicPorts.map((port) => (
-							<div key={port.id} className="flex items-center gap-1.5 text-xs">
+							<div key={port.id} className="flex items-center gap-1.5 text-sm">
 								<Globe className="h-3 w-3 text-sky-500" />
 								<span className="text-sky-600 dark:text-sky-400">
 									{port.domain}
@@ -151,7 +151,7 @@ function ServiceCard({
 							</div>
 						))}
 						{hasInternalDns && (
-							<div className="flex items-center gap-1.5 text-xs">
+							<div className="flex items-center gap-1.5 text-sm">
 								<Lock className="h-3 w-3 text-zinc-500" />
 								<span className="text-zinc-600 dark:text-zinc-400">
 									{service.hostname || service.name}.internal
@@ -166,7 +166,7 @@ function ServiceCard({
 						{service.volumes.map((volume) => (
 							<div
 								key={volume.id}
-								className="flex items-center gap-2 text-xs text-muted-foreground"
+								className="flex items-center gap-2 text-sm text-muted-foreground"
 							>
 								<HardDrive className="h-3.5 w-3.5" />
 								<span>{volume.name}</span>
@@ -178,8 +178,8 @@ function ServiceCard({
 				{service.deployments.length > 0 && (
 					<div className="mt-2">
 						<div className="flex items-center justify-between">
-							<span className="text-xs text-muted-foreground">Replicas</span>
-							<span className={`text-sm font-medium ${colors.text}`}>
+							<span className="text-sm text-muted-foreground">Replicas</span>
+							<span className={`text-base font-medium ${colors.text}`}>
 								{runningCount}/{service.deployments.length}
 							</span>
 						</div>
@@ -188,7 +188,7 @@ function ServiceCard({
 
 				{service.deployments.length === 0 && (
 					<div className="mt-2">
-						<span className="text-xs text-muted-foreground">Not deployed</span>
+						<span className="text-sm text-muted-foreground">Not deployed</span>
 					</div>
 				)}
 			</Link>

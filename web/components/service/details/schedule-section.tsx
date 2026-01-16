@@ -85,19 +85,19 @@ export const ScheduleSection = memo(function ScheduleSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Cron Expression</label>
+					<label className="text-base font-medium">Cron Expression</label>
 					<Input
 						placeholder="0 2 * * * (daily at 2am)"
 						value={schedule}
 						onChange={(e) => setSchedule(e.target.value)}
 					/>
 					{(error || saveError) && (
-						<p className="text-xs text-destructive">{error || saveError}</p>
+						<p className="text-sm text-destructive">{error || saveError}</p>
 					)}
 					{!error && !saveError && description && (
-						<p className="text-xs text-muted-foreground">{description}</p>
+						<p className="text-sm text-muted-foreground">{description}</p>
 					)}
-					<p className="text-xs text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						{service.sourceType === "github"
 							? "Triggers a build and deploy on schedule"
 							: "Redeploys the current image on schedule"}
