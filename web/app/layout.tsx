@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
-import { Inter, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { ThemeProvider } from "@/components/core/theme-provider";
 import "./globals.css";
 
-const inter = Inter({
+const ibmPlexSans = IBM_Plex_Sans({
 	subsets: ["latin"],
-	variable: "--font-inter",
+	weight: ["400", "500", "600", "700"],
+	variable: "--font-ibm-plex-sans",
 });
 
-const geistMono = Geist_Mono({
-	subsets: ["latin"],
-	variable: "--font-geist-mono",
+const lilex = localFont({
+	src: "./fonts/Lilex/Lilex[wght].woff2",
+	variable: "--font-lilex",
 });
 
 export const metadata: Metadata = {
@@ -26,7 +28,7 @@ export default function RootLayout({
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<body
-				className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
+				className={`${ibmPlexSans.variable} ${lilex.variable} font-sans antialiased`}
 			>
 				<ThemeProvider>{children}</ThemeProvider>
 			</body>

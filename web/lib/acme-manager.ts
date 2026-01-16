@@ -1,5 +1,5 @@
-import * as acme from "acme-client";
 import { randomUUID } from "node:crypto";
+import * as acme from "acme-client";
 import { eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { acmeChallenges, domainCertificates, settings } from "@/db/schema";
@@ -118,7 +118,7 @@ export async function issueCertificate(domain: string): Promise<{
 
 	console.log(`[acme] certificate issued successfully for ${domain}`);
 
-	const certInfo = await acme.crypto.readCertificateInfo(cert);
+	const certInfo = acme.crypto.readCertificateInfo(cert);
 	const expiresAt = certInfo.notAfter;
 
 	console.log(

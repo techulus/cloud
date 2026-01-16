@@ -81,6 +81,7 @@ export function ServiceLayoutClient({
 
 	const tabs = [
 		{ name: "Deployment", href: basePath },
+		{ name: "Configuration", href: `${basePath}/configuration` },
 		{ name: "Logs", href: `${basePath}/logs` },
 		...(hasPublicPorts
 			? [{ name: "Requests", href: `${basePath}/requests` }]
@@ -88,7 +89,6 @@ export function ServiceLayoutClient({
 		...(service?.sourceType === "github"
 			? [{ name: "Builds", href: `${basePath}/builds` }]
 			: []),
-		{ name: "Configuration", href: `${basePath}/configuration` },
 		...(service?.stateful
 			? [{ name: "Backups", href: `${basePath}/backups` }]
 			: []),
