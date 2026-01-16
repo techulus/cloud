@@ -155,7 +155,7 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-base font-medium">Preset</label>
+					<label className="text-sm font-medium">Preset</label>
 					<NativeSelect
 						value={selectedPreset}
 						onChange={handlePresetChange}
@@ -173,7 +173,7 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 					<div className="space-y-3">
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1">
-								<label className="text-sm font-medium">CPU Cores</label>
+								<label className="text-xs font-medium">CPU Cores</label>
 								<Input
 									type="number"
 									step="0.1"
@@ -185,7 +185,7 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 								/>
 							</div>
 							<div className="space-y-1">
-								<label className="text-sm font-medium">Memory (MB)</label>
+								<label className="text-xs font-medium">Memory (MB)</label>
 								<Input
 									type="number"
 									step="64"
@@ -198,13 +198,13 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 							</div>
 						</div>
 						{validationError && (
-							<p className="text-sm text-destructive">{validationError}</p>
+							<p className="text-xs text-destructive">{validationError}</p>
 						)}
 					</div>
 				)}
 
 				{selectedPreset !== "none" && selectedPreset !== "custom" && (
-					<p className="text-sm text-muted-foreground">
+					<p className="text-xs text-muted-foreground">
 						CPU: {PRESETS[selectedPreset].cpuCores} cores, Memory:{" "}
 						{PRESETS[selectedPreset].memoryMb} MB
 					</p>

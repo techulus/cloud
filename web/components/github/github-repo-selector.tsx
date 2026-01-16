@@ -98,7 +98,7 @@ export function GitHubRepoSelector({
 		<div className="space-y-2">
 			{value ? (
 				<div className="flex items-center justify-between rounded-md border bg-muted/50 px-3 py-2">
-					<span className="flex items-center gap-2 text-base">
+					<span className="flex items-center gap-2 text-sm">
 						{value.isPrivate ? (
 							<Lock className="size-4 text-muted-foreground" />
 						) : (
@@ -110,7 +110,7 @@ export function GitHubRepoSelector({
 						type="button"
 						onClick={handleClear}
 						disabled={disabled}
-						className="text-sm text-muted-foreground hover:text-foreground"
+						className="text-xs text-muted-foreground hover:text-foreground"
 					>
 						Change
 					</button>
@@ -125,7 +125,7 @@ export function GitHubRepoSelector({
 					/>
 					<div className="max-h-48 overflow-y-auto rounded-md border">
 						{isLoading ? (
-							<div className="flex items-center justify-center gap-2 py-6 text-base text-muted-foreground">
+							<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
 								<Loader2 className="size-4 animate-spin" />
 								Loading repositories...
 							</div>
@@ -133,13 +133,13 @@ export function GitHubRepoSelector({
 							<>
 								{publicRepoFromSearch && (
 									<div className="border-b p-1">
-										<p className="px-2 py-1.5 text-sm font-medium text-muted-foreground">
+										<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
 											Public Repository
 										</p>
 										<button
 											type="button"
 											onClick={() => handleSelectPublic(publicRepoFromSearch)}
-											className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-base hover:bg-accent"
+											className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 										>
 											<Globe className="size-4" />
 											<span>{publicRepoFromSearch}</span>
@@ -149,7 +149,7 @@ export function GitHubRepoSelector({
 
 								{hasInstallations && filteredRepos.length > 0 && (
 									<div className="p-1">
-										<p className="px-2 py-1.5 text-sm font-medium text-muted-foreground">
+										<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
 											Connected Repositories
 										</p>
 										{filteredRepos.map((repo) => (
@@ -157,7 +157,7 @@ export function GitHubRepoSelector({
 												type="button"
 												key={repo.id}
 												onClick={() => handleSelect(repo)}
-												className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-base hover:bg-accent"
+												className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 											>
 												{repo.private ? (
 													<Lock className="size-4" />
@@ -173,7 +173,7 @@ export function GitHubRepoSelector({
 								)}
 
 								{!hasInstallations && !publicRepoFromSearch && (
-									<div className="space-y-1 p-4 text-center text-base">
+									<div className="space-y-1 p-4 text-center text-sm">
 										<p>No GitHub App installed.</p>
 										<p className="text-muted-foreground">
 											Paste a public repo URL or install the GitHub App for
@@ -185,7 +185,7 @@ export function GitHubRepoSelector({
 								{hasInstallations &&
 									filteredRepos.length === 0 &&
 									!publicRepoFromSearch && (
-										<div className="space-y-1 p-4 text-center text-base">
+										<div className="space-y-1 p-4 text-center text-sm">
 											<p>No matching repositories.</p>
 											<p className="text-muted-foreground">
 												Paste a public GitHub URL to use any public repo.

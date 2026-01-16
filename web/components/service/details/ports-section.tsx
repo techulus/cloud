@@ -33,10 +33,10 @@ function DnsInstructionsModal() {
 					<DialogTitle>DNS Configuration</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-4">
-					<p className="text-base text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						Point your domain A record to your proxy servers.
 					</p>
-					<div className="text-sm text-muted-foreground">
+					<div className="text-xs text-muted-foreground">
 						<p>Type: A | TTL: 300</p>
 					</div>
 				</div>
@@ -129,14 +129,14 @@ export const PortsSection = memo(function PortsSection({
 				</ItemContent>
 			</Item>
 			<div className="p-4 space-y-4">
-				<div className="flex items-center gap-1 text-base">
+				<div className="flex items-center gap-1 text-sm">
 					<Lock className="h-4 w-4 text-muted-foreground" />
 					<span className="text-muted-foreground">Private endpoint:</span>
 					<EditableText
 						value={hostname}
 						onChange={handleHostnameChange}
 						label="hostname"
-						textClassName="text-base font-mono"
+						textClassName="text-sm font-mono"
 					/>
 					<span className="text-muted-foreground">.internal</span>
 				</div>
@@ -146,13 +146,13 @@ export const PortsSection = memo(function PortsSection({
 						{httpPorts.map((port) => (
 							<div
 								key={port.id}
-								className="flex items-center justify-between px-3 py-2 rounded-md text-base bg-muted"
+								className="flex items-center justify-between px-3 py-2 rounded-md text-sm bg-muted"
 							>
 								<div className="flex items-center gap-2">
 									<Globe className="h-4 w-4 text-primary" />
 									<span className="font-medium">{port.port}</span>
 									{port.domain && (
-										<span className="text-sm text-muted-foreground">
+										<span className="text-xs text-muted-foreground">
 											{port.domain}
 										</span>
 									)}

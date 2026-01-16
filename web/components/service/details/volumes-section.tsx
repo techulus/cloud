@@ -68,7 +68,7 @@ export const VolumesSection = memo(function VolumesSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				{service.lockedServerId && (
-					<div className="flex items-center gap-2 text-base text-muted-foreground">
+					<div className="flex items-center gap-2 text-sm text-muted-foreground">
 						<Lock className="h-3 w-3" />
 						<span>
 							Volume data stored on:{" "}
@@ -78,7 +78,7 @@ export const VolumesSection = memo(function VolumesSection({
 				)}
 
 				{volumes.length === 0 ? (
-					<p className="text-base text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						No volumes configured. Add volumes to persist data.
 					</p>
 				) : (
@@ -89,8 +89,8 @@ export const VolumesSection = memo(function VolumesSection({
 								className="flex items-center justify-between p-3 bg-muted rounded-md"
 							>
 								<div>
-									<p className="font-medium font-mono text-base">{volume.name}</p>
-									<p className="text-sm text-muted-foreground">
+									<p className="font-medium font-mono text-sm">{volume.name}</p>
+									<p className="text-xs text-muted-foreground">
 										Mount: {volume.containerPath}
 									</p>
 								</div>
@@ -109,7 +109,7 @@ export const VolumesSection = memo(function VolumesSection({
 				)}
 
 				{error && (
-					<p className="text-base text-red-600 dark:text-red-400">{error}</p>
+					<p className="text-sm text-red-600 dark:text-red-400">{error}</p>
 				)}
 
 				<div className="flex flex-col sm:flex-row gap-2">

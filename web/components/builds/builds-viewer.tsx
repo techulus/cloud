@@ -110,7 +110,7 @@ function StatusBadge({ status }: { status: BuildStatus }) {
 
 	return (
 		<span
-			className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium ${config.color} bg-current/10`}
+			className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ${config.color} bg-current/10`}
 		>
 			<Icon className={`size-3.5 ${isAnimated ? "animate-spin" : ""}`} />
 			{config.label}
@@ -218,7 +218,7 @@ export function BuildsViewer({
 			<div className="flex items-center justify-between">
 				<div>
 					<h2 className="text-lg font-semibold">Builds</h2>
-					<p className="text-base text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						Builds are triggered automatically on push to the deploy branch.
 					</p>
 				</div>
@@ -259,7 +259,7 @@ export function BuildsViewer({
 							<ItemContent>
 								<ItemTitle>
 									<GitCommit className="size-3.5 text-muted-foreground" />
-									<code className="font-mono text-sm">
+									<code className="font-mono text-xs">
 										{build.commitSha.slice(0, 7)}
 									</code>
 									<span className="truncate text-muted-foreground font-normal">
@@ -285,7 +285,7 @@ export function BuildsViewer({
 									)}
 								</ItemDescription>
 								{build.error && (
-									<div className="mt-1 text-sm text-red-500 bg-red-500/10 rounded p-2">
+									<div className="mt-1 text-xs text-red-500 bg-red-500/10 rounded p-2">
 										{build.error}
 									</div>
 								)}

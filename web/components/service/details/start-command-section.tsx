@@ -60,14 +60,14 @@ export const StartCommandSection = memo(function StartCommandSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-base font-medium">Command</label>
+					<label className="text-sm font-medium">Command</label>
 					<Input
 						placeholder="npm run start"
 						value={command}
 						onChange={(e) => setCommand(e.target.value)}
 						className="font-mono"
 					/>
-					<p className="text-sm text-muted-foreground">
+					<p className="text-xs text-muted-foreground">
 						Overrides the container's default command (e.g., npm run start)
 					</p>
 				</div>

@@ -106,7 +106,7 @@ export const TCPProxySection = memo(function TCPProxySection({
 				</ItemContent>
 			</Item>
 			<div className="p-4 space-y-4">
-				<p className="text-base text-muted-foreground">
+				<p className="text-sm text-muted-foreground">
 					Expose TCP/UDP ports directly through the proxy for databases and
 					other non-HTTP services.
 				</p>
@@ -118,16 +118,16 @@ export const TCPProxySection = memo(function TCPProxySection({
 							return (
 								<div
 									key={port.id}
-									className="flex flex-col gap-2 px-3 py-2 rounded-md text-base bg-muted"
+									className="flex flex-col gap-2 px-3 py-2 rounded-md text-sm bg-muted"
 								>
 									<div className="flex items-center justify-between">
 										<div className="flex items-center gap-2">
 											<span className="font-medium">{port.port}</span>
-											<span className="text-sm px-1.5 py-0.5 rounded bg-background">
+											<span className="text-xs px-1.5 py-0.5 rounded bg-background">
 												{port.protocol?.toUpperCase()}
 											</span>
 											{port.tlsPassthrough && (
-												<span className="text-sm px-1.5 py-0.5 rounded bg-background flex items-center gap-1">
+												<span className="text-xs px-1.5 py-0.5 rounded bg-background flex items-center gap-1">
 													<Lock className="h-3 w-3" />
 													TLS
 												</span>
@@ -144,7 +144,7 @@ export const TCPProxySection = memo(function TCPProxySection({
 									</div>
 									{connectionString && (
 										<div className="flex items-center gap-2">
-											<code className="text-sm text-muted-foreground font-mono flex-1 truncate">
+											<code className="text-xs text-muted-foreground font-mono flex-1 truncate">
 												{connectionString}
 											</code>
 											<Button
@@ -170,7 +170,7 @@ export const TCPProxySection = memo(function TCPProxySection({
 				)}
 
 				{!PROXY_DOMAIN && (
-					<p className="text-sm text-amber-600">
+					<p className="text-xs text-amber-600">
 						NEXT_PUBLIC_PROXY_DOMAIN environment variable is not configured.
 						Connection strings will not be available.
 					</p>
@@ -207,7 +207,7 @@ export const TCPProxySection = memo(function TCPProxySection({
 						</Button>
 					</div>
 					{protocol === "tcp" && (
-						<label className="flex items-center gap-2 text-base">
+						<label className="flex items-center gap-2 text-sm">
 							<Switch
 								checked={tlsPassthrough}
 								onCheckedChange={setTlsPassthrough}

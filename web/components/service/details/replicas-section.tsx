@@ -224,7 +224,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 											{service.lockedServer?.name || service.lockedServerId}
 										</span>
 									</div>
-									<p className="text-base text-muted-foreground">
+									<p className="text-sm text-muted-foreground">
 										Changing the server will trigger a migration. The service
 										will be backed up, moved to the new server, and redeployed.
 									</p>
@@ -232,14 +232,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 							)}
 							{isChangingServer && (
 								<div className="p-3 bg-yellow-500/10 border border-yellow-500/50 rounded-md">
-									<p className="text-base text-yellow-600 dark:text-yellow-400">
+									<p className="text-sm text-yellow-600 dark:text-yellow-400">
 										<AlertTriangle className="h-4 w-4 inline mr-1" />
 										Changing server will trigger a migration. The service will
 										experience downtime during the migration process.
 									</p>
 								</div>
 							)}
-							<p className="text-base text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								{service.lockedServerId
 									? "Select a different server to migrate this service."
 									: "Select a server for this stateful service. Once deployed, it will be locked to this server."}
@@ -259,7 +259,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 										<div className="flex-1 min-w-0">
 											<p className="font-medium truncate">{server.name}</p>
 											<p
-												className={`text-sm font-mono ${
+												className={`text-xs font-mono ${
 													selectedServerId === server.id
 														? "text-primary-foreground/70"
 														: "text-muted-foreground"
@@ -272,7 +272,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 								))}
 							</div>
 							{!selectedServerId && (
-								<p className="text-base text-amber-600 dark:text-amber-400">
+								<p className="text-sm text-amber-600 dark:text-amber-400">
 									Select a server to deploy
 								</p>
 							)}
@@ -315,7 +315,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{autoPlace ? (
 					<>
-						<p className="text-base text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							Replicas will be automatically distributed across healthy servers.
 							If a server goes offline, replicas are automatically recovered.
 						</p>
@@ -390,7 +390,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 								>
 									<div className="flex-1 min-w-0">
 										<p className="font-medium truncate">{server.name}</p>
-										<p className="text-sm text-muted-foreground font-mono">
+										<p className="text-xs text-muted-foreground font-mono">
 											{server.wireguardIp}
 										</p>
 									</div>
@@ -437,14 +437,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 								</div>
 							))}
 						</div>
-						<div className="flex items-center justify-between text-base">
+						<div className="flex items-center justify-between text-sm">
 							<span>
 								Total: <strong>{totalReplicas}</strong> replica
 								{totalReplicas !== 1 ? "s" : ""}
 							</span>
 						</div>
 						{totalReplicas === 0 && (
-							<p className="text-base text-amber-600 dark:text-amber-400">
+							<p className="text-sm text-amber-600 dark:text-amber-400">
 								Add at least 1 replica to deploy
 							</p>
 						)}

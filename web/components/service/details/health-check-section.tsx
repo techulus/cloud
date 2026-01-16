@@ -139,7 +139,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-base font-medium">Command</label>
+					<label className="text-sm font-medium">Command</label>
 					<Input
 						placeholder="curl -f http://localhost:8080/health || exit 1"
 						value={state.cmd}
@@ -147,7 +147,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 							dispatch({ type: "SET_CMD", payload: e.target.value })
 						}
 					/>
-					<p className="text-sm text-muted-foreground">
+					<p className="text-xs text-muted-foreground">
 						Exit 0 = healthy, non-zero = unhealthy
 					</p>
 				</div>
@@ -155,7 +155,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 				<button
 					type="button"
 					onClick={() => setShowAdvanced(!showAdvanced)}
-					className="flex items-center gap-1 text-base text-muted-foreground hover:text-foreground transition-colors"
+					className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
 				>
 					<ChevronDown
 						className={`h-4 w-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
@@ -166,7 +166,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 				{showAdvanced && (
 					<div className="grid grid-cols-2 gap-3 pt-2">
 						<div className="space-y-1">
-							<label className="text-sm font-medium">Interval (s)</label>
+							<label className="text-xs font-medium">Interval (s)</label>
 							<Input
 								type="number"
 								value={state.interval}
@@ -180,7 +180,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-sm font-medium">Timeout (s)</label>
+							<label className="text-xs font-medium">Timeout (s)</label>
 							<Input
 								type="number"
 								value={state.timeout}
@@ -194,7 +194,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-sm font-medium">Retries</label>
+							<label className="text-xs font-medium">Retries</label>
 							<Input
 								type="number"
 								value={state.retries}
@@ -208,7 +208,7 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-sm font-medium">Start Period (s)</label>
+							<label className="text-xs font-medium">Start Period (s)</label>
 							<Input
 								type="number"
 								value={state.startPeriod}

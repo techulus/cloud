@@ -832,7 +832,7 @@ export function LogViewer(props: LogViewerProps) {
 
 			<div
 				ref={containerRef}
-				className="flex-1 overflow-y-auto font-mono text-sm leading-5"
+				className="flex-1 overflow-y-auto font-mono text-xs leading-5"
 			>
 				{hasMore && config.loadMoreLabel && (
 					<div className="flex justify-center py-2 border-b">
