@@ -34,9 +34,9 @@ flowchart LR
 
     subgraph Servers
         direction TB
-        P[Proxy Node\nTraefik + Agent + Containers]
-        W1[Worker Node\nAgent + Containers]
-        W2[Worker Node\nAgent + Containers]
+        P[Proxy Node<br/>Traefik + Agent + Containers]
+        W1[Worker Node<br/>Agent + Containers]
+        W2[Worker Node<br/>Agent + Containers]
         P <-.WireGuard.-> W1
         P <-.WireGuard.-> W2
         W1 <-.WireGuard.-> W2
