@@ -38,20 +38,20 @@ func main() {
 	var (
 		controlPlaneURL string
 		token           string
-		logsEndpoint    string
 		isProxy         bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", paths.DataDir, "Data directory for agent state")
-	flag.StringVar(&logsEndpoint, "logs-endpoint", "", "VictoriaLogs endpoint URL (enables logging)")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
 		log.Fatal("--url is required")
 	}
+
+	logsEndpoint := fetchLogsEndpoint(controlPlaneURL)
 
 	if isProxy && runtime.GOOS != "linux" {
 		log.Fatal("--proxy flag is only supported on Linux")
@@ -323,4 +323,36 @@ func getPrivateIP() string {
 	}
 
 	return ""
+}
+
+type discoverResponse struct {
+	LoggingEndpoint *string `json:"loggingEndpoint"`
+	Version         int     `json:"version"`
+}
+
+func fetchLogsEndpoint(controlPlaneURL string) string {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(controlPlaneURL + "/api/v1/agent/discover")
+	if err != nil {
+		log.Printf("Failed to fetch discovery endpoint: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Discovery endpoint returned status %d", resp.StatusCode)
+		return ""
+	}
+
+	var discovery discoverResponse
+	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
+		log.Printf("Failed to decode discovery response: %v", err)
+		return ""
+	}
+
+	if discovery.LoggingEndpoint == nil {
+		return ""
+	}
+
+	return *discovery.LoggingEndpoint
 }

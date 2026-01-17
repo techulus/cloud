@@ -77,7 +77,6 @@ echo "For non-interactive installation, set these environment variables:"
 echo "  CONTROL_PLANE_URL  (required)"
 echo "  REGISTRATION_TOKEN (required for new installs)"
 echo "  IS_PROXY           (set to 'true' for proxy nodes)"
-echo "  LOGS_ENDPOINT      (optional)"
 echo ""
 
 step "Checking prerequisites..."
@@ -156,13 +155,6 @@ else
   echo "✓ Proxy mode: $IS_PROXY"
 fi
 
-prompt LOGS_ENDPOINT "Enter Logs Endpoint (optional, press Enter to skip): " optional
-if [ -n "$LOGS_ENDPOINT" ]; then
-  echo "✓ Logs Endpoint: $LOGS_ENDPOINT"
-else
-  echo "✓ Logs Endpoint: (disabled)"
-fi
-
 step "Verifying connectivity..."
 
 HEALTH_URL="${CONTROL_PLANE_URL}/api/health"
@@ -172,18 +164,10 @@ if [ "$HTTP_STATUS" != "200" ]; then
 fi
 echo "✓ Control plane is reachable"
 
-if [ -n "$LOGS_ENDPOINT" ]; then
-  if ! curl -s -o /dev/null --connect-timeout 10 "$LOGS_ENDPOINT" 2>/dev/null; then
-    error "Cannot reach logs endpoint at $LOGS_ENDPOINT. Please check the URL and your network connection."
-  fi
-  echo "✓ Logs endpoint is reachable"
-fi
-
 echo ""
 echo "Configuration summary:"
 echo "  Control Plane URL: $CONTROL_PLANE_URL"
 echo "  Proxy Mode:        $IS_PROXY"
-echo "  Logs Endpoint:     ${LOGS_ENDPOINT:-disabled}"
 echo "  New Setup:         $NEW_SETUP"
 echo ""
 
@@ -503,7 +487,6 @@ step "Creating agent configuration..."
 cat > /var/lib/techulus-agent/environment << EOF
 AGENT_URL=${CONTROL_PLANE_URL}
 AGENT_DATA_DIR=/var/lib/techulus-agent
-AGENT_LOGS_ENDPOINT=${LOGS_ENDPOINT}
 EOF
 chmod 600 /var/lib/techulus-agent/environment
 
@@ -513,11 +496,6 @@ fi
 echo "✓ Agent environment file created"
 
 step "Creating agent systemd service..."
-
-LOGS_ARG=""
-if [ -n "$LOGS_ENDPOINT" ]; then
-  LOGS_ARG="--logs-endpoint \${AGENT_LOGS_ENDPOINT}"
-fi
 
 PROXY_ARG=""
 if [ "$IS_PROXY" = "true" ]; then
@@ -539,7 +517,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/var/lib/techulus-agent/environment
-ExecStart=/usr/local/bin/techulus-agent --url \${AGENT_URL} --data-dir \${AGENT_DATA_DIR} ${LOGS_ARG} ${PROXY_ARG}
+ExecStart=/usr/local/bin/techulus-agent --url \${AGENT_URL} --data-dir \${AGENT_DATA_DIR} ${PROXY_ARG}
 Restart=always
 RestartSec=10
 KillMode=process
