@@ -8,6 +8,7 @@ import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
+import { ImportComposeDialog } from "./import-compose-dialog";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import { buttonVariants } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -84,7 +85,7 @@ function EnvironmentSelector({
 				)}
 			>
 				<Settings className="h-4 w-4" />
-				<span>Settings</span>
+				<span className="hidden md:inline">Settings</span>
 			</Link>
 		</div>
 	);
@@ -275,11 +276,18 @@ export function ServiceCanvas({
 							Add your first service to deploy.
 						</EmptyDescription>
 						<EmptyContent>
-							<CreateServiceDialog
-								projectId={projectId}
-								environmentId={envId}
-								onSuccess={() => mutate()}
-							/>
+							<div className="flex flex-col gap-2">
+								<CreateServiceDialog
+									projectId={projectId}
+									environmentId={envId}
+									onSuccess={() => mutate()}
+								/>
+								<ImportComposeDialog
+									projectId={projectId}
+									environmentId={envId}
+									onSuccess={() => mutate()}
+								/>
+							</div>
 						</EmptyContent>
 					</Empty>
 				</div>
@@ -312,11 +320,18 @@ export function ServiceCanvas({
 							Add your first service to deploy.
 						</EmptyDescription>
 						<EmptyContent>
-							<CreateServiceDialog
-								projectId={projectId}
-								environmentId={envId}
-								onSuccess={() => mutate()}
-							/>
+							<div className="flex gap-2">
+								<CreateServiceDialog
+									projectId={projectId}
+									environmentId={envId}
+									onSuccess={() => mutate()}
+								/>
+								<ImportComposeDialog
+									projectId={projectId}
+									environmentId={envId}
+									onSuccess={() => mutate()}
+								/>
+							</div>
 						</EmptyContent>
 					</Empty>
 				</div>
@@ -333,11 +348,18 @@ export function ServiceCanvas({
 						selectedEnvName={envName}
 						projectSlug={projectSlug}
 					/>
-					<CreateServiceDialog
-						projectId={projectId}
-						environmentId={envId}
-						onSuccess={() => mutate()}
-					/>
+					<div className="flex gap-2">
+						<ImportComposeDialog
+							projectId={projectId}
+							environmentId={envId}
+							onSuccess={() => mutate()}
+						/>
+						<CreateServiceDialog
+							projectId={projectId}
+							environmentId={envId}
+							onSuccess={() => mutate()}
+						/>
+					</div>
 				</div>
 				<div className="flex flex-col gap-4">
 					{services.map((service) => (
@@ -370,7 +392,12 @@ export function ServiceCanvas({
 					projectSlug={projectSlug}
 					className="absolute top-4 left-4"
 				/>
-				<div className="absolute top-4 right-4">
+				<div className="absolute top-4 right-4 flex gap-2">
+					<ImportComposeDialog
+						projectId={projectId}
+						environmentId={envId}
+						onSuccess={() => mutate()}
+					/>
 					<CreateServiceDialog
 						projectId={projectId}
 						environmentId={envId}

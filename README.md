@@ -15,3 +15,8 @@ A stateless container deployment platform with private-first networking.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
+## TODO
+
+- Managed Database: Deploy standalone databases (PostgreSQL, MySQL, MongoDB, Redis, MariaDB) with automated configuration and management
+- Notifications: Alert channels (Slack, Discord, Telegram, Email, Webhooks) for deployment success/failure and system events
+- Templates? Pre-configured templates for popular apps
