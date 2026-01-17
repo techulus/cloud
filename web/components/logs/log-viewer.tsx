@@ -7,7 +7,7 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -582,6 +582,7 @@ function ServerLogRow({
 
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
+	const scrollRestorationRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 	const [search, setSearch] = useState("");
 	const [autoScroll, setAutoScroll] = useState(true);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
@@ -623,6 +624,14 @@ export function LogViewer(props: LogViewerProps) {
 		const oldestLog = logs[0] as { timestamp?: string } | undefined;
 		if (!oldestLog?.timestamp) return;
 
+		const container = containerRef.current;
+		if (container) {
+			scrollRestorationRef.current = {
+				scrollTop: container.scrollTop,
+				scrollHeight: container.scrollHeight,
+			};
+		}
+
 		setIsLoadingOlder(true);
 		try {
 			const cursor = oldestLog.timestamp;
@@ -654,9 +663,11 @@ export function LogViewer(props: LogViewerProps) {
 				setOlderHasMore(result.hasMore || false);
 			} else {
 				setOlderHasMore(false);
+				scrollRestorationRef.current = null;
 			}
 		} catch (error) {
 			console.error("Failed to load older logs:", error);
+			scrollRestorationRef.current = null;
 		} finally {
 			setIsLoadingOlder(false);
 		}
@@ -723,9 +734,16 @@ export function LogViewer(props: LogViewerProps) {
 		statusFilter,
 	]);
 
-	useEffect(() => {
-		if (autoScroll && containerRef.current) {
-			containerRef.current.scrollTop = containerRef.current.scrollHeight;
+	useLayoutEffect(() => {
+		const container = containerRef.current;
+		const restoration = scrollRestorationRef.current;
+
+		if (restoration && container) {
+			const scrollHeightAfter = container.scrollHeight;
+			container.scrollTop = restoration.scrollTop + (scrollHeightAfter - restoration.scrollHeight);
+			scrollRestorationRef.current = null;
+		} else if (autoScroll && container) {
+			container.scrollTop = container.scrollHeight;
 		}
 	}, [filteredLogs.length, autoScroll]);
 
