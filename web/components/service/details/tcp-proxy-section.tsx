@@ -8,13 +8,14 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Network, X, Plus, Copy, Check, Lock } from "lucide-react";
 import { updateServiceConfig } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
-const PROXY_DOMAIN = process.env.NEXT_PUBLIC_PROXY_DOMAIN;
 
 export const TCPProxySection = memo(function TCPProxySection({
 	service,
+	proxyDomain,
 	onUpdate,
 }: {
 	service: Service;
+	proxyDomain: string | null;
 	onUpdate: () => void;
 }) {
 	const [newPort, setNewPort] = useState("");
@@ -85,8 +86,8 @@ export const TCPProxySection = memo(function TCPProxySection({
 		protocol: string | null;
 		externalPort: number | null;
 	}) => {
-		if (!port.externalPort || !PROXY_DOMAIN) return null;
-		return `${port.protocol}://${PROXY_DOMAIN}:${port.externalPort}`;
+		if (!port.externalPort || !proxyDomain) return null;
+		return `${port.protocol}://${proxyDomain}:${port.externalPort}`;
 	};
 
 	const copyToClipboard = async (text: string, portId: string) => {
@@ -169,10 +170,10 @@ export const TCPProxySection = memo(function TCPProxySection({
 					</div>
 				)}
 
-				{!PROXY_DOMAIN && (
+				{!proxyDomain && (
 					<p className="text-xs text-amber-600">
-						NEXT_PUBLIC_PROXY_DOMAIN environment variable is not configured.
-						Connection strings will not be available.
+						Proxy domain is not configured. Set it in Settings &gt;
+						Infrastructure for connection strings.
 					</p>
 				)}
 

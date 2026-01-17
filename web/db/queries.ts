@@ -194,19 +194,29 @@ export async function getSetting<T>(key: string): Promise<T | null> {
 }
 
 export async function getGlobalSettings() {
-	const [buildServers, excludedServers, buildTimeout, backupConfig] =
-		await Promise.all([
-			getSetting<string[]>("servers_allowed_for_builds"),
-			getSetting<string[]>("servers_excluded_from_workload_placement"),
-			getSetting<number>("build_timeout_minutes"),
-			getSetting<BackupStorageConfig>("backup_storage_config"),
-		]);
+	const [
+		buildServers,
+		excludedServers,
+		buildTimeout,
+		backupConfig,
+		acmeEmail,
+		proxyDomain,
+	] = await Promise.all([
+		getSetting<string[]>("servers_allowed_for_builds"),
+		getSetting<string[]>("servers_excluded_from_workload_placement"),
+		getSetting<number>("build_timeout_minutes"),
+		getSetting<BackupStorageConfig>("backup_storage_config"),
+		getSetting<string>("acme_email"),
+		getSetting<string>("proxy_domain"),
+	]);
 
 	return {
 		buildServerIds: buildServers ?? [],
 		excludedServerIds: excludedServers ?? [],
 		buildTimeoutMinutes: buildTimeout ?? 30,
 		backupStorage: backupConfig ?? null,
+		acmeEmail: acmeEmail ?? null,
+		proxyDomain: proxyDomain ?? null,
 	};
 }
 

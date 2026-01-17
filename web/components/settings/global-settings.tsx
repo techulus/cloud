@@ -3,7 +3,7 @@
 import { useState, useReducer } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Hammer, Server, Ban, Clock, HardDrive } from "lucide-react";
+import { Hammer, Server, Ban, Clock, HardDrive, Shield, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,8 @@ import {
 	updateExcludedServers,
 	updateBuildTimeout,
 	updateBackupStorageConfig,
+	updateAcmeEmail,
+	updateProxyDomain,
 } from "@/actions/settings";
 import type { Server as ServerType } from "@/db/types";
 import {
@@ -49,6 +51,8 @@ type Props = {
 			secretKey: string;
 			retentionDays: number;
 		} | null;
+		acmeEmail: string | null;
+		proxyDomain: string | null;
 	};
 	initialTab?: string;
 };
@@ -137,6 +141,13 @@ export function GlobalSettings({
 		initialSettings.backupStorage,
 		createInitialBackupState,
 	);
+
+	const [acmeEmail, setAcmeEmail] = useState(initialSettings.acmeEmail ?? "");
+	const [proxyDomain, setProxyDomain] = useState(
+		initialSettings.proxyDomain ?? "",
+	);
+	const [isSavingAcmeEmail, setIsSavingAcmeEmail] = useState(false);
+	const [isSavingProxyDomain, setIsSavingProxyDomain] = useState(false);
 
 	const {
 		provider: backupProvider,
@@ -250,6 +261,36 @@ export function GlobalSettings({
 		}
 	};
 
+	const handleSaveAcmeEmail = async () => {
+		setIsSavingAcmeEmail(true);
+		try {
+			await updateAcmeEmail(acmeEmail);
+			toast.success("ACME email updated");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to update ACME email",
+			);
+		} finally {
+			setIsSavingAcmeEmail(false);
+		}
+	};
+
+	const handleSaveProxyDomain = async () => {
+		setIsSavingProxyDomain(true);
+		try {
+			await updateProxyDomain(proxyDomain);
+			toast.success("Proxy domain updated");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to update proxy domain",
+			);
+		} finally {
+			setIsSavingProxyDomain(false);
+		}
+	};
+
 	const buildServersChanged =
 		buildServerIds.size !== initialSettings.buildServerIds.length ||
 		!initialSettings.buildServerIds.every((id) => buildServerIds.has(id));
@@ -271,6 +312,10 @@ export function GlobalSettings({
 		backupSecretKey !== (initialBackup?.secretKey ?? "") ||
 		backupRetentionDays !==
 			(initialBackup?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS);
+
+	const acmeEmailChanged = acmeEmail !== (initialSettings.acmeEmail ?? "");
+	const proxyDomainChanged =
+		proxyDomain !== (initialSettings.proxyDomain ?? "");
 
 	if (servers.length === 0) {
 		return (
@@ -294,6 +339,9 @@ export function GlobalSettings({
 				</TabsTrigger>
 				<TabsTrigger value="deployment" className="px-4 py-2 shrink-0">
 					Deployment
+				</TabsTrigger>
+				<TabsTrigger value="infrastructure" className="px-4 py-2 shrink-0">
+					Infrastructure
 				</TabsTrigger>
 				<TabsTrigger value="backup" className="px-4 py-2 shrink-0">
 					Backup
@@ -466,6 +514,84 @@ export function GlobalSettings({
 									size="sm"
 								>
 									{isSavingExcluded ? "Saving..." : "Save"}
+								</Button>
+							</div>
+						)}
+					</div>
+				</div>
+			</TabsContent>
+
+			<TabsContent value="infrastructure" className="space-y-6 pt-4">
+				<div className="rounded-lg border">
+					<Item className="border-0 border-b rounded-none">
+						<ItemMedia variant="icon">
+							<Shield className="size-5 text-muted-foreground" />
+						</ItemMedia>
+						<ItemContent>
+							<ItemTitle>SSL/ACME Email</ItemTitle>
+						</ItemContent>
+					</Item>
+					<div className="p-4 space-y-4">
+						<p className="text-sm text-muted-foreground">
+							Email address used for Let&apos;s Encrypt SSL certificate
+							registration. You will receive expiration notifications at this
+							address.
+						</p>
+						<div className="space-y-2">
+							<Label htmlFor="acme-email">Email Address</Label>
+							<Input
+								id="acme-email"
+								type="email"
+								value={acmeEmail}
+								onChange={(e) => setAcmeEmail(e.target.value)}
+								placeholder="ssl@example.com"
+							/>
+						</div>
+						{acmeEmailChanged && (
+							<div className="pt-3 border-t">
+								<Button
+									onClick={handleSaveAcmeEmail}
+									disabled={isSavingAcmeEmail}
+									size="sm"
+								>
+									{isSavingAcmeEmail ? "Saving..." : "Save"}
+								</Button>
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="rounded-lg border">
+					<Item className="border-0 border-b rounded-none">
+						<ItemMedia variant="icon">
+							<Network className="size-5 text-muted-foreground" />
+						</ItemMedia>
+						<ItemContent>
+							<ItemTitle>Proxy Domain</ItemTitle>
+						</ItemContent>
+					</Item>
+					<div className="p-4 space-y-4">
+						<p className="text-sm text-muted-foreground">
+							Domain used for TCP/UDP proxy connections. This should point to
+							your proxy server.
+						</p>
+						<div className="space-y-2">
+							<Label htmlFor="proxy-domain">Domain</Label>
+							<Input
+								id="proxy-domain"
+								value={proxyDomain}
+								onChange={(e) => setProxyDomain(e.target.value)}
+								placeholder="proxy.example.com"
+							/>
+						</div>
+						{proxyDomainChanged && (
+							<div className="pt-3 border-t">
+								<Button
+									onClick={handleSaveProxyDomain}
+									disabled={isSavingProxyDomain}
+									size="sm"
+								>
+									{isSavingProxyDomain ? "Saving..." : "Save"}
 								</Button>
 							</div>
 						)}

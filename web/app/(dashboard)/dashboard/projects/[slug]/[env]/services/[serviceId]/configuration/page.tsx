@@ -33,7 +33,7 @@ import { Trash2 } from "lucide-react";
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
-	const { service, projectSlug, envName, onUpdate } = useService();
+	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
 	const [isDeleting, setIsDeleting] = useState(false);
 
 	const handleDelete = async () => {
@@ -59,7 +59,7 @@ export default function ConfigurationPage() {
 
 			<PortsSection service={service} onUpdate={onUpdate} />
 
-			<TCPProxySection service={service} onUpdate={onUpdate} />
+			<TCPProxySection service={service} proxyDomain={proxyDomain} onUpdate={onUpdate} />
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
 

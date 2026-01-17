@@ -3,6 +3,8 @@ import * as acme from "acme-client";
 import { eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { acmeChallenges, domainCertificates, settings } from "@/db/schema";
+import { getSetting } from "@/db/queries";
+import { SETTING_KEYS } from "@/lib/settings-keys";
 
 const ACME_ACCOUNT_KEY_SETTING = "acme_account_key";
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -80,10 +82,10 @@ export async function issueCertificate(domain: string): Promise<{
 }> {
 	console.log(`[acme] starting certificate issuance for ${domain}`);
 	const client = await getAcmeClient();
-	const email = process.env.ACME_EMAIL;
+	const email = await getSetting<string>(SETTING_KEYS.ACME_EMAIL);
 
 	if (!email) {
-		throw new Error("ACME_EMAIL environment variable is required");
+		throw new Error("ACME email is not configured. Please set it in Settings > Infrastructure.");
 	}
 
 	const [privateKey, csr] = await acme.crypto.createCsr({

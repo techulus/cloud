@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { ServiceLayoutClient } from "@/components/service/service-layout-client";
-import { getProjectBySlug, getService } from "@/db/queries";
+import { getProjectBySlug, getService, getSetting } from "@/db/queries";
+import { SETTING_KEYS } from "@/lib/settings-keys";
 
 export default async function ServiceLayout({
 	params,
@@ -11,8 +12,11 @@ export default async function ServiceLayout({
 	children: React.ReactNode;
 }) {
 	const { slug, env, serviceId } = await params;
-	const project = await getProjectBySlug(slug);
-	const service = await getService(serviceId);
+	const [project, service, proxyDomain] = await Promise.all([
+		getProjectBySlug(slug),
+		getService(serviceId),
+		getSetting<string>(SETTING_KEYS.PROXY_DOMAIN),
+	]);
 
 	if (!project || !service) {
 		notFound();
@@ -35,6 +39,7 @@ export default async function ServiceLayout({
 				projectId={project.id}
 				serviceId={serviceId}
 				envName={env}
+				proxyDomain={proxyDomain}
 			>
 				{children}
 			</ServiceLayoutClient>

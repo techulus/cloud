@@ -48,3 +48,20 @@ export async function updateBackupStorageConfig(config: BackupStorageConfig) {
 	revalidatePath("/dashboard/settings");
 	return { success: true };
 }
+
+export async function updateAcmeEmail(email: string) {
+	const trimmed = email.trim();
+	if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+		throw new Error("Invalid email address");
+	}
+	await setSetting(SETTING_KEYS.ACME_EMAIL, trimmed || null);
+	revalidatePath("/dashboard/settings");
+	return { success: true };
+}
+
+export async function updateProxyDomain(domain: string) {
+	const trimmed = domain.trim();
+	await setSetting(SETTING_KEYS.PROXY_DOMAIN, trimmed || null);
+	revalidatePath("/dashboard/settings");
+	return { success: true };
+}
