@@ -28,7 +28,7 @@ import {
 } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
-import { getEnvironment, getService } from "@/db/queries";
+import { getEnvironment, getProject, getService } from "@/db/queries";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import { allocatePort } from "@/lib/port-allocation";
@@ -354,13 +354,17 @@ export async function createService(input: CreateServiceInput) {
 		github,
 	} = input;
 	const env = await getEnvironment(environmentId);
-
 	if (!env) {
 		throw new Error("Environment not found");
 	}
 
+	const project = await getProject(projectId);
+	if (!project) {
+		throw new Error("Project not found");
+	}
+
 	const id = randomUUID();
-	const hostname = `${slugify(name)}-${env.name}`;
+	const hostname = `${project.slug}-${slugify(name)}-${env.name}`;
 
 	let finalImage = image;
 	let sourceType: "image" | "github" = "image";
