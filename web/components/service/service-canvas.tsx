@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import { Box, Globe, HardDrive, Lock, Settings } from "lucide-react";
+import { Box, Globe, HardDrive, Lock, Settings, Upload } from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import { CreateServiceDialog } from "./create-service-dialog";
-import { ImportComposeDialog } from "./import-compose-dialog";
+import { Button } from "@/components/ui/button";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import { buttonVariants } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -282,11 +282,12 @@ export function ServiceCanvas({
 									environmentId={envId}
 									onSuccess={() => mutate()}
 								/>
-								<ImportComposeDialog
-									projectId={projectId}
-									environmentId={envId}
-									onSuccess={() => mutate()}
-								/>
+								<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+									<Button variant="outline">
+										<Upload className="h-4 w-4 mr-2" />
+										Compose
+									</Button>
+								</Link>
 							</div>
 						</EmptyContent>
 					</Empty>
@@ -326,11 +327,12 @@ export function ServiceCanvas({
 									environmentId={envId}
 									onSuccess={() => mutate()}
 								/>
-								<ImportComposeDialog
-									projectId={projectId}
-									environmentId={envId}
-									onSuccess={() => mutate()}
-								/>
+								<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+									<Button variant="outline">
+										<Upload className="h-4 w-4 mr-2" />
+										Compose
+									</Button>
+								</Link>
 							</div>
 						</EmptyContent>
 					</Empty>
@@ -349,11 +351,12 @@ export function ServiceCanvas({
 						projectSlug={projectSlug}
 					/>
 					<div className="flex gap-2">
-						<ImportComposeDialog
-							projectId={projectId}
-							environmentId={envId}
-							onSuccess={() => mutate()}
-						/>
+						<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+							<Button variant="outline" size="sm">
+								<Upload className="h-4 w-4 md:mr-2" />
+								<span className="hidden md:inline">Compose</span>
+							</Button>
+						</Link>
 						<CreateServiceDialog
 							projectId={projectId}
 							environmentId={envId}
@@ -393,11 +396,12 @@ export function ServiceCanvas({
 					className="absolute top-4 left-4"
 				/>
 				<div className="absolute top-4 right-4 flex gap-2">
-					<ImportComposeDialog
-						projectId={projectId}
-						environmentId={envId}
-						onSuccess={() => mutate()}
-					/>
+					<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+						<Button variant="outline">
+							<Upload className="h-4 w-4 mr-2" />
+							Compose
+						</Button>
+					</Link>
 					<CreateServiceDialog
 						projectId={projectId}
 						environmentId={envId}
