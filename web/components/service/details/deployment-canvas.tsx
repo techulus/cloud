@@ -64,7 +64,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 		>
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-1">
-					<Box className="h-3 w-3 text-zinc-500" />
+					<Box className="h-3 w-3 text-slate-500" />
 					{deployment.containerId && (
 						<code className="text-[11px] font-mono text-muted-foreground">
 							{deployment.containerId.slice(0, 8)}
@@ -119,7 +119,7 @@ function ServerBox({
 	const hasRunning = deployments.some((d) => d.status === "running");
 	const borderClass = hasRunning
 		? "border-emerald-500/30"
-		: "border-zinc-200 dark:border-zinc-700";
+		: "border-slate-200 dark:border-slate-700";
 	const hasVolumes = volumes && volumes.length > 0;
 
 	return (
@@ -194,7 +194,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			<>
 				<div className="flex flex-col items-center justify-center py-12 md:hidden">
 					<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-						<Box className="h-8 w-8 text-zinc-400" />
+						<Box className="h-8 w-8 text-slate-400" />
 					</div>
 					<p className="text-muted-foreground mt-4">No deployments yet.</p>
 				</div>
@@ -205,7 +205,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					emptyContent={
 						<div className="text-center space-y-4">
 							<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-								<Box className="h-8 w-8 text-zinc-400" />
+								<Box className="h-8 w-8 text-slate-400" />
 							</div>
 							<p className="text-muted-foreground">No deployments yet.</p>
 						</div>
@@ -222,7 +222,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			<div className="flex flex-col items-center gap-4 py-4 pb-16 md:hidden">
 				{hasEndpoints && (
 					<>
-						<div className="flex flex-col gap-2 w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700">
+						<div className="flex flex-col gap-2 w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700">
 							{publicPorts.map((port) => (
 								<a
 									key={port.id}
@@ -239,14 +239,14 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 							))}
 							{hasRunningDeployments && (
 								<div className="flex items-center gap-1.5 text-xs">
-									<Lock className="h-3 w-3 text-zinc-500" />
-									<span className="text-zinc-600 dark:text-zinc-400">
+									<Lock className="h-3 w-3 text-slate-500" />
+									<span className="text-slate-600 dark:text-slate-400">
 										{service.hostname || service.name}.internal
 									</span>
 								</div>
 							)}
 						</div>
-						<ArrowDown className="h-5 w-5 text-zinc-400" />
+						<ArrowDown className="h-5 w-5 text-slate-400" />
 					</>
 				)}
 				<div className="flex flex-col gap-4 w-full">
@@ -267,7 +267,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 				<div className="flex flex-col items-center gap-4">
 					{hasEndpoints && (
 						<>
-							<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-zinc-200 dark:border-zinc-700 transition-all duration-300">
+							<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700 transition-all duration-300">
 								{publicPorts.map((port) => (
 									<a
 										key={port.id}
@@ -284,14 +284,14 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 								))}
 								{hasRunningDeployments && (
 									<div className="flex items-center gap-1.5 text-xs">
-										<Lock className="h-3 w-3 text-zinc-500" />
-										<span className="text-zinc-600 dark:text-zinc-400">
+										<Lock className="h-3 w-3 text-slate-500" />
+										<span className="text-slate-600 dark:text-slate-400">
 											{service.hostname || service.name}.internal
 										</span>
 									</div>
 								)}
 							</div>
-							<ArrowDown className="h-5 w-5 text-zinc-400" />
+							<ArrowDown className="h-5 w-5 text-slate-400" />
 						</>
 					)}
 

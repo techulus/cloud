@@ -23,7 +23,7 @@ import {
 function ServiceCardSkeleton() {
 	return (
 		<div className="flex flex-col items-center gap-2 w-full md:w-70">
-			<div className="w-full p-3 rounded-xl border-2 border-zinc-200 dark:border-zinc-700 bg-slate-100/50 dark:bg-slate-800/50">
+			<div className="w-full p-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-800/50">
 				<div className="flex items-center gap-2">
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-1.5">
@@ -153,8 +153,8 @@ function ServiceCard({
 						))}
 						{hasInternalDns && (
 							<div className="flex items-center gap-1.5 text-xs">
-								<Lock className="h-3 w-3 text-zinc-500" />
-								<span className="text-zinc-600 dark:text-zinc-400">
+								<Lock className="h-3 w-3 text-slate-500" />
+								<span className="text-slate-600 dark:text-slate-400">
 									{service.hostname || service.name}.internal
 								</span>
 							</div>

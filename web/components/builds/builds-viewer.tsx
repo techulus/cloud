@@ -63,7 +63,7 @@ const STATUS_CONFIG: Record<
 > = {
 	pending: {
 		icon: Clock,
-		color: "text-zinc-500",
+		color: "text-slate-500",
 		label: "Queued",
 	},
 	claimed: {
@@ -98,7 +98,7 @@ const STATUS_CONFIG: Record<
 	},
 	cancelled: {
 		icon: AlertCircle,
-		color: "text-zinc-500",
+		color: "text-slate-500",
 		label: "Cancelled",
 	},
 };

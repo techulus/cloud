@@ -453,7 +453,7 @@ function ServiceLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
-				className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
@@ -478,7 +478,7 @@ function ServiceLogRow({
 				className={`break-all whitespace-pre-wrap ${
 					entry.stream === "stderr"
 						? "text-red-600 dark:text-red-400"
-						: "text-zinc-800 dark:text-zinc-200"
+						: "text-slate-800 dark:text-slate-200"
 				}`}
 			>
 				{highlightMatches(entry.message, search)}
@@ -499,7 +499,7 @@ function RequestRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
-				className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
@@ -509,16 +509,16 @@ function RequestRow({
 			>
 				{entry.status}
 			</span>
-			<span className="shrink-0 w-12 text-zinc-500 dark:text-zinc-400 font-medium">
+			<span className="shrink-0 w-12 text-slate-500 dark:text-slate-400 font-medium">
 				{entry.method}
 			</span>
-			<span className="flex-1 break-all whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+			<span className="flex-1 break-all whitespace-pre-wrap text-slate-800 dark:text-slate-200">
 				{highlightMatches(entry.path, search)}
 			</span>
-			<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums">
+			<span className="shrink-0 ml-2 text-slate-400 dark:text-slate-500 tabular-nums">
 				{Math.round(Number(entry.duration) || 0)}ms
 			</span>
-			<span className="shrink-0 ml-2 text-zinc-400 dark:text-zinc-500 tabular-nums hidden group-hover:inline">
+			<span className="shrink-0 ml-2 text-slate-400 dark:text-slate-500 tabular-nums hidden group-hover:inline">
 				{entry.clientIp}
 			</span>
 		</div>
@@ -535,12 +535,12 @@ function BuildLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
-				className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
-			<span className="text-zinc-800 dark:text-zinc-200 break-all whitespace-pre-wrap">
+			<span className="text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
 				{highlightMatches(entry.message, search)}
 			</span>
 		</div>
@@ -563,7 +563,7 @@ function ServerLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
-				className="shrink-0 text-zinc-400 dark:text-zinc-600 select-none pr-2 tabular-nums"
+				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
@@ -573,7 +573,7 @@ function ServerLogRow({
 			>
 				{entry.level}
 			</span>
-			<span className="text-zinc-800 dark:text-zinc-200 break-all whitespace-pre-wrap">
+			<span className="text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
 				{highlightMatches(entry.message, search)}
 			</span>
 		</div>

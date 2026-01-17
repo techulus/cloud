@@ -36,9 +36,9 @@ const statusColorMap: Record<string, StatusColors> = {
 	},
 	stopped: {
 		bg: "bg-slate-500/5",
-		border: "border-zinc-400/30",
+		border: "border-slate-400/30",
 		dot: "bg-slate-400",
-		text: "text-zinc-500",
+		text: "text-slate-500",
 	},
 	failed: {
 		bg: "bg-rose-500/5",
@@ -56,9 +56,9 @@ const statusColorMap: Record<string, StatusColors> = {
 
 const defaultColors: StatusColors = {
 	bg: "bg-slate-500/5",
-	border: "border-zinc-300/50 dark:border-zinc-700/50",
+	border: "border-slate-300/50 dark:border-slate-700/50",
 	dot: "bg-slate-300 dark:bg-slate-600",
-	text: "text-zinc-400",
+	text: "text-slate-400",
 };
 
 export function getStatusColor(status: string): StatusColors {
@@ -106,7 +106,7 @@ const healthColorMap: Record<string, HealthColors> = {
 
 const defaultHealthColors: HealthColors = {
 	dot: "bg-slate-400",
-	text: "text-zinc-500",
+	text: "text-slate-500",
 };
 
 export function getHealthColor(healthStatus: string): HealthColors {
@@ -132,7 +132,7 @@ export function CanvasWrapper({
 		return (
 			<div
 				className={cn(
-					"rounded-xl border border-zinc-200 dark:border-zinc-800",
+					"rounded-xl border border-slate-200 dark:border-slate-800",
 					"bg-slate-50 dark:bg-slate-900/50",
 					"flex items-center justify-center",
 					className,
@@ -151,7 +151,7 @@ export function CanvasWrapper({
 	return (
 		<div
 			className={cn(
-				"p-6 rounded-xl border border-zinc-200 dark:border-zinc-800",
+				"p-6 rounded-xl border border-slate-200 dark:border-slate-800",
 				"bg-slate-50/50 dark:bg-slate-900/30",
 				"overflow-auto",
 				className,

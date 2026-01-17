@@ -14,7 +14,7 @@ export function StatusIndicator({ status }: { status: string }) {
 		},
 		unknown: {
 			dot: "bg-slate-400",
-			text: "text-zinc-500",
+			text: "text-slate-500",
 		},
 	};
 
