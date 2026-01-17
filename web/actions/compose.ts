@@ -10,7 +10,6 @@ import {
 	validateDockerImage,
 	updateServiceHealthCheck,
 	updateServiceResourceLimits,
-	updateServiceConfig,
 	updateServiceStartCommand,
 	addServiceVolume,
 } from "./projects";
@@ -128,19 +127,6 @@ export async function importCompose(
 
 			createdServiceIds.push(result.id);
 			created.push({ name: finalName, serviceId: result.id });
-
-			if (service.ports.length > 0) {
-				await updateServiceConfig(result.id, {
-					ports: {
-						add: service.ports.map((p) => ({
-							port: p.port,
-							isPublic: false,
-							domain: null,
-							protocol: p.protocol,
-						})),
-					},
-				});
-			}
 
 			if (service.environment.length > 0) {
 				await createSecretsBatch(result.id, service.environment);

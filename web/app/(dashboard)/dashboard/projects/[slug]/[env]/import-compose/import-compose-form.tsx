@@ -271,12 +271,6 @@ services:
 											<span className="text-foreground/70">Image:</span>
 											<code className="bg-muted px-1.5 py-0.5 rounded text-xs">{service.image}</code>
 										</div>
-										{service.ports.length > 0 ? (
-											<div className="flex items-center gap-2">
-												<span className="text-foreground/70">Ports:</span>
-												<span>{service.ports.map((p) => `${p.port}/${p.protocol}`).join(", ")}</span>
-											</div>
-										) : null}
 										{service.environment.length > 0 ? (
 											<div className="flex items-center gap-2">
 												<span className="text-foreground/70">Env vars:</span>
@@ -336,7 +330,7 @@ services:
 					) : null}
 
 					<p className="text-sm text-muted-foreground">
-						All ports will be private by default. You can make them public after import.
+						Ports are not imported automatically. You can configure them after import.
 					</p>
 
 					<div className="flex justify-between">
