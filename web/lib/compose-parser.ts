@@ -369,6 +369,20 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 	const definedVolumes = new Set(Object.keys(composeFile.volumes || {}));
 
 	for (const [serviceName, serviceConfig] of Object.entries(composeFile.services)) {
+		const isTemplateService =
+			!serviceConfig.command &&
+			!serviceConfig.entrypoint &&
+			!serviceConfig.ports?.length;
+
+		if (isTemplateService) {
+			warnings.push({
+				service: serviceName,
+				field: "service",
+				message: `Service '${serviceName}' appears to be a YAML anchor template (no command, entrypoint, or ports). Skipping.`,
+			});
+			continue;
+		}
+
 		if (!serviceConfig.image && serviceConfig.build) {
 			errors.push({
 				service: serviceName,
