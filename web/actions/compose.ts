@@ -11,6 +11,7 @@ import {
 	updateServiceHealthCheck,
 	updateServiceResourceLimits,
 	updateServiceConfig,
+	updateServiceStartCommand,
 	addServiceVolume,
 } from "./projects";
 import { createSecretsBatch } from "./secrets";
@@ -161,6 +162,10 @@ export async function importCompose(
 
 			if (service.healthCheck) {
 				await updateServiceHealthCheck(result.id, service.healthCheck);
+			}
+
+			if (service.startCommand) {
+				await updateServiceStartCommand(result.id, service.startCommand);
 			}
 
 			if (service.resourceCpuLimit !== null && service.resourceMemoryLimitMb !== null) {

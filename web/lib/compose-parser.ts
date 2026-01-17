@@ -33,6 +33,7 @@ const composeServiceSchema = z.object({
 	volumes: z.array(z.string()).optional(),
 	healthcheck: composeHealthcheckSchema.optional(),
 	command: z.union([z.string(), z.array(z.string())]).optional(),
+	entrypoint: z.union([z.string(), z.array(z.string())]).optional(),
 	deploy: composeDeploySchema.optional(),
 	depends_on: z.any().optional(),
 	networks: z.any().optional(),
@@ -79,6 +80,7 @@ export type ParsedService = {
 	replicas: number;
 	resourceCpuLimit: number | null;
 	resourceMemoryLimitMb: number | null;
+	startCommand: string | null;
 };
 
 export type ParseWarning = {
@@ -294,6 +296,34 @@ function parseHealthcheck(
 	};
 }
 
+function quoteIfNeeded(arg: string): string {
+	if (arg.includes(" ") || arg.includes('"') || arg.includes("'")) {
+		return `"${arg.replace(/"/g, '\\"')}"`;
+	}
+	return arg;
+}
+
+function parseStartCommand(
+	entrypoint: string | string[] | undefined,
+	command: string | string[] | undefined,
+): string | null {
+	const ep = entrypoint
+		? Array.isArray(entrypoint)
+			? entrypoint.map(quoteIfNeeded).join(" ")
+			: entrypoint
+		: null;
+	const cmd = command
+		? Array.isArray(command)
+			? command.map(quoteIfNeeded).join(" ")
+			: command
+		: null;
+
+	if (ep && cmd) return `${ep} ${cmd}`;
+	if (ep) return ep;
+	if (cmd) return cmd;
+	return null;
+}
+
 export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 	const warnings: ParseWarning[] = [];
 	const errors: ParseError[] = [];
@@ -301,7 +331,7 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(yamlContent);
+		parsed = parseYaml(yamlContent, { merge: true });
 	} catch (e) {
 		const message = e instanceof Error ? e.message : "Unknown error";
 		return {
@@ -403,14 +433,6 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			});
 		}
 
-		if (serviceConfig.command) {
-			warnings.push({
-				service: serviceName,
-				field: "command",
-				message: "command ignored. Platform's startCommand replaces ENTRYPOINT which has different behavior.",
-			});
-		}
-
 		const parsedPorts: ParsedPort[] = [];
 		for (const portDef of serviceConfig.ports || []) {
 			const result = parsePort(portDef, serviceName);
@@ -494,6 +516,7 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			replicas,
 			resourceCpuLimit: cpuLimit,
 			resourceMemoryLimitMb: memoryLimit,
+			startCommand: parseStartCommand(serviceConfig.entrypoint, serviceConfig.command),
 		});
 	}
 
