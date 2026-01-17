@@ -89,7 +89,7 @@ func (a *Agent) CollectLogs() {
 		if c.DeploymentID == "" || c.ServiceID == "" {
 			continue
 		}
-		if c.State != "running" {
+		if c.State != "running" && c.State != "exited" {
 			continue
 		}
 		containerInfos = append(containerInfos, logs.ContainerInfo{
