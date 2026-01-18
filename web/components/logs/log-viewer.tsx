@@ -454,20 +454,20 @@ function ServiceLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
-				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
 			{level && (
 				<span
-					className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
+					className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
 				>
 					{level}
 				</span>
 			)}
 			<span
-				className={`shrink-0 px-1 rounded text-[10px] mr-2 ${
+				className={`shrink-0 w-[50px] text-center px-1 rounded text-[10px] mr-2 ${
 					entry.stream === "stderr"
 						? "text-red-600 dark:text-red-400 bg-red-500/10"
 						: "text-slate-600 dark:text-slate-400 bg-slate-500/10"
@@ -500,23 +500,23 @@ function RequestRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
-				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
 			<span
-				className={`shrink-0 px-1.5 rounded text-[10px] font-medium mr-2 tabular-nums ${STATUS_COLORS[category]}`}
+				className={`shrink-0 w-[40px] text-center px-1.5 rounded text-[10px] font-medium mr-2 tabular-nums ${STATUS_COLORS[category]}`}
 			>
 				{entry.status}
 			</span>
-			<span className="shrink-0 w-12 text-slate-500 dark:text-slate-400 font-medium">
+			<span className="shrink-0 w-[50px] text-slate-500 dark:text-slate-400 font-medium">
 				{entry.method}
 			</span>
 			<span className="flex-1 break-all whitespace-pre-wrap text-slate-800 dark:text-slate-200">
 				{highlightMatches(entry.path, search)}
 			</span>
-			<span className="shrink-0 ml-2 text-slate-400 dark:text-slate-500 tabular-nums">
+			<span className="shrink-0 w-[60px] text-right ml-2 text-slate-400 dark:text-slate-500 tabular-nums">
 				{Math.round(Number(entry.duration) || 0)}ms
 			</span>
 			<span className="shrink-0 ml-2 text-slate-400 dark:text-slate-500 tabular-nums hidden group-hover:inline">
@@ -536,7 +536,7 @@ function BuildLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
-				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
