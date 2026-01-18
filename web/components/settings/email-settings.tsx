@@ -46,6 +46,8 @@ type State = {
 	alertEmails: string;
 	testEmailAddress: string;
 	serverOfflineAlert: boolean;
+	buildFailure: boolean;
+	deploymentFailure: boolean;
 	isSaving: boolean;
 	isTesting: boolean;
 	isSendingTest: boolean;
@@ -54,12 +56,14 @@ type State = {
 
 type StringField = "fromName" | "fromAddress" | "host" | "port" | "customPort" | "username" | "password" | "timeout" | "alertEmails" | "testEmailAddress";
 
+type AlertField = "serverOfflineAlert" | "buildFailure" | "deploymentFailure";
+
 type Action =
 	| { type: "SET_STRING"; field: StringField; value: string }
 	| { type: "SET_ENABLED"; value: boolean }
 	| { type: "SET_ENCRYPTION"; value: SmtpEncryption }
 	| { type: "SET_PORT"; port: string; customPort: string }
-	| { type: "SET_SERVER_OFFLINE_ALERT"; value: boolean }
+	| { type: "SET_ALERT"; field: AlertField; value: boolean }
 	| { type: "SET_LOADING"; field: "isSaving" | "isTesting" | "isSendingTest" | "isSavingAlerts"; value: boolean };
 
 function createInitialState(props: Props): State {
@@ -78,6 +82,8 @@ function createInitialState(props: Props): State {
 		alertEmails: config?.alertEmails ?? "",
 		testEmailAddress: "",
 		serverOfflineAlert: alertsConfig?.serverOfflineAlert ?? true,
+		buildFailure: alertsConfig?.buildFailure ?? true,
+		deploymentFailure: alertsConfig?.deploymentFailure ?? true,
 		isSaving: false,
 		isTesting: false,
 		isSendingTest: false,
@@ -95,8 +101,8 @@ function reducer(state: State, action: Action): State {
 			return { ...state, encryption: action.value };
 		case "SET_PORT":
 			return { ...state, port: action.port, customPort: action.customPort };
-		case "SET_SERVER_OFFLINE_ALERT":
-			return { ...state, serverOfflineAlert: action.value };
+		case "SET_ALERT":
+			return { ...state, [action.field]: action.value };
 		case "SET_LOADING":
 			return { ...state, [action.field]: action.value };
 	}
@@ -171,6 +177,8 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 		try {
 			await updateEmailAlertsConfig({
 				serverOfflineAlert: state.serverOfflineAlert,
+				buildFailure: state.buildFailure,
+				deploymentFailure: state.deploymentFailure,
 			});
 			toast.success("Alert settings saved");
 			router.refresh();
@@ -215,8 +223,14 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 
 	const hasAlertsChanges = useMemo(() => {
 		const initialServerOfflineAlert = initialAlertsConfig?.serverOfflineAlert ?? true;
-		return state.serverOfflineAlert !== initialServerOfflineAlert;
-	}, [state.serverOfflineAlert, initialAlertsConfig]);
+		const initialBuildFailure = initialAlertsConfig?.buildFailure ?? true;
+		const initialDeploymentFailure = initialAlertsConfig?.deploymentFailure ?? true;
+		return (
+			state.serverOfflineAlert !== initialServerOfflineAlert ||
+			state.buildFailure !== initialBuildFailure ||
+			state.deploymentFailure !== initialDeploymentFailure
+		);
+	}, [state.serverOfflineAlert, state.buildFailure, state.deploymentFailure, initialAlertsConfig]);
 
 	const setString = useCallback(
 		(field: StringField) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -273,7 +287,35 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							<Switch
 								id="server-offline-alert"
 								checked={state.serverOfflineAlert}
-								onCheckedChange={(value) => dispatch({ type: "SET_SERVER_OFFLINE_ALERT", value })}
+								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "serverOfflineAlert", value })}
+							/>
+						</div>
+
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label htmlFor="build-failure-alert">Build Failure Alert</Label>
+								<p className="text-xs text-muted-foreground">
+									Receive an email when a build fails
+								</p>
+							</div>
+							<Switch
+								id="build-failure-alert"
+								checked={state.buildFailure}
+								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "buildFailure", value })}
+							/>
+						</div>
+
+						<div className="flex items-center justify-between">
+							<div className="space-y-0.5">
+								<Label htmlFor="deployment-failure-alert">Deployment Failure Alert</Label>
+								<p className="text-xs text-muted-foreground">
+									Receive an email when a deployment fails
+								</p>
+							</div>
+							<Switch
+								id="deployment-failure-alert"
+								checked={state.deploymentFailure}
+								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "deploymentFailure", value })}
 							/>
 						</div>
 					</div>

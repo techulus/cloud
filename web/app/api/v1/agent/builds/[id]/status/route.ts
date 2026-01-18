@@ -11,6 +11,7 @@ import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { deployService } from "@/actions/projects";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
+import { sendBuildFailureAlert } from "@/lib/email";
 
 type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
@@ -127,6 +128,16 @@ export async function POST(
 				error,
 			);
 		}
+	}
+
+	if (update.status === "failed") {
+		sendBuildFailureAlert({
+			serviceId: build.serviceId,
+			buildId,
+			error: update.error,
+		}).catch((error) => {
+			console.error("[build:status] failed to send build failure alert:", error);
+		});
 	}
 
 	if (update.status === "completed") {

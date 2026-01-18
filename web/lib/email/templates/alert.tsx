@@ -1,66 +1,57 @@
 import { Heading, Text, Section, Button } from "@react-email/components";
 import { BaseEmail } from "./base";
 
-type ServerOfflineAlertProps = {
-	serverName: string;
-	serverIp?: string;
-	detectedAt: Date;
-	dashboardUrl?: string;
+type AlertDetail = {
+	label: string;
+	value: string;
+};
+
+type AlertProps = {
+	bannerText: string;
+	heading: string;
+	description: string;
+	details: AlertDetail[];
+	note?: string;
+	buttonText?: string;
+	buttonUrl?: string;
 	baseUrl?: string;
 };
 
-export function ServerOfflineAlert({
-	serverName,
-	serverIp,
-	detectedAt,
-	dashboardUrl,
+export function Alert({
+	bannerText,
+	heading,
+	description,
+	details,
+	note,
+	buttonText,
+	buttonUrl,
 	baseUrl,
-}: ServerOfflineAlertProps) {
-	const formattedTime = detectedAt.toLocaleString("en-US", {
-		dateStyle: "medium",
-		timeStyle: "short",
-	});
-
+}: AlertProps) {
 	return (
-		<BaseEmail
-			preview={`Alert: Server "${serverName}" is offline`}
-			baseUrl={baseUrl}
-		>
+		<BaseEmail preview={heading} baseUrl={baseUrl}>
 			<Section style={alertBanner}>
-				<Text style={alertText}>SERVER OFFLINE</Text>
+				<Text style={alertText}>{bannerText}</Text>
 			</Section>
 
-			<Heading style={heading}>Server Offline Alert</Heading>
+			<Heading style={headingStyle}>{heading}</Heading>
 
-			<Text style={paragraph}>
-				The server <strong>{serverName}</strong> has gone offline and is no
-				longer responding to health checks.
-			</Text>
+			<Text style={paragraph}>{description}</Text>
 
 			<Section style={detailsBox}>
-				<Text style={detailLabel}>Server Name</Text>
-				<Text style={detailValue}>{serverName}</Text>
-
-				{serverIp && (
-					<>
-						<Text style={detailLabel}>IP Address</Text>
-						<Text style={detailValue}>{serverIp}</Text>
-					</>
-				)}
-
-				<Text style={detailLabel}>Detected At</Text>
-				<Text style={detailValue}>{formattedTime}</Text>
+				{details.map((detail, index) => (
+					<div key={index}>
+						<Text style={detailLabel}>{detail.label}</Text>
+						<Text style={detailValue}>{detail.value}</Text>
+					</div>
+				))}
 			</Section>
 
-			<Text style={paragraph}>
-				Auto-placed stateless services running on this server will be
-				automatically recovered and redeployed to healthy servers.
-			</Text>
+			{note && <Text style={paragraph}>{note}</Text>}
 
-			{dashboardUrl && (
+			{buttonText && buttonUrl && (
 				<Section style={buttonContainer}>
-					<Button style={button} href={dashboardUrl}>
-						View Dashboard
+					<Button style={button} href={buttonUrl}>
+						{buttonText}
 					</Button>
 				</Section>
 			)}
@@ -84,7 +75,7 @@ const alertText = {
 	textAlign: "center" as const,
 };
 
-const heading = {
+const headingStyle = {
 	fontSize: "24px",
 	fontWeight: "600",
 	lineHeight: "32px",

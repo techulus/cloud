@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
+import { sendDeploymentFailureAlert } from "@/lib/email";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -109,6 +110,7 @@ async function handleRolloutFailure(
 	if (rolloutDeployments.length === 0) return;
 
 	const serviceId = rolloutDeployments[0].serviceId;
+	const serverId = rolloutDeployments[0].serverId;
 
 	const updated = await db
 		.update(rollouts)
@@ -147,6 +149,14 @@ async function handleRolloutFailure(
 			.update(rollouts)
 			.set({ status: "rolled_back", completedAt: new Date() })
 			.where(eq(rollouts.id, rolloutId));
+
+		sendDeploymentFailureAlert({
+			serviceId,
+			serverId,
+			failedStage,
+		}).catch((error) => {
+			console.error("[rollout:failure] failed to send deployment failure alert:", error);
+		});
 	}
 }
 

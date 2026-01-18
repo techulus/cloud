@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, memo, useReducer, useCallback } from "react";
+import { formatDateTime } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
@@ -124,10 +125,6 @@ function formatBytes(bytes: number): string {
 	const sizes = ["B", "KB", "MB", "GB"];
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
 	return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
-}
-
-function formatDate(date: Date): string {
-	return new Date(date).toLocaleString();
 }
 
 function getStatusIcon(status: string) {
@@ -422,7 +419,7 @@ export const BackupTab = memo(function BackupTab({
 									<div>
 										<p className="font-medium text-sm">{backup.volumeName}</p>
 										<p className="text-xs text-muted-foreground">
-											{formatDate(backup.createdAt)}
+											{formatDateTime(backup.createdAt)}
 											{backup.sizeBytes &&
 												` · ${formatBytes(backup.sizeBytes)}`}
 											{backup.serverName && ` · ${backup.serverName}`}
