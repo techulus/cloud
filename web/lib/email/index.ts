@@ -119,7 +119,7 @@ export async function sendServerOfflineAlert(
 	}
 
 	const baseUrl = getAppBaseUrl();
-	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard/servers` : undefined;
+	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
 
 	const details = [
 		{ label: "Server Name", value: options.serverName },
@@ -225,7 +225,7 @@ export async function sendDeploymentFailureAlert(
 	}
 
 	const baseUrl = getAppBaseUrl();
-	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard/services` : undefined;
+	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
 
 	const details = [
 		{ label: "Service", value: result.serviceName },

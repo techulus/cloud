@@ -36,22 +36,29 @@ var dataDir string
 
 func main() {
 	var (
-		controlPlaneURL string
-		token           string
-		isProxy         bool
+		controlPlaneURL  string
+		token            string
+		isProxy          bool
+		logsEndpointFlag string
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", paths.DataDir, "Data directory for agent state")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
+	flag.StringVar(&logsEndpointFlag, "logs-endpoint", "", "Override logs endpoint URL (optional)")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
 		log.Fatal("--url is required")
 	}
 
-	logsEndpoint := fetchLogsEndpoint(controlPlaneURL)
+	var logsEndpoint string
+	if logsEndpointFlag != "" {
+		logsEndpoint = logsEndpointFlag
+	} else {
+		logsEndpoint = fetchLogsEndpoint(controlPlaneURL)
+	}
 
 	if isProxy && runtime.GOOS != "linux" {
 		log.Fatal("--proxy flag is only supported on Linux")
