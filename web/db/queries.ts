@@ -12,7 +12,7 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
-import type { SmtpConfig } from "@/lib/settings-keys";
+import type { SmtpConfig, EmailAlertsConfig } from "@/lib/settings-keys";
 
 export async function listProjects() {
 	const projectList = await db
@@ -203,6 +203,7 @@ export async function getGlobalSettings() {
 		acmeEmail,
 		proxyDomain,
 		smtpConfig,
+		emailAlertsConfig,
 	] = await Promise.all([
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<string[]>("servers_excluded_from_workload_placement"),
@@ -211,6 +212,7 @@ export async function getGlobalSettings() {
 		getSetting<string>("acme_email"),
 		getSetting<string>("proxy_domain"),
 		getSetting<SmtpConfig>("smtp_config"),
+		getSetting<EmailAlertsConfig>("email_alerts_config"),
 	]);
 
 	return {
@@ -221,6 +223,7 @@ export async function getGlobalSettings() {
 		acmeEmail: acmeEmail ?? null,
 		proxyDomain: proxyDomain ?? null,
 		smtpConfig: smtpConfig ?? null,
+		emailAlertsConfig: emailAlertsConfig ?? null,
 	};
 }
 
@@ -240,6 +243,10 @@ export async function getSmtpConfig(): Promise<SmtpConfig | null> {
 		return null;
 	}
 	return config;
+}
+
+export async function getEmailAlertsConfig(): Promise<EmailAlertsConfig | null> {
+	return getSetting<EmailAlertsConfig>("email_alerts_config");
 }
 
 export async function getBackupStorageConfig() {

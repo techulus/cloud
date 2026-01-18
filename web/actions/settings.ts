@@ -9,7 +9,9 @@ import {
 	MAX_BACKUP_RETENTION_DAYS,
 	type BackupStorageConfig,
 	type SmtpConfig,
+	type EmailAlertsConfig,
 	smtpConfigSchema,
+	emailAlertsConfigSchema,
 } from "@/lib/settings-keys";
 import { verifyConnection, sendEmail, getAppBaseUrl } from "@/lib/email";
 import { TestEmail } from "@/lib/email/templates/test-email";
@@ -123,5 +125,19 @@ export async function sendTestEmail(config: SmtpConfig, toAddress: string) {
 		throw new Error(
 			error instanceof Error ? error.message : "Failed to send test email",
 		);
+	}
+}
+
+export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
+	try {
+		const validated = emailAlertsConfigSchema.parse(config);
+		await setSetting(SETTING_KEYS.EMAIL_ALERTS_CONFIG, validated);
+		revalidatePath("/dashboard/settings");
+		return { success: true };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid email alerts configuration"));
+		}
+		throw error;
 	}
 }

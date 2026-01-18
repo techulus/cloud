@@ -34,6 +34,7 @@ import {
 	DEFAULT_BACKUP_RETENTION_DAYS,
 	type BackupStorageProvider,
 	type SmtpConfig,
+	type EmailAlertsConfig,
 } from "@/lib/settings-keys";
 import { GitHubAppSetup } from "@/components/github/github-app-setup";
 import { EmailSettings } from "@/components/settings/email-settings";
@@ -56,6 +57,7 @@ type Props = {
 		acmeEmail: string | null;
 		proxyDomain: string | null;
 		smtpConfig: SmtpConfig | null;
+		emailAlertsConfig: EmailAlertsConfig | null;
 	};
 	initialTab?: string;
 };
@@ -777,7 +779,10 @@ export function GlobalSettings({
 			</TabsContent>
 
 			<TabsContent value="email" className="space-y-6 pt-4">
-				<EmailSettings initialConfig={initialSettings.smtpConfig} />
+				<EmailSettings
+					initialConfig={initialSettings.smtpConfig}
+					initialAlertsConfig={initialSettings.emailAlertsConfig}
+				/>
 			</TabsContent>
 
 			<TabsContent value="github" className="space-y-6 pt-4">

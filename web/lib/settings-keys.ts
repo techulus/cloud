@@ -9,6 +9,7 @@ export const SETTING_KEYS = {
 	ACME_EMAIL: "acme_email",
 	PROXY_DOMAIN: "proxy_domain",
 	SMTP_CONFIG: "smtp_config",
+	EMAIL_ALERTS_CONFIG: "email_alerts_config",
 } as const;
 
 export const DEFAULT_BUILD_TIMEOUT_MINUTES = 30;
@@ -73,3 +74,9 @@ export const smtpConfigSchema = z.object({
 
 export type SmtpEncryption = "starttls" | "tls" | "none";
 export type SmtpConfig = z.infer<typeof smtpConfigSchema>;
+
+export const emailAlertsConfigSchema = z.object({
+	serverOfflineAlert: z.boolean(),
+});
+
+export type EmailAlertsConfig = z.infer<typeof emailAlertsConfigSchema>;

@@ -3,7 +3,7 @@ import type { Transporter } from "nodemailer";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { render } from "@react-email/render";
 import type { ReactElement } from "react";
-import { getSmtpConfig } from "@/db/queries";
+import { getSmtpConfig, getEmailAlertsConfig } from "@/db/queries";
 import { ServerOfflineAlert } from "./templates/server-offline-alert";
 
 export function getAppBaseUrl(): string | undefined {
@@ -108,6 +108,12 @@ type ServerOfflineAlertOptions = {
 export async function sendServerOfflineAlert(
 	options: ServerOfflineAlertOptions,
 ): Promise<void> {
+	const alertsConfig = await getEmailAlertsConfig();
+
+	if (alertsConfig?.serverOfflineAlert === false) {
+		return;
+	}
+
 	const baseUrl = getAppBaseUrl();
 	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard/servers` : undefined;
 
