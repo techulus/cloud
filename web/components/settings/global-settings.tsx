@@ -3,7 +3,7 @@
 import { useState, useReducer } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Hammer, Server, Ban, Clock, HardDrive, Shield, Network } from "lucide-react";
+import { Hammer, Server, Ban, Clock, HardDrive, Shield, Network, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,8 +33,10 @@ import {
 	MAX_BACKUP_RETENTION_DAYS,
 	DEFAULT_BACKUP_RETENTION_DAYS,
 	type BackupStorageProvider,
+	type SmtpConfig,
 } from "@/lib/settings-keys";
 import { GitHubAppSetup } from "@/components/github/github-app-setup";
+import { EmailSettings } from "@/components/settings/email-settings";
 
 type Props = {
 	servers: ServerType[];
@@ -53,6 +55,7 @@ type Props = {
 		} | null;
 		acmeEmail: string | null;
 		proxyDomain: string | null;
+		smtpConfig: SmtpConfig | null;
 	};
 	initialTab?: string;
 };
@@ -345,6 +348,9 @@ export function GlobalSettings({
 				</TabsTrigger>
 				<TabsTrigger value="backup" className="px-4 py-2 shrink-0">
 					Backup
+				</TabsTrigger>
+				<TabsTrigger value="email" className="px-4 py-2 shrink-0">
+					Email
 				</TabsTrigger>
 				<TabsTrigger value="github" className="px-4 py-2 shrink-0">
 					GitHub
@@ -768,6 +774,10 @@ export function GlobalSettings({
 						)}
 					</div>
 				</div>
+			</TabsContent>
+
+			<TabsContent value="email" className="space-y-6 pt-4">
+				<EmailSettings initialConfig={initialSettings.smtpConfig} />
 			</TabsContent>
 
 			<TabsContent value="github" className="space-y-6 pt-4">

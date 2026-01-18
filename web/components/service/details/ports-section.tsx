@@ -2,6 +2,8 @@
 
 import { useState, memo } from "react";
 import { useRouter } from "next/navigation";
+import isFQDN from "validator/es/lib/isFQDN";
+import isPort from "validator/es/lib/isPort";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -67,19 +69,19 @@ export const PortsSection = memo(function PortsSection({
 		router.refresh();
 	};
 
-	const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
-	const isValidDomain = domain.trim() && domainRegex.test(domain.trim());
+	const isValidDomain = domain.trim() && isFQDN(domain.trim());
+	const isValidPort = newPort && isPort(newPort);
 	const canAdd =
-		newPort &&
+		isValidPort &&
 		!httpPorts.some((p) => p.port === parseInt(newPort, 10)) &&
 		isValidDomain &&
 		!isSaving;
 
 	const handleAdd = async () => {
-		const port = parseInt(newPort, 10);
-		if (Number.isNaN(port) || port <= 0 || port > 65535 || !isValidDomain) {
+		if (!isValidPort || !isValidDomain) {
 			return;
 		}
+		const port = parseInt(newPort, 10);
 
 		setIsSaving(true);
 		try {

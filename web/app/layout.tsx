@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans } from "next/font/google";
 import localFont from "next/font/local";
 import { ThemeProvider } from "@/components/core/theme-provider";
@@ -18,6 +18,13 @@ const lilex = localFont({
 export const metadata: Metadata = {
 	title: "Techulus Cloud",
 	description: "Stateless container deployment platform",
+};
+
+export const viewport: Viewport = {
+	themeColor: [
+		{ media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+		{ media: "(prefers-color-scheme: dark)", color: "#0f0d1a" },
+	],
 };
 
 export default function RootLayout({

@@ -12,6 +12,7 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
+import type { SmtpConfig } from "@/lib/settings-keys";
 
 export async function listProjects() {
 	const projectList = await db
@@ -201,6 +202,7 @@ export async function getGlobalSettings() {
 		backupConfig,
 		acmeEmail,
 		proxyDomain,
+		smtpConfig,
 	] = await Promise.all([
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<string[]>("servers_excluded_from_workload_placement"),
@@ -208,6 +210,7 @@ export async function getGlobalSettings() {
 		getSetting<BackupStorageConfig>("backup_storage_config"),
 		getSetting<string>("acme_email"),
 		getSetting<string>("proxy_domain"),
+		getSetting<SmtpConfig>("smtp_config"),
 	]);
 
 	return {
@@ -217,6 +220,7 @@ export async function getGlobalSettings() {
 		backupStorage: backupConfig ?? null,
 		acmeEmail: acmeEmail ?? null,
 		proxyDomain: proxyDomain ?? null,
+		smtpConfig: smtpConfig ?? null,
 	};
 }
 
@@ -229,6 +233,14 @@ type BackupStorageConfig = {
 	secretKey: string;
 	retentionDays: number;
 };
+
+export async function getSmtpConfig(): Promise<SmtpConfig | null> {
+	const config = await getSetting<SmtpConfig>("smtp_config");
+	if (!config?.host || !config?.fromAddress) {
+		return null;
+	}
+	return config;
+}
 
 export async function getBackupStorageConfig() {
 	const config = await getSetting<BackupStorageConfig>("backup_storage_config");

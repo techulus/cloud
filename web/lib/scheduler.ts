@@ -12,6 +12,7 @@ import { CronExpressionParser } from "cron-parser";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { deployService } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
+import { sendServerOfflineAlert } from "@/lib/email";
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
@@ -111,7 +112,12 @@ export async function checkAndRecoverStaleServers(
 		.update(servers)
 		.set({ status: "offline" })
 		.where(and(...conditions))
-		.returning({ id: servers.id });
+		.returning({
+			id: servers.id,
+			name: servers.name,
+			publicIp: servers.publicIp,
+			wireguardIp: servers.wireguardIp,
+		});
 
 	if (markedOffline.length === 0) return;
 
@@ -119,6 +125,18 @@ export async function checkAndRecoverStaleServers(
 	console.log(
 		`[scheduler] marked ${offlineIds.length} stale servers offline, triggering recovery`,
 	);
+
+	for (const server of markedOffline) {
+		sendServerOfflineAlert({
+			serverName: server.name,
+			serverIp: server.wireguardIp || server.publicIp || undefined,
+		}).catch((error) => {
+			console.error(
+				`[scheduler] failed to send offline alert for ${server.name}:`,
+				error,
+			);
+		});
+	}
 
 	triggerRecoveryForOfflineServers(offlineIds).catch((error) => {
 		console.error("[scheduler] recovery failed:", error);

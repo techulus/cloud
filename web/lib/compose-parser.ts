@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { formatZodErrors } from "@/lib/utils";
 
 const composeHealthcheckSchema = z.object({
 	test: z.union([z.string(), z.array(z.string())]).optional(),
@@ -344,14 +345,11 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 
 	const validated = composeFileSchema.safeParse(parsed);
 	if (!validated.success) {
-		const zodErrors = validated.error.issues
-			.map((e) => `${e.path.join(".")}: ${e.message}`)
-			.join("; ");
 		return {
 			success: false,
 			services: [],
 			warnings: [],
-			errors: [{ message: `Invalid Docker Compose file: ${zodErrors}` }],
+			errors: [{ message: `Invalid Docker Compose file: ${formatZodErrors(validated.error)}` }],
 		};
 	}
 

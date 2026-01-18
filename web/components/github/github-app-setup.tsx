@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import isFQDN from "validator/es/lib/isFQDN";
 import {
 	Github,
 	TriangleAlert,
@@ -100,7 +101,7 @@ export function GitHubAppSetup() {
 		const h = hostname.trim().toLowerCase();
 		if (!h) return false;
 		if (h === "localhost") return true;
-		return /^[a-z0-9]+(\.[a-z0-9-]+)+$/.test(h);
+		return isFQDN(h);
 	})();
 
 	const isOrgValid =
