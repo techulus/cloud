@@ -26,7 +26,7 @@ export function BaseEmail({ preview, children, baseUrl }: BaseEmailProps) {
 			<Body style={body}>
 				<Container style={container}>
 					<Section style={header}>
-						<Img src={logoUrl} width="140" height="32" alt="Techulus Cloud" />
+						<Img src={logoUrl} width="48" height="48" alt="Techulus Cloud" />
 					</Section>
 					<Section style={content}>{children}</Section>
 					<Text style={footer}>Sent from Techulus Cloud</Text>

@@ -15,6 +15,7 @@ import { verifyConnection, sendEmail, getAppBaseUrl } from "@/lib/email";
 import { TestEmail } from "@/lib/email/templates/test-email";
 import { ZodError } from "zod";
 import { getZodErrorMessage } from "@/lib/utils";
+import { buildTimeoutSchema } from "@/lib/schemas";
 
 export async function updateBuildServers(serverIds: string[]) {
 	await setSetting(SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS, serverIds);
@@ -32,12 +33,17 @@ export async function updateExcludedServers(serverIds: string[]) {
 }
 
 export async function updateBuildTimeout(minutes: number) {
-	if (minutes < 5 || minutes > 120) {
-		throw new Error("Build timeout must be between 5 and 120 minutes");
+	try {
+		const validatedMinutes = buildTimeoutSchema.parse(minutes);
+		await setSetting(SETTING_KEYS.BUILD_TIMEOUT_MINUTES, validatedMinutes);
+		revalidatePath("/dashboard/settings");
+		return { success: true };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid build timeout"));
+		}
+		throw error;
 	}
-	await setSetting(SETTING_KEYS.BUILD_TIMEOUT_MINUTES, minutes);
-	revalidatePath("/dashboard/settings");
-	return { success: true };
 }
 
 export async function updateBackupStorageConfig(config: BackupStorageConfig) {

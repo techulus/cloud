@@ -1,8 +1,16 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
+import {
+	nameSchema,
+	replicaCountSchema,
+	volumeNameSchema,
+	containerPathSchema,
+	githubRepoUrlSchema,
+} from "@/lib/schemas";
+import { getZodErrorMessage } from "@/lib/utils";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -191,24 +199,32 @@ function normalizeImage(image: string): string {
 }
 
 export async function createProject(name: string) {
-	const id = randomUUID();
-	const slug = slugify(name);
+	try {
+		const validatedName = nameSchema.parse(name);
+		const id = randomUUID();
+		const slug = slugify(validatedName);
 
-	await db.transaction(async (tx) => {
-		await tx.insert(projects).values({
-			id,
-			name,
-			slug,
+		await db.transaction(async (tx) => {
+			await tx.insert(projects).values({
+				id,
+				name: validatedName,
+				slug,
+			});
+
+			await tx.insert(environments).values({
+				id: randomUUID(),
+				projectId: id,
+				name: "production",
+			});
 		});
 
-		await tx.insert(environments).values({
-			id: randomUUID(),
-			projectId: id,
-			name: "production",
-		});
-	});
-
-	return { id, name, slug };
+		return { id, name: validatedName, slug };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid project name"));
+		}
+		throw error;
+	}
 }
 
 export async function deleteProject(id: string) {
@@ -248,17 +264,21 @@ export async function deleteProject(id: string) {
 }
 
 export async function updateProjectName(projectId: string, name: string) {
-	const trimmed = name.trim();
-	if (!trimmed) {
-		throw new Error("Project name cannot be empty");
+	try {
+		const validatedName = nameSchema.parse(name);
+
+		await db
+			.update(projects)
+			.set({ name: validatedName })
+			.where(eq(projects.id, projectId));
+
+		return { success: true };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid project name"));
+		}
+		throw error;
 	}
-
-	await db
-		.update(projects)
-		.set({ name: trimmed })
-		.where(eq(projects.id, projectId));
-
-	return { success: true };
 }
 
 export async function updateProjectSlug(projectId: string, slug: string) {
@@ -506,42 +526,44 @@ export async function updateServiceGithubRepo(
 	branch: string,
 	rootDir?: string,
 ) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	let normalizedUrl: string | null = null;
-	if (repoUrl) {
-		normalizedUrl = repoUrl.trim();
-		if (!normalizedUrl.startsWith("https://github.com/")) {
-			throw new Error(
-				"Repository URL must be a GitHub URL (https://github.com/...)",
-			);
+	try {
+		const service = await getService(serviceId);
+		if (!service) {
+			throw new Error("Service not found");
 		}
-	}
 
-	const normalizedBranch = branch.trim() || "main";
-	const normalizedRootDir = rootDir?.trim() || null;
-
-	const updateData: Record<string, unknown> = {
-		sourceType: normalizedUrl ? "github" : "image",
-		githubRepoUrl: normalizedUrl,
-		githubBranch: normalizedBranch,
-		githubRootDir: normalizedRootDir,
-	};
-
-	if (normalizedUrl) {
-		const registryHost = process.env.REGISTRY_HOST;
-		if (!registryHost) {
-			throw new Error("REGISTRY_HOST environment variable is required");
+		let normalizedUrl: string | null = null;
+		if (repoUrl) {
+			normalizedUrl = githubRepoUrlSchema.parse(repoUrl);
 		}
-		updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
+
+		const normalizedBranch = branch.trim() || "main";
+		const normalizedRootDir = rootDir?.trim() || null;
+
+		const updateData: Record<string, unknown> = {
+			sourceType: normalizedUrl ? "github" : "image",
+			githubRepoUrl: normalizedUrl,
+			githubBranch: normalizedBranch,
+			githubRootDir: normalizedRootDir,
+		};
+
+		if (normalizedUrl) {
+			const registryHost = process.env.REGISTRY_HOST;
+			if (!registryHost) {
+				throw new Error("REGISTRY_HOST environment variable is required");
+			}
+			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
+		}
+
+		await db.update(services).set(updateData).where(eq(services.id, serviceId));
+
+		return { success: true };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid GitHub repository URL"));
+		}
+		throw error;
 	}
-
-	await db.update(services).set(updateData).where(eq(services.id, serviceId));
-
-	return { success: true };
 }
 
 const PORT_RANGE_START = 30000;
@@ -1276,47 +1298,47 @@ export async function addServiceVolume(
 	name: string,
 	containerPath: string,
 ) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
+	try {
+		const validatedName = volumeNameSchema.parse(name);
+		const validatedPath = containerPathSchema.parse(containerPath);
+
+		const service = await getService(serviceId);
+		if (!service) {
+			throw new Error("Service not found");
+		}
+
+		if (!service.stateful) {
+			throw new Error("Volumes can only be added to stateful services");
+		}
+
+		const existing = await db
+			.select()
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, serviceId));
+
+		if (existing.some((v) => v.name === validatedName)) {
+			throw new Error("Volume with this name already exists");
+		}
+
+		if (existing.some((v) => v.containerPath === validatedPath)) {
+			throw new Error("A volume with this container path already exists");
+		}
+
+		const id = randomUUID();
+		await db.insert(serviceVolumes).values({
+			id,
+			serviceId,
+			name: validatedName,
+			containerPath: validatedPath,
+		});
+
+		return { id, name: validatedName, containerPath: validatedPath };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid volume configuration"));
+		}
+		throw error;
 	}
-
-	if (!service.stateful) {
-		throw new Error("Volumes can only be added to stateful services");
-	}
-
-	const sanitizedName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-	if (!sanitizedName || sanitizedName.length < 1) {
-		throw new Error("Invalid volume name");
-	}
-
-	const trimmedPath = containerPath.trim();
-	if (!trimmedPath.startsWith("/")) {
-		throw new Error("Container path must be an absolute path");
-	}
-
-	const existing = await db
-		.select()
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.serviceId, serviceId));
-
-	if (existing.some((v) => v.name === sanitizedName)) {
-		throw new Error("Volume with this name already exists");
-	}
-
-	if (existing.some((v) => v.containerPath === trimmedPath)) {
-		throw new Error("A volume with this container path already exists");
-	}
-
-	const id = randomUUID();
-	await db.insert(serviceVolumes).values({
-		id,
-		serviceId,
-		name: sanitizedName,
-		containerPath: trimmedPath,
-	});
-
-	return { id, name: sanitizedName, containerPath: trimmedPath };
 }
 
 export async function removeServiceVolume(volumeId: string) {
@@ -1389,22 +1411,27 @@ export async function updateServiceReplicas(
 	serviceId: string,
 	replicas: number,
 ) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
+	try {
+		const validatedReplicas = replicaCountSchema.parse(replicas);
+
+		const service = await getService(serviceId);
+		if (!service) {
+			throw new Error("Service not found");
+		}
+
+		if (service.stateful && validatedReplicas > 1) {
+			throw new Error("Stateful services can only have exactly 1 replica");
+		}
+
+		await db.update(services).set({ replicas: validatedReplicas }).where(eq(services.id, serviceId));
+
+		return { success: true };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid replica count"));
+		}
+		throw error;
 	}
-
-	if (replicas < 1 || replicas > 10) {
-		throw new Error("Replicas must be between 1 and 10");
-	}
-
-	if (service.stateful && replicas > 1) {
-		throw new Error("Stateful services can only have exactly 1 replica");
-	}
-
-	await db.update(services).set({ replicas }).where(eq(services.id, serviceId));
-
-	return { success: true };
 }
 
 export async function updateServiceBackupSettings(

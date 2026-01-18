@@ -3,12 +3,23 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { eq, and, isNull, gt } from "drizzle-orm";
 import { assignSubnet } from "@/lib/wireguard";
+import { agentRegisterSchema } from "@/lib/schemas";
+import { formatZodErrors } from "@/lib/utils";
 
 const TOKEN_EXPIRY_HOURS = 24;
 
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
+		const parseResult = agentRegisterSchema.safeParse(body);
+
+		if (!parseResult.success) {
+			return NextResponse.json(
+				{ error: formatZodErrors(parseResult.error) },
+				{ status: 400 },
+			);
+		}
+
 		const {
 			token,
 			wireguardPublicKey,
@@ -16,17 +27,7 @@ export async function POST(request: NextRequest) {
 			publicIp,
 			privateIp,
 			isProxy,
-		} = body;
-
-		if (!token || !wireguardPublicKey || !signingPublicKey) {
-			return NextResponse.json(
-				{
-					error:
-						"Missing required fields: token, wireguardPublicKey, signingPublicKey",
-				},
-				{ status: 400 },
-			);
-		}
+		} = parseResult.data;
 
 		const now = new Date();
 		const expiryThreshold = new Date(
