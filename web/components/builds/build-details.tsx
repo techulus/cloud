@@ -195,7 +195,7 @@ export function BuildDetails({
 					size="icon-sm"
 					onClick={() =>
 						router.push(
-							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}?tab=builds`,
+							`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
 						)
 					}
 				>
