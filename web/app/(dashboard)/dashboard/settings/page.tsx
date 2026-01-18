@@ -2,18 +2,11 @@ import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { GlobalSettings } from "@/components/settings/global-settings";
 import { listServers, getGlobalSettings } from "@/db/queries";
 
-type Props = {
-	searchParams: Promise<{ tab?: string }>;
-};
-
-export default async function SettingsPage({ searchParams }: Props) {
-	const [servers, settings, params] = await Promise.all([
+export default async function SettingsPage() {
+	const [servers, settings] = await Promise.all([
 		listServers(),
 		getGlobalSettings(),
-		searchParams,
 	]);
-
-	const initialTab = params.tab || "build";
 
 	return (
 		<>
@@ -34,7 +27,6 @@ export default async function SettingsPage({ searchParams }: Props) {
 				<GlobalSettings
 					servers={servers}
 					initialSettings={settings}
-					initialTab={initialTab}
 				/>
 			</div>
 		</>

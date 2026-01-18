@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans } from "next/font/google";
 import localFont from "next/font/local";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/core/theme-provider";
 import "./globals.css";
 
@@ -37,7 +38,9 @@ export default function RootLayout({
 			<body
 				className={`${ibmPlexSans.variable} ${lilex.variable} font-sans antialiased`}
 			>
-				<ThemeProvider>{children}</ThemeProvider>
+				<ThemeProvider>
+					<NuqsAdapter>{children}</NuqsAdapter>
+				</ThemeProvider>
 			</body>
 		</html>
 	);

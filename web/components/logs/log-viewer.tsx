@@ -7,6 +7,7 @@ import {
 	Search,
 	X,
 } from "lucide-react";
+import { parseAsArrayOf, parseAsBoolean, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
@@ -580,23 +581,30 @@ function ServerLogRow({
 	);
 }
 
+const logLevelParser = parseAsArrayOf(parseAsStringLiteral(["error", "warn", "info", "debug"] as const));
+const statusParser = parseAsArrayOf(parseAsStringLiteral(["2xx", "3xx", "4xx", "5xx"] as const));
+
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const scrollRestorationRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
-	const [search, setSearch] = useState("");
+	const [search, setSearch] = useQueryState("q", { defaultValue: "" });
 	const [autoScroll, setAutoScroll] = useState(true);
-	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+	const [selectedServerId, setSelectedServerId] = useQueryState("server");
 
-	const [levels, setLevels] = useState<Set<LogLevel>>(() =>
-		props.variant === "server-logs"
-			? new Set(["error", "warn", "info"])
-			: new Set(["error", "warn", "info", "debug"]),
-	);
-	const [showStdout, setShowStdout] = useState(true);
-	const [showStderr, setShowStderr] = useState(true);
-	const [statusFilter, setStatusFilter] = useState<Set<StatusCategory>>(
-		new Set(["2xx", "3xx", "4xx", "5xx"]),
-	);
+	const defaultLevels = props.variant === "server-logs"
+		? (["error", "warn", "info"] as const)
+		: (["error", "warn", "info", "debug"] as const);
+
+	const [levelsParam, setLevelsParam] = useQueryState("levels", logLevelParser.withDefault([...defaultLevels]));
+	const levels = useMemo(() => new Set(levelsParam as LogLevel[]), [levelsParam]);
+	const setLevels = (newLevels: Set<LogLevel>) => setLevelsParam(Array.from(newLevels) as typeof levelsParam);
+
+	const [showStdout, setShowStdout] = useQueryState("stdout", parseAsBoolean.withDefault(true));
+	const [showStderr, setShowStderr] = useQueryState("stderr", parseAsBoolean.withDefault(true));
+
+	const [statusParam, setStatusParam] = useQueryState("status", statusParser.withDefault(["2xx", "3xx", "4xx", "5xx"]));
+	const statusFilter = useMemo(() => new Set(statusParam as StatusCategory[]), [statusParam]);
+	const setStatusFilter = (newStatus: Set<StatusCategory>) => setStatusParam(Array.from(newStatus) as typeof statusParam);
 
 	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false);

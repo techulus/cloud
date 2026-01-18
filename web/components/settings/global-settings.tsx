@@ -2,6 +2,7 @@
 
 import { useState, useReducer } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryState } from "nuqs";
 import { toast } from "sonner";
 import { Hammer, Server, Ban, Clock, HardDrive, Shield, Network, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,6 @@ type Props = {
 		smtpConfig: SmtpConfig | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
 	};
-	initialTab?: string;
 };
 
 type BackupStorageState = {
@@ -125,9 +125,9 @@ function createInitialBackupState(
 export function GlobalSettings({
 	servers,
 	initialSettings,
-	initialTab = "build",
 }: Props) {
 	const router = useRouter();
+	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
 	);
@@ -337,7 +337,7 @@ export function GlobalSettings({
 	}
 
 	return (
-		<Tabs defaultValue={initialTab}>
+		<Tabs value={tab} onValueChange={(value) => setTab(value)}>
 			<TabsList className="w-full justify-start overflow-x-auto">
 				<TabsTrigger value="build" className="px-4 shrink-0">
 					Build
