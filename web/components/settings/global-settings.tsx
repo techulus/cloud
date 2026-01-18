@@ -337,22 +337,22 @@ export function GlobalSettings({
 	return (
 		<Tabs defaultValue={initialTab}>
 			<TabsList className="w-full justify-start overflow-x-auto">
-				<TabsTrigger value="build" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="build" className="px-4 shrink-0">
 					Build
 				</TabsTrigger>
-				<TabsTrigger value="deployment" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="deployment" className="px-4 shrink-0">
 					Deployment
 				</TabsTrigger>
-				<TabsTrigger value="infrastructure" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
 				</TabsTrigger>
-				<TabsTrigger value="backup" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="backup" className="px-4 shrink-0">
 					Backup
 				</TabsTrigger>
-				<TabsTrigger value="email" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="email" className="px-4 shrink-0">
 					Email
 				</TabsTrigger>
-				<TabsTrigger value="github" className="px-4 py-2 shrink-0">
+				<TabsTrigger value="github" className="px-4 shrink-0">
 					GitHub
 				</TabsTrigger>
 			</TabsList>

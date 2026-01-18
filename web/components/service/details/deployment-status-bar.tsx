@@ -12,6 +12,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { FloatingBar } from "@/components/ui/floating-bar";
+import { Spinner } from "@/components/ui/spinner";
 import { deployService, abortRollout } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
 import type { ConfigChange } from "@/lib/service-config";
@@ -374,7 +375,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							disabled={isAborting}
 							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
 						>
-							{isAborting ? "..." : "Abort"}
+							{isAborting ? <Spinner /> : "Abort"}
 						</button>
 					)
 				}
@@ -408,7 +409,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 							disabled={isDeploying || totalReplicas === 0}
 							className="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
 						>
-							{isDeploying ? "..." : "Deploy"}
+							{isDeploying ? <Spinner /> : "Deploy"}
 						</button>
 					</div>
 				}

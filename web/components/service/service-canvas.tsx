@@ -118,8 +118,7 @@ function ServiceCard({
 				className={`
           group relative w-full
           p-3 rounded-xl border-2 ${colors.border} ${colors.bg}
-          hover:shadow-lg hover:scale-[1.02]
-          transition-all duration-200 ease-out
+          hover:shadow-lg transition-shadow duration-200
           cursor-pointer
         `}
 			>
