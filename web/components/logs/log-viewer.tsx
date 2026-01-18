@@ -614,10 +614,36 @@ export function LogViewer(props: LogViewerProps) {
 
 	const { data, isLoading } = useLogData(props, selectedServerId ?? undefined);
 	const recentLogs = (data?.logs || []) as unknown[];
-	const logs = useMemo(
-		() => [...olderLogs, ...recentLogs],
-		[olderLogs, recentLogs],
-	);
+	const logs = useMemo(() => {
+		const seenIds = new Set<string>();
+		const combined: unknown[] = [];
+
+		for (const log of olderLogs) {
+			const entry = log as { id?: string; timestamp?: string };
+			const id = entry.id || entry.timestamp || "";
+			if (!seenIds.has(id)) {
+				seenIds.add(id);
+				combined.push(log);
+			}
+		}
+
+		for (const log of recentLogs) {
+			const entry = log as { id?: string; timestamp?: string };
+			const id = entry.id || entry.timestamp || "";
+			if (!seenIds.has(id)) {
+				seenIds.add(id);
+				combined.push(log);
+			}
+		}
+
+		return combined.sort((a, b) => {
+			const aEntry = a as { id?: string; timestamp?: string };
+			const bEntry = b as { id?: string; timestamp?: string };
+			const timeCompare = (aEntry.timestamp || "").localeCompare(bEntry.timestamp || "");
+			if (timeCompare !== 0) return timeCompare;
+			return (aEntry.id || "").localeCompare(bEntry.id || "");
+		});
+	}, [olderLogs, recentLogs]);
 	const hasMore =
 		olderLogs.length === 0 ? data?.hasMore || false : olderHasMore;
 

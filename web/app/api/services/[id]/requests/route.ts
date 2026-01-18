@@ -35,7 +35,7 @@ export async function GET(
 		});
 
 		const logs = result.logs.map((log) => ({
-			id: `${log.service_id}-${log._time}`,
+			id: `${log._time}-${log.method}-${log.path}-${log.status}-${log.duration_ms}`,
 			method: log.method || "GET",
 			path: log.path || log._msg,
 			status: log.status || 0,
