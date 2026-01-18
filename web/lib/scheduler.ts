@@ -5,6 +5,7 @@ import {
 	servers,
 	services,
 	serviceReplicas,
+	workQueue,
 } from "@/db/schema";
 import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -220,4 +221,70 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 	}
 
 	console.log("[scheduler] finished checking scheduled deployments");
+}
+
+const STALE_ITEM_THRESHOLD_MS = 15 * 60 * 1000;
+const OLD_ITEM_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
+
+export async function cleanupStaleItems(): Promise<void> {
+	const staleThreshold = new Date(Date.now() - STALE_ITEM_THRESHOLD_MS);
+	const oldThreshold = new Date(Date.now() - OLD_ITEM_THRESHOLD_MS);
+
+	const staleRollouts = await db
+		.update(rollouts)
+		.set({
+			status: "failed",
+			currentStage: "timeout",
+			completedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(rollouts.status, "in_progress"),
+				lt(rollouts.createdAt, staleThreshold),
+			),
+		)
+		.returning({ id: rollouts.id });
+
+	if (staleRollouts.length > 0) {
+		console.log(
+			`[scheduler] cleaned up ${staleRollouts.length} stale rollouts`,
+		);
+	}
+
+	const staleWorkItems = await db
+		.update(workQueue)
+		.set({ status: "failed" })
+		.where(
+			and(
+				inArray(workQueue.status, ["pending", "processing"]),
+				lt(workQueue.createdAt, staleThreshold),
+			),
+		)
+		.returning({ id: workQueue.id });
+
+	if (staleWorkItems.length > 0) {
+		console.log(
+			`[scheduler] cleaned up ${staleWorkItems.length} stale work queue items`,
+		);
+	}
+
+	const deletedRollouts = await db
+		.delete(rollouts)
+		.where(lt(rollouts.createdAt, oldThreshold))
+		.returning({ id: rollouts.id });
+
+	if (deletedRollouts.length > 0) {
+		console.log(`[scheduler] deleted ${deletedRollouts.length} old rollouts`);
+	}
+
+	const deletedWorkItems = await db
+		.delete(workQueue)
+		.where(lt(workQueue.createdAt, oldThreshold))
+		.returning({ id: workQueue.id });
+
+	if (deletedWorkItems.length > 0) {
+		console.log(
+			`[scheduler] deleted ${deletedWorkItems.length} old work queue items`,
+		);
+	}
 }

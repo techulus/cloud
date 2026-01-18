@@ -96,9 +96,9 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 		};
 	}
 
-	const activeRollout = service.rollouts?.find(
-		(r) => r.status === "in_progress",
-	);
+	const latestRollout = service.rollouts?.[0];
+	const activeRollout =
+		latestRollout?.status === "in_progress" ? latestRollout : undefined;
 
 	if (activeRollout) {
 		let currentStage = activeRollout.currentStage || "deploying";
@@ -259,7 +259,10 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 
 		if (barState.mode === "ready" || barState.mode === "hidden") {
 			const latestRollout = service.rollouts?.[0];
-			if (!latestRollout || toastShownForRolloutRef.current === latestRollout.id) {
+			if (
+				!latestRollout ||
+				toastShownForRolloutRef.current === latestRollout.id
+			) {
 				return;
 			}
 

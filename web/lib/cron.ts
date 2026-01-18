@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
+	cleanupStaleItems,
 } from "@/lib/scheduler";
 import {
 	renewExpiringCertificates,
@@ -39,5 +40,10 @@ export function startCronEngine() {
 	new Cron("0 3 * * *", async () => {
 		console.log("[cron] cleaning up old backups");
 		await cleanupOldBackups();
+	});
+
+	new Cron("*/5 * * * *", async () => {
+		console.log("[cron] cleaning up stale items");
+		await cleanupStaleItems();
 	});
 }

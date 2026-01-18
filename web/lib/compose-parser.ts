@@ -29,7 +29,13 @@ const composeServiceSchema = z.object({
 	build: z.any().optional(),
 	ports: z.array(z.union([z.string(), z.number()])).optional(),
 	environment: z
-		.union([z.array(z.string()), z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))])
+		.union([
+			z.array(z.string()),
+			z.record(
+				z.string(),
+				z.union([z.string(), z.number(), z.boolean(), z.null()]),
+			),
+		])
 		.optional(),
 	volumes: z.array(z.string()).optional(),
 	healthcheck: composeHealthcheckSchema.optional(),
@@ -176,7 +182,11 @@ function parsePort(
 		};
 	}
 
-	if (Number.isNaN(containerPort) || containerPort < 1 || containerPort > 65535) {
+	if (
+		Number.isNaN(containerPort) ||
+		containerPort < 1 ||
+		containerPort > 65535
+	) {
 		return {
 			port: null,
 			error: `Service '${serviceName}' has invalid port format: '${str}'. Expected formats: '80', '8080:80', or '8080:80/tcp'`,
@@ -193,7 +203,11 @@ function parseVolume(
 	volumeString: string,
 	serviceName: string,
 	definedVolumes: Set<string>,
-): { volume: ParsedVolume | null; warning: string | null; error: string | null } {
+): {
+	volume: ParsedVolume | null;
+	warning: string | null;
+	error: string | null;
+} {
 	const parts = volumeString.split(":");
 
 	if (parts.length < 2) {
@@ -215,7 +229,11 @@ function parseVolume(
 		};
 	}
 
-	if (source.startsWith("/") || source.startsWith("./") || source.startsWith("../")) {
+	if (
+		source.startsWith("/") ||
+		source.startsWith("./") ||
+		source.startsWith("../")
+	) {
 		return {
 			volume: null,
 			warning: `Bind mount '${source}' ignored. Only named volumes are supported.`,
@@ -223,7 +241,10 @@ function parseVolume(
 		};
 	}
 
-	if (!definedVolumes.has(source) && !source.match(/^[a-zA-Z][a-zA-Z0-9_-]*$/)) {
+	if (
+		!definedVolumes.has(source) &&
+		!source.match(/^[a-zA-Z][a-zA-Z0-9_-]*$/)
+	) {
 		return {
 			volume: null,
 			warning: `Bind mount '${source}' ignored. Only named volumes are supported.`,
@@ -349,7 +370,11 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			success: false,
 			services: [],
 			warnings: [],
-			errors: [{ message: `Invalid Docker Compose file: ${formatZodErrors(validated.error)}` }],
+			errors: [
+				{
+					message: `Invalid Docker Compose file: ${formatZodErrors(validated.error)}`,
+				},
+			],
 		};
 	}
 
@@ -360,13 +385,17 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			success: false,
 			services: [],
 			warnings: [],
-			errors: [{ message: "Docker Compose file must contain a 'services' section" }],
+			errors: [
+				{ message: "Docker Compose file must contain a 'services' section" },
+			],
 		};
 	}
 
 	const definedVolumes = new Set(Object.keys(composeFile.volumes || {}));
 
-	for (const [serviceName, serviceConfig] of Object.entries(composeFile.services)) {
+	for (const [serviceName, serviceConfig] of Object.entries(
+		composeFile.services,
+	)) {
 		const isTemplateService =
 			!serviceConfig.command &&
 			!serviceConfig.entrypoint &&
@@ -409,7 +438,8 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			warnings.push({
 				service: serviceName,
 				field: "depends_on",
-				message: "Service dependencies ignored. Services will start independently.",
+				message:
+					"Service dependencies ignored. Services will start independently.",
 			});
 		}
 
@@ -417,11 +447,16 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			warnings.push({
 				service: serviceName,
 				field: "networks",
-				message: "Custom networks ignored. Services use internal mesh networking.",
+				message:
+					"Custom networks ignored. Services use internal mesh networking.",
 			});
 		}
 
-		if (serviceConfig.privileged || serviceConfig.cap_add || serviceConfig.cap_drop) {
+		if (
+			serviceConfig.privileged ||
+			serviceConfig.cap_add ||
+			serviceConfig.cap_drop
+		) {
 			warnings.push({
 				service: serviceName,
 				field: "privileged/cap_add/cap_drop",
@@ -441,7 +476,8 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			warnings.push({
 				service: serviceName,
 				field: "restart",
-				message: "Restart policy ignored. Platform manages restarts automatically.",
+				message:
+					"Restart policy ignored. Platform manages restarts automatically.",
 			});
 		}
 
@@ -451,7 +487,13 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			if (result.error) {
 				errors.push({ service: serviceName, message: result.error });
 			} else if (result.port) {
-				if (!parsedPorts.some((p) => p.port === result.port!.port && p.protocol === result.port!.protocol)) {
+				if (
+					!parsedPorts.some(
+						(p) =>
+							p.port === result.port!.port &&
+							p.protocol === result.port!.protocol,
+					)
+				) {
 					parsedPorts.push(result.port);
 				}
 			}
@@ -495,7 +537,10 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 		const resources = serviceConfig.deploy?.resources?.limits;
 		if (resources) {
 			if (resources.cpus) {
-				const cpuValue = typeof resources.cpus === "string" ? Number.parseFloat(resources.cpus) : resources.cpus;
+				const cpuValue =
+					typeof resources.cpus === "string"
+						? Number.parseFloat(resources.cpus)
+						: resources.cpus;
 				if (!Number.isNaN(cpuValue) && cpuValue >= 0.1 && cpuValue <= 64) {
 					cpuLimit = cpuValue;
 				}
@@ -512,7 +557,8 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 				warnings.push({
 					service: serviceName,
 					field: "deploy.resources.limits",
-					message: "Resource limits ignored. Both CPU and memory must be set together.",
+					message:
+						"Resource limits ignored. Both CPU and memory must be set together.",
 				});
 			}
 		}
@@ -528,7 +574,10 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			replicas,
 			resourceCpuLimit: cpuLimit,
 			resourceMemoryLimitMb: memoryLimit,
-			startCommand: parseStartCommand(serviceConfig.entrypoint, serviceConfig.command),
+			startCommand: parseStartCommand(
+				serviceConfig.entrypoint,
+				serviceConfig.command,
+			),
 		});
 	}
 

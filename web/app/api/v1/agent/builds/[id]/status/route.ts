@@ -136,7 +136,10 @@ export async function POST(
 			buildId,
 			error: update.error,
 		}).catch((error) => {
-			console.error("[build:status] failed to send build failure alert:", error);
+			console.error(
+				"[build:status] failed to send build failure alert:",
+				error,
+			);
 		});
 	}
 

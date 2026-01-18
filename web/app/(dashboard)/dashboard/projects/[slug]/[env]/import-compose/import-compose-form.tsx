@@ -26,7 +26,11 @@ import {
 	importCompose,
 	type ServiceOverride,
 } from "@/actions/compose";
-import type { ParsedService, ParseWarning, ParseError } from "@/lib/compose-parser";
+import type {
+	ParsedService,
+	ParseWarning,
+	ParseError,
+} from "@/lib/compose-parser";
 
 type Step = "upload" | "preview" | "configure" | "importing" | "complete";
 
@@ -54,7 +58,9 @@ export function ImportComposeForm({
 	const [parsedServices, setParsedServices] = useState<ParsedService[]>([]);
 	const [warnings, setWarnings] = useState<ParseWarning[]>([]);
 	const [errors, setErrors] = useState<ParseError[]>([]);
-	const [serviceConfigs, setServiceConfigs] = useState<Record<string, ServiceConfig>>({});
+	const [serviceConfigs, setServiceConfigs] = useState<
+		Record<string, ServiceConfig>
+	>({});
 	const [isLoading, setIsLoading] = useState(false);
 	const [importResult, setImportResult] = useState<{
 		created: Array<{ name: string; serviceId: string }>;
@@ -93,7 +99,11 @@ export function ImportComposeForm({
 
 			setStep("preview");
 		} catch (err) {
-			setErrors([{ message: err instanceof Error ? err.message : "Failed to parse YAML" }]);
+			setErrors([
+				{
+					message: err instanceof Error ? err.message : "Failed to parse YAML",
+				},
+			]);
 		} finally {
 			setIsLoading(false);
 		}
@@ -106,11 +116,16 @@ export function ImportComposeForm({
 		try {
 			const overrides: Record<string, ServiceOverride> = {};
 			for (const [originalName, config] of Object.entries(serviceConfigs)) {
-				const originalService = parsedServices.find((s) => s.name === originalName);
+				const originalService = parsedServices.find(
+					(s) => s.name === originalName,
+				);
 				if (originalService) {
 					overrides[originalName] = {
 						name: config.name !== originalName ? config.name : undefined,
-						stateful: config.stateful !== originalService.stateful ? config.stateful : undefined,
+						stateful:
+							config.stateful !== originalService.stateful
+								? config.stateful
+								: undefined,
 					};
 				}
 			}
@@ -134,21 +149,27 @@ export function ImportComposeForm({
 				setStep("preview");
 			}
 		} catch (err) {
-			setErrors([{ message: err instanceof Error ? err.message : "Import failed" }]);
+			setErrors([
+				{ message: err instanceof Error ? err.message : "Import failed" },
+			]);
 			setStep("preview");
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
-	const updateServiceConfig = (serviceName: string, updates: Partial<ServiceConfig>) => {
+	const updateServiceConfig = (
+		serviceName: string,
+		updates: Partial<ServiceConfig>,
+	) => {
 		setServiceConfigs((prev) => ({
 			...prev,
 			[serviceName]: { ...prev[serviceName], ...updates },
 		}));
 	};
 
-	const canProceedToConfigure = errors.length === 0 && parsedServices.length > 0;
+	const canProceedToConfigure =
+		errors.length === 0 && parsedServices.length > 0;
 
 	return (
 		<div className="container max-w-5xl mx-auto px-4 py-8">
@@ -168,11 +189,19 @@ export function ImportComposeForm({
 					{step === "complete" ? "Import Complete" : null}
 				</h1>
 				<p className="text-muted-foreground mt-1">
-					{step === "upload" ? "Upload or paste your Docker Compose file to import services." : null}
-					{step === "preview" ? "Review the services that will be created." : null}
-					{step === "configure" ? "Customize service names and settings before import." : null}
+					{step === "upload"
+						? "Upload or paste your Docker Compose file to import services."
+						: null}
+					{step === "preview"
+						? "Review the services that will be created."
+						: null}
+					{step === "configure"
+						? "Customize service names and settings before import."
+						: null}
 					{step === "importing" ? "Creating your services..." : null}
-					{step === "complete" ? "Your services have been created successfully." : null}
+					{step === "complete"
+						? "Your services have been created successfully."
+						: null}
 				</p>
 			</div>
 
@@ -193,7 +222,9 @@ export function ImportComposeForm({
 								<span className="w-full border-t" />
 							</div>
 							<div className="relative flex justify-center text-xs uppercase">
-								<span className="bg-background px-2 text-muted-foreground">Or paste YAML</span>
+								<span className="bg-background px-2 text-muted-foreground">
+									Or paste YAML
+								</span>
 							</div>
 						</div>
 
@@ -262,14 +293,18 @@ services:
 												</Badge>
 											) : null}
 											{service.replicas > 1 ? (
-												<Badge variant="outline">{service.replicas} replicas</Badge>
+												<Badge variant="outline">
+													{service.replicas} replicas
+												</Badge>
 											) : null}
 										</div>
 									</div>
 									<div className="text-sm text-muted-foreground space-y-1">
 										<div className="flex items-center gap-2">
 											<span className="text-foreground/70">Image:</span>
-											<code className="bg-muted px-1.5 py-0.5 rounded text-xs">{service.image}</code>
+											<code className="bg-muted px-1.5 py-0.5 rounded text-xs">
+												{service.image}
+											</code>
 										</div>
 										{service.environment.length > 0 ? (
 											<div className="flex items-center gap-2">
@@ -280,13 +315,17 @@ services:
 										{service.volumes.length > 0 ? (
 											<div className="flex items-center gap-2">
 												<span className="text-foreground/70">Volumes:</span>
-												<span>{service.volumes.map((v) => v.name).join(", ")}</span>
+												<span>
+													{service.volumes.map((v) => v.name).join(", ")}
+												</span>
 											</div>
 										) : null}
 										{service.startCommand ? (
 											<div className="flex items-center gap-2">
 												<span className="text-foreground/70">Command:</span>
-												<code className="bg-muted px-1.5 py-0.5 rounded text-xs">{service.startCommand}</code>
+												<code className="bg-muted px-1.5 py-0.5 rounded text-xs">
+													{service.startCommand}
+												</code>
 											</div>
 										) : null}
 									</div>
@@ -305,7 +344,8 @@ services:
 								<ul className="list-disc list-inside space-y-1 mt-1">
 									{warnings.map((w, i) => (
 										<li key={i}>
-											{w.service ? <strong>{w.service}:</strong> : null} {w.message}
+											{w.service ? <strong>{w.service}:</strong> : null}{" "}
+											{w.message}
 										</li>
 									))}
 								</ul>
@@ -321,7 +361,8 @@ services:
 								<ul className="list-disc list-inside space-y-1 mt-1">
 									{errors.map((e, i) => (
 										<li key={i}>
-											{e.service ? <strong>{e.service}:</strong> : null} {e.message}
+											{e.service ? <strong>{e.service}:</strong> : null}{" "}
+											{e.message}
 										</li>
 									))}
 								</ul>
@@ -330,7 +371,8 @@ services:
 					) : null}
 
 					<p className="text-sm text-muted-foreground">
-						Ports are not imported automatically. You can configure them after import.
+						Ports are not imported automatically. You can configure them after
+						import.
 					</p>
 
 					<div className="flex justify-between">
@@ -373,14 +415,18 @@ services:
 											id={`name-${service.name}`}
 											value={config.name}
 											onChange={(e) =>
-												updateServiceConfig(service.name, { name: e.target.value })
+												updateServiceConfig(service.name, {
+													name: e.target.value,
+												})
 											}
 										/>
 									</div>
 
 									<div className="flex items-center justify-between">
 										<div className="space-y-0.5">
-											<Label htmlFor={`stateful-${service.name}`}>Stateful</Label>
+											<Label htmlFor={`stateful-${service.name}`}>
+												Stateful
+											</Label>
 											<p className="text-sm text-muted-foreground">
 												{service.volumes.length > 0
 													? "Has volumes - recommended to keep enabled"
@@ -406,7 +452,8 @@ services:
 							Back
 						</Button>
 						<Button onClick={handleImport} size="lg">
-							Import {parsedServices.length} Service{parsedServices.length !== 1 ? "s" : ""}
+							Import {parsedServices.length} Service
+							{parsedServices.length !== 1 ? "s" : ""}
 						</Button>
 					</div>
 				</div>
@@ -446,12 +493,15 @@ services:
 					{importResult.warnings.length > 0 ? (
 						<Alert className="border-yellow-500/50 bg-yellow-500/10">
 							<AlertTriangle className="h-4 w-4 text-yellow-600" />
-							<AlertTitle className="text-yellow-700 dark:text-yellow-500">Notes</AlertTitle>
+							<AlertTitle className="text-yellow-700 dark:text-yellow-500">
+								Notes
+							</AlertTitle>
 							<AlertDescription className="text-yellow-700/80 dark:text-yellow-500/80">
 								<ul className="list-disc list-inside space-y-1 mt-1">
 									{importResult.warnings.map((w, i) => (
 										<li key={i}>
-											{w.service ? <strong>{w.service}:</strong> : null} {w.message}
+											{w.service ? <strong>{w.service}:</strong> : null}{" "}
+											{w.message}
 										</li>
 									))}
 								</ul>
@@ -460,7 +510,8 @@ services:
 					) : null}
 
 					<p className="text-sm text-muted-foreground text-center">
-						Services are created but not deployed. Review configuration and deploy when ready.
+						Services are created but not deployed. Review configuration and
+						deploy when ready.
 					</p>
 
 					<div className="flex justify-center">

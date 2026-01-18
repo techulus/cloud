@@ -4,7 +4,10 @@ import { useState, useMemo, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
 import { Gauge } from "lucide-react";
 import { updateServiceResourceLimits } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -95,8 +98,7 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 	}, [service, currentValues]);
 
 	const hasLimits =
-		service.resourceCpuLimit !== null ||
-		service.resourceMemoryLimitMb !== null;
+		service.resourceCpuLimit !== null || service.resourceMemoryLimitMb !== null;
 
 	const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		const preset = e.target.value;

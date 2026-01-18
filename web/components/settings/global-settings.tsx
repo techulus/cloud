@@ -4,7 +4,16 @@ import { useState, useReducer } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { toast } from "sonner";
-import { Hammer, Server, Ban, Clock, HardDrive, Shield, Network, Mail } from "lucide-react";
+import {
+	Hammer,
+	Server,
+	Ban,
+	Clock,
+	HardDrive,
+	Shield,
+	Network,
+	Mail,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -117,15 +126,13 @@ function createInitialBackupState(
 		endpoint: backupStorage?.endpoint ?? "",
 		accessKey: backupStorage?.accessKey ?? "",
 		secretKey: backupStorage?.secretKey ?? "",
-		retentionDays: backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
+		retentionDays:
+			backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
 		isSaving: false,
 	};
 }
 
-export function GlobalSettings({
-	servers,
-	initialSettings,
-}: Props) {
+export function GlobalSettings({ servers, initialSettings }: Props) {
 	const router = useRouter();
 	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
@@ -289,7 +296,9 @@ export function GlobalSettings({
 			router.refresh();
 		} catch (error) {
 			toast.error(
-				error instanceof Error ? error.message : "Failed to update proxy domain",
+				error instanceof Error
+					? error.message
+					: "Failed to update proxy domain",
 			);
 		} finally {
 			setIsSavingProxyDomain(false);

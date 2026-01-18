@@ -155,7 +155,10 @@ async function handleRolloutFailure(
 			serverId,
 			failedStage,
 		}).catch((error) => {
-			console.error("[rollout:failure] failed to send deployment failure alert:", error);
+			console.error(
+				"[rollout:failure] failed to send deployment failure alert:",
+				error,
+			);
 		});
 	}
 }

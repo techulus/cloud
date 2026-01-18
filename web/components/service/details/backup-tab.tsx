@@ -342,7 +342,8 @@ export const BackupTab = memo(function BackupTab({
 
 							{isDatabaseService && (
 								<p className="text-xs text-muted-foreground">
-									Database detected ({detectedDbType}). Scheduled backups will use native database tools for portable backups.
+									Database detected ({detectedDbType}). Scheduled backups will
+									use native database tools for portable backups.
 								</p>
 							)}
 						</div>

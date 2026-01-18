@@ -54,7 +54,17 @@ type State = {
 	isSavingAlerts: boolean;
 };
 
-type StringField = "fromName" | "fromAddress" | "host" | "port" | "customPort" | "username" | "password" | "timeout" | "alertEmails" | "testEmailAddress";
+type StringField =
+	| "fromName"
+	| "fromAddress"
+	| "host"
+	| "port"
+	| "customPort"
+	| "username"
+	| "password"
+	| "timeout"
+	| "alertEmails"
+	| "testEmailAddress";
 
 type AlertField = "serverOfflineAlert" | "buildFailure" | "deploymentFailure";
 
@@ -64,7 +74,11 @@ type Action =
 	| { type: "SET_ENCRYPTION"; value: SmtpEncryption }
 	| { type: "SET_PORT"; port: string; customPort: string }
 	| { type: "SET_ALERT"; field: AlertField; value: boolean }
-	| { type: "SET_LOADING"; field: "isSaving" | "isTesting" | "isSendingTest" | "isSavingAlerts"; value: boolean };
+	| {
+			type: "SET_LOADING";
+			field: "isSaving" | "isTesting" | "isSendingTest" | "isSavingAlerts";
+			value: boolean;
+	  };
 
 function createInitialState(props: Props): State {
 	const { initialConfig: config, initialAlertsConfig: alertsConfig } = props;
@@ -110,10 +124,16 @@ function reducer(state: State, action: Action): State {
 
 export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 	const router = useRouter();
-	const [state, dispatch] = useReducer(reducer, { initialConfig, initialAlertsConfig }, createInitialState);
+	const [state, dispatch] = useReducer(
+		reducer,
+		{ initialConfig, initialAlertsConfig },
+		createInitialState,
+	);
 
 	const isStandardPort = ["587", "465", "25"].includes(state.port);
-	const currentPort = parseInt(isStandardPort ? state.port : state.customPort, 10) || DEFAULT_SMTP_PORT;
+	const currentPort =
+		parseInt(isStandardPort ? state.port : state.customPort, 10) ||
+		DEFAULT_SMTP_PORT;
 	const currentTimeout = (parseInt(state.timeout, 10) || 10) * 1000;
 
 	const getConfig = (): SmtpConfig => ({
@@ -150,9 +170,7 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 			await testSmtpConnection(getConfig());
 			toast.success("Connection successful");
 		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Connection failed",
-			);
+			toast.error(error instanceof Error ? error.message : "Connection failed");
 		} finally {
 			dispatch({ type: "SET_LOADING", field: "isTesting", value: false });
 		}
@@ -184,7 +202,9 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 			router.refresh();
 		} catch (error) {
 			toast.error(
-				error instanceof Error ? error.message : "Failed to save alert settings",
+				error instanceof Error
+					? error.message
+					: "Failed to save alert settings",
 			);
 		} finally {
 			dispatch({ type: "SET_LOADING", field: "isSavingAlerts", value: false });
@@ -222,15 +242,22 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 	]);
 
 	const hasAlertsChanges = useMemo(() => {
-		const initialServerOfflineAlert = initialAlertsConfig?.serverOfflineAlert ?? true;
+		const initialServerOfflineAlert =
+			initialAlertsConfig?.serverOfflineAlert ?? true;
 		const initialBuildFailure = initialAlertsConfig?.buildFailure ?? true;
-		const initialDeploymentFailure = initialAlertsConfig?.deploymentFailure ?? true;
+		const initialDeploymentFailure =
+			initialAlertsConfig?.deploymentFailure ?? true;
 		return (
 			state.serverOfflineAlert !== initialServerOfflineAlert ||
 			state.buildFailure !== initialBuildFailure ||
 			state.deploymentFailure !== initialDeploymentFailure
 		);
-	}, [state.serverOfflineAlert, state.buildFailure, state.deploymentFailure, initialAlertsConfig]);
+	}, [
+		state.serverOfflineAlert,
+		state.buildFailure,
+		state.deploymentFailure,
+		initialAlertsConfig,
+	]);
 
 	const setString = useCallback(
 		(field: StringField) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,7 +306,9 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 
 						<div className="flex items-center justify-between">
 							<div className="space-y-0.5">
-								<Label htmlFor="server-offline-alert">Server Offline Alert</Label>
+								<Label htmlFor="server-offline-alert">
+									Server Offline Alert
+								</Label>
 								<p className="text-xs text-muted-foreground">
 									Receive an email when a server goes offline
 								</p>
@@ -287,7 +316,13 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							<Switch
 								id="server-offline-alert"
 								checked={state.serverOfflineAlert}
-								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "serverOfflineAlert", value })}
+								onCheckedChange={(value) =>
+									dispatch({
+										type: "SET_ALERT",
+										field: "serverOfflineAlert",
+										value,
+									})
+								}
 							/>
 						</div>
 
@@ -301,13 +336,17 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							<Switch
 								id="build-failure-alert"
 								checked={state.buildFailure}
-								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "buildFailure", value })}
+								onCheckedChange={(value) =>
+									dispatch({ type: "SET_ALERT", field: "buildFailure", value })
+								}
 							/>
 						</div>
 
 						<div className="flex items-center justify-between">
 							<div className="space-y-0.5">
-								<Label htmlFor="deployment-failure-alert">Deployment Failure Alert</Label>
+								<Label htmlFor="deployment-failure-alert">
+									Deployment Failure Alert
+								</Label>
 								<p className="text-xs text-muted-foreground">
 									Receive an email when a deployment fails
 								</p>
@@ -315,14 +354,24 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							<Switch
 								id="deployment-failure-alert"
 								checked={state.deploymentFailure}
-								onCheckedChange={(value) => dispatch({ type: "SET_ALERT", field: "deploymentFailure", value })}
+								onCheckedChange={(value) =>
+									dispatch({
+										type: "SET_ALERT",
+										field: "deploymentFailure",
+										value,
+									})
+								}
 							/>
 						</div>
 					</div>
 
 					{hasAlertsChanges && (
 						<div className="pt-3 border-t">
-							<Button onClick={handleSaveAlerts} disabled={state.isSavingAlerts} size="sm">
+							<Button
+								onClick={handleSaveAlerts}
+								disabled={state.isSavingAlerts}
+								size="sm"
+							>
 								{state.isSavingAlerts ? "Saving..." : "Save Alert Settings"}
 							</Button>
 						</div>
@@ -341,8 +390,8 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 				</Item>
 				<div className="p-4 space-y-4">
 					<p className="text-sm text-muted-foreground">
-						Configure SMTP settings to enable email notifications. These settings
-						will be used to send system emails.
+						Configure SMTP settings to enable email notifications. These
+						settings will be used to send system emails.
 					</p>
 
 					<div className="flex items-center justify-between">
@@ -355,7 +404,9 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 						<Switch
 							id="smtp-enabled"
 							checked={state.enabled}
-							onCheckedChange={(value) => dispatch({ type: "SET_ENABLED", value })}
+							onCheckedChange={(value) =>
+								dispatch({ type: "SET_ENABLED", value })
+							}
 						/>
 					</div>
 
@@ -400,9 +451,15 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 									onChange={(e) => handlePortChange(e.target.value)}
 									className="flex-1"
 								>
-									<NativeSelectOption value="587">587 (StartTLS)</NativeSelectOption>
-									<NativeSelectOption value="465">465 (TLS/SSL)</NativeSelectOption>
-									<NativeSelectOption value="25">25 (Unencrypted)</NativeSelectOption>
+									<NativeSelectOption value="587">
+										587 (StartTLS)
+									</NativeSelectOption>
+									<NativeSelectOption value="465">
+										465 (TLS/SSL)
+									</NativeSelectOption>
+									<NativeSelectOption value="25">
+										25 (Unencrypted)
+									</NativeSelectOption>
 									<NativeSelectOption value="custom">Custom</NativeSelectOption>
 								</NativeSelect>
 								{!isStandardPort && (
@@ -445,9 +502,16 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							<NativeSelect
 								id="smtp-encryption"
 								value={state.encryption}
-								onChange={(e) => dispatch({ type: "SET_ENCRYPTION", value: e.target.value as SmtpEncryption })}
+								onChange={(e) =>
+									dispatch({
+										type: "SET_ENCRYPTION",
+										value: e.target.value as SmtpEncryption,
+									})
+								}
 							>
-								<NativeSelectOption value="starttls">StartTLS</NativeSelectOption>
+								<NativeSelectOption value="starttls">
+									StartTLS
+								</NativeSelectOption>
 								<NativeSelectOption value="tls">TLS/SSL</NativeSelectOption>
 								<NativeSelectOption value="none">None</NativeSelectOption>
 							</NativeSelect>
@@ -494,7 +558,9 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 								variant="outline"
 								size="sm"
 								onClick={handleSendTestEmail}
-								disabled={state.isSendingTest || !state.host || !state.testEmailAddress}
+								disabled={
+									state.isSendingTest || !state.host || !state.testEmailAddress
+								}
 							>
 								<Send className="size-4 mr-2" />
 								{state.isSendingTest ? "Sending..." : "Send"}

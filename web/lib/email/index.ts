@@ -123,7 +123,9 @@ export async function sendServerOfflineAlert(
 
 	const details = [
 		{ label: "Server Name", value: options.serverName },
-		...(options.serverIp ? [{ label: "IP Address", value: options.serverIp }] : []),
+		...(options.serverIp
+			? [{ label: "IP Address", value: options.serverIp }]
+			: []),
 		{ label: "Detected At", value: formatDateTime(new Date()) },
 	];
 
@@ -171,7 +173,9 @@ export async function sendBuildFailureAlert(
 	}
 
 	const baseUrl = getAppBaseUrl();
-	const buildUrl = baseUrl ? `${baseUrl}/builds/${options.buildId}/logs` : undefined;
+	const buildUrl = baseUrl
+		? `${baseUrl}/builds/${options.buildId}/logs`
+		: undefined;
 
 	const details = [
 		{ label: "Service", value: result.serviceName },
@@ -231,7 +235,9 @@ export async function sendDeploymentFailureAlert(
 		{ label: "Service", value: result.serviceName },
 		{ label: "Project", value: result.projectName },
 		{ label: "Server", value: result.serverName },
-		...(options.failedStage ? [{ label: "Failed Stage", value: options.failedStage }] : []),
+		...(options.failedStage
+			? [{ label: "Failed Stage", value: options.failedStage }]
+			: []),
 	];
 
 	await sendAlert({

@@ -59,7 +59,11 @@ export default function ConfigurationPage() {
 
 			<PortsSection service={service} onUpdate={onUpdate} />
 
-			<TCPProxySection service={service} proxyDomain={proxyDomain} onUpdate={onUpdate} />
+			<TCPProxySection
+				service={service}
+				proxyDomain={proxyDomain}
+				onUpdate={onUpdate}
+			/>
 
 			<HealthCheckSection service={service} onUpdate={onUpdate} />
 

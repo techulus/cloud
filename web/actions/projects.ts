@@ -560,7 +560,9 @@ export async function updateServiceGithubRepo(
 		return { success: true };
 	} catch (error) {
 		if (error instanceof ZodError) {
-			throw new Error(getZodErrorMessage(error, "Invalid GitHub repository URL"));
+			throw new Error(
+				getZodErrorMessage(error, "Invalid GitHub repository URL"),
+			);
 		}
 		throw error;
 	}
@@ -984,7 +986,9 @@ const resourceLimitsSchema = z
 			const hasMem = data.memoryMb !== null;
 			return hasCpu === hasMem;
 		},
-		{ message: "Both CPU and memory must be set together, or both must be null" },
+		{
+			message: "Both CPU and memory must be set together, or both must be null",
+		},
 	);
 
 export async function updateServiceResourceLimits(
@@ -1335,7 +1339,9 @@ export async function addServiceVolume(
 		return { id, name: validatedName, containerPath: validatedPath };
 	} catch (error) {
 		if (error instanceof ZodError) {
-			throw new Error(getZodErrorMessage(error, "Invalid volume configuration"));
+			throw new Error(
+				getZodErrorMessage(error, "Invalid volume configuration"),
+			);
 		}
 		throw error;
 	}
@@ -1423,7 +1429,10 @@ export async function updateServiceReplicas(
 			throw new Error("Stateful services can only have exactly 1 replica");
 		}
 
-		await db.update(services).set({ replicas: validatedReplicas }).where(eq(services.id, serviceId));
+		await db
+			.update(services)
+			.set({ replicas: validatedReplicas })
+			.where(eq(services.id, serviceId));
 
 		return { success: true };
 	} catch (error) {

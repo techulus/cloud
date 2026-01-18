@@ -86,7 +86,8 @@ export async function GET(
 					.select()
 					.from(rollouts)
 					.where(eq(rollouts.serviceId, service.id))
-					.orderBy(desc(rollouts.createdAt)),
+					.orderBy(desc(rollouts.createdAt))
+					.limit(1),
 				db
 					.select()
 					.from(serviceVolumes)

@@ -7,7 +7,12 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import { parseAsArrayOf, parseAsBoolean, parseAsStringLiteral, useQueryState } from "nuqs";
+import {
+	parseAsArrayOf,
+	parseAsBoolean,
+	parseAsStringLiteral,
+	useQueryState,
+} from "nuqs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
@@ -581,30 +586,58 @@ function ServerLogRow({
 	);
 }
 
-const logLevelParser = parseAsArrayOf(parseAsStringLiteral(["error", "warn", "info", "debug"] as const));
-const statusParser = parseAsArrayOf(parseAsStringLiteral(["2xx", "3xx", "4xx", "5xx"] as const));
+const logLevelParser = parseAsArrayOf(
+	parseAsStringLiteral(["error", "warn", "info", "debug"] as const),
+);
+const statusParser = parseAsArrayOf(
+	parseAsStringLiteral(["2xx", "3xx", "4xx", "5xx"] as const),
+);
 
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
-	const scrollRestorationRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
+	const scrollRestorationRef = useRef<{
+		scrollTop: number;
+		scrollHeight: number;
+	} | null>(null);
 	const [search, setSearch] = useQueryState("q", { defaultValue: "" });
 	const [autoScroll, setAutoScroll] = useState(true);
 	const [selectedServerId, setSelectedServerId] = useQueryState("server");
 
-	const defaultLevels = props.variant === "server-logs"
-		? (["error", "warn", "info"] as const)
-		: (["error", "warn", "info", "debug"] as const);
+	const defaultLevels =
+		props.variant === "server-logs"
+			? (["error", "warn", "info"] as const)
+			: (["error", "warn", "info", "debug"] as const);
 
-	const [levelsParam, setLevelsParam] = useQueryState("levels", logLevelParser.withDefault([...defaultLevels]));
-	const levels = useMemo(() => new Set(levelsParam as LogLevel[]), [levelsParam]);
-	const setLevels = (newLevels: Set<LogLevel>) => setLevelsParam(Array.from(newLevels) as typeof levelsParam);
+	const [levelsParam, setLevelsParam] = useQueryState(
+		"levels",
+		logLevelParser.withDefault([...defaultLevels]),
+	);
+	const levels = useMemo(
+		() => new Set(levelsParam as LogLevel[]),
+		[levelsParam],
+	);
+	const setLevels = (newLevels: Set<LogLevel>) =>
+		setLevelsParam(Array.from(newLevels) as typeof levelsParam);
 
-	const [showStdout, setShowStdout] = useQueryState("stdout", parseAsBoolean.withDefault(true));
-	const [showStderr, setShowStderr] = useQueryState("stderr", parseAsBoolean.withDefault(true));
+	const [showStdout, setShowStdout] = useQueryState(
+		"stdout",
+		parseAsBoolean.withDefault(true),
+	);
+	const [showStderr, setShowStderr] = useQueryState(
+		"stderr",
+		parseAsBoolean.withDefault(true),
+	);
 
-	const [statusParam, setStatusParam] = useQueryState("status", statusParser.withDefault(["2xx", "3xx", "4xx", "5xx"]));
-	const statusFilter = useMemo(() => new Set(statusParam as StatusCategory[]), [statusParam]);
-	const setStatusFilter = (newStatus: Set<StatusCategory>) => setStatusParam(Array.from(newStatus) as typeof statusParam);
+	const [statusParam, setStatusParam] = useQueryState(
+		"status",
+		statusParser.withDefault(["2xx", "3xx", "4xx", "5xx"]),
+	);
+	const statusFilter = useMemo(
+		() => new Set(statusParam as StatusCategory[]),
+		[statusParam],
+	);
+	const setStatusFilter = (newStatus: Set<StatusCategory>) =>
+		setStatusParam(Array.from(newStatus) as typeof statusParam);
 
 	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -639,7 +672,9 @@ export function LogViewer(props: LogViewerProps) {
 		return combined.sort((a, b) => {
 			const aEntry = a as { id?: string; timestamp?: string };
 			const bEntry = b as { id?: string; timestamp?: string };
-			const timeCompare = (aEntry.timestamp || "").localeCompare(bEntry.timestamp || "");
+			const timeCompare = (aEntry.timestamp || "").localeCompare(
+				bEntry.timestamp || "",
+			);
 			if (timeCompare !== 0) return timeCompare;
 			return (aEntry.id || "").localeCompare(bEntry.id || "");
 		});
@@ -774,7 +809,8 @@ export function LogViewer(props: LogViewerProps) {
 
 		if (restoration && container) {
 			const scrollHeightAfter = container.scrollHeight;
-			container.scrollTop = restoration.scrollTop + (scrollHeightAfter - restoration.scrollHeight);
+			container.scrollTop =
+				restoration.scrollTop + (scrollHeightAfter - restoration.scrollHeight);
 			scrollRestorationRef.current = null;
 		} else if (autoScroll && container) {
 			container.scrollTop = container.scrollHeight;

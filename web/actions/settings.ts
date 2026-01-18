@@ -101,7 +101,9 @@ export async function testSmtpConnection(config: SmtpConfig) {
 		return { success: true };
 	} catch (error) {
 		throw new Error(
-			error instanceof Error ? error.message : "Failed to connect to SMTP server",
+			error instanceof Error
+				? error.message
+				: "Failed to connect to SMTP server",
 		);
 	}
 }
@@ -136,7 +138,9 @@ export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
 		return { success: true };
 	} catch (error) {
 		if (error instanceof ZodError) {
-			throw new Error(getZodErrorMessage(error, "Invalid email alerts configuration"));
+			throw new Error(
+				getZodErrorMessage(error, "Invalid email alerts configuration"),
+			);
 		}
 		throw error;
 	}

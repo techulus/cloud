@@ -281,7 +281,9 @@ export default function Page() {
 							<div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
 								<KeyRound className="h-6 w-6 text-primary" />
 							</div>
-							<h3 className="text-lg font-semibold mb-2">Environment Secrets</h3>
+							<h3 className="text-lg font-semibold mb-2">
+								Environment Secrets
+							</h3>
 							<p className="text-muted-foreground text-sm">
 								Inject secrets at runtime. Never bake credentials into your
 								images.

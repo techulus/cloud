@@ -69,9 +69,12 @@ export async function createBackup(
 		throw new Error("Deployment is missing container ID");
 	}
 
-	const backupType = backupTypeOverride ?? (detectDatabaseType(service.image) ? "database" : "volume");
+	const backupType =
+		backupTypeOverride ??
+		(detectDatabaseType(service.image) ? "database" : "volume");
 	const backupId = randomUUID();
-	const fileExtension = backupType === "database" ? getDbBackupExtension(service.image) : ".tar.gz";
+	const fileExtension =
+		backupType === "database" ? getDbBackupExtension(service.image) : ".tar.gz";
 	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}${fileExtension}`;
 
 	await db.insert(volumeBackups).values({
@@ -115,7 +118,6 @@ function getDbBackupExtension(image: string): string {
 	if (imageLower.includes("redis")) return ".rdb";
 	return ".backup";
 }
-
 
 export async function listBackups(serviceId: string) {
 	const backups = await db

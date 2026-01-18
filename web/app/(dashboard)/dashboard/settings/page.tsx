@@ -24,10 +24,7 @@ export default async function SettingsPage() {
 					</p>
 				</div>
 
-				<GlobalSettings
-					servers={servers}
-					initialSettings={settings}
-				/>
+				<GlobalSettings servers={servers} initialSettings={settings} />
 			</div>
 		</>
 	);

@@ -85,7 +85,9 @@ export async function issueCertificate(domain: string): Promise<{
 	const email = await getSetting<string>(SETTING_KEYS.ACME_EMAIL);
 
 	if (!email) {
-		throw new Error("ACME email is not configured. Please set it in Settings > Infrastructure.");
+		throw new Error(
+			"ACME email is not configured. Please set it in Settings > Infrastructure.",
+		);
 	}
 
 	const [privateKey, csr] = await acme.crypto.createCsr({

@@ -65,11 +65,15 @@ export function ServerList({
 }: {
 	initialServers: ServerWithResources[];
 }) {
-	const { data: servers } = useSWR<ServerWithResources[]>("/api/servers", fetcher, {
-		fallbackData: initialServers,
-		refreshInterval: 10000,
-		revalidateOnFocus: true,
-	});
+	const { data: servers } = useSWR<ServerWithResources[]>(
+		"/api/servers",
+		fetcher,
+		{
+			fallbackData: initialServers,
+			refreshInterval: 10000,
+			revalidateOnFocus: true,
+		},
+	);
 
 	return (
 		<div className="space-y-6">
@@ -119,8 +123,12 @@ export function ServerList({
 								<ItemDescription>
 									{formatResources(server) || formatOsArch(server) ? (
 										<>
-											{formatResources(server) && <span>{formatResources(server)}</span>}
-											{formatOsArch(server) && <span className="block">{formatOsArch(server)}</span>}
+											{formatResources(server) && (
+												<span>{formatResources(server)}</span>
+											)}
+											{formatOsArch(server) && (
+												<span className="block">{formatOsArch(server)}</span>
+											)}
 										</>
 									) : (
 										"Not registered"

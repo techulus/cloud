@@ -11,7 +11,10 @@ import { CreateServiceDialog } from "./create-service-dialog";
 import { Button } from "@/components/ui/button";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import { buttonVariants } from "@/components/ui/button";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
 import {
 	Empty,
 	EmptyContent,
@@ -281,7 +284,9 @@ export function ServiceCanvas({
 									environmentId={envId}
 									onSuccess={() => mutate()}
 								/>
-								<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+								<Link
+									href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+								>
 									<Button variant="outline">
 										<Upload className="h-4 w-4 mr-2" />
 										Compose
@@ -326,7 +331,9 @@ export function ServiceCanvas({
 									environmentId={envId}
 									onSuccess={() => mutate()}
 								/>
-								<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+								<Link
+									href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+								>
 									<Button variant="outline">
 										<Upload className="h-4 w-4 mr-2" />
 										Compose
@@ -350,7 +357,9 @@ export function ServiceCanvas({
 						projectSlug={projectSlug}
 					/>
 					<div className="flex gap-2">
-						<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+						<Link
+							href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+						>
 							<Button variant="outline" size="sm">
 								<Upload className="h-4 w-4 md:mr-2" />
 								<span className="hidden md:inline">Compose</span>
@@ -395,7 +404,9 @@ export function ServiceCanvas({
 					className="absolute top-4 left-4"
 				/>
 				<div className="absolute top-4 right-4 flex gap-2">
-					<Link href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}>
+					<Link
+						href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+					>
 						<Button variant="outline">
 							<Upload className="h-4 w-4 mr-2" />
 							Compose

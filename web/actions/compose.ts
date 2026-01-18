@@ -65,10 +65,15 @@ export async function importCompose(
 		.select({ name: services.name })
 		.from(services)
 		.where(
-			and(eq(services.projectId, projectId), eq(services.environmentId, environmentId)),
+			and(
+				eq(services.projectId, projectId),
+				eq(services.environmentId, environmentId),
+			),
 		);
 
-	const existingNames = new Set(existingServices.map((s) => s.name.toLowerCase()));
+	const existingNames = new Set(
+		existingServices.map((s) => s.name.toLowerCase()),
+	);
 
 	for (const service of parseResult.services) {
 		const overrideName = serviceOverrides[service.name]?.name;
@@ -135,7 +140,11 @@ export async function importCompose(
 			if (finalStateful && service.volumes.length > 0) {
 				for (const volume of service.volumes) {
 					try {
-						await addServiceVolume(result.id, volume.name, volume.containerPath);
+						await addServiceVolume(
+							result.id,
+							volume.name,
+							volume.containerPath,
+						);
 					} catch (e) {
 						warnings.push({
 							service: finalName,
@@ -154,7 +163,10 @@ export async function importCompose(
 				await updateServiceStartCommand(result.id, service.startCommand);
 			}
 
-			if (service.resourceCpuLimit !== null && service.resourceMemoryLimitMb !== null) {
+			if (
+				service.resourceCpuLimit !== null &&
+				service.resourceMemoryLimitMb !== null
+			) {
 				await updateServiceResourceLimits(result.id, {
 					cpuCores: service.resourceCpuLimit,
 					memoryMb: service.resourceMemoryLimitMb,
@@ -172,8 +184,7 @@ export async function importCompose(
 		for (const serviceId of createdServiceIds) {
 			try {
 				await db.delete(services).where(eq(services.id, serviceId));
-			} catch {
-			}
+			} catch {}
 		}
 
 		return {

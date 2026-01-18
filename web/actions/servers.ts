@@ -55,7 +55,10 @@ export async function approveServer(id: string) {
 export async function updateServerName(id: string, name: string) {
 	try {
 		const validatedName = nameSchema.parse(name);
-		await db.update(servers).set({ name: validatedName }).where(eq(servers.id, id));
+		await db
+			.update(servers)
+			.set({ name: validatedName })
+			.where(eq(servers.id, id));
 	} catch (error) {
 		if (error instanceof ZodError) {
 			throw new Error(getZodErrorMessage(error, "Invalid server name"));

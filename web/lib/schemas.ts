@@ -31,31 +31,31 @@ export const containerPathSchema = z
 	.string()
 	.min(1, "Container path is required")
 	.transform((val) => val.trim())
-	.refine((val) => val.startsWith("/"), "Container path must be an absolute path");
+	.refine(
+		(val) => val.startsWith("/"),
+		"Container path must be an absolute path",
+	);
 
 export const githubRepoUrlSchema = z
 	.string()
 	.transform((val) => val.trim())
 	.refine(
 		(val) => val.startsWith("https://github.com/"),
-		"Repository URL must be a GitHub URL (https://github.com/...)"
+		"Repository URL must be a GitHub URL (https://github.com/...)",
 	);
 
 export const cronScheduleSchema = z
 	.string()
 	.nullable()
-	.refine(
-		(val) => {
-			if (!val) return true;
-			try {
-				cronstrue.toString(val);
-				return true;
-			} catch {
-				return false;
-			}
-		},
-		"Invalid cron expression"
-	);
+	.refine((val) => {
+		if (!val) return true;
+		try {
+			cronstrue.toString(val);
+			return true;
+		} catch {
+			return false;
+		}
+	}, "Invalid cron expression");
 
 export const envVarKeySchema = z
 	.string()
