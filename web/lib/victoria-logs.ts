@@ -52,6 +52,7 @@ export async function queryLogsByService(
 	if (before) {
 		query += ` _time:<${before}`;
 	}
+	query += " | sort by (_time desc)";
 
 	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
 	url.searchParams.set("query", query);
@@ -88,6 +89,7 @@ export async function queryLogsByDeployment(
 	if (before) {
 		query += ` _time:<${before}`;
 	}
+	query += " | sort by (_time desc)";
 
 	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
 	url.searchParams.set("query", query);
