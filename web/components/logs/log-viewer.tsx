@@ -564,13 +564,13 @@ function ServerLogRow({
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
-				className="shrink-0 text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
 			<span
-				className={`shrink-0 px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${levelColors[entry.level] || levelColors.info}`}
+				className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${levelColors[entry.level] || levelColors.info}`}
 			>
 				{entry.level}
 			</span>
