@@ -144,6 +144,57 @@ export async function sendServerOfflineAlert(
 	});
 }
 
+type DeploymentMovedAlertOptions = {
+	serviceId: string;
+	reason: string;
+};
+
+export async function sendDeploymentMovedAlert(
+	options: DeploymentMovedAlertOptions,
+): Promise<void> {
+	const alertsConfig = await getEmailAlertsConfig();
+
+	if (alertsConfig?.deploymentMovedAlert === false) {
+		return;
+	}
+
+	const [result] = await db
+		.select({
+			serviceName: services.name,
+			projectName: projects.name,
+		})
+		.from(services)
+		.innerJoin(projects, eq(projects.id, services.projectId))
+		.where(eq(services.id, options.serviceId));
+
+	if (!result) {
+		return;
+	}
+
+	const baseUrl = getAppBaseUrl();
+	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
+
+	const details = [
+		{ label: "Service", value: result.serviceName },
+		{ label: "Project", value: result.projectName },
+		{ label: "Reason", value: options.reason },
+		{ label: "Moved At", value: formatDateTime(new Date()) },
+	];
+
+	await sendAlert({
+		subject: `Service "${result.serviceName}" automatically redeployed`,
+		template: Alert({
+			bannerText: "DEPLOYMENT MOVED",
+			heading: "Service Automatically Redeployed",
+			description: `The service "${result.serviceName}" in project "${result.projectName}" was automatically redeployed due to server failure.`,
+			details,
+			buttonText: dashboardUrl ? "View Dashboard" : undefined,
+			buttonUrl: dashboardUrl,
+			baseUrl,
+		}),
+	});
+}
+
 type BuildFailureAlertOptions = {
 	serviceId: string;
 	buildId: string;

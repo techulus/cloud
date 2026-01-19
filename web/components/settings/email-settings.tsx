@@ -1,30 +1,30 @@
 "use client";
 
-import { useReducer, useMemo, useCallback } from "react";
+import { Bell, Mail, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useReducer } from "react";
 import { toast } from "sonner";
-import { Mail, Send, Bell } from "lucide-react";
+import {
+	sendTestEmail,
+	testSmtpConnection,
+	updateEmailAlertsConfig,
+	updateSmtpConfig,
+} from "@/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import {
-	updateSmtpConfig,
-	testSmtpConnection,
-	sendTestEmail,
-	updateEmailAlertsConfig,
-} from "@/actions/settings";
+import { Switch } from "@/components/ui/switch";
 import {
 	DEFAULT_SMTP_PORT,
 	DEFAULT_SMTP_TIMEOUT,
+	type EmailAlertsConfig,
 	type SmtpConfig,
 	type SmtpEncryption,
-	type EmailAlertsConfig,
 } from "@/lib/settings-keys";
 
 type Props = {
@@ -48,6 +48,7 @@ type State = {
 	serverOfflineAlert: boolean;
 	buildFailure: boolean;
 	deploymentFailure: boolean;
+	deploymentMovedAlert: boolean;
 	isSaving: boolean;
 	isTesting: boolean;
 	isSendingTest: boolean;
@@ -66,7 +67,40 @@ type StringField =
 	| "alertEmails"
 	| "testEmailAddress";
 
-type AlertField = "serverOfflineAlert" | "buildFailure" | "deploymentFailure";
+type AlertField =
+	| "serverOfflineAlert"
+	| "buildFailure"
+	| "deploymentFailure"
+	| "deploymentMovedAlert";
+
+type AlertSetting = {
+	field: AlertField;
+	label: string;
+	description: string;
+};
+
+const ALERT_SETTINGS: AlertSetting[] = [
+	{
+		field: "serverOfflineAlert",
+		label: "Server Offline Alert",
+		description: "Receive an email when a server goes offline",
+	},
+	{
+		field: "buildFailure",
+		label: "Build Failure Alert",
+		description: "Receive an email when a build fails",
+	},
+	{
+		field: "deploymentFailure",
+		label: "Deployment Failure Alert",
+		description: "Receive an email when a deployment fails",
+	},
+	{
+		field: "deploymentMovedAlert",
+		label: "Deployment Moved Alert",
+		description: "Receive an email when a service is automatically redeployed",
+	},
+];
 
 type Action =
 	| { type: "SET_STRING"; field: StringField; value: string }
@@ -98,6 +132,7 @@ function createInitialState(props: Props): State {
 		serverOfflineAlert: alertsConfig?.serverOfflineAlert ?? true,
 		buildFailure: alertsConfig?.buildFailure ?? true,
 		deploymentFailure: alertsConfig?.deploymentFailure ?? true,
+		deploymentMovedAlert: alertsConfig?.deploymentMovedAlert ?? true,
 		isSaving: false,
 		isTesting: false,
 		isSendingTest: false,
@@ -197,6 +232,7 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 				serverOfflineAlert: state.serverOfflineAlert,
 				buildFailure: state.buildFailure,
 				deploymentFailure: state.deploymentFailure,
+				deploymentMovedAlert: state.deploymentMovedAlert,
 			});
 			toast.success("Alert settings saved");
 			router.refresh();
@@ -242,20 +278,15 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 	]);
 
 	const hasAlertsChanges = useMemo(() => {
-		const initialServerOfflineAlert =
-			initialAlertsConfig?.serverOfflineAlert ?? true;
-		const initialBuildFailure = initialAlertsConfig?.buildFailure ?? true;
-		const initialDeploymentFailure =
-			initialAlertsConfig?.deploymentFailure ?? true;
-		return (
-			state.serverOfflineAlert !== initialServerOfflineAlert ||
-			state.buildFailure !== initialBuildFailure ||
-			state.deploymentFailure !== initialDeploymentFailure
+		return ALERT_SETTINGS.some(
+			(setting) =>
+				state[setting.field] !== (initialAlertsConfig?.[setting.field] ?? true),
 		);
 	}, [
 		state.serverOfflineAlert,
 		state.buildFailure,
 		state.deploymentFailure,
+		state.deploymentMovedAlert,
 		initialAlertsConfig,
 	]);
 
@@ -304,65 +335,30 @@ export function EmailSettings({ initialConfig, initialAlertsConfig }: Props) {
 							Customise your notifications
 						</p>
 
-						<div className="flex items-center justify-between">
-							<div className="space-y-0.5">
-								<Label htmlFor="server-offline-alert">
-									Server Offline Alert
-								</Label>
-								<p className="text-xs text-muted-foreground">
-									Receive an email when a server goes offline
-								</p>
+						{ALERT_SETTINGS.map((setting) => (
+							<div
+								key={setting.field}
+								className="flex items-center justify-between"
+							>
+								<div className="space-y-0.5">
+									<Label htmlFor={setting.field}>{setting.label}</Label>
+									<p className="text-xs text-muted-foreground">
+										{setting.description}
+									</p>
+								</div>
+								<Switch
+									id={setting.field}
+									checked={state[setting.field]}
+									onCheckedChange={(value) =>
+										dispatch({
+											type: "SET_ALERT",
+											field: setting.field,
+											value,
+										})
+									}
+								/>
 							</div>
-							<Switch
-								id="server-offline-alert"
-								checked={state.serverOfflineAlert}
-								onCheckedChange={(value) =>
-									dispatch({
-										type: "SET_ALERT",
-										field: "serverOfflineAlert",
-										value,
-									})
-								}
-							/>
-						</div>
-
-						<div className="flex items-center justify-between">
-							<div className="space-y-0.5">
-								<Label htmlFor="build-failure-alert">Build Failure Alert</Label>
-								<p className="text-xs text-muted-foreground">
-									Receive an email when a build fails
-								</p>
-							</div>
-							<Switch
-								id="build-failure-alert"
-								checked={state.buildFailure}
-								onCheckedChange={(value) =>
-									dispatch({ type: "SET_ALERT", field: "buildFailure", value })
-								}
-							/>
-						</div>
-
-						<div className="flex items-center justify-between">
-							<div className="space-y-0.5">
-								<Label htmlFor="deployment-failure-alert">
-									Deployment Failure Alert
-								</Label>
-								<p className="text-xs text-muted-foreground">
-									Receive an email when a deployment fails
-								</p>
-							</div>
-							<Switch
-								id="deployment-failure-alert"
-								checked={state.deploymentFailure}
-								onCheckedChange={(value) =>
-									dispatch({
-										type: "SET_ALERT",
-										field: "deploymentFailure",
-										value,
-									})
-								}
-							/>
-						</div>
+						))}
 					</div>
 
 					{hasAlertsChanges && (

@@ -79,6 +79,7 @@ export const emailAlertsConfigSchema = z.object({
 	serverOfflineAlert: z.boolean(),
 	buildFailure: z.boolean(),
 	deploymentFailure: z.boolean(),
+	deploymentMovedAlert: z.boolean(),
 });
 
 export type EmailAlertsConfig = z.infer<typeof emailAlertsConfigSchema>;
