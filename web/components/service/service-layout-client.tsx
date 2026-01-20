@@ -152,7 +152,7 @@ export function ServiceLayoutClient({
 
 			<div
 				className={cn(
-					"px-4 py-2 pb-24 md:pb-2",
+					"px-4 py-2 pb-24",
 					isConstrainedTab && "container max-w-7xl mx-auto",
 				)}
 			>

@@ -45,17 +45,17 @@ const body = {
 const container = {
 	backgroundColor: "#ffffff",
 	margin: "0 auto",
-	padding: "20px 0 48px",
+	padding: "12px 0 32px",
 	marginBottom: "64px",
 	maxWidth: "600px",
 };
 
 const header = {
-	padding: "24px 48px 0",
+	padding: "16px 24px 0",
 };
 
 const content = {
-	padding: "24px 48px",
+	padding: "16px 24px",
 };
 
 const footer = {
