@@ -107,6 +107,70 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 	);
 }
 
+function EndpointsCard({
+	publicPorts,
+	internalHostname,
+	hasRunningDeployments,
+}: {
+	publicPorts: Array<{ id: string; domain: string | null }>;
+	internalHostname: string;
+	hasRunningDeployments: boolean;
+}) {
+	return (
+		<div className="w-full md:w-[320px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
+			<div className="px-2.5 py-2 border-b border-slate-200 dark:border-slate-700">
+				<h3 className="font-semibold text-sm text-foreground">Endpoints</h3>
+			</div>
+
+			{publicPorts.length > 0 && (
+				<div className="border-l-2 border-sky-500 mx-2.5 my-2 pl-2.5">
+					<div className="flex items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5 text-muted-foreground">
+							<Globe className="h-3 w-3" />
+							<span className="text-xs">Public domain</span>
+						</div>
+						<div className="flex items-center gap-1.5">
+							<span className="h-2 w-2 rounded-full bg-emerald-500" />
+							<span className="text-xs text-emerald-600 dark:text-emerald-400">Active</span>
+						</div>
+					</div>
+					<div className="mt-1 space-y-0.5">
+						{publicPorts.map((port) => (
+							<a
+								key={port.id}
+								href={`https://${port.domain}`}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="block text-xs text-foreground hover:text-sky-600 dark:hover:text-sky-400 transition-colors truncate"
+							>
+								{port.domain}
+							</a>
+						))}
+					</div>
+				</div>
+			)}
+
+			{hasRunningDeployments && (
+				<div className="border-l-2 border-slate-300 dark:border-slate-600 mx-2.5 my-2 pl-2.5">
+					<div className="flex items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5 text-muted-foreground">
+							<Lock className="h-3 w-3" />
+							<span className="text-xs">Internal</span>
+						</div>
+						<div className="flex items-center gap-1.5">
+							<span className="h-2 w-2 rounded-full bg-emerald-500" />
+							<span className="text-xs text-emerald-600 dark:text-emerald-400">Active</span>
+						</div>
+					</div>
+					<p className="mt-1 text-xs text-foreground truncate">
+						{internalHostname}
+					</p>
+				</div>
+			)}
+		</div>
+	);
+}
+
 function ServerBox({
 	serverName,
 	deployments,
@@ -125,7 +189,7 @@ function ServerBox({
 	return (
 		<div
 			className={`
-				w-full md:w-[280px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
+				w-full md:w-[320px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
 				bg-white/50 dark:bg-slate-900/50
 				backdrop-blur-sm
 				transition-all duration-300 ease-in-out
@@ -222,30 +286,11 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			<div className="flex flex-col items-center gap-4 py-4 pb-16 md:hidden">
 				{hasEndpoints && (
 					<>
-						<div className="flex flex-col gap-2 w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700">
-							{publicPorts.map((port) => (
-								<a
-									key={port.id}
-									href={`https://${port.domain}`}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
-								>
-									<Globe className="h-3 w-3 text-sky-500" />
-									<span className="text-sky-600 dark:text-sky-400">
-										{port.domain}
-									</span>
-								</a>
-							))}
-							{hasRunningDeployments && (
-								<div className="flex items-center gap-1.5 text-xs">
-									<Lock className="h-3 w-3 text-slate-500" />
-									<span className="text-slate-600 dark:text-slate-400">
-										{service.hostname || service.name}.internal
-									</span>
-								</div>
-							)}
-						</div>
+						<EndpointsCard
+							publicPorts={publicPorts}
+							internalHostname={`${service.hostname || service.name}.internal`}
+							hasRunningDeployments={hasRunningDeployments}
+						/>
 						<ArrowDown className="h-5 w-5 text-slate-400" />
 					</>
 				)}
@@ -267,30 +312,11 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 				<div className="flex flex-col items-center gap-4">
 					{hasEndpoints && (
 						<>
-							<div className="flex flex-col gap-2 justify-center px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700 transition-all duration-300">
-								{publicPorts.map((port) => (
-									<a
-										key={port.id}
-										href={`https://${port.domain}`}
-										target="_blank"
-										rel="noopener noreferrer"
-										className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity"
-									>
-										<Globe className="h-3 w-3 text-sky-500" />
-										<span className="text-sky-600 dark:text-sky-400">
-											{port.domain}
-										</span>
-									</a>
-								))}
-								{hasRunningDeployments && (
-									<div className="flex items-center gap-1.5 text-xs">
-										<Lock className="h-3 w-3 text-slate-500" />
-										<span className="text-slate-600 dark:text-slate-400">
-											{service.hostname || service.name}.internal
-										</span>
-									</div>
-								)}
-							</div>
+							<EndpointsCard
+								publicPorts={publicPorts}
+								internalHostname={`${service.hostname || service.name}.internal`}
+								hasRunningDeployments={hasRunningDeployments}
+							/>
 							<ArrowDown className="h-5 w-5 text-slate-400" />
 						</>
 					)}

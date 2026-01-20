@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { getSmtpConfig, getEmailAlertsConfig } from "@/db/queries";
 import { Alert } from "./templates/alert";
 import { db } from "@/db";
-import { services, projects, servers } from "@/db/schema";
+import { services, projects, servers, environments } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { formatDateTime } from "@/lib/date";
 
@@ -162,9 +162,12 @@ export async function sendDeploymentMovedAlert(
 		.select({
 			serviceName: services.name,
 			projectName: projects.name,
+			projectSlug: projects.slug,
+			envName: environments.name,
 		})
 		.from(services)
 		.innerJoin(projects, eq(projects.id, services.projectId))
+		.innerJoin(environments, eq(environments.id, services.environmentId))
 		.where(eq(services.id, options.serviceId));
 
 	if (!result) {
@@ -172,7 +175,9 @@ export async function sendDeploymentMovedAlert(
 	}
 
 	const baseUrl = getAppBaseUrl();
-	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
+	const serviceUrl = baseUrl
+		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}`
+		: undefined;
 
 	const details = [
 		{ label: "Service", value: result.serviceName },
@@ -188,8 +193,8 @@ export async function sendDeploymentMovedAlert(
 			heading: "Service Automatically Redeployed",
 			description: `The service "${result.serviceName}" in project "${result.projectName}" was automatically redeployed due to server failure.`,
 			details,
-			buttonText: dashboardUrl ? "View Dashboard" : undefined,
-			buttonUrl: dashboardUrl,
+			buttonText: serviceUrl ? "View Service" : undefined,
+			buttonUrl: serviceUrl,
 			baseUrl,
 		}),
 	});
@@ -214,9 +219,12 @@ export async function sendBuildFailureAlert(
 		.select({
 			serviceName: services.name,
 			projectName: projects.name,
+			projectSlug: projects.slug,
+			envName: environments.name,
 		})
 		.from(services)
 		.innerJoin(projects, eq(projects.id, services.projectId))
+		.innerJoin(environments, eq(environments.id, services.environmentId))
 		.where(eq(services.id, options.serviceId));
 
 	if (!result) {
@@ -225,7 +233,7 @@ export async function sendBuildFailureAlert(
 
 	const baseUrl = getAppBaseUrl();
 	const buildUrl = baseUrl
-		? `${baseUrl}/builds/${options.buildId}/logs`
+		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}/builds/${options.buildId}`
 		: undefined;
 
 	const details = [
@@ -268,10 +276,13 @@ export async function sendDeploymentFailureAlert(
 		.select({
 			serviceName: services.name,
 			projectName: projects.name,
+			projectSlug: projects.slug,
+			envName: environments.name,
 			serverName: servers.name,
 		})
 		.from(services)
 		.innerJoin(projects, eq(projects.id, services.projectId))
+		.innerJoin(environments, eq(environments.id, services.environmentId))
 		.innerJoin(servers, eq(servers.id, options.serverId))
 		.where(eq(services.id, options.serviceId));
 
@@ -280,7 +291,9 @@ export async function sendDeploymentFailureAlert(
 	}
 
 	const baseUrl = getAppBaseUrl();
-	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
+	const serviceUrl = baseUrl
+		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}`
+		: undefined;
 
 	const details = [
 		{ label: "Service", value: result.serviceName },
@@ -298,8 +311,8 @@ export async function sendDeploymentFailureAlert(
 			heading: "Deployment Failure Alert",
 			description: `The deployment for service "${result.serviceName}" in project "${result.projectName}" has failed on server "${result.serverName}".`,
 			details,
-			buttonText: dashboardUrl ? "View Dashboard" : undefined,
-			buttonUrl: dashboardUrl,
+			buttonText: serviceUrl ? "View Service" : undefined,
+			buttonUrl: serviceUrl,
 			baseUrl,
 		}),
 	});
