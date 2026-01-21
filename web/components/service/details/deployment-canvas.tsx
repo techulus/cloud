@@ -263,7 +263,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					<p className="text-muted-foreground mt-4">No deployments yet.</p>
 				</div>
 				<CanvasWrapper
-					height="70vh"
+					height="82vh"
 					isEmpty
 					className="hidden md:flex"
 					emptyContent={
@@ -301,34 +301,39 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 				))}
 			</div>
 
-			<div className="hidden md:flex items-center justify-center gap-6 py-4 min-h-[70vh]">
-				{hasEndpoints && (
-					<EndpointsCard
-						publicPorts={publicPorts}
-						internalHostname={`${service.hostname || service.name}.internal`}
-						hasRunningDeployments={hasRunningDeployments}
-					/>
-				)}
+			<CanvasWrapper
+				height="82vh"
+				className="hidden md:flex items-center justify-center"
+			>
+				<div className="flex items-center justify-center gap-6">
+					{hasEndpoints && (
+						<EndpointsCard
+							publicPorts={publicPorts}
+							internalHostname={`${service.hostname || service.name}.internal`}
+							hasRunningDeployments={hasRunningDeployments}
+						/>
+					)}
 
-				{hasEndpoints && (
-					<ArrowRight className="h-5 w-5 text-slate-400 shrink-0" />
-				)}
+					{hasEndpoints && (
+						<ArrowRight className="h-5 w-5 text-slate-400 shrink-0" />
+					)}
 
-				<div className="space-y-4">
-					{serverGroups.map((group) => (
-						<div
-							key={group.serverName}
-							className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-						>
-							<ServerBox
-								serverName={group.serverName}
-								deployments={group.deployments}
-								volumes={service.volumes}
-							/>
-						</div>
-					))}
+					<div className="space-y-4">
+						{serverGroups.map((group) => (
+							<div
+								key={group.serverName}
+								className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+							>
+								<ServerBox
+									serverName={group.serverName}
+									deployments={group.deployments}
+									volumes={service.volumes}
+								/>
+							</div>
+						))}
+					</div>
 				</div>
-			</div>
+			</CanvasWrapper>
 		</>
 	);
 }
