@@ -65,14 +65,14 @@ export function EditableText({
 					<button
 						type="button"
 						className={cn(
-							"outline-none hover:bg-muted p-1 px-2 rounded-md -mx-2 group flex items-center gap-1",
+							"outline-none hover:bg-muted p-1 px-2 rounded-md -mx-2 group flex items-center",
 							textClassName,
 						)}
 					/>
 				}
 			>
 				<span>{value}</span>
-				<Edit className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
+				<Edit className="h-4 w-0 group-hover:w-4 group-hover:ml-1 overflow-hidden transition-all" />
 			</DialogTrigger>
 
 			<DialogContent showCloseButton={false}>

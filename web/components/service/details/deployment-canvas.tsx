@@ -1,7 +1,7 @@
 "use client";
 
 import {
-	ArrowDown,
+	ArrowRight,
 	Box,
 	Globe,
 	HardDrive,
@@ -283,60 +283,52 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	return (
 		<>
-			<div className="flex flex-col items-center gap-4 py-4 pb-16 md:hidden">
+			<div className="flex flex-col gap-4 py-4 pb-16 md:hidden">
 				{hasEndpoints && (
-					<>
-						<EndpointsCard
-							publicPorts={publicPorts}
-							internalHostname={`${service.hostname || service.name}.internal`}
-							hasRunningDeployments={hasRunningDeployments}
-						/>
-						<ArrowDown className="h-5 w-5 text-slate-400" />
-					</>
+					<EndpointsCard
+						publicPorts={publicPorts}
+						internalHostname={`${service.hostname || service.name}.internal`}
+						hasRunningDeployments={hasRunningDeployments}
+					/>
 				)}
-				<div className="flex flex-col gap-4 w-full">
+				{serverGroups.map((group) => (
+					<ServerBox
+						key={group.serverName}
+						serverName={group.serverName}
+						deployments={group.deployments}
+						volumes={service.volumes}
+					/>
+				))}
+			</div>
+
+			<div className="hidden md:flex items-center justify-center gap-6 py-4 min-h-[70vh]">
+				{hasEndpoints && (
+					<EndpointsCard
+						publicPorts={publicPorts}
+						internalHostname={`${service.hostname || service.name}.internal`}
+						hasRunningDeployments={hasRunningDeployments}
+					/>
+				)}
+
+				{hasEndpoints && (
+					<ArrowRight className="h-5 w-5 text-slate-400 shrink-0" />
+				)}
+
+				<div className="space-y-4">
 					{serverGroups.map((group) => (
-						<ServerBox
+						<div
 							key={group.serverName}
-							serverName={group.serverName}
-							deployments={group.deployments}
-							volumes={service.volumes}
-						/>
+							className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+						>
+							<ServerBox
+								serverName={group.serverName}
+								deployments={group.deployments}
+								volumes={service.volumes}
+							/>
+						</div>
 					))}
 				</div>
 			</div>
-			<CanvasWrapper
-				height="auto"
-				className="hidden md:flex items-center justify-center min-h-[84vh]"
-			>
-				<div className="flex flex-col items-center gap-4">
-					{hasEndpoints && (
-						<>
-							<EndpointsCard
-								publicPorts={publicPorts}
-								internalHostname={`${service.hostname || service.name}.internal`}
-								hasRunningDeployments={hasRunningDeployments}
-							/>
-							<ArrowDown className="h-5 w-5 text-slate-400" />
-						</>
-					)}
-
-					<div className="flex flex-wrap gap-6 justify-center max-w-[900px]">
-						{serverGroups.map((group) => (
-							<div
-								key={group.serverName}
-								className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-							>
-								<ServerBox
-									serverName={group.serverName}
-									deployments={group.deployments}
-									volumes={service.volumes}
-								/>
-							</div>
-						))}
-					</div>
-				</div>
-			</CanvasWrapper>
 		</>
 	);
 }
