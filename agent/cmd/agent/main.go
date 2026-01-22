@@ -112,12 +112,12 @@ func main() {
 
 		log.Printf("Loaded config: serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 
-		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to setup local DNS: %v", err)
-		}
-
 		if err := container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
+		}
+
+		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		}
 	} else {
 		if token == "" {
@@ -186,18 +186,18 @@ func main() {
 
 		log.Println("WireGuard interface is up!")
 
-		log.Println("Setting up local DNS...")
-		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to setup local DNS: %v", err)
-		} else {
-			log.Println("Local DNS configured successfully")
-		}
-
 		log.Println("Ensuring container network exists...")
 		if err := container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to create container network: %v", err)
 		} else {
 			log.Println("Container network ready")
+		}
+
+		log.Println("Setting up local DNS...")
+		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+			log.Printf("Warning: Failed to setup local DNS: %v", err)
+		} else {
+			log.Println("Local DNS configured successfully")
 		}
 	}
 

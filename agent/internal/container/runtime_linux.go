@@ -506,5 +506,9 @@ func EnsureNetwork(subnetId int) error {
 		return fmt.Errorf("failed to create network: %s: %w", string(output), err)
 	}
 
+	// Podman only creates the bridge interface when a container uses the network.
+	// Run a throwaway container to force bridge creation so DNS can bind to the gateway IP.
+	exec.Command("podman", "run", "--rm", "--network", NetworkName, "busybox", "true").Run()
+
 	return nil
 }
