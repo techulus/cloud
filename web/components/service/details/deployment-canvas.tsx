@@ -118,12 +118,12 @@ function EndpointsCard({
 }) {
 	return (
 		<div className="w-full md:w-[320px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
-			<div className="px-2.5 py-2 border-b border-slate-200 dark:border-slate-700">
+			<div className="px-2.5 pt-2 pb-1">
 				<h3 className="font-semibold text-sm text-foreground">Endpoints</h3>
 			</div>
 
 			{publicPorts.length > 0 && (
-				<div className="border-l-2 border-sky-500 mx-2.5 my-2 pl-2.5">
+				<div className="border-l-2 border-sky-500 mx-2.5 mt-1 mb-2 pl-2.5">
 					<div className="flex items-center justify-between gap-2">
 						<div className="flex items-center gap-1.5 text-muted-foreground">
 							<Globe className="h-3 w-3" />
@@ -151,7 +151,7 @@ function EndpointsCard({
 			)}
 
 			{hasRunningDeployments && (
-				<div className="border-l-2 border-slate-300 dark:border-slate-600 mx-2.5 my-2 pl-2.5">
+				<div className="border-l-2 border-slate-300 dark:border-slate-600 mx-2.5 mt-1 mb-2 pl-2.5">
 					<div className="flex items-center justify-between gap-2">
 						<div className="flex items-center gap-1.5 text-muted-foreground">
 							<Lock className="h-3 w-3" />

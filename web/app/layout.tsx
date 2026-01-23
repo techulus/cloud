@@ -1,18 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans } from "next/font/google";
 import localFont from "next/font/local";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/core/theme-provider";
 import "./globals.css";
 
-const ibmPlexSans = IBM_Plex_Sans({
-	subsets: ["latin"],
-	weight: ["400", "500", "600", "700"],
-	variable: "--font-ibm-plex-sans",
+const inter = localFont({
+	src: "./fonts/Inter.woff2",
+	variable: "--font-inter",
 });
 
 const lilex = localFont({
-	src: "./fonts/Lilex/Lilex[wght].woff2",
+	src: "./fonts/Lilex.woff2",
 	variable: "--font-lilex",
 });
 
@@ -35,9 +33,7 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en" suppressHydrationWarning>
-			<body
-				className={`${ibmPlexSans.variable} ${lilex.variable} font-sans antialiased`}
-			>
+			<body className={`${inter.variable} ${lilex.variable} font-sans antialiased`}>
 				<ThemeProvider>
 					<NuqsAdapter>{children}</NuqsAdapter>
 				</ThemeProvider>

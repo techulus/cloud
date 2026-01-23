@@ -4,15 +4,61 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-	--color-background: var(--background);
-	--color-foreground: var(--foreground);
-	--font-sans:
-		var(--font-ibm-plex-sans), ui-sans-serif, system-ui, -apple-system,
-		BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+@theme {
+	--font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+	--font-sans--font-feature-settings: "cv11", "ss03";
 	--font-mono:
 		var(--font-lilex), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
 		monospace;
+
+	--text-7xl: 4.5rem;
+	--text-7xl--line-height: 1.11;
+	--text-7xl--letter-spacing: -0.04em;
+
+	--text-6xl: 3.75rem;
+	--text-6xl--line-height: 1.13;
+	--text-6xl--letter-spacing: -0.035em;
+
+	--text-5xl: 3rem;
+	--text-5xl--line-height: 1.21;
+	--text-5xl--letter-spacing: -0.025em;
+
+	--text-4xl: 2.25rem;
+	--text-4xl--line-height: 1.28;
+	--text-4xl--letter-spacing: -0.015em;
+
+	--text-3xl: 1.875rem;
+	--text-3xl--line-height: 1.33;
+	--text-3xl--letter-spacing: -0.01em;
+
+	--text-2xl: 1.5rem;
+	--text-2xl--line-height: 1.42;
+	--text-2xl--letter-spacing: -0.005em;
+
+	--text-xl: 1.25rem;
+	--text-xl--line-height: 1.5;
+	--text-xl--letter-spacing: 0em;
+
+	--text-lg: 1.125rem;
+	--text-lg--line-height: 1.56;
+	--text-lg--letter-spacing: 0em;
+
+	--text-base: 1rem;
+	--text-base--line-height: 1.625;
+	--text-base--letter-spacing: 0em;
+
+	--text-sm: 0.875rem;
+	--text-sm--line-height: 1.57;
+	--text-sm--letter-spacing: 0em;
+
+	--text-xs: 0.75rem;
+	--text-xs--line-height: 1.667;
+	--text-xs--letter-spacing: 0.01em;
+}
+
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -73,6 +119,14 @@
 	--shadow-opacity: var(--shadow-opacity);
 	--color-shadow-color: var(--shadow-color);
 	--color-destructive-foreground: var(--destructive-foreground);
+}
+
+@layer theme {
+	:root {
+		font-feature-settings:
+			"liga" 1,
+			"calt" 1;
+	}
 }
 
 :root {
