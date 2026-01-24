@@ -1,4 +1,9 @@
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
+const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
+
+function getQueryEndpoint(): string | undefined {
+	return VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
+}
 
 export type LogType = "container" | "http";
 
@@ -36,7 +41,8 @@ export async function queryLogsByService(
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
 	const { serviceId, limit, before, logType, serverId } = options;
 
-	if (!VICTORIA_LOGS_URL) {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
@@ -54,7 +60,7 @@ export async function queryLogsByService(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	const url = new URL(`${endpoint}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
@@ -81,7 +87,8 @@ export async function queryLogsByDeployment(
 	limit: number,
 	before?: string,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	if (!VICTORIA_LOGS_URL) {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
@@ -91,7 +98,7 @@ export async function queryLogsByDeployment(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	const url = new URL(`${endpoint}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
@@ -135,7 +142,8 @@ export async function queryLogsByServer(
 	limit: number = 500,
 	before?: string,
 ): Promise<{ logs: AgentLog[]; hasMore: boolean }> {
-	if (!VICTORIA_LOGS_URL) {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
@@ -145,7 +153,7 @@ export async function queryLogsByServer(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	const url = new URL(`${endpoint}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
@@ -171,13 +179,14 @@ export async function queryLogsByBuild(
 	buildId: string,
 	limit: number = 1000,
 ): Promise<{ logs: BuildLog[] }> {
-	if (!VICTORIA_LOGS_URL) {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
 	const query = `build_id:${buildId} log_type:build | sort by (_time)`;
 
-	const url = new URL(`${VICTORIA_LOGS_URL}/select/logsql/query`);
+	const url = new URL(`${endpoint}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit));
 
