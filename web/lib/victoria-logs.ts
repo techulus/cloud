@@ -1,8 +1,35 @@
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
 
-function getQueryEndpoint(): string | undefined {
-	return VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
+type EndpointConfig = {
+	url: string;
+	username?: string;
+	password?: string;
+};
+
+function parseEndpoint(endpoint: string): EndpointConfig {
+	const parsed = new URL(endpoint);
+	const username = parsed.username || undefined;
+	const password = parsed.password || undefined;
+	parsed.username = "";
+	parsed.password = "";
+	return { url: parsed.toString().replace(/\/$/, ""), username, password };
+}
+
+function getQueryEndpoint(): EndpointConfig | undefined {
+	const endpoint = VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
+	if (!endpoint) return undefined;
+	return parseEndpoint(endpoint);
+}
+
+function buildFetchOptions(config: EndpointConfig): RequestInit {
+	if (config.username) {
+		const credentials = Buffer.from(
+			`${config.username}:${config.password || ""}`,
+		).toString("base64");
+		return { headers: { Authorization: `Basic ${credentials}` } };
+	}
+	return {};
 }
 
 export type LogType = "container" | "http";
@@ -60,11 +87,11 @@ export async function queryLogsByService(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint}/select/logsql/query`);
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
-	const response = await fetch(url.toString());
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
 
 	if (!response.ok) {
 		throw new Error(
@@ -98,11 +125,11 @@ export async function queryLogsByDeployment(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint}/select/logsql/query`);
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
-	const response = await fetch(url.toString());
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
 
 	if (!response.ok) {
 		throw new Error(
@@ -153,11 +180,11 @@ export async function queryLogsByServer(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint}/select/logsql/query`);
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
-	const response = await fetch(url.toString());
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
 
 	if (!response.ok) {
 		throw new Error(
@@ -186,11 +213,11 @@ export async function queryLogsByBuild(
 
 	const query = `build_id:${buildId} log_type:build | sort by (_time)`;
 
-	const url = new URL(`${endpoint}/select/logsql/query`);
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit));
 
-	const response = await fetch(url.toString());
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
 
 	if (!response.ok) {
 		throw new Error(
