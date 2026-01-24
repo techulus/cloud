@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -13,16 +14,36 @@ import (
 type VictoriaLogsSender struct {
 	endpoint string
 	serverID string
+	username string
+	password string
 	client   *http.Client
 }
 
 func NewVictoriaLogsSender(endpoint, serverID string) *VictoriaLogsSender {
+	var username, password string
+	cleanEndpoint := endpoint
+
+	if parsedURL, err := url.Parse(endpoint); err == nil && parsedURL.User != nil {
+		username = parsedURL.User.Username()
+		password, _ = parsedURL.User.Password()
+		parsedURL.User = nil
+		cleanEndpoint = parsedURL.String()
+	}
+
 	return &VictoriaLogsSender{
-		endpoint: endpoint,
+		endpoint: cleanEndpoint,
 		serverID: serverID,
+		username: username,
+		password: password,
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+	}
+}
+
+func (v *VictoriaLogsSender) setAuthHeader(req *http.Request) {
+	if v.username != "" {
+		req.SetBasicAuth(v.username, v.password)
 	}
 }
 
@@ -71,6 +92,7 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	v.setAuthHeader(req)
 
 	start := time.Now()
 	resp, err := v.client.Do(req)
@@ -137,6 +159,7 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	v.setAuthHeader(req)
 
 	start := time.Now()
 	resp, err := v.client.Do(req)
@@ -211,6 +234,7 @@ func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string,
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	v.setAuthHeader(req)
 
 	resp, err := v.client.Do(req)
 	if err != nil {
@@ -254,6 +278,7 @@ func (v *VictoriaLogsSender) SendAgentLogs(logs []AgentLog) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	v.setAuthHeader(req)
 
 	resp, err := v.client.Do(req)
 	if err != nil {
