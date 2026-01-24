@@ -1,20 +1,28 @@
 "use client";
 
-import { useState, memo, type ClipboardEvent } from "react";
+import {
+	useState,
+	useEffect,
+	useCallback,
+	useRef,
+	memo,
+	type ClipboardEvent,
+} from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Key, Plus, X, Save } from "lucide-react";
+import { Key, Plus, X, Save, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { createSecretsBatch, deleteSecretsBatch } from "@/actions/secrets";
 import type { Secret, ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
+const KEY_REGEX = /^[A-Z_][A-Z0-9_]*$/;
+
 function parseEnvContent(content: string): { key: string; value: string }[] {
 	const lines = content.split("\n");
 	const results: { key: string; value: string }[] = [];
-	const keyRegex = /^[A-Z_][A-Z0-9_]*$/;
 
 	for (const line of lines) {
 		const trimmed = line.trim();
@@ -33,7 +41,7 @@ function parseEnvContent(content: string): { key: string; value: string }[] {
 			value = value.slice(1, -1);
 		}
 
-		if (keyRegex.test(key) && value) {
+		if (KEY_REGEX.test(key) && value) {
 			results.push({ key, value });
 		}
 	}
@@ -63,12 +71,68 @@ export const SecretsSection = memo(function SecretsSection({
 		{ key: string; value: string }[]
 	>([]);
 	const [pendingDeletes, setPendingDeletes] = useState<string[]>([]);
+	const [revealedSecrets, setRevealedSecrets] = useState<
+		Record<string, string>
+	>({});
+	const [revealingSecretId, setRevealingSecretId] = useState<string | null>(
+		null,
+	);
+	const revealedSecretsRef = useRef(revealedSecrets);
+	revealedSecretsRef.current = revealedSecrets;
+	const revealingSecretIdRef = useRef(revealingSecretId);
+	revealingSecretIdRef.current = revealingSecretId;
 
-	const keyRegex = /^[A-Z_][A-Z0-9_]*$/;
-	const isValidKey = newKey.trim() && keyRegex.test(newKey.trim());
+	const isValidKey = newKey.trim() && KEY_REGEX.test(newKey.trim());
 	const canAdd = isValidKey && newValue.trim();
 
 	const hasChanges = pendingVars.length > 0 || pendingDeletes.length > 0;
+
+	const handleReveal = useCallback(
+		async (secretId: string) => {
+			if (revealingSecretIdRef.current === secretId) return;
+
+			if (revealedSecretsRef.current[secretId]) {
+				setRevealedSecrets((prev) => {
+					const next = { ...prev };
+					delete next[secretId];
+					return next;
+				});
+				return;
+			}
+
+			setRevealingSecretId(secretId);
+			try {
+				const response = await fetch(
+					`/api/services/${service.id}/secrets/${secretId}/reveal`,
+					{ method: "POST" },
+				);
+				if (!response.ok) {
+					const data = await response.json().catch(() => ({}));
+					throw new Error(data.error || "Failed to reveal secret");
+				}
+				const data = await response.json();
+				setRevealedSecrets((prev) => ({ ...prev, [secretId]: data.value }));
+			} catch (err) {
+				toast.error(
+					err instanceof Error ? err.message : "Failed to reveal secret",
+				);
+			} finally {
+				setRevealingSecretId(null);
+			}
+		},
+		[service.id],
+	);
+
+	useEffect(() => {
+		const revealedIds = Object.keys(revealedSecrets);
+		if (revealedIds.length === 0) return;
+
+		const timeout = setTimeout(() => {
+			setRevealedSecrets({});
+		}, 30000);
+
+		return () => clearTimeout(timeout);
+	}, [revealedSecrets]);
 
 	const handlePaste = (e: ClipboardEvent<HTMLInputElement>) => {
 		const pasted = e.clipboardData.getData("text");
@@ -151,31 +215,50 @@ export const SecretsSection = memo(function SecretsSection({
 									key={secret.id}
 									className={`flex items-center justify-between px-3 py-2 rounded-md text-sm bg-muted ${isDeleting ? "opacity-50" : ""}`}
 								>
-									<div className="flex items-center gap-2">
+									<div className="flex items-center gap-2 min-w-0 flex-1">
 										<span
 											className={`font-mono font-medium ${isDeleting ? "line-through" : ""}`}
 										>
 											{secret.key}
 										</span>
-										<span className="text-muted-foreground">= ••••••••</span>
+										<span className="text-muted-foreground">=</span>
+										<span className="font-mono text-muted-foreground truncate">
+											{revealedSecrets[secret.id] ?? "••••••••"}
+										</span>
 									</div>
-									{isDeleting ? (
-										<button
-											type="button"
-											onClick={() => handleUndoDelete(secret.id)}
-											className="text-xs text-muted-foreground hover:text-foreground"
-										>
-											Undo
-										</button>
-									) : (
-										<button
-											type="button"
-											onClick={() => handleDelete(secret.id)}
-											className="text-muted-foreground hover:text-foreground"
-										>
-											<X className="h-4 w-4" />
-										</button>
-									)}
+									<div className="flex items-center gap-1">
+										{!isDeleting && (
+											<button
+												type="button"
+												onClick={() => handleReveal(secret.id)}
+												disabled={revealingSecretId === secret.id}
+												className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+											>
+												{revealedSecrets[secret.id] ? (
+													<EyeOff className="h-4 w-4" />
+												) : (
+													<Eye className="h-4 w-4" />
+												)}
+											</button>
+										)}
+										{isDeleting ? (
+											<button
+												type="button"
+												onClick={() => handleUndoDelete(secret.id)}
+												className="text-xs text-muted-foreground hover:text-foreground"
+											>
+												Undo
+											</button>
+										) : (
+											<button
+												type="button"
+												onClick={() => handleDelete(secret.id)}
+												className="text-muted-foreground hover:text-foreground"
+											>
+												<X className="h-4 w-4" />
+											</button>
+										)}
+									</div>
 								</div>
 							);
 						})}

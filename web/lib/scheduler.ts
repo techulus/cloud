@@ -13,10 +13,7 @@ import { CronExpressionParser } from "cron-parser";
 import { calculateSpreadPlacement } from "@/lib/placement";
 import { deployService } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
-import {
-	sendServerOfflineAlert,
-	sendDeploymentMovedAlert,
-} from "@/lib/email";
+import { sendServerOfflineAlert, sendDeploymentMovedAlert } from "@/lib/email";
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 

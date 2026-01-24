@@ -33,7 +33,9 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en" suppressHydrationWarning>
-			<body className={`${inter.variable} ${lilex.variable} font-sans antialiased`}>
+			<body
+				className={`${inter.variable} ${lilex.variable} font-sans antialiased`}
+			>
 				<ThemeProvider>
 					<NuqsAdapter>{children}</NuqsAdapter>
 				</ThemeProvider>

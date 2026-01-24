@@ -131,7 +131,9 @@ function EndpointsCard({
 						</div>
 						<div className="flex items-center gap-1.5">
 							<span className="h-2 w-2 rounded-full bg-emerald-500" />
-							<span className="text-xs text-emerald-600 dark:text-emerald-400">Active</span>
+							<span className="text-xs text-emerald-600 dark:text-emerald-400">
+								Active
+							</span>
 						</div>
 					</div>
 					<div className="mt-1 space-y-0.5">
@@ -159,7 +161,9 @@ function EndpointsCard({
 						</div>
 						<div className="flex items-center gap-1.5">
 							<span className="h-2 w-2 rounded-full bg-emerald-500" />
-							<span className="text-xs text-emerald-600 dark:text-emerald-400">Active</span>
+							<span className="text-xs text-emerald-600 dark:text-emerald-400">
+								Active
+							</span>
 						</div>
 					</div>
 					<p className="mt-1 text-xs text-foreground truncate">
