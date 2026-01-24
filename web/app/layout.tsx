@@ -7,6 +7,7 @@ import "./globals.css";
 const inter = localFont({
 	src: "./fonts/Inter.woff2",
 	variable: "--font-inter",
+	weight: "100 900",
 });
 
 const lilex = localFont({
