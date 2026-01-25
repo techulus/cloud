@@ -428,29 +428,34 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, volumeName)
 	log.Printf("[restore_volume] restoring volume %s to %s", volumeName, volumePath)
 
-	if containerID == "" {
-		return fmt.Errorf("containerId is required for restore operation")
-	}
-
-	running, err := container.IsContainerRunning(containerID)
-	if err != nil {
-		return fmt.Errorf("failed to check container status: %w", err)
-	}
-
-	if running {
-		log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
-		if err := container.Stop(containerID); err != nil {
-			return fmt.Errorf("failed to stop container: %w", err)
+	reportFailure := func(err error) error {
+		if reportErr := a.Client.ReportRestoreComplete(backupID, false, err.Error()); reportErr != nil {
+			log.Printf("[restore_volume] warning: failed to report restore failure: %v", reportErr)
 		}
+		return err
+	}
 
-		defer func() {
-			log.Printf("[restore_volume] starting container %s after restore", Truncate(containerID, 12))
-			if err := container.Start(containerID); err != nil {
-				log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
+	if containerID != "" {
+		running, err := container.IsContainerRunning(containerID)
+		if err != nil {
+			log.Printf("[restore_volume] failed to check container status: %v, proceeding without stop", err)
+		} else if running {
+			log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
+			if err := container.Stop(containerID); err != nil {
+				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
 			}
-		}()
+
+			defer func() {
+				log.Printf("[restore_volume] starting container %s after restore", Truncate(containerID, 12))
+				if err := container.Start(containerID); err != nil {
+					log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
+				}
+			}()
+		} else {
+			log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
+		}
 	} else {
-		log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
+		log.Printf("[restore_volume] no containerID provided, restoring directly to volume path")
 	}
 
 	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", backupID))
@@ -458,37 +463,41 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 
 	s3Client, err := createS3Client(storageConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create S3 client: %w", err)
+		return reportFailure(fmt.Errorf("failed to create S3 client: %w", err))
 	}
 
 	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, tarPath); err != nil {
-		return fmt.Errorf("failed to download from S3: %w", err)
+		return reportFailure(fmt.Errorf("failed to download from S3: %w", err))
 	}
 
 	log.Printf("[restore_volume] downloaded from S3: %s/%s", storageConfig.Bucket, storagePath)
 
 	checksum, err := calculateChecksum(tarPath)
 	if err != nil {
-		return fmt.Errorf("failed to calculate checksum: %w", err)
+		return reportFailure(fmt.Errorf("failed to calculate checksum: %w", err))
 	}
 
 	if checksum != expectedChecksum {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum)
+		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
 	}
 
 	if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove existing volume: %w", err)
+		return reportFailure(fmt.Errorf("failed to remove existing volume: %w", err))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(volumePath), 0755); err != nil {
-		return fmt.Errorf("failed to create volume parent directory: %w", err)
+		return reportFailure(fmt.Errorf("failed to create volume parent directory: %w", err))
 	}
 
 	if err := extractTarGz(tarPath, volumePath); err != nil {
-		return fmt.Errorf("failed to extract archive: %w", err)
+		return reportFailure(fmt.Errorf("failed to extract archive: %w", err))
 	}
 
 	log.Printf("[restore_volume] restored volume %s successfully", volumeName)
+
+	if err := a.Client.ReportRestoreComplete(backupID, true, ""); err != nil {
+		log.Printf("[restore_volume] warning: failed to report restore complete: %v", err)
+	}
 
 	return nil
 }
@@ -501,16 +510,27 @@ func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, service
 
 	log.Printf("[restore_database] detected database type: %s for image %s", dbType, serviceImage)
 
+	reportFailure := func(err error) error {
+		if reportErr := a.Client.ReportRestoreComplete(backupID, false, err.Error()); reportErr != nil {
+			log.Printf("[restore_database] warning: failed to report restore failure: %v", reportErr)
+		}
+		return err
+	}
+
+	if dbType == "redis" && containerID == "" {
+		return a.processRedisRestoreToVolume(backupID, serviceID, storagePath, expectedChecksum, storageConfig)
+	}
+
 	if containerID == "" {
-		return fmt.Errorf("containerId is required for database restore")
+		return reportFailure(fmt.Errorf("containerId is required for %s database restore", dbType))
 	}
 
 	running, err := container.IsContainerRunning(containerID)
 	if err != nil {
-		return fmt.Errorf("failed to check container status: %w", err)
+		return reportFailure(fmt.Errorf("failed to check container status: %w", err))
 	}
 	if !running {
-		return fmt.Errorf("container %s is not running", containerID)
+		return reportFailure(fmt.Errorf("container %s is not running", containerID))
 	}
 
 	restorePath := filepath.Join(os.TempDir(), fmt.Sprintf("dbrestore-%s%s", backupID, getBackupFileExtension(dbType)))
@@ -518,33 +538,33 @@ func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, service
 
 	s3Client, err := createS3Client(storageConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create S3 client: %w", err)
+		return reportFailure(fmt.Errorf("failed to create S3 client: %w", err))
 	}
 
 	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, restorePath); err != nil {
-		return fmt.Errorf("failed to download from S3: %w", err)
+		return reportFailure(fmt.Errorf("failed to download from S3: %w", err))
 	}
 
 	log.Printf("[restore_database] downloaded from S3: %s/%s", storageConfig.Bucket, storagePath)
 
 	checksum, err := calculateChecksum(restorePath)
 	if err != nil {
-		return fmt.Errorf("failed to calculate checksum: %w", err)
+		return reportFailure(fmt.Errorf("failed to calculate checksum: %w", err))
 	}
 
 	if checksum != expectedChecksum {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum)
+		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
 	}
 
 	if dbType == "redis" {
-		return a.processRedisRestore(containerID, restorePath)
+		return a.processRedisRestore(backupID, containerID, restorePath)
 	}
 
 	log.Printf("[restore_database] copying backup file to container %s", Truncate(containerID, 12))
 
 	containerRestorePath := fmt.Sprintf("/tmp/restore%s", getBackupFileExtension(dbType))
 	if err := copyFileToContainer(containerID, restorePath, containerRestorePath); err != nil {
-		return fmt.Errorf("failed to copy backup to container: %w", err)
+		return reportFailure(fmt.Errorf("failed to copy backup to container: %w", err))
 	}
 
 	defer container.Exec(containerID, []string{"rm", "-f", containerRestorePath})
@@ -562,7 +582,7 @@ func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, service
 	case "mongodb":
 		restoreCmd = []string{"sh", "-c", fmt.Sprintf("mongorestore --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --archive=%s --gzip", containerRestorePath)}
 	default:
-		return fmt.Errorf("unsupported database type for restore: %s", dbType)
+		return reportFailure(fmt.Errorf("unsupported database type for restore: %s", dbType))
 	}
 
 	output, err := container.Exec(containerID, restoreCmd)
@@ -570,42 +590,128 @@ func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, service
 		outputStr := string(output)
 		if isAuthError(outputStr) {
 			if errMsg, ok := credentialErrors[dbType]; ok {
-				return fmt.Errorf("%s\n\nOriginal error: %s", errMsg, outputStr)
+				return reportFailure(fmt.Errorf("%s\n\nOriginal error: %s", errMsg, outputStr))
 			}
 		}
-		return fmt.Errorf("database restore failed: %s: %w", outputStr, err)
+		return reportFailure(fmt.Errorf("database restore failed: %s: %w", outputStr, err))
 	}
 
 	log.Printf("[restore_database] restored database successfully")
+
+	if err := a.Client.ReportRestoreComplete(backupID, true, ""); err != nil {
+		log.Printf("[restore_database] warning: failed to report restore complete: %v", err)
+	}
+
 	return nil
 }
 
-func (a *Agent) processRedisRestore(containerID, restorePath string) error {
+func (a *Agent) processRedisRestore(backupID, containerID, restorePath string) error {
 	log.Printf("[restore_database] restoring Redis from %s", restorePath)
+
+	reportFailure := func(err error) error {
+		if reportErr := a.Client.ReportRestoreComplete(backupID, false, err.Error()); reportErr != nil {
+			log.Printf("[restore_database] warning: failed to report restore failure: %v", reportErr)
+		}
+		return err
+	}
 
 	rdbPath, err := getRedisRDBPath(containerID)
 	if err != nil {
-		return fmt.Errorf("failed to get Redis RDB path: %w", err)
+		return reportFailure(fmt.Errorf("failed to get Redis RDB path: %w", err))
 	}
 
 	log.Printf("[restore_database] stopping Redis container %s", Truncate(containerID, 12))
 	if err := container.Stop(containerID); err != nil {
-		return fmt.Errorf("failed to stop container for restore: %w", err)
+		return reportFailure(fmt.Errorf("failed to stop container for restore: %w", err))
 	}
 
 	log.Printf("[restore_database] copying RDB file to %s", rdbPath)
 	if err := copyFileToContainer(containerID, restorePath, rdbPath); err != nil {
 		container.Start(containerID)
-		return fmt.Errorf("failed to copy RDB to container: %w", err)
+		return reportFailure(fmt.Errorf("failed to copy RDB to container: %w", err))
 	}
 
 	log.Printf("[restore_database] starting Redis container %s", Truncate(containerID, 12))
 	if err := container.Start(containerID); err != nil {
-		return fmt.Errorf("failed to start container after restore: %w", err)
+		return reportFailure(fmt.Errorf("failed to start container after restore: %w", err))
 	}
 
 	log.Printf("[restore_database] restored Redis successfully")
+
+	if err := a.Client.ReportRestoreComplete(backupID, true, ""); err != nil {
+		log.Printf("[restore_database] warning: failed to report restore complete: %v", err)
+	}
+
 	return nil
+}
+
+func (a *Agent) processRedisRestoreToVolume(backupID, serviceID, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
+	log.Printf("[restore_database] restoring Redis directly to volume path (no container)")
+
+	reportFailure := func(err error) error {
+		if reportErr := a.Client.ReportRestoreComplete(backupID, false, err.Error()); reportErr != nil {
+			log.Printf("[restore_database] warning: failed to report restore failure: %v", reportErr)
+		}
+		return err
+	}
+
+	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, "data")
+	rdbPath := filepath.Join(volumePath, "dump.rdb")
+
+	restorePath := filepath.Join(os.TempDir(), fmt.Sprintf("redis-restore-%s.rdb", serviceID))
+	defer os.Remove(restorePath)
+
+	s3Client, err := createS3Client(storageConfig)
+	if err != nil {
+		return reportFailure(fmt.Errorf("failed to create S3 client: %w", err))
+	}
+
+	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, restorePath); err != nil {
+		return reportFailure(fmt.Errorf("failed to download from S3: %w", err))
+	}
+
+	checksum, err := calculateChecksum(restorePath)
+	if err != nil {
+		return reportFailure(fmt.Errorf("failed to calculate checksum: %w", err))
+	}
+	if checksum != expectedChecksum {
+		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
+	}
+
+	if err := os.MkdirAll(volumePath, 0755); err != nil {
+		return reportFailure(fmt.Errorf("failed to create volume directory: %w", err))
+	}
+
+	if err := copyFile(restorePath, rdbPath); err != nil {
+		return reportFailure(fmt.Errorf("failed to copy RDB file: %w", err))
+	}
+
+	log.Printf("[restore_database] restored Redis RDB to %s", rdbPath)
+
+	if err := a.Client.ReportRestoreComplete(backupID, true, ""); err != nil {
+		log.Printf("[restore_database] warning: failed to report restore complete: %v", err)
+	}
+
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }
 
 func copyFileToContainer(containerID, srcPath, destPath string) error {

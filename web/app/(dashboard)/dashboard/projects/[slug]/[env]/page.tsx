@@ -1,7 +1,11 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { ServiceCanvas } from "@/components/service/service-canvas";
-import { getProjectBySlug, getEnvironmentByName } from "@/db/queries";
+import {
+	getProjectBySlug,
+	getEnvironmentByName,
+	getGlobalSettings,
+} from "@/db/queries";
 
 export default async function ProjectEnvironmentPage({
 	params,
@@ -15,7 +19,10 @@ export default async function ProjectEnvironmentPage({
 		notFound();
 	}
 
-	const environment = await getEnvironmentByName(project.id, envName);
+	const [environment, globalSettings] = await Promise.all([
+		getEnvironmentByName(project.id, envName),
+		getGlobalSettings(),
+	]);
 
 	if (!environment) {
 		notFound();
@@ -38,6 +45,7 @@ export default async function ProjectEnvironmentPage({
 					projectSlug={slug}
 					envId={environment.id}
 					envName={environment.name}
+					proxyDomain={globalSettings.proxyDomain}
 				/>
 			</div>
 		</>

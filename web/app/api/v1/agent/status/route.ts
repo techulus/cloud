@@ -10,6 +10,7 @@ import {
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { sendDeploymentFailureAlert } from "@/lib/email";
+import { continueMigrationAfterDeploy } from "@/actions/migrations";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -315,8 +316,22 @@ export async function POST(request: NextRequest) {
 					containerId: container.containerId,
 				};
 
-				if (!hasHealthCheck && deployment.rolloutId) {
-					await checkRolloutProgress(deployment.rolloutId);
+				if (!hasHealthCheck) {
+					if (deployment.rolloutId) {
+						await checkRolloutProgress(deployment.rolloutId);
+					}
+
+					if (service?.migrationStatus === "deploying_target") {
+						console.log(
+							`[migration] stuck deployment ${deployment.id} recovered and healthy, triggering restore`,
+						);
+						continueMigrationAfterDeploy(deployment.id).catch((err) => {
+							console.error(
+								`[migration] failed to continue migration after deploy:`,
+								err,
+							);
+						});
+					}
 					continue;
 				}
 			} else {
@@ -346,12 +361,27 @@ export async function POST(request: NextRequest) {
 				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.status} to ${newStatus}`,
 			);
 
-			if (!hasHealthCheck && deployment.rolloutId) {
+			if (!hasHealthCheck) {
 				await db
 					.update(deployments)
 					.set(updateFields)
 					.where(eq(deployments.id, deployment.id));
-				await checkRolloutProgress(deployment.rolloutId);
+
+				if (deployment.rolloutId) {
+					await checkRolloutProgress(deployment.rolloutId);
+				}
+
+				if (service?.migrationStatus === "deploying_target") {
+					console.log(
+						`[migration] deployment ${deployment.id} healthy (no health check), triggering restore`,
+					);
+					continueMigrationAfterDeploy(deployment.id).catch((err) => {
+						console.error(
+							`[migration] failed to continue migration after deploy:`,
+							err,
+						);
+					});
+				}
 				continue;
 			}
 		}
@@ -387,6 +417,24 @@ export async function POST(request: NextRequest) {
 
 			if (deployment.rolloutId) {
 				await checkRolloutProgress(deployment.rolloutId);
+			}
+
+			const deployedService = await db
+				.select({ migrationStatus: services.migrationStatus })
+				.from(services)
+				.where(eq(services.id, deployment.serviceId))
+				.then((r) => r[0]);
+
+			if (deployedService?.migrationStatus === "deploying_target") {
+				console.log(
+					`[migration] deployment ${deployment.id} healthy, triggering restore`,
+				);
+				continueMigrationAfterDeploy(deployment.id).catch((err) => {
+					console.error(
+						`[migration] failed to continue migration after deploy:`,
+						err,
+					);
+				});
 			}
 		}
 

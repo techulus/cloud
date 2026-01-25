@@ -7,6 +7,7 @@ import {
 	HardDrive,
 	HeartPulse,
 	Lock,
+	Network,
 } from "lucide-react";
 import {
 	CanvasWrapper,
@@ -14,6 +15,7 @@ import {
 	getStatusColor,
 } from "@/components/ui/canvas-wrapper";
 import { Spinner } from "@/components/ui/spinner";
+import { useService } from "@/components/service/service-layout-client";
 import type {
 	Deployment as BaseDeployment,
 	DeploymentPort,
@@ -109,10 +111,18 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 
 function EndpointsCard({
 	publicPorts,
+	tcpUdpPorts,
+	proxyDomain,
 	internalHostname,
 	hasRunningDeployments,
 }: {
 	publicPorts: Array<{ id: string; domain: string | null }>;
+	tcpUdpPorts: Array<{
+		id: string;
+		protocol: string | null;
+		externalPort: number | null;
+	}>;
+	proxyDomain: string | null;
 	internalHostname: string;
 	hasRunningDeployments: boolean;
 }) {
@@ -147,6 +157,33 @@ function EndpointsCard({
 							>
 								{port.domain}
 							</a>
+						))}
+					</div>
+				</div>
+			)}
+
+			{tcpUdpPorts.length > 0 && proxyDomain && (
+				<div className="border-l-2 border-violet-500 mx-2.5 mt-1 mb-2 pl-2.5">
+					<div className="flex items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5 text-muted-foreground">
+							<Network className="h-3 w-3" />
+							<span className="text-xs">TCP/UDP proxy</span>
+						</div>
+						<div className="flex items-center gap-1.5">
+							<span className="h-2 w-2 rounded-full bg-emerald-500" />
+							<span className="text-xs text-emerald-600 dark:text-emerald-400">
+								Active
+							</span>
+						</div>
+					</div>
+					<div className="mt-1 space-y-0.5">
+						{tcpUdpPorts.map((port) => (
+							<p
+								key={port.id}
+								className="text-xs text-foreground truncate font-mono"
+							>
+								{port.protocol}://{proxyDomain}:{port.externalPort}
+							</p>
 						))}
 					</div>
 				</div>
@@ -234,8 +271,16 @@ interface DeploymentCanvasProps {
 }
 
 export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
+	const { proxyDomain } = useService();
 	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
+	const tcpUdpPorts = service.ports.filter(
+		(p) =>
+			(p.protocol === "tcp" || p.protocol === "udp") &&
+			p.isPublic &&
+			p.externalPort,
+	);
 	const hasPublicIngress = publicPorts.length > 0;
+	const hasTcpUdpPorts = tcpUdpPorts.length > 0 && proxyDomain;
 	const hasRunningDeployments = service.deployments.some(
 		(d) => d.status === "running",
 	);
@@ -283,7 +328,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 		);
 	}
 
-	const hasEndpoints = hasPublicIngress || hasRunningDeployments;
+	const hasEndpoints = hasPublicIngress || hasTcpUdpPorts || hasRunningDeployments;
 
 	return (
 		<>
@@ -291,6 +336,8 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 				{hasEndpoints && (
 					<EndpointsCard
 						publicPorts={publicPorts}
+						tcpUdpPorts={tcpUdpPorts}
+						proxyDomain={proxyDomain}
 						internalHostname={`${service.hostname || service.name}.internal`}
 						hasRunningDeployments={hasRunningDeployments}
 					/>
@@ -313,6 +360,8 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					{hasEndpoints && (
 						<EndpointsCard
 							publicPorts={publicPorts}
+							tcpUdpPorts={tcpUdpPorts}
+							proxyDomain={proxyDomain}
 							internalHostname={`${service.hostname || service.name}.internal`}
 							hasRunningDeployments={hasRunningDeployments}
 						/>

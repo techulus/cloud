@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { continueMigrationAfterBackup } from "@/actions/migrations";
 
@@ -28,6 +28,8 @@ export async function POST(request: NextRequest) {
 		);
 	}
 
+	const { serverId } = auth;
+
 	await db
 		.update(volumeBackups)
 		.set({
@@ -36,7 +38,9 @@ export async function POST(request: NextRequest) {
 			checksum,
 			completedAt: new Date(),
 		})
-		.where(eq(volumeBackups.id, backupId));
+		.where(
+			and(eq(volumeBackups.id, backupId), eq(volumeBackups.serverId, serverId)),
+		);
 
 	await continueMigrationAfterBackup(backupId);
 

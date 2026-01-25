@@ -3,7 +3,15 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import { Box, Globe, HardDrive, Lock, Settings, Upload } from "lucide-react";
+import {
+	Box,
+	Globe,
+	HardDrive,
+	Lock,
+	Network,
+	Settings,
+	Upload,
+} from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
@@ -98,13 +106,21 @@ function ServiceCard({
 	service,
 	projectSlug,
 	envName,
+	proxyDomain,
 }: {
 	service: ServiceWithDetails;
 	projectSlug: string;
 	envName: string;
+	proxyDomain: string | null;
 }) {
 	const colors = getStatusColorFromDeployments(service.deployments);
 	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
+	const tcpUdpPorts = service.ports.filter(
+		(p) =>
+			(p.protocol === "tcp" || p.protocol === "udp") &&
+			p.isPublic &&
+			p.externalPort,
+	);
 	const hasInternalDns = service.deployments.some(
 		(d) => d.status === "running",
 	);
@@ -112,7 +128,10 @@ function ServiceCard({
 		(d) => d.status === "running",
 	).length;
 
-	const hasEndpoints = publicPorts.length > 0 || hasInternalDns;
+	const hasEndpoints =
+		publicPorts.length > 0 ||
+		(tcpUdpPorts.length > 0 && proxyDomain) ||
+		hasInternalDns;
 
 	return (
 		<div className="flex flex-col items-center gap-2 w-full md:w-70">
@@ -148,15 +167,28 @@ function ServiceCard({
 						{publicPorts.map((port) => (
 							<div key={port.id} className="flex items-center gap-1.5 text-xs">
 								<Globe className="h-3 w-3 text-sky-500" />
-								<span className="text-sky-600 dark:text-sky-400">
+								<span className="text-sky-600 dark:text-sky-400 truncate">
 									{port.domain}
 								</span>
 							</div>
 						))}
+						{tcpUdpPorts.length > 0 &&
+							proxyDomain &&
+							tcpUdpPorts.map((port) => (
+								<div
+									key={port.id}
+									className="flex items-center gap-1.5 text-xs"
+								>
+									<Network className="h-3 w-3 text-violet-500" />
+									<span className="text-violet-600 dark:text-violet-400 font-mono truncate">
+										{port.protocol}://{proxyDomain}:{port.externalPort}
+									</span>
+								</div>
+							))}
 						{hasInternalDns && (
 							<div className="flex items-center gap-1.5 text-xs">
 								<Lock className="h-3 w-3 text-slate-500" />
-								<span className="text-slate-600 dark:text-slate-400">
+								<span className="text-slate-600 dark:text-slate-400 truncate">
 									{service.hostname || service.name}.internal
 								</span>
 							</div>
@@ -204,11 +236,13 @@ export function ServiceCanvas({
 	projectSlug,
 	envId,
 	envName,
+	proxyDomain,
 }: {
 	projectId: string;
 	projectSlug: string;
 	envId: string;
 	envName: string;
+	proxyDomain: string | null;
 }) {
 	const { data: environments } = useSWR<Environment[]>(
 		`/api/projects/${projectId}/environments`,
@@ -379,6 +413,7 @@ export function ServiceCanvas({
 							service={service}
 							projectSlug={projectSlug}
 							envName={envName}
+							proxyDomain={proxyDomain}
 						/>
 					))}
 				</div>
@@ -425,6 +460,7 @@ export function ServiceCanvas({
 							service={service}
 							projectSlug={projectSlug}
 							envName={envName}
+							proxyDomain={proxyDomain}
 						/>
 					))}
 				</div>

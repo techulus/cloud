@@ -226,18 +226,33 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		return;
 	}
 
-	const isDatabase = detectDatabaseType(service.image);
-	if (isDatabase) {
-		const deployment = await db
-			.select({
-				id: deployments.id,
-				serverId: deployments.serverId,
-				containerId: deployments.containerId,
+	const targetServerId = service.migrationTargetServerId;
+	if (!targetServerId) {
+		await db
+			.update(services)
+			.set({
+				migrationStatus: "failed",
+				migrationError: "Target server not set",
 			})
-			.from(deployments)
-			.where(eq(deployments.serviceId, service.id))
-			.then((r) => r[0]);
+			.where(eq(services.id, service.id));
+		return;
+	}
 
+	const dbType = detectDatabaseType(service.image);
+	const isRedis = service.image.toLowerCase().includes("redis");
+	const isSqlDatabase = dbType && !isRedis;
+
+	const deployment = await db
+		.select({
+			id: deployments.id,
+			serverId: deployments.serverId,
+			containerId: deployments.containerId,
+		})
+		.from(deployments)
+		.where(eq(deployments.serviceId, service.id))
+		.then((r) => r[0]);
+
+	if (isSqlDatabase) {
 		if (deployment?.containerId && deployment.serverId) {
 			await db
 				.update(services)
@@ -254,24 +269,53 @@ export async function continueMigrationAfterBackup(backupId: string) {
 				.set({ status: "stopped" })
 				.where(eq(deployments.id, deployment.id));
 		}
+
+		await db
+			.update(services)
+			.set({ migrationStatus: "deploying_target" })
+			.where(eq(services.id, service.id));
+
+		await db
+			.delete(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, service.id));
+
+		await db.insert(serviceReplicas).values({
+			id: randomUUID(),
+			serviceId: service.id,
+			serverId: targetServerId,
+			count: 1,
+		});
+
+		await db
+			.update(services)
+			.set({ lockedServerId: targetServerId })
+			.where(eq(services.id, service.id));
+
+		try {
+			await deployService(service.id);
+		} catch (error) {
+			console.error(
+				`[migration] failed to deploy for ${service.id}:`,
+				error,
+			);
+			await db
+				.update(services)
+				.set({
+					migrationStatus: "failed",
+					migrationError:
+						error instanceof Error ? error.message : "Deployment failed",
+				})
+				.where(eq(services.id, service.id));
+		}
+
+		revalidatePath(`/dashboard/projects`);
+		return;
 	}
 
 	await db
 		.update(services)
 		.set({ migrationStatus: "restoring" })
 		.where(eq(services.id, service.id));
-
-	const targetServerId = service.migrationTargetServerId;
-	if (!targetServerId) {
-		await db
-			.update(services)
-			.set({
-				migrationStatus: "failed",
-				migrationError: "Target server not set",
-			})
-			.where(eq(services.id, service.id));
-		return;
-	}
 
 	for (const backup of backups) {
 		if (!backup.storagePath || !backup.checksum) {
@@ -317,8 +361,6 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		count: 1,
 	});
 
-	// Update lockedServerId before deploying to prevent deployService from triggering another migration
-	// Mark as starting deployment before triggering rollout so UI doesn't falsely show completion
 	await db
 		.update(services)
 		.set({
@@ -327,10 +369,8 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		})
 		.where(eq(services.id, service.id));
 
-	// Auto-trigger deployment after migration completes
 	try {
 		await deployService(service.id);
-		// Clear migration state after successful deployment
 		await db
 			.update(services)
 			.set({
@@ -355,6 +395,106 @@ export async function continueMigrationAfterBackup(backupId: string) {
 			.where(eq(services.id, service.id));
 		throw error;
 	}
+
+	revalidatePath(`/dashboard/projects`);
+}
+
+export async function continueMigrationAfterDeploy(deploymentId: string) {
+	const deployment = await db
+		.select()
+		.from(deployments)
+		.where(eq(deployments.id, deploymentId))
+		.then((r) => r[0]);
+
+	if (!deployment) return;
+
+	const service = await db
+		.select()
+		.from(services)
+		.where(eq(services.id, deployment.serviceId))
+		.then((r) => r[0]);
+
+	if (!service || service.migrationStatus !== "deploying_target") return;
+
+	const storageConfig = await getBackupStorageConfig();
+	if (!storageConfig) {
+		await db
+			.update(services)
+			.set({
+				migrationStatus: "failed",
+				migrationError: "Backup storage not configured",
+			})
+			.where(eq(services.id, service.id));
+		return;
+	}
+
+	if (!deployment.containerId) {
+		await db
+			.update(services)
+			.set({
+				migrationStatus: "failed",
+				migrationError: "Target deployment has no container ID",
+			})
+			.where(eq(services.id, service.id));
+		return;
+	}
+
+	const backups = await db
+		.select()
+		.from(volumeBackups)
+		.where(
+			and(
+				eq(volumeBackups.serviceId, service.id),
+				eq(volumeBackups.isMigrationBackup, true),
+			),
+		);
+
+	await db
+		.update(services)
+		.set({ migrationStatus: "restoring" })
+		.where(eq(services.id, service.id));
+
+	for (const backup of backups) {
+		if (!backup.storagePath || !backup.checksum) {
+			await db
+				.update(services)
+				.set({
+					migrationStatus: "failed",
+					migrationError: `Backup ${backup.id} is missing required data`,
+				})
+				.where(eq(services.id, service.id));
+			return;
+		}
+
+		await enqueueWork(deployment.serverId, "restore_volume", {
+			backupId: backup.id,
+			serviceId: service.id,
+			containerId: deployment.containerId,
+			volumeName: backup.volumeName,
+			storagePath: backup.storagePath,
+			expectedChecksum: backup.checksum,
+			backupType: detectBackupTypeFromPath(backup.storagePath),
+			serviceImage: service.image,
+			storageConfig: {
+				provider: storageConfig.provider,
+				bucket: storageConfig.bucket,
+				region: storageConfig.region,
+				endpoint: storageConfig.endpoint,
+				accessKey: storageConfig.accessKey,
+				secretKey: storageConfig.secretKey,
+			},
+		});
+	}
+
+	await db
+		.update(services)
+		.set({
+			migrationStatus: null,
+			migrationTargetServerId: null,
+			migrationBackupId: null,
+			migrationError: null,
+		})
+		.where(eq(services.id, service.id));
 
 	revalidatePath(`/dashboard/projects`);
 }
