@@ -34,6 +34,7 @@ import {
 	restoreBackup,
 	deleteBackup,
 } from "@/actions/backups";
+import { toast } from "sonner";
 import { detectDatabaseType } from "@/lib/database-utils";
 import { updateServiceBackupSettings } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -218,6 +219,7 @@ export const BackupTab = memo(function BackupTab({
 			dispatch({ type: "SET_ERROR", payload: null });
 			try {
 				await restoreBackup(service.id, backupId);
+				toast.success("Restore initiated");
 				onUpdate();
 			} catch (e) {
 				dispatch({

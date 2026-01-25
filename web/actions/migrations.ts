@@ -11,6 +11,7 @@ import {
 	serviceReplicas,
 } from "@/db/schema";
 import { getBackupStorageConfig } from "@/db/queries";
+import { detectDatabaseType } from "@/lib/database-utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { revalidatePath } from "next/cache";
 import { deployService } from "./projects";
@@ -107,6 +108,8 @@ export async function startMigration(
 		.set({ migrationStatus: "backing_up" })
 		.where(eq(services.id, serviceId));
 
+	const backupType = detectDatabaseType(service.image) ? "database" : "volume";
+
 	for (const volume of volumes) {
 		const backupId = randomUUID();
 		const storagePath = `migrations/${serviceId}/${volume.name}/${backupId}.tar.gz`;
@@ -135,6 +138,8 @@ export async function startMigration(
 			containerId: deployment.containerId,
 			volumeName: volume.name,
 			storagePath,
+			backupType,
+			serviceImage: service.image,
 			storageConfig: {
 				provider: storageConfig.provider,
 				bucket: storageConfig.bucket,
@@ -235,8 +240,17 @@ export async function continueMigrationAfterBackup(backupId: string) {
 
 	for (const backup of backups) {
 		if (!backup.storagePath || !backup.checksum) {
-			continue;
+			await db
+				.update(services)
+				.set({
+					migrationStatus: "failed",
+					migrationError: `Backup ${backup.id} is missing required data (storagePath or checksum)`,
+				})
+				.where(eq(services.id, service.id));
+			return;
 		}
+
+		const backupType = detectBackupTypeFromPath(backup.storagePath);
 
 		await enqueueWork(targetServerId, "restore_volume", {
 			backupId: backup.id,
@@ -244,6 +258,8 @@ export async function continueMigrationAfterBackup(backupId: string) {
 			volumeName: backup.volumeName,
 			storagePath: backup.storagePath,
 			expectedChecksum: backup.checksum,
+			backupType,
+			serviceImage: service.image,
 			storageConfig: {
 				provider: storageConfig.provider,
 				bucket: storageConfig.bucket,
@@ -334,4 +350,13 @@ export async function getMigrationStatus(serviceId: string) {
 		.then((r) => r[0]);
 
 	return service ?? null;
+}
+
+function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
+	if (storagePath.endsWith(".tar.gz")) return "volume";
+	if (storagePath.endsWith(".dump")) return "database";
+	if (storagePath.endsWith(".sql")) return "database";
+	if (storagePath.endsWith(".archive.gz")) return "database";
+	if (storagePath.endsWith(".rdb")) return "database";
+	return "volume";
 }
