@@ -454,6 +454,17 @@ if [ ! -d /var/lib/techulus-agent ]; then
 fi
 echo "✓ Data directory created"
 
+step "Configuring BuildKit..."
+mkdir -p /etc/buildkit
+cat > /etc/buildkit/buildkitd.toml << 'EOF'
+[dns]
+  nameservers = ["8.8.8.8", "1.1.1.1"]
+EOF
+if [ ! -f /etc/buildkit/buildkitd.toml ]; then
+  error "Failed to create BuildKit config"
+fi
+echo "✓ BuildKit config created"
+
 step "Creating BuildKit systemd service..."
 cat > /etc/systemd/system/buildkitd.service << 'EOF'
 [Unit]
@@ -462,7 +473,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/buildkitd
+ExecStart=/usr/local/bin/buildkitd --config /etc/buildkit/buildkitd.toml
 Restart=always
 RestartSec=10
 
