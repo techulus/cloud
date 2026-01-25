@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Box, Layers } from "lucide-react";
-import { StatusIndicator } from "@/components/core/status-indicator";
 import {
 	Card,
 	CardContent,
@@ -53,10 +52,9 @@ export async function ServerServices({ serverId }: { serverId: string }) {
 								<Box className="size-5 text-muted-foreground" />
 							</ItemMedia>
 							<ItemContent>
-								<div className="flex items-center justify-between gap-2">
-									<ItemTitle className="truncate">{service.serviceName}</ItemTitle>
-									<StatusIndicator status={service.deploymentStatus} />
-								</div>
+								<ItemTitle className="truncate">
+									{service.serviceName}
+								</ItemTitle>
 								<ItemDescription className="truncate">
 									{service.projectName} / {service.environmentName}
 								</ItemDescription>

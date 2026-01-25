@@ -203,7 +203,14 @@ export const services = pgTable("services", {
 	backupEnabled: boolean("backup_enabled").default(false),
 	backupSchedule: text("backup_schedule"),
 	migrationStatus: text("migration_status", {
-		enum: ["stopping", "backing_up", "deploying_target", "restoring", "starting", "failed"],
+		enum: [
+			"stopping",
+			"backing_up",
+			"deploying_target",
+			"restoring",
+			"starting",
+			"failed",
+		],
 	}),
 	migrationTargetServerId: text("migration_target_server_id").references(
 		() => servers.id,

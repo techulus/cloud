@@ -328,7 +328,8 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 		);
 	}
 
-	const hasEndpoints = hasPublicIngress || hasTcpUdpPorts || hasRunningDeployments;
+	const hasEndpoints =
+		hasPublicIngress || hasTcpUdpPorts || hasRunningDeployments;
 
 	return (
 		<>

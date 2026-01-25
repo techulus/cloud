@@ -294,10 +294,7 @@ export async function continueMigrationAfterBackup(backupId: string) {
 		try {
 			await deployService(service.id);
 		} catch (error) {
-			console.error(
-				`[migration] failed to deploy for ${service.id}:`,
-				error,
-			);
+			console.error(`[migration] failed to deploy for ${service.id}:`, error);
 			await db
 				.update(services)
 				.set({
