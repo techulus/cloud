@@ -418,7 +418,7 @@ func (a *Agent) ProcessRestoreVolume(item agenthttp.WorkQueueItem) error {
 	}
 
 	if payload.BackupType == "database" {
-		return a.processDatabaseRestore(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.ServiceImage, payload.StoragePath, payload.ExpectedChecksum, payload.StorageConfig)
+		return a.processDatabaseRestore(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.VolumeName, payload.ServiceImage, payload.StoragePath, payload.ExpectedChecksum, payload.StorageConfig)
 	}
 
 	return a.processVolumeRestore(payload.BackupID, payload.ServiceID, payload.ContainerID, payload.VolumeName, payload.StoragePath, payload.ExpectedChecksum, payload.StorageConfig)
@@ -433,29 +433,6 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 			log.Printf("[restore_volume] warning: failed to report restore failure: %v", reportErr)
 		}
 		return err
-	}
-
-	if containerID != "" {
-		running, err := container.IsContainerRunning(containerID)
-		if err != nil {
-			log.Printf("[restore_volume] failed to check container status: %v, proceeding without stop", err)
-		} else if running {
-			log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
-			if err := container.Stop(containerID); err != nil {
-				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
-			}
-
-			defer func() {
-				log.Printf("[restore_volume] starting container %s after restore", Truncate(containerID, 12))
-				if err := container.Start(containerID); err != nil {
-					log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
-				}
-			}()
-		} else {
-			log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
-		}
-	} else {
-		log.Printf("[restore_volume] no containerID provided, restoring directly to volume path")
 	}
 
 	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", backupID))
@@ -481,17 +458,69 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
 	}
 
+	tempExtractPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-extract-%s", backupID))
+	defer os.RemoveAll(tempExtractPath)
+
+	if err := os.MkdirAll(tempExtractPath, 0755); err != nil {
+		return reportFailure(fmt.Errorf("failed to create temp extract directory: %w", err))
+	}
+
+	log.Printf("[restore_volume] extracting archive to temp location for validation")
+	if err := extractTarGz(tarPath, tempExtractPath); err != nil {
+		return reportFailure(fmt.Errorf("failed to extract archive: %w", err))
+	}
+
+	var shouldStartContainer bool
+	if containerID != "" {
+		running, err := container.IsContainerRunning(containerID)
+		if err != nil {
+			log.Printf("[restore_volume] failed to check container status: %v, proceeding without stop", err)
+		} else if running {
+			log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
+			if err := container.Stop(containerID); err != nil {
+				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
+			}
+			shouldStartContainer = true
+		} else {
+			log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
+		}
+	} else {
+		log.Printf("[restore_volume] no containerID provided, restoring directly to volume path")
+	}
+
+	startContainerWithRetry := func() {
+		if !shouldStartContainer {
+			return
+		}
+		log.Printf("[restore_volume] starting container %s", Truncate(containerID, 12))
+		err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
+			if err := container.Start(containerID); err != nil {
+				log.Printf("[restore_volume] start attempt failed for container %s: %v", Truncate(containerID, 12), err)
+				return false, err
+			}
+			return true, nil
+		})
+		if err != nil {
+			log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
+		}
+	}
+
 	if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
+		startContainerWithRetry()
 		return reportFailure(fmt.Errorf("failed to remove existing volume: %w", err))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(volumePath), 0755); err != nil {
+		startContainerWithRetry()
 		return reportFailure(fmt.Errorf("failed to create volume parent directory: %w", err))
 	}
 
-	if err := extractTarGz(tarPath, volumePath); err != nil {
-		return reportFailure(fmt.Errorf("failed to extract archive: %w", err))
+	if err := os.Rename(tempExtractPath, volumePath); err != nil {
+		startContainerWithRetry()
+		return reportFailure(fmt.Errorf("failed to move restored data to volume path: %w", err))
 	}
+
+	startContainerWithRetry()
 
 	log.Printf("[restore_volume] restored volume %s successfully", volumeName)
 
@@ -502,7 +531,7 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 	return nil
 }
 
-func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, serviceImage, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
+func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, volumeName, serviceImage, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
 	dbType := detectDatabaseType(serviceImage)
 	if dbType == "" {
 		return fmt.Errorf("database restore not supported for image: %s", serviceImage)
@@ -518,19 +547,30 @@ func (a *Agent) processDatabaseRestore(backupID, serviceID, containerID, service
 	}
 
 	if dbType == "redis" && containerID == "" {
-		return a.processRedisRestoreToVolume(backupID, serviceID, storagePath, expectedChecksum, storageConfig)
+		return a.processRedisRestoreToVolume(backupID, serviceID, volumeName, storagePath, expectedChecksum, storageConfig)
 	}
 
 	if containerID == "" {
 		return reportFailure(fmt.Errorf("containerId is required for %s database restore", dbType))
 	}
 
-	running, err := container.IsContainerRunning(containerID)
-	if err != nil {
-		return reportFailure(fmt.Errorf("failed to check container status: %w", err))
+	var running bool
+	for i := 0; i < 30; i++ {
+		var err error
+		running, err = container.IsContainerRunning(containerID)
+		if err != nil {
+			log.Printf("[restore_database] failed to check container status (attempt %d): %v", i+1, err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if running {
+			break
+		}
+		log.Printf("[restore_database] container %s not running yet, waiting... (attempt %d/30)", Truncate(containerID, 12), i+1)
+		time.Sleep(time.Second)
 	}
 	if !running {
-		return reportFailure(fmt.Errorf("container %s is not running", containerID))
+		return reportFailure(fmt.Errorf("container %s is not running after 30 seconds", containerID))
 	}
 
 	restorePath := filepath.Join(os.TempDir(), fmt.Sprintf("dbrestore-%s%s", backupID, getBackupFileExtension(dbType)))
@@ -645,7 +685,7 @@ func (a *Agent) processRedisRestore(backupID, containerID, restorePath string) e
 	return nil
 }
 
-func (a *Agent) processRedisRestoreToVolume(backupID, serviceID, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
+func (a *Agent) processRedisRestoreToVolume(backupID, serviceID, volumeName, storagePath, expectedChecksum string, storageConfig StorageConfig) error {
 	log.Printf("[restore_database] restoring Redis directly to volume path (no container)")
 
 	reportFailure := func(err error) error {
@@ -655,7 +695,10 @@ func (a *Agent) processRedisRestoreToVolume(backupID, serviceID, storagePath, ex
 		return err
 	}
 
-	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, "data")
+	if volumeName == "" {
+		volumeName = "data"
+	}
+	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, volumeName)
 	rdbPath := filepath.Join(volumePath, "dump.rdb")
 
 	restorePath := filepath.Join(os.TempDir(), fmt.Sprintf("redis-restore-%s.rdb", serviceID))
