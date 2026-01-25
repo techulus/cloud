@@ -268,9 +268,9 @@ export const volumeBackups = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
-		serverId: text("server_id")
-			.notNull()
-			.references(() => servers.id),
+		serverId: text("server_id").references(() => servers.id, {
+			onDelete: "set null",
+		}),
 		status: text("status", {
 			enum: ["pending", "uploading", "completed", "failed"],
 		})

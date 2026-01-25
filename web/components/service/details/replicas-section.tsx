@@ -67,10 +67,10 @@ export const ReplicasSection = memo(function ReplicasSection({
 		if (!servers) return;
 
 		if (service.stateful) {
-			if (service.lockedServerId) {
-				setSelectedServerId(service.lockedServerId);
-			} else if (configuredReplicas.length > 0) {
+			if (configuredReplicas.length > 0) {
 				setSelectedServerId(configuredReplicas[0].serverId);
+			} else if (service.lockedServerId) {
+				setSelectedServerId(service.lockedServerId);
 			} else {
 				setSelectedServerId(null);
 			}

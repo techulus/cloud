@@ -12,6 +12,7 @@ import { LogViewer } from "@/components/logs/log-viewer";
 import { Label } from "@/components/ui/label";
 import { ServerDangerZone } from "@/components/server/server-danger-zone";
 import { ServerHeader } from "@/components/server/server-header";
+import { ServerServices } from "@/components/server/server-services";
 import { formatRelativeTime } from "@/lib/date";
 
 export default async function ServerDetailPage({
@@ -137,6 +138,8 @@ export default async function ServerDetailPage({
 						</div>
 					</CardContent>
 				</Card>
+
+				<ServerServices serverId={id} />
 
 				<div className="space-y-2">
 					<h3 className="text-sm font-medium">Agent Logs</h3>

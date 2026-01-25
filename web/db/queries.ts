@@ -163,6 +163,28 @@ export async function getServerDetails(id: string) {
 	return serverResults[0] || null;
 }
 
+export async function getServerServices(serverId: string) {
+	const results = await db
+		.select({
+			deploymentId: deployments.id,
+			deploymentStatus: deployments.status,
+			serviceId: services.id,
+			serviceName: services.name,
+			serviceImage: services.image,
+			projectId: projects.id,
+			projectName: projects.name,
+			projectSlug: projects.slug,
+			environmentName: environments.name,
+		})
+		.from(deployments)
+		.innerJoin(services, eq(deployments.serviceId, services.id))
+		.innerJoin(projects, eq(services.projectId, projects.id))
+		.innerJoin(environments, eq(services.environmentId, environments.id))
+		.where(eq(deployments.serverId, serverId));
+
+	return results;
+}
+
 export async function listEnvironments(projectId: string) {
 	return db
 		.select()
