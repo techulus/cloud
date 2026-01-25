@@ -33,10 +33,15 @@ type RegisterRequest struct {
 }
 
 type RegisterResponse struct {
-	ServerID      string `json:"serverId"`
-	SubnetID      int    `json:"subnetId"`
-	WireGuardIP   string `json:"wireguardIp"`
-	EncryptionKey string `json:"encryptionKey"`
+	ServerID         string  `json:"serverId"`
+	SubnetID         int     `json:"subnetId"`
+	WireGuardIP      string  `json:"wireguardIp"`
+	EncryptionKey    string  `json:"encryptionKey"`
+	LoggingEndpoint  *string `json:"loggingEndpoint"`
+	RegistryURL      *string `json:"registryUrl"`
+	RegistryUsername *string `json:"registryUsername"`
+	RegistryPassword *string `json:"registryPassword"`
+	RegistryInsecure bool    `json:"registryInsecure"`
 }
 
 func (c *Client) Register(token, wireguardPublicKey, signingPublicKey, publicIP, privateIP string, isProxy bool) (*RegisterResponse, error) {

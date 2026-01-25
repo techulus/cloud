@@ -36,11 +36,16 @@ func (s AgentState) String() string {
 }
 
 type Config struct {
-	ServerID      string `json:"serverId"`
-	SubnetID      int    `json:"subnetId"`
-	WireGuardIP   string `json:"wireguardIp"`
-	EncryptionKey string `json:"encryptionKey"`
-	IsProxy       bool   `json:"isProxy"`
+	ServerID         string `json:"serverId"`
+	SubnetID         int    `json:"subnetId"`
+	WireGuardIP      string `json:"wireguardIp"`
+	EncryptionKey    string `json:"encryptionKey"`
+	IsProxy          bool   `json:"isProxy"`
+	LoggingEndpoint  string `json:"loggingEndpoint,omitempty"`
+	RegistryURL      string `json:"registryUrl,omitempty"`
+	RegistryUsername string `json:"registryUsername,omitempty"`
+	RegistryPassword string `json:"registryPassword,omitempty"`
+	RegistryInsecure bool   `json:"registryInsecure"`
 }
 
 type ActualState struct {

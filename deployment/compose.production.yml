@@ -1,0 +1,107 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+      args:
+        - DATABASE_URL=${DATABASE_URL}
+        - NEXT_PUBLIC_APP_URL=https://${ROOT_DOMAIN}
+        - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
+    env_file:
+      - ./.env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
+      - NEXT_PUBLIC_APP_URL=https://${ROOT_DOMAIN}
+      - VICTORIA_LOGS_URL=http://victoria-logs:9428
+      - REGISTRY_URL=registry:5000
+      - REGISTRY_HOST=registry.${ROOT_DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoria-logs:
+        condition: service_started
+      registry:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.web.loadbalancer.server.port=3000"
+    restart: unless-stopped
+
+  registry:
+    build:
+      context: ../registry
+      dockerfile: Dockerfile
+    volumes:
+      - registry-data:/var/lib/registry
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.registry.rule=Host(`registry.${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.registry.entrypoints=websecure"
+      - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.registry.middlewares=registry-auth"
+      - "traefik.http.middlewares.registry-auth.basicauth.users=${REGISTRY_AUTH}"
+      - "traefik.http.services.registry.loadbalancer.server.port=5000"
+    restart: unless-stopped
+
+  victoria-logs:
+    image: victoriametrics/victoria-logs:latest
+    volumes:
+      - victoria-logs-data:/vlogs
+    command:
+      - "-storageDataPath=/vlogs"
+      - "-retentionPeriod=${VL_RETENTION:-7d}"
+      - "-httpAuth.username=${VL_USERNAME}"
+      - "-httpAuth.password=${VL_PASSWORD}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.logs.rule=Host(`logs.${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.logs.entrypoints=websecure"
+      - "traefik.http.routers.logs.tls.certresolver=letsencrypt"
+      - "traefik.http.services.logs.loadbalancer.server.port=9428"
+    restart: unless-stopped
+
+volumes:
+  letsencrypt:
+  postgres-data:
+  registry-data:
+  victoria-logs-data:

@@ -54,11 +54,6 @@ func main() {
 	}
 
 	var logsEndpoint string
-	if logsEndpointFlag != "" {
-		logsEndpoint = logsEndpointFlag
-	} else {
-		logsEndpoint = fetchLogsEndpoint(controlPlaneURL)
-	}
 
 	if isProxy && runtime.GOOS != "linux" {
 		log.Fatal("--proxy flag is only supported on Linux")
@@ -112,6 +107,12 @@ func main() {
 
 		log.Printf("Loaded config: serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 
+		if logsEndpointFlag != "" {
+			logsEndpoint = logsEndpointFlag
+		} else if config.LoggingEndpoint != "" {
+			logsEndpoint = config.LoggingEndpoint
+		}
+
 		if err := container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
 		}
@@ -152,12 +153,39 @@ func main() {
 			log.Fatalf("Failed to register: %v", err)
 		}
 
+		var respLoggingEndpoint string
+		if resp.LoggingEndpoint != nil {
+			respLoggingEndpoint = *resp.LoggingEndpoint
+		}
+
+		var registryURL, registryUsername, registryPassword string
+		if resp.RegistryURL != nil {
+			registryURL = *resp.RegistryURL
+		}
+		if resp.RegistryUsername != nil {
+			registryUsername = *resp.RegistryUsername
+		}
+		if resp.RegistryPassword != nil {
+			registryPassword = *resp.RegistryPassword
+		}
+
 		config = &agent.Config{
-			ServerID:      resp.ServerID,
-			SubnetID:      resp.SubnetID,
-			WireGuardIP:   resp.WireGuardIP,
-			EncryptionKey: resp.EncryptionKey,
-			IsProxy:       isProxy,
+			ServerID:         resp.ServerID,
+			SubnetID:         resp.SubnetID,
+			WireGuardIP:      resp.WireGuardIP,
+			EncryptionKey:    resp.EncryptionKey,
+			IsProxy:          isProxy,
+			LoggingEndpoint:  respLoggingEndpoint,
+			RegistryURL:      registryURL,
+			RegistryUsername: registryUsername,
+			RegistryPassword: registryPassword,
+			RegistryInsecure: resp.RegistryInsecure,
+		}
+
+		if logsEndpointFlag != "" {
+			logsEndpoint = logsEndpointFlag
+		} else if respLoggingEndpoint != "" {
+			logsEndpoint = respLoggingEndpoint
 		}
 
 		if err := saveConfig(configPath, config); err != nil {
@@ -198,6 +226,13 @@ func main() {
 			log.Printf("Warning: Failed to setup local DNS: %v", err)
 		} else {
 			log.Println("Local DNS configured successfully")
+		}
+	}
+
+	if config.RegistryURL != "" && config.RegistryUsername != "" {
+		log.Printf("[registry] attempting login to %s", config.RegistryURL)
+		if err := container.Login(config.RegistryURL, config.RegistryUsername, config.RegistryPassword, config.RegistryInsecure); err != nil {
+			log.Printf("[registry] warning: failed to login to registry: %v", err)
 		}
 	}
 
@@ -330,36 +365,4 @@ func getPrivateIP() string {
 	}
 
 	return ""
-}
-
-type discoverResponse struct {
-	LoggingEndpoint *string `json:"loggingEndpoint"`
-	Version         int     `json:"version"`
-}
-
-func fetchLogsEndpoint(controlPlaneURL string) string {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(controlPlaneURL + "/api/v1/agent/discover")
-	if err != nil {
-		log.Printf("Failed to fetch discovery endpoint: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Discovery endpoint returned status %d", resp.StatusCode)
-		return ""
-	}
-
-	var discovery discoverResponse
-	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
-		log.Printf("Failed to decode discovery response: %v", err)
-		return ""
-	}
-
-	if discovery.LoggingEndpoint == nil {
-		return ""
-	}
-
-	return *discovery.LoggingEndpoint
 }

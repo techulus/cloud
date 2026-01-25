@@ -77,6 +77,11 @@ export async function POST(request: NextRequest) {
 			subnetId,
 			wireguardIp,
 			encryptionKey: process.env.ENCRYPTION_KEY,
+			loggingEndpoint: process.env.VICTORIA_LOGS_URL ?? null,
+			registryUrl: process.env.REGISTRY_URL ?? null,
+			registryUsername: process.env.REGISTRY_USERNAME ?? null,
+			registryPassword: process.env.REGISTRY_PASSWORD ?? null,
+			registryInsecure: process.env.REGISTRY_INSECURE !== "false",
 		});
 	} catch (error) {
 		console.error("Agent registration error:", error);

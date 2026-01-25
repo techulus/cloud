@@ -418,6 +418,29 @@ func CheckPrerequisites() error {
 	return nil
 }
 
+func Login(registryURL, username, password string, insecure bool) error {
+	if registryURL == "" || username == "" {
+		return nil
+	}
+
+	log.Printf("[podman:login] logging in to registry %s", registryURL)
+
+	args := []string{"login"}
+	if insecure {
+		args = append(args, "--tls-verify=false")
+	}
+	args = append(args, "-u", username, "-p", password, registryURL)
+
+	cmd := exec.Command("podman", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to login to registry: %s: %w", string(output), err)
+	}
+
+	log.Printf("[podman:login] successfully logged in to registry %s", registryURL)
+	return nil
+}
+
 func ImagePrune() {
 	exec.Command("podman", "image", "prune", "-f").Run()
 }

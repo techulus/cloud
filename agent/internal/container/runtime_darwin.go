@@ -417,6 +417,25 @@ func CheckPrerequisites() error {
 	return nil
 }
 
+func Login(registryURL, username, password string, insecure bool) error {
+	if registryURL == "" || username == "" {
+		return nil
+	}
+
+	log.Printf("[docker:login] logging in to registry %s", registryURL)
+
+	args := []string{"login", "-u", username, "-p", password, registryURL}
+
+	cmd := exec.Command("docker", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to login to registry: %s: %w", string(output), err)
+	}
+
+	log.Printf("[docker:login] successfully logged in to registry %s", registryURL)
+	return nil
+}
+
 func ImagePrune() {
 	exec.Command("docker", "image", "prune", "-f").Run()
 }
