@@ -81,34 +81,39 @@ export async function startMigration(
 		throw new Error("Service is already running on the target server");
 	}
 
+	const backupType = detectDatabaseType(service.image) ? "database" : "volume";
+
+	if (backupType === "volume") {
+		await db
+			.update(services)
+			.set({
+				migrationStatus: "stopping",
+				migrationTargetServerId: targetServerId,
+				migrationBackupId: null,
+				migrationError: null,
+			})
+			.where(eq(services.id, serviceId));
+
+		await enqueueWork(deployment.serverId, "stop", {
+			deploymentId: deployment.id,
+			containerId: deployment.containerId,
+		});
+
+		await db
+			.update(deployments)
+			.set({ status: "stopped" })
+			.where(eq(deployments.id, deployment.id));
+	}
+
 	await db
 		.update(services)
 		.set({
-			migrationStatus: "stopping",
+			migrationStatus: "backing_up",
 			migrationTargetServerId: targetServerId,
 			migrationBackupId: null,
 			migrationError: null,
 		})
 		.where(eq(services.id, serviceId));
-
-	if (deployment.containerId) {
-		await enqueueWork(deployment.serverId, "stop", {
-			deploymentId: deployment.id,
-			containerId: deployment.containerId,
-		});
-	}
-
-	await db
-		.update(deployments)
-		.set({ status: "stopped" })
-		.where(eq(deployments.id, deployment.id));
-
-	await db
-		.update(services)
-		.set({ migrationStatus: "backing_up" })
-		.where(eq(services.id, serviceId));
-
-	const backupType = detectDatabaseType(service.image) ? "database" : "volume";
 
 	for (const volume of volumes) {
 		const backupId = randomUUID();
@@ -219,6 +224,36 @@ export async function continueMigrationAfterBackup(backupId: string) {
 
 	if (!allCompleted) {
 		return;
+	}
+
+	const isDatabase = detectDatabaseType(service.image);
+	if (isDatabase) {
+		const deployment = await db
+			.select({
+				id: deployments.id,
+				serverId: deployments.serverId,
+				containerId: deployments.containerId,
+			})
+			.from(deployments)
+			.where(eq(deployments.serviceId, service.id))
+			.then((r) => r[0]);
+
+		if (deployment?.containerId && deployment.serverId) {
+			await db
+				.update(services)
+				.set({ migrationStatus: "stopping" })
+				.where(eq(services.id, service.id));
+
+			await enqueueWork(deployment.serverId, "stop", {
+				deploymentId: deployment.id,
+				containerId: deployment.containerId,
+			});
+
+			await db
+				.update(deployments)
+				.set({ status: "stopped" })
+				.where(eq(deployments.id, deployment.id));
+		}
 	}
 
 	await db

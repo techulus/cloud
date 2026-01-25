@@ -15,6 +15,7 @@ import { FloatingBar } from "@/components/ui/floating-bar";
 import { Spinner } from "@/components/ui/spinner";
 import { deployService, abortRollout } from "@/actions/projects";
 import { triggerBuild } from "@/actions/builds";
+import { cancelMigration } from "@/actions/migrations";
 import type { ConfigChange } from "@/lib/service-config";
 import type {
 	DeploymentStatus,
@@ -243,6 +244,7 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 	const [showModal, setShowModal] = useState(false);
 	const [isDeploying, setIsDeploying] = useState(false);
 	const [isAborting, setIsAborting] = useState(false);
+	const [isCancellingMigration, setIsCancellingMigration] = useState(false);
 	const barState = useMemo(
 		() => getBarState(service, changes),
 		[service, changes],
@@ -318,6 +320,21 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		}
 	};
 
+	const handleCancelMigration = async () => {
+		setIsCancellingMigration(true);
+		try {
+			await cancelMigration(service.id);
+			toast.success("Migration cancelled");
+			onUpdate();
+		} catch (e) {
+			toast.error(
+				e instanceof Error ? e.message : "Failed to cancel migration",
+			);
+		} finally {
+			setIsCancellingMigration(false);
+		}
+	};
+
 	if (barState.mode === "hidden") {
 		return null;
 	}
@@ -365,13 +382,24 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 				"Migrating";
 		}
 
+		const isMigrationFailed = service.migrationStatus === "failed";
+
 		return (
 			<FloatingBar
 				visible
-				loading
+				loading={!isMigrationFailed}
 				status={status}
 				action={
-					isMigrating ? null : (
+					isMigrating ? (
+						<button
+							type="button"
+							onClick={handleCancelMigration}
+							disabled={isCancellingMigration}
+							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+						>
+							{isCancellingMigration ? <Spinner /> : "Cancel"}
+						</button>
+					) : (
 						<button
 							type="button"
 							onClick={handleAbort}
