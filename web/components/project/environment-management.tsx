@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useOptimistic, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Layers, Plus, Trash2 } from "lucide-react";
 import { createEnvironment, deleteEnvironment } from "@/actions/projects";
@@ -32,20 +32,35 @@ import {
 	ItemGroup,
 	ItemMedia,
 	ItemTitle,
-	ItemDescription,
 	ItemActions,
 } from "@/components/ui/item";
 
+type OptimisticAction =
+	| { type: "add"; environment: Environment }
+	| { type: "delete"; id: string };
+
 export function EnvironmentManagement({
 	projectId,
-	initialEnvironments,
+	environments,
 }: {
 	projectId: string;
-	initialEnvironments: Environment[];
+	environments: Environment[];
 }) {
 	const router = useRouter();
-	const [environments, setEnvironments] =
-		useState<Environment[]>(initialEnvironments);
+	const [, startTransition] = useTransition();
+	const [optimisticEnvironments, updateOptimistic] = useOptimistic(
+		environments,
+		(state, action: OptimisticAction) => {
+			if (action.type === "add") {
+				return [...state, action.environment];
+			}
+			if (action.type === "delete") {
+				return state.filter((e) => e.id !== action.id);
+			}
+			return state;
+		},
+	);
+
 	const [isOpen, setIsOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
@@ -59,40 +74,50 @@ export function EnvironmentManagement({
 		setIsLoading(true);
 		setError(null);
 
-		try {
-			const result = await createEnvironment(projectId, name.trim());
-			setEnvironments([
-				...environments,
-				{
-					id: result.id,
+		const trimmedName = name.trim();
+		const tempId = crypto.randomUUID();
+
+		startTransition(async () => {
+			updateOptimistic({
+				type: "add",
+				environment: {
+					id: tempId,
 					projectId,
-					name: result.name,
+					name: trimmedName,
 					createdAt: new Date(),
 				},
-			]);
-			setName("");
-			setIsOpen(false);
-			router.refresh();
-		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : "Failed to create environment",
-			);
-		} finally {
-			setIsLoading(false);
-		}
+			});
+
+			try {
+				await createEnvironment(projectId, trimmedName);
+				setName("");
+				setIsOpen(false);
+				router.refresh();
+			} catch (err) {
+				setError(
+					err instanceof Error ? err.message : "Failed to create environment",
+				);
+			} finally {
+				setIsLoading(false);
+			}
+		});
 	};
 
 	const handleDelete = async (envId: string) => {
 		setDeletingId(envId);
-		try {
-			await deleteEnvironment(envId);
-			setEnvironments(environments.filter((e) => e.id !== envId));
-			router.refresh();
-		} catch (err) {
-			console.error("Failed to delete environment:", err);
-		} finally {
-			setDeletingId(null);
-		}
+
+		startTransition(async () => {
+			updateOptimistic({ type: "delete", id: envId });
+
+			try {
+				await deleteEnvironment(envId);
+				router.refresh();
+			} catch (err) {
+				console.error("Failed to delete environment:", err);
+			} finally {
+				setDeletingId(null);
+			}
+		});
 	};
 
 	return (
@@ -146,7 +171,7 @@ export function EnvironmentManagement({
 			</div>
 
 			<ItemGroup className="rounded-lg border py-3">
-				{environments.map((env) => (
+				{optimisticEnvironments.map((env) => (
 					<Item key={env.id}>
 						<ItemMedia variant="icon">
 							<Layers className="size-5" />

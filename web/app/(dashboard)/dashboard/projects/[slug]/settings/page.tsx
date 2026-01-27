@@ -38,7 +38,7 @@ export default async function ProjectSettingsPage({
 
 				<EnvironmentManagement
 					projectId={project.id}
-					initialEnvironments={environments}
+					environments={environments}
 				/>
 
 				<ProjectDangerZone project={project} />
