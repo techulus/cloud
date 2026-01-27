@@ -36,12 +36,22 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
 
-	await db
+	const { serverId } = auth;
+
+	const result = await db
 		.update(workQueue)
 		.set({
 			status: data.status,
 		})
-		.where(eq(workQueue.id, data.id));
+		.where(and(eq(workQueue.id, data.id), eq(workQueue.serverId, serverId)))
+		.returning();
+
+	if (result.length === 0) {
+		return NextResponse.json(
+			{ error: "Work queue item not found" },
+			{ status: 404 },
+		);
+	}
 
 	return NextResponse.json({ ok: true });
 }

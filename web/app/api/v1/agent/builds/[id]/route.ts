@@ -31,24 +31,24 @@ export async function GET(
 	const { id: buildId } = await params;
 	const { serverId } = auth;
 
-	const build = await db
-		.select()
-		.from(builds)
-		.where(eq(builds.id, buildId))
-		.then((r) => r[0]);
-
-	if (!build) {
-		return NextResponse.json({ error: "Build not found" }, { status: 404 });
-	}
-
-	await db
+	const claimResult = await db
 		.update(builds)
 		.set({
 			status: "claimed",
 			claimedBy: serverId,
 			claimedAt: new Date(),
 		})
-		.where(eq(builds.id, buildId));
+		.where(and(eq(builds.id, buildId), eq(builds.status, "pending")))
+		.returning();
+
+	const build = claimResult[0];
+
+	if (!build) {
+		return NextResponse.json(
+			{ error: "Build not found or already claimed" },
+			{ status: 409 },
+		);
+	}
 
 	const service = await db
 		.select()
