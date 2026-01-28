@@ -41,6 +41,8 @@ func (a *Agent) handleIdle() {
 		return
 	}
 
+	a.updateDnsInSync(expected, actual)
+
 	changes := a.detectChanges(expected, actual)
 	if len(changes) > 0 {
 		log.Printf("[idle] drift detected, %d change(s) to apply:", len(changes))
@@ -78,6 +80,8 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
+	a.updateDnsInSync(a.expectedState, actual)
+
 	if !a.hasDrift(a.expectedState, actual) {
 		log.Printf("[processing] state converged, transitioning to IDLE")
 		a.ReportStatus(false)
@@ -94,6 +98,14 @@ func (a *Agent) handleProcessing() {
 	}
 
 	a.ReportStatus(false)
+}
+
+func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {
+	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
+	for i, r := range expected.Dns.Records {
+		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
+	}
+	a.dnsInSync = dns.HashRecords(expectedDnsRecords) == actual.DnsConfigHash
 }
 
 func (a *Agent) getActualState() (*ActualState, error) {

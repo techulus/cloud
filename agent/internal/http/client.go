@@ -240,6 +240,7 @@ type StatusReport struct {
 	PrivateIP  string            `json:"privateIp,omitempty"`
 	Meta       map[string]string `json:"meta,omitempty"`
 	Containers []ContainerStatus `json:"containers"`
+	DnsInSync  bool              `json:"dnsInSync,omitempty"`
 }
 
 func (c *Client) ReportStatus(report *StatusReport) error {

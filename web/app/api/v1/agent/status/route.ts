@@ -29,6 +29,7 @@ type StatusReport = {
 	privateIp?: string;
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
+	dnsInSync?: boolean;
 };
 
 async function checkRolloutProgress(rolloutId: string): Promise<void> {
@@ -56,15 +57,13 @@ async function checkRolloutProgress(rolloutId: string): Promise<void> {
 
 	const allHealthy = newDeployments.every((d) => d.status === "healthy");
 
-	if (allHealthy) {
+	if (allHealthy && rollout.currentStage !== "dns_sync") {
 		const serviceId = newDeployments[0].serviceId;
 
 		const updated = await db
 			.update(rollouts)
 			.set({
-				status: "completed",
-				currentStage: "completed",
-				completedAt: new Date(),
+				currentStage: "dns_sync",
 			})
 			.where(
 				and(eq(rollouts.id, rolloutId), eq(rollouts.status, "in_progress")),
@@ -72,9 +71,7 @@ async function checkRolloutProgress(rolloutId: string): Promise<void> {
 			.returning();
 
 		if (updated.length > 0) {
-			console.log(
-				`[rollout:${rolloutId}] all healthy → running, completing rollout`,
-			);
+			console.log(`[rollout:${rolloutId}] all healthy → waiting for DNS sync`);
 
 			await db
 				.update(deployments)
@@ -461,5 +458,49 @@ export async function POST(request: NextRequest) {
 		await checkRolloutProgress(rollout.id);
 	}
 
+	if (report.dnsInSync) {
+		await checkDnsSyncCompletion(serverId);
+	}
+
 	return NextResponse.json({ ok: true });
+}
+
+async function checkDnsSyncCompletion(serverId: string): Promise<void> {
+	const pendingRollouts = await db
+		.select({
+			id: rollouts.id,
+			serviceId: rollouts.serviceId,
+		})
+		.from(rollouts)
+		.where(
+			and(
+				eq(rollouts.status, "in_progress"),
+				eq(rollouts.currentStage, "dns_sync"),
+			),
+		);
+
+	if (pendingRollouts.length === 0) return;
+
+	for (const rollout of pendingRollouts) {
+		const rolloutDeployments = await db
+			.select({ serverId: deployments.serverId })
+			.from(deployments)
+			.where(eq(deployments.rolloutId, rollout.id));
+
+		const involvedServerIds = new Set(
+			rolloutDeployments.map((d) => d.serverId),
+		);
+		if (!involvedServerIds.has(serverId)) continue;
+
+		await db
+			.update(rollouts)
+			.set({
+				status: "completed",
+				currentStage: "completed",
+				completedAt: new Date(),
+			})
+			.where(eq(rollouts.id, rollout.id));
+
+		console.log(`[rollout:${rollout.id}] DNS synced, completing rollout`);
+	}
 }

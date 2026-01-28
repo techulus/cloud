@@ -34,6 +34,7 @@ func (a *Agent) ReportStatus(includeResources bool) {
 		PublicIP:   a.PublicIP,
 		PrivateIP:  a.PrivateIP,
 		Containers: []agenthttp.ContainerStatus{},
+		DnsInSync:  a.dnsInSync,
 	}
 
 	if includeResources {

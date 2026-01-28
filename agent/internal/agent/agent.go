@@ -76,6 +76,7 @@ type Agent struct {
 	buildMutex          sync.Mutex
 	currentBuildID      string
 	IsProxy             bool
+	dnsInSync           bool
 }
 
 func NewAgent(
