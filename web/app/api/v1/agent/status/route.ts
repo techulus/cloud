@@ -381,6 +381,19 @@ export async function POST(request: NextRequest) {
 				}
 				continue;
 			}
+
+			if (deployment.rolloutId) {
+				await db
+					.update(rollouts)
+					.set({ currentStage: "health_check" })
+					.where(
+						and(
+							eq(rollouts.id, deployment.rolloutId),
+							eq(rollouts.status, "in_progress"),
+							eq(rollouts.currentStage, "deploying"),
+						),
+					);
+			}
 		}
 
 		if (deployment.status === "unknown") {

@@ -103,25 +103,7 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 		latestRollout?.status === "in_progress" ? latestRollout : undefined;
 
 	if (activeRollout) {
-		let currentStage = activeRollout.currentStage || "deploying";
-
-		if (currentStage !== "dns_sync") {
-			const rolloutDeployments = service.deployments.filter(
-				(d) => d.rolloutId === activeRollout.id,
-			);
-
-			if (rolloutDeployments.length > 0) {
-				const statuses = rolloutDeployments.map((d) => d.status);
-
-				if (statuses.every((s) => s === "running")) {
-					currentStage = "completed";
-				} else if (statuses.some((s) => s === "healthy" || s === "starting")) {
-					currentStage = "health_check";
-				} else if (statuses.some((s) => s === "pending" || s === "pulling")) {
-					currentStage = "deploying";
-				}
-			}
-		}
+		const currentStage = activeRollout.currentStage || "deploying";
 
 		return {
 			mode: "deploying",
