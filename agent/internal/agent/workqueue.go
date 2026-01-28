@@ -2,12 +2,16 @@ package agent
 
 import (
 	"log"
+	"time"
 )
 
+const LongPollTimeout = 30 * time.Second
+
 func (a *Agent) ProcessWorkQueue() {
-	items, err := a.Client.GetWorkQueue()
+	items, err := a.Client.GetWorkQueue(LongPollTimeout)
 	if err != nil {
 		log.Printf("[work-queue] failed to get work queue: %v", err)
+		time.Sleep(5 * time.Second)
 		return
 	}
 

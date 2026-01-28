@@ -355,15 +355,21 @@ type WorkQueueItem struct {
 	Payload string `json:"payload"`
 }
 
-func (c *Client) GetWorkQueue() ([]WorkQueueItem, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/work-queue", nil)
+func (c *Client) GetWorkQueue(timeout time.Duration) ([]WorkQueueItem, error) {
+	url := fmt.Sprintf("%s/api/v1/agent/work-queue?timeout=%d", c.baseURL, timeout.Milliseconds())
+
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.signRequest(req, "")
 
-	resp, err := c.client.Do(req)
+	client := &http.Client{
+		Timeout: timeout + 10*time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch work queue: %w", err)
 	}

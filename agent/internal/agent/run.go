@@ -28,10 +28,8 @@ func (a *Agent) Run(ctx context.Context) {
 		cleanupTickerC = cleanupTicker.C
 	}
 
-	workQueueTicker := time.NewTicker(5 * time.Second)
-	defer workQueueTicker.Stop()
-
 	go a.HeartbeatLoop(ctx)
+	go a.WorkQueueLoop(ctx)
 
 	a.Tick()
 
@@ -51,7 +49,16 @@ func (a *Agent) Run(ctx context.Context) {
 			a.CollectLogs()
 		case <-cleanupTickerC:
 			go a.RunBuildCleanup()
-		case <-workQueueTicker.C:
+		}
+	}
+}
+
+func (a *Agent) WorkQueueLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 			a.ProcessWorkQueue()
 		}
 	}
