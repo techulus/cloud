@@ -113,29 +113,30 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 		};
 	}
 
-	const inProgressStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"stopping",
-	];
-	const hasInProgressDeployments = service.deployments.some((d) =>
-		inProgressStatuses.includes(d.status),
-	);
+	const latestRolloutJustCompleted =
+		latestRollout?.status === "completed" ||
+		latestRollout?.status === "rolled_back" ||
+		latestRollout?.status === "failed";
 
-	if (hasInProgressDeployments) {
-		const maxStageIndex = Math.max(
-			...service.deployments
-				.filter((d) => inProgressStatuses.includes(d.status))
-				.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status))),
+	if (!latestRolloutJustCompleted) {
+		const inProgressStatuses = ["pending", "pulling", "starting", "healthy"];
+		const hasInProgressDeployments = service.deployments.some((d) =>
+			inProgressStatuses.includes(d.status),
 		);
-		return {
-			mode: "deploying",
-			stage: STAGES[maxStageIndex]?.id || "deploying",
-			stageIndex: maxStageIndex,
-			rolloutId: "",
-		};
+
+		if (hasInProgressDeployments) {
+			const maxStageIndex = Math.max(
+				...service.deployments
+					.filter((d) => inProgressStatuses.includes(d.status))
+					.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status))),
+			);
+			return {
+				mode: "deploying",
+				stage: STAGES[maxStageIndex]?.id || "deploying",
+				stageIndex: maxStageIndex,
+				rolloutId: "",
+			};
+		}
 	}
 
 	const totalReplicas = service.autoPlace
