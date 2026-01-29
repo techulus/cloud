@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 import { createService, validateDockerImage } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
@@ -28,12 +29,17 @@ type SelectedRepo = {
 export function CreateServiceDialog({
 	projectId,
 	environmentId,
+	projectSlug,
+	envName,
 	onSuccess,
 }: {
 	projectId: string;
 	environmentId: string;
+	projectSlug: string;
+	envName: string;
 	onSuccess?: () => void;
 }) {
+	const router = useRouter();
 	const { mutate } = useSWRConfig();
 	const [isOpen, setIsOpen] = useState(false);
 	const [name, setName] = useState("");
@@ -60,7 +66,7 @@ export function CreateServiceDialog({
 				return;
 			}
 
-			await createService({
+			const result = await createService({
 				projectId,
 				environmentId,
 				name: name.trim(),
@@ -70,6 +76,9 @@ export function CreateServiceDialog({
 			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
+			router.push(
+				`/dashboard/projects/${projectSlug}/${envName}/services/${result.id}/configuration`,
+			);
 		} catch (err) {
 			console.error("Failed to create service:", err);
 			setError("Failed to create service");
@@ -86,7 +95,7 @@ export function CreateServiceDialog({
 		setError(null);
 
 		try {
-			await createService({
+			const result = await createService({
 				projectId,
 				environmentId,
 				name: name.trim(),
@@ -103,6 +112,9 @@ export function CreateServiceDialog({
 			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
 			onSuccess?.();
+			router.push(
+				`/dashboard/projects/${projectSlug}/${envName}/services/${result.id}/configuration`,
+			);
 		} catch (err) {
 			console.error("Failed to create service:", err);
 			setError(err instanceof Error ? err.message : "Failed to create service");

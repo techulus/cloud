@@ -9,6 +9,7 @@ import {
 	PlayIcon,
 	StopCircleIcon,
 	Trash2Icon,
+	AlertTriangleIcon,
 } from "lucide-react";
 import {
 	deleteDeployments,
@@ -27,10 +28,24 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+type ConfirmAction = "redeploy" | "stop" | "delete" | null;
 
 export default function ArchitecturePage() {
 	const { service, onUpdate } = useService();
 	const [isLoading, setIsLoading] = useState<string | null>(null);
+	const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
 
 	const handleAction = async (
 		actionName: string,
@@ -38,6 +53,7 @@ export default function ArchitecturePage() {
 		successMessage?: string,
 	) => {
 		setIsLoading(actionName);
+		setConfirmAction(null);
 		try {
 			await action();
 			if (successMessage) {
@@ -60,6 +76,35 @@ export default function ArchitecturePage() {
 		} finally {
 			setIsLoading(null);
 		}
+	};
+
+	const confirmActionConfig = {
+		redeploy: {
+			title: "Redeploy Service",
+			description:
+				"This will create new deployments and replace all existing ones. The service may experience brief downtime during the transition.",
+			actionLabel: "Redeploy",
+			variant: "default" as const,
+			onConfirm: () =>
+				handleAction("redeploy", () => deployService(service.id)),
+		},
+		stop: {
+			title: "Stop All Deployments",
+			description:
+				"This will stop all running containers for this service. The service will become unavailable until you start it again.",
+			actionLabel: "Stop All",
+			variant: "default" as const,
+			onConfirm: () => handleAction("stop", () => stopService(service.id)),
+		},
+		delete: {
+			title: "Delete All Deployments",
+			description:
+				"This will permanently delete all deployments for this service. Running containers will be stopped and removed. This action cannot be undone.",
+			actionLabel: "Delete All",
+			variant: "destructive" as const,
+			onConfirm: () =>
+				handleAction("delete", () => deleteDeployments(service.id)),
+		},
 	};
 
 	const hasRunningDeployments = service.deployments.some(
@@ -113,35 +158,27 @@ export default function ArchitecturePage() {
 								<DropdownMenuContent side="bottom" align="end">
 									<DropdownMenuItem
 										disabled={isLoading !== null}
-										onClick={() =>
-											handleAction("redeploy", () => deployService(service.id))
-										}
+										onClick={() => setConfirmAction("redeploy")}
 									>
 										<RotateCcwIcon />
-										{isLoading === "redeploy" ? "Redeploying..." : "Redeploy"}
+										Redeploy
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem
 										disabled={isLoading !== null}
-										onClick={() =>
-											handleAction("stop", () => stopService(service.id))
-										}
+										onClick={() => setConfirmAction("stop")}
 										className="text-orange-600 dark:text-orange-500"
 									>
 										<StopCircleIcon />
-										{isLoading === "stop" ? "Stopping..." : "Stop All"}
+										Stop All
 									</DropdownMenuItem>
 									<DropdownMenuItem
 										variant="destructive"
 										disabled={isLoading !== null}
-										onClick={() =>
-											handleAction("delete", () =>
-												deleteDeployments(service.id),
-											)
-										}
+										onClick={() => setConfirmAction("delete")}
 									>
 										<Trash2Icon />
-										{isLoading === "delete" ? "Deleting..." : "Delete All"}
+										Delete All
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>
@@ -176,14 +213,10 @@ export default function ArchitecturePage() {
 									<DropdownMenuItem
 										variant="destructive"
 										disabled={isLoading !== null}
-										onClick={() =>
-											handleAction("delete", () =>
-												deleteDeployments(service.id),
-											)
-										}
+										onClick={() => setConfirmAction("delete")}
 									>
 										<Trash2Icon />
-										{isLoading === "delete" ? "Deleting..." : "Delete All"}
+										Delete All
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>
@@ -192,6 +225,47 @@ export default function ArchitecturePage() {
 				</div>
 			)}
 			<DeploymentCanvas service={service} />
+
+			<AlertDialog
+				open={confirmAction !== null}
+				onOpenChange={(open) => !open && setConfirmAction(null)}
+			>
+				{confirmAction && (
+					<AlertDialogContent size="sm">
+						<AlertDialogHeader>
+							<AlertDialogMedia
+								className={
+									confirmAction === "delete"
+										? "bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400"
+										: "bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
+								}
+							>
+								<AlertTriangleIcon />
+							</AlertDialogMedia>
+							<AlertDialogTitle>
+								{confirmActionConfig[confirmAction].title}
+							</AlertDialogTitle>
+							<AlertDialogDescription>
+								{confirmActionConfig[confirmAction].description}
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel disabled={isLoading !== null}>
+								Cancel
+							</AlertDialogCancel>
+							<AlertDialogAction
+								variant={confirmActionConfig[confirmAction].variant}
+								disabled={isLoading !== null}
+								onClick={confirmActionConfig[confirmAction].onConfirm}
+							>
+								{isLoading
+									? "Processing..."
+									: confirmActionConfig[confirmAction].actionLabel}
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				)}
+			</AlertDialog>
 		</div>
 	);
 }

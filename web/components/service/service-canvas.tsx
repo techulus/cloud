@@ -316,6 +316,8 @@ export function ServiceCanvas({
 								<CreateServiceDialog
 									projectId={projectId}
 									environmentId={envId}
+									projectSlug={projectSlug}
+									envName={envName}
 									onSuccess={() => mutate()}
 								/>
 								<Link
@@ -363,6 +365,8 @@ export function ServiceCanvas({
 								<CreateServiceDialog
 									projectId={projectId}
 									environmentId={envId}
+									projectSlug={projectSlug}
+									envName={envName}
 									onSuccess={() => mutate()}
 								/>
 								<Link
@@ -402,6 +406,8 @@ export function ServiceCanvas({
 						<CreateServiceDialog
 							projectId={projectId}
 							environmentId={envId}
+							projectSlug={projectSlug}
+							envName={envName}
 							onSuccess={() => mutate()}
 						/>
 					</div>
@@ -450,6 +456,8 @@ export function ServiceCanvas({
 					<CreateServiceDialog
 						projectId={projectId}
 						environmentId={envId}
+						projectSlug={projectSlug}
+						envName={envName}
 						onSuccess={() => mutate()}
 					/>
 				</div>

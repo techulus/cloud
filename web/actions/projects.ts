@@ -443,26 +443,30 @@ export async function deleteService(serviceId: string) {
 		throw new Error("Service not found");
 	}
 
-	const activeDeployments = await db
+	const allDeployments = await db
 		.select()
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
-	const activeStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-		"stopping",
-	];
-	const hasActiveDeployments = activeDeployments.some((d) =>
-		activeStatuses.includes(d.status),
-	);
+	for (const dep of allDeployments) {
+		if (dep.status === "running" && dep.containerId) {
+			await db
+				.update(deployments)
+				.set({ status: "stopping" })
+				.where(eq(deployments.id, dep.id));
 
-	if (hasActiveDeployments) {
-		throw new Error("Stop all deployments before deleting the service");
+			await enqueueWork(dep.serverId, "stop", {
+				deploymentId: dep.id,
+				containerId: dep.containerId,
+			});
+		}
+
+		await db
+			.delete(deploymentPorts)
+			.where(eq(deploymentPorts.deploymentId, dep.id));
 	}
+
+	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 
 	if (service.stateful && service.lockedServerId) {
 		const volumes = await db
@@ -477,12 +481,6 @@ export async function deleteService(serviceId: string) {
 		}
 	}
 
-	for (const deployment of activeDeployments) {
-		await db
-			.delete(deploymentPorts)
-			.where(eq(deploymentPorts.deploymentId, deployment.id));
-	}
-	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
