@@ -6,7 +6,6 @@ import {
 	projects,
 	serviceReplicas,
 	githubRepos,
-	servers,
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
@@ -146,6 +145,10 @@ export async function POST(
 	}
 
 	if (update.status === "completed") {
+		console.log(
+			`[build:status] build ${buildId.slice(0, 8)} completed, targetPlatform=${build.targetPlatform}, serviceId=${build.serviceId}, commitSha=${build.commitSha?.slice(0, 8)}`,
+		);
+
 		const service = await db
 			.select()
 			.from(services)
@@ -194,9 +197,15 @@ export async function POST(
 					),
 				);
 
+			console.log(
+				`[build:status] groupBuilds found: ${groupBuilds.length}, statuses: ${groupBuilds.map((b) => `${b.id.slice(0, 8)}=${b.status}`).join(", ")}`,
+			);
+
 			const allCompleted = groupBuilds.every(
 				(b) => b.id === buildId || b.status === "completed",
 			);
+
+			console.log(`[build:status] allCompleted=${allCompleted}`);
 
 			if (allCompleted && groupBuilds.length > 0) {
 				console.log(
@@ -209,26 +218,13 @@ export async function POST(
 				});
 
 				if (images.length > 1) {
-					const onlineServer = await db
-						.select({ id: servers.id })
-						.from(servers)
-						.where(eq(servers.status, "online"))
-						.limit(1)
-						.then((r) => r[0]);
-
-					if (onlineServer) {
-						console.log(
-							`[build:complete] enqueueing create_manifest for ${baseImageUri}`,
-						);
-						await enqueueWork(onlineServer.id, "create_manifest", {
-							images,
-							finalImageUri: baseImageUri,
-						});
-					} else {
-						console.error(
-							"[build:complete] no online server available for manifest creation",
-						);
-					}
+					console.log(
+						`[build:complete] enqueueing create_manifest for ${baseImageUri} to server ${serverId.slice(0, 8)}`,
+					);
+					await enqueueWork(serverId, "create_manifest", {
+						images,
+						finalImageUri: baseImageUri,
+					});
 				} else {
 					console.log(
 						`[build:complete] single platform build, copying image to final tag`,
@@ -273,6 +269,10 @@ export async function POST(
 				);
 			}
 		} else {
+			console.log(
+				`[build:status] no targetPlatform, using legacy single-build path`,
+			);
+
 			await db
 				.update(builds)
 				.set({ imageUri: baseImageUri })
