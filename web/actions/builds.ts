@@ -47,31 +47,8 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
-	if (build.targetPlatform) {
-		const newBuildId = randomUUID();
-
-		await db.insert(builds).values({
-			id: newBuildId,
-			githubRepoId: build.githubRepoId,
-			serviceId: build.serviceId,
-			commitSha: build.commitSha,
-			commitMessage: build.commitMessage,
-			branch: build.branch,
-			author: build.author,
-			targetPlatform: build.targetPlatform,
-			status: "pending",
-		});
-
-		const serverId = await selectBuildServerForPlatform(
-			build.serviceId,
-			build.targetPlatform,
-		);
-		await enqueueWork(serverId, "build", { buildId: newBuildId });
-
-		return { success: true, buildId: newBuildId };
-	}
-
 	const targetPlatforms = await getTargetPlatformsForService(build.serviceId);
+	const buildGroupId = randomUUID();
 	const buildIds: string[] = [];
 
 	for (const platform of targetPlatforms) {
@@ -87,6 +64,7 @@ export async function retryBuild(buildId: string) {
 			branch: build.branch,
 			author: build.author,
 			targetPlatform: platform,
+			buildGroupId,
 			status: "pending",
 		});
 
@@ -146,6 +124,7 @@ export async function triggerBuild(
 				: "Manual build trigger";
 
 		const targetPlatforms = await getTargetPlatformsForService(serviceId);
+		const buildGroupId = randomUUID();
 		const buildIds: string[] = [];
 
 		for (const platform of targetPlatforms) {
@@ -161,6 +140,7 @@ export async function triggerBuild(
 				branch: latestBuild?.branch || githubRepo.deployBranch || "main",
 				author: latestBuild?.author,
 				targetPlatform: platform,
+				buildGroupId,
 				status: "pending",
 			});
 
@@ -191,6 +171,7 @@ export async function triggerBuild(
 			: "Manual build trigger";
 
 	const targetPlatforms = await getTargetPlatformsForService(serviceId);
+	const buildGroupId = randomUUID();
 	const buildIds: string[] = [];
 
 	for (const platform of targetPlatforms) {
@@ -204,6 +185,7 @@ export async function triggerBuild(
 			commitMessage: triggerMessage,
 			branch: service.githubBranch || "main",
 			targetPlatform: platform,
+			buildGroupId,
 			status: "pending",
 		});
 

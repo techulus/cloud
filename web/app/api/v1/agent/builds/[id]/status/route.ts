@@ -187,15 +187,44 @@ export async function POST(
 				.set({ imageUri: archImageUri })
 				.where(eq(builds.id, buildId));
 
+			if (!build.buildGroupId) {
+				console.log(
+					`[build:status] no buildGroupId, treating as single build`,
+				);
+				await db
+					.update(services)
+					.set({ image: baseImageUri })
+					.where(eq(services.id, build.serviceId));
+
+				const replicas = await db
+					.select()
+					.from(serviceReplicas)
+					.where(eq(serviceReplicas.serviceId, build.serviceId));
+
+				const shouldDeploy =
+					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+
+				if (shouldDeploy) {
+					console.log(
+						`[build:complete] triggering deployment for service ${build.serviceId}`,
+					);
+					try {
+						await deployService(build.serviceId);
+					} catch (error) {
+						console.error("[build:complete] deployment failed:", error);
+					}
+				}
+
+				console.log(
+					`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
+				);
+				return NextResponse.json({ ok: true });
+			}
+
 			const groupBuilds = await db
 				.select()
 				.from(builds)
-				.where(
-					and(
-						eq(builds.serviceId, build.serviceId),
-						eq(builds.commitSha, build.commitSha),
-					),
-				);
+				.where(eq(builds.buildGroupId, build.buildGroupId));
 
 			console.log(
 				`[build:status] groupBuilds found: ${groupBuilds.length}, statuses: ${groupBuilds.map((b) => `${b.id.slice(0, 8)}=${b.status}`).join(", ")}`,

@@ -199,6 +199,7 @@ async function handlePushEvent(payload: PushPayload) {
 	const targetPlatforms = await getTargetPlatformsForService(
 		githubRepo.serviceId,
 	);
+	const buildGroupId = randomUUID();
 	const buildIds: string[] = [];
 
 	for (const platform of targetPlatforms) {
@@ -214,6 +215,7 @@ async function handlePushEvent(payload: PushPayload) {
 			branch,
 			author: head_commit.author.username || head_commit.author.name,
 			targetPlatform: platform,
+			buildGroupId,
 			status: "pending",
 			githubDeploymentId,
 		});

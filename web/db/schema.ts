@@ -509,6 +509,7 @@ export const builds = pgTable(
 		error: text("error"),
 		githubDeploymentId: bigint("github_deployment_id", { mode: "number" }),
 		targetPlatform: text("target_platform"),
+		buildGroupId: text("build_group_id"),
 		claimedBy: text("claimed_by").references(() => servers.id, {
 			onDelete: "set null",
 		}),
