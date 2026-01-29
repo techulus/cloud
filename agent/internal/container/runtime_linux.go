@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"techulus/cloud-agent/internal/dns"
 	"techulus/cloud-agent/internal/retry"
 )
 
@@ -122,9 +121,6 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		}
 	}
 
-	if dnsIP := dns.GetContainerDNS(); dnsIP != "" {
-		args = append(args, "--dns", dnsIP)
-	}
 
 	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {
 		args = append(args, "--health-cmd", config.HealthCheck.Cmd)
@@ -516,7 +512,6 @@ func EnsureNetwork(subnetId int) error {
 		"--driver", "bridge",
 		"--subnet", subnet,
 		"--gateway", gateway,
-		"--disable-dns",
 		NetworkName,
 	}
 
