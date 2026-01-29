@@ -1,13 +1,31 @@
 package dns
 
 import (
+	"time"
+
 	"github.com/miekg/dns"
 )
 
 const defaultTTL = 30
 
+var upstreamServers = []string{
+	"8.8.8.8:53",
+	"1.1.1.1:53",
+}
+
 type dnsHandler struct {
-	store *RecordStore
+	store  *RecordStore
+	client *dns.Client
+}
+
+func newDNSHandler(store *RecordStore) *dnsHandler {
+	return &dnsHandler{
+		store: store,
+		client: &dns.Client{
+			Net:     "udp",
+			Timeout: 5 * time.Second,
+		},
+	}
 }
 
 func (h *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -18,23 +36,29 @@ func (h *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	for _, q := range r.Question {
 		switch q.Qtype {
 		case dns.TypeA:
-			h.handleA(m, q)
+			if !h.handleA(m, q) {
+				h.forwardQuery(w, r)
+				return
+			}
 		case dns.TypeAAAA:
-			h.handleAAAA(m, q)
+			if !h.handleAAAA(m, q) {
+				h.forwardQuery(w, r)
+				return
+			}
 		default:
-			m.Rcode = dns.RcodeNotImplemented
+			h.forwardQuery(w, r)
+			return
 		}
 	}
 
 	w.WriteMsg(m)
 }
 
-func (h *dnsHandler) handleA(m *dns.Msg, q dns.Question) {
+func (h *dnsHandler) handleA(m *dns.Msg, q dns.Question) bool {
 	ips := h.store.Lookup(q.Name)
 
 	if ips == nil {
-		m.Rcode = dns.RcodeNameError
-		return
+		return false
 	}
 
 	for _, ip := range ips {
@@ -51,14 +75,14 @@ func (h *dnsHandler) handleA(m *dns.Msg, q dns.Question) {
 			m.Answer = append(m.Answer, rr)
 		}
 	}
+	return true
 }
 
-func (h *dnsHandler) handleAAAA(m *dns.Msg, q dns.Question) {
+func (h *dnsHandler) handleAAAA(m *dns.Msg, q dns.Question) bool {
 	ips := h.store.Lookup(q.Name)
 
 	if ips == nil {
-		m.Rcode = dns.RcodeNameError
-		return
+		return false
 	}
 
 	for _, ip := range ips {
@@ -75,4 +99,22 @@ func (h *dnsHandler) handleAAAA(m *dns.Msg, q dns.Question) {
 			m.Answer = append(m.Answer, rr)
 		}
 	}
+	return true
+}
+
+func (h *dnsHandler) forwardQuery(w dns.ResponseWriter, r *dns.Msg) {
+	for _, server := range upstreamServers {
+		resp, _, err := h.client.Exchange(r, server)
+		if err != nil {
+			continue
+		}
+		resp.Id = r.Id
+		w.WriteMsg(resp)
+		return
+	}
+
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Rcode = dns.RcodeServerFailure
+	w.WriteMsg(m)
 }
