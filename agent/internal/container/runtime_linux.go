@@ -121,7 +121,6 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		}
 	}
 
-
 	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {
 		args = append(args, "--health-cmd", config.HealthCheck.Cmd)
 		args = append(args, "--health-interval", fmt.Sprintf("%ds", config.HealthCheck.Interval))
@@ -512,6 +511,7 @@ func EnsureNetwork(subnetId int) error {
 		"--driver", "bridge",
 		"--subnet", subnet,
 		"--gateway", gateway,
+		"--disable-dns",
 		NetworkName,
 	}
 
