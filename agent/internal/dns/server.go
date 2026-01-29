@@ -42,7 +42,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	addr := fmt.Sprintf("%s:%d", s.listenAddr, s.port)
 
-	handler := &dnsHandler{store: s.store}
+	handler := newDNSHandler(s.store)
 
 	udpReady := make(chan struct{})
 	tcpReady := make(chan struct{})
