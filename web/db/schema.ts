@@ -415,6 +415,7 @@ export const workQueue = pgTable(
 				"build",
 				"backup_volume",
 				"restore_volume",
+				"create_manifest",
 			],
 		}).notNull(),
 		payload: text("payload").notNull(),
@@ -507,6 +508,7 @@ export const builds = pgTable(
 		imageUri: text("image_uri"),
 		error: text("error"),
 		githubDeploymentId: bigint("github_deployment_id", { mode: "number" }),
+		targetPlatform: text("target_platform"),
 		claimedBy: text("claimed_by").references(() => servers.id, {
 			onDelete: "set null",
 		}),

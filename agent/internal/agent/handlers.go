@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/paths"
 )
 
 func (a *Agent) ProcessRestart(item agenthttp.WorkQueueItem) error {
@@ -205,4 +207,32 @@ func (a *Agent) RunBuildCleanup() {
 	if err := a.Builder.Cleanup(); err != nil {
 		log.Printf("[build:cleanup] cleanup failed: %v", err)
 	}
+}
+
+func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		Images        []string `json:"images"`
+		FinalImageUri string   `json:"finalImageUri"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse create_manifest payload: %w", err)
+	}
+
+	log.Printf("[create_manifest] creating manifest for %s with %d images", payload.FinalImageUri, len(payload.Images))
+
+	craneArgs := []string{"index", "append", "--insecure", "-t", payload.FinalImageUri}
+	for _, img := range payload.Images {
+		craneArgs = append(craneArgs, "-m", img)
+	}
+
+	cmd := exec.Command(paths.CranePath, craneArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[create_manifest] crane failed: %s", string(output))
+		return fmt.Errorf("crane index append failed: %w: %s", err, string(output))
+	}
+
+	log.Printf("[create_manifest] manifest created successfully for %s", payload.FinalImageUri)
+	return nil
 }

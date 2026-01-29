@@ -181,8 +181,6 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		buildkitAddr = paths.BuildKitSocket
 	}
 
-	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", config.ImageURI)
-
 	var secretArgs []string
 	var secretEnv []string
 	for key, value := range config.Secrets {
@@ -190,15 +188,19 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		secretEnv = append(secretEnv, fmt.Sprintf("%s=%s", key, value))
 	}
 
-	platforms := config.TargetPlatforms
-	if len(platforms) == 0 {
-		platforms = []string{"linux/amd64", "linux/arm64"}
+	platform := "linux/amd64"
+	if len(config.TargetPlatforms) > 0 {
+		platform = config.TargetPlatforms[0]
 	}
+	arch := strings.Split(platform, "/")[1]
+
+	archImageUri := config.ImageURI + "-" + arch
+	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", archImageUri)
 
 	if hasDockerfile {
-		log.Printf("[build:%s] building with Dockerfile via buildctl", truncateStr(config.BuildID, 8))
+		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
 		b.sendLog(config, "Using existing Dockerfile")
-		b.sendLog(config, fmt.Sprintf("Building and pushing %s", config.ImageURI))
+		b.sendLog(config, fmt.Sprintf("Building and pushing %s", archImageUri))
 
 		args := []string{
 			"--addr", buildkitAddr,
@@ -206,8 +208,8 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--frontend", "dockerfile.v0",
 			"--local", "context=.",
 			"--local", "dockerfile=.",
-			"--opt", fmt.Sprintf("platform=%s", strings.Join(platforms, ",")),
-			"--output", outputFlag,
+			"--opt", fmt.Sprintf("platform=%s", platform),
+			"--output", archOutputFlag,
 		}
 		args = append(args, secretArgs...)
 
@@ -221,7 +223,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			return fmt.Errorf("buildctl build failed: %w", err)
 		}
 	} else {
-		log.Printf("[build:%s] building with Railpack via buildctl", truncateStr(config.BuildID, 8))
+		log.Printf("[build:%s] building with Railpack via buildctl for %s", truncateStr(config.BuildID, 8), platform)
 		b.sendLog(config, "No Dockerfile found, using Railpack...")
 
 		b.sendLog(config, "Generating build plan...")
@@ -239,70 +241,34 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			return fmt.Errorf("railpack prepare failed: %w", err)
 		}
 
-		var platformImages []string
+		b.sendLog(config, fmt.Sprintf("Building for %s...", platform))
 
-		for _, platform := range platforms {
-			arch := strings.Split(platform, "/")[1]
-			platformTag := config.ImageURI + "-" + arch
-			platformImages = append(platformImages, platformTag)
-
-			b.sendLog(config, fmt.Sprintf("Building for %s...", platform))
-
-			platformOutput := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", platformTag)
-
-			args := []string{
-				"--addr", buildkitAddr,
-				"build",
-				"--frontend", "gateway.v0",
-				"--opt", "source=ghcr.io/railwayapp/railpack-frontend:v0.15.4",
-				"--local", "context=.",
-				"--local", "dockerfile=.",
-				"--opt", "filename=railpack-plan.json",
-				"--opt", fmt.Sprintf("platform=%s", platform),
-				"--output", platformOutput,
-			}
-
-			secretsHash := computeSecretsHash(config.Secrets)
-			if secretsHash != "" {
-				args = append(args, "--opt", fmt.Sprintf("build-arg:secrets-hash=%s", secretsHash))
-			}
-			args = append(args, secretArgs...)
-
-			cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
-			cmd.Dir = contextDir
-			cmd.Env = append(os.Environ(), secretEnv...)
-			output, err = b.runCommandStreaming(cmd, config)
-			if err != nil {
-				log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)
-				b.sendLog(config, fmt.Sprintf("Build error (%s): %s", platform, output))
-				return fmt.Errorf("buildctl build failed for %s: %w", platform, err)
-			}
+		args := []string{
+			"--addr", buildkitAddr,
+			"build",
+			"--frontend", "gateway.v0",
+			"--opt", "source=ghcr.io/railwayapp/railpack-frontend:v0.15.4",
+			"--local", "context=.",
+			"--local", "dockerfile=.",
+			"--opt", "filename=railpack-plan.json",
+			"--opt", fmt.Sprintf("platform=%s", platform),
+			"--output", archOutputFlag,
 		}
 
-		if len(platformImages) == 1 {
-			b.sendLog(config, "Tagging single-platform image...")
-			craneArgs := []string{"copy", "--insecure", platformImages[0], config.ImageURI}
-			cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
-			output, err = b.runCommandStreaming(cmd, config)
-			if err != nil {
-				log.Printf("[build:%s] crane copy failed: %s", truncateStr(config.BuildID, 8), output)
-				b.sendLog(config, fmt.Sprintf("Image tagging error: %s", output))
-				return fmt.Errorf("crane copy failed: %w", err)
-			}
-		} else {
-			b.sendLog(config, "Creating multi-arch manifest...")
-			craneArgs := []string{"index", "append", "--insecure", "-t", config.ImageURI}
-			for _, img := range platformImages {
-				craneArgs = append(craneArgs, "-m", img)
-			}
+		secretsHash := computeSecretsHash(config.Secrets)
+		if secretsHash != "" {
+			args = append(args, "--opt", fmt.Sprintf("build-arg:secrets-hash=%s", secretsHash))
+		}
+		args = append(args, secretArgs...)
 
-			cmd = exec.CommandContext(ctx, paths.CranePath, craneArgs...)
-			output, err = b.runCommandStreaming(cmd, config)
-			if err != nil {
-				log.Printf("[build:%s] crane failed: %s", truncateStr(config.BuildID, 8), output)
-				b.sendLog(config, fmt.Sprintf("Manifest creation error: %s", output))
-				return fmt.Errorf("crane index append failed: %w", err)
-			}
+		cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
+		cmd.Dir = contextDir
+		cmd.Env = append(os.Environ(), secretEnv...)
+		output, err = b.runCommandStreaming(cmd, config)
+		if err != nil {
+			log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)
+			b.sendLog(config, fmt.Sprintf("Build error (%s): %s", platform, output))
+			return fmt.Errorf("buildctl build failed for %s: %w", platform, err)
 		}
 	}
 

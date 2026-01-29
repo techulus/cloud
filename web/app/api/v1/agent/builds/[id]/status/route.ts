@@ -6,12 +6,14 @@ import {
 	projects,
 	serviceReplicas,
 	githubRepos,
+	servers,
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { deployService } from "@/actions/projects";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { sendBuildFailureAlert } from "@/lib/email";
+import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
@@ -172,41 +174,142 @@ export async function POST(
 			);
 		}
 		const commitSha = build.commitSha === "HEAD" ? "latest" : build.commitSha;
-		const imageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
+		const baseImageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
 
-		await db.update(builds).set({ imageUri }).where(eq(builds.id, buildId));
+		if (build.targetPlatform) {
+			const arch = build.targetPlatform.split("/")[1];
+			const archImageUri = `${baseImageUri}-${arch}`;
+			await db
+				.update(builds)
+				.set({ imageUri: archImageUri })
+				.where(eq(builds.id, buildId));
 
-		await db
-			.update(services)
-			.set({ image: imageUri })
-			.where(eq(services.id, build.serviceId));
+			const groupBuilds = await db
+				.select()
+				.from(builds)
+				.where(
+					and(
+						eq(builds.serviceId, build.serviceId),
+						eq(builds.commitSha, build.commitSha),
+					),
+				);
 
-		const replicas = await db
-			.select()
-			.from(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, build.serviceId));
-
-		const shouldDeploy =
-			replicas.length > 0 || (service.autoPlace && service.replicas > 0);
-
-		if (shouldDeploy) {
-			console.log(
-				`[build:complete] triggering deployment for service ${build.serviceId}`,
+			const allCompleted = groupBuilds.every(
+				(b) => b.id === buildId || b.status === "completed",
 			);
 
-			try {
-				await deployService(build.serviceId);
-			} catch (error) {
-				console.error("[build:complete] deployment failed:", error);
+			if (allCompleted && groupBuilds.length > 0) {
+				console.log(
+					`[build:complete] all ${groupBuilds.length} platform builds completed for ${build.serviceId}@${build.commitSha.slice(0, 8)}`,
+				);
+
+				const images = groupBuilds.map((b) => {
+					const bArch = b.targetPlatform?.split("/")[1] || "amd64";
+					return `${baseImageUri}-${bArch}`;
+				});
+
+				if (images.length > 1) {
+					const onlineServer = await db
+						.select({ id: servers.id })
+						.from(servers)
+						.where(eq(servers.status, "online"))
+						.limit(1)
+						.then((r) => r[0]);
+
+					if (onlineServer) {
+						console.log(
+							`[build:complete] enqueueing create_manifest for ${baseImageUri}`,
+						);
+						await enqueueWork(onlineServer.id, "create_manifest", {
+							images,
+							finalImageUri: baseImageUri,
+						});
+					} else {
+						console.error(
+							"[build:complete] no online server available for manifest creation",
+						);
+					}
+				} else {
+					console.log(
+						`[build:complete] single platform build, copying image to final tag`,
+					);
+				}
+
 				await db
-					.update(builds)
-					.set({ error: `Deployment failed: ${error}` })
-					.where(eq(builds.id, buildId));
+					.update(services)
+					.set({ image: baseImageUri })
+					.where(eq(services.id, build.serviceId));
+
+				const replicas = await db
+					.select()
+					.from(serviceReplicas)
+					.where(eq(serviceReplicas.serviceId, build.serviceId));
+
+				const shouldDeploy =
+					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+
+				if (shouldDeploy) {
+					console.log(
+						`[build:complete] triggering deployment for service ${build.serviceId}`,
+					);
+
+					try {
+						await deployService(build.serviceId);
+					} catch (error) {
+						console.error("[build:complete] deployment failed:", error);
+						await db
+							.update(builds)
+							.set({ error: `Deployment failed: ${error}` })
+							.where(eq(builds.id, buildId));
+					}
+				} else {
+					console.log(
+						`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
+					);
+				}
+			} else {
+				console.log(
+					`[build:complete] waiting for other platform builds to complete for ${build.serviceId}@${build.commitSha.slice(0, 8)}`,
+				);
 			}
 		} else {
-			console.log(
-				`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
-			);
+			await db
+				.update(builds)
+				.set({ imageUri: baseImageUri })
+				.where(eq(builds.id, buildId));
+
+			await db
+				.update(services)
+				.set({ image: baseImageUri })
+				.where(eq(services.id, build.serviceId));
+
+			const replicas = await db
+				.select()
+				.from(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, build.serviceId));
+
+			const shouldDeploy =
+				replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+
+			if (shouldDeploy) {
+				console.log(
+					`[build:complete] triggering deployment for service ${build.serviceId}`,
+				);
+
+				try {
+					await deployService(build.serviceId);
+				} catch (error) {
+					console.error("[build:complete] deployment failed:", error);
+					await db
+						.update(builds)
+						.set({ error: `Deployment failed: ${error}` })
+						.where(eq(builds.id, buildId));
+				}
+			} else {
+				console.log(
+					`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
+				);
+			}
 		}
 	}
 

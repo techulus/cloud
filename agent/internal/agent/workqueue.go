@@ -36,6 +36,8 @@ func (a *Agent) ProcessWorkQueue() {
 			processErr = a.ProcessBackupVolume(item)
 		case "restore_volume":
 			processErr = a.ProcessRestoreVolume(item)
+		case "create_manifest":
+			processErr = a.ProcessCreateManifest(item)
 		default:
 			log.Printf("[work-queue] unknown work item type: %s", item.Type)
 			continue

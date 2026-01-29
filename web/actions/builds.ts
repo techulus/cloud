@@ -4,7 +4,10 @@ import { randomUUID } from "node:crypto";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
-import { selectBuildServer } from "@/lib/build-assignment";
+import {
+	selectBuildServerForPlatform,
+	getTargetPlatformsForService,
+} from "@/lib/build-assignment";
 import { enqueueWork } from "@/lib/work-queue";
 
 export async function cancelBuild(buildId: string) {
@@ -44,23 +47,57 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
-	const newBuildId = randomUUID();
+	if (build.targetPlatform) {
+		const newBuildId = randomUUID();
 
-	await db.insert(builds).values({
-		id: newBuildId,
-		githubRepoId: build.githubRepoId,
-		serviceId: build.serviceId,
-		commitSha: build.commitSha,
-		commitMessage: build.commitMessage,
-		branch: build.branch,
-		author: build.author,
-		status: "pending",
-	});
+		await db.insert(builds).values({
+			id: newBuildId,
+			githubRepoId: build.githubRepoId,
+			serviceId: build.serviceId,
+			commitSha: build.commitSha,
+			commitMessage: build.commitMessage,
+			branch: build.branch,
+			author: build.author,
+			targetPlatform: build.targetPlatform,
+			status: "pending",
+		});
 
-	const serverId = await selectBuildServer(build.serviceId);
-	await enqueueWork(serverId, "build", { buildId: newBuildId });
+		const serverId = await selectBuildServerForPlatform(
+			build.serviceId,
+			build.targetPlatform,
+		);
+		await enqueueWork(serverId, "build", { buildId: newBuildId });
 
-	return { success: true, buildId: newBuildId };
+		return { success: true, buildId: newBuildId };
+	}
+
+	const targetPlatforms = await getTargetPlatformsForService(build.serviceId);
+	const buildIds: string[] = [];
+
+	for (const platform of targetPlatforms) {
+		const newBuildId = randomUUID();
+		buildIds.push(newBuildId);
+
+		await db.insert(builds).values({
+			id: newBuildId,
+			githubRepoId: build.githubRepoId,
+			serviceId: build.serviceId,
+			commitSha: build.commitSha,
+			commitMessage: build.commitMessage,
+			branch: build.branch,
+			author: build.author,
+			targetPlatform: platform,
+			status: "pending",
+		});
+
+		const serverId = await selectBuildServerForPlatform(
+			build.serviceId,
+			platform,
+		);
+		await enqueueWork(serverId, "build", { buildId: newBuildId });
+	}
+
+	return { success: true, buildId: buildIds[0] };
 }
 
 export async function triggerBuild(
@@ -79,8 +116,6 @@ export async function triggerBuild(
 	if (service.sourceType !== "github") {
 		throw new Error("Service is not connected to GitHub");
 	}
-
-	const newBuildId = randomUUID();
 
 	const [githubRepo] = await db
 		.select()
@@ -110,21 +145,30 @@ export async function triggerBuild(
 				? "Scheduled build trigger"
 				: "Manual build trigger";
 
-		await db.insert(builds).values({
-			id: newBuildId,
-			githubRepoId: githubRepo.id,
-			serviceId,
-			commitSha: latestBuild?.commitSha || "HEAD",
-			commitMessage: latestBuild?.commitMessage || triggerMessage,
-			branch: latestBuild?.branch || githubRepo.deployBranch || "main",
-			author: latestBuild?.author,
-			status: "pending",
-		});
+		const targetPlatforms = await getTargetPlatformsForService(serviceId);
+		const buildIds: string[] = [];
 
-		const serverId = await selectBuildServer(serviceId);
-		await enqueueWork(serverId, "build", { buildId: newBuildId });
+		for (const platform of targetPlatforms) {
+			const buildId = randomUUID();
+			buildIds.push(buildId);
 
-		return { success: true, buildId: newBuildId };
+			await db.insert(builds).values({
+				id: buildId,
+				githubRepoId: githubRepo.id,
+				serviceId,
+				commitSha: latestBuild?.commitSha || "HEAD",
+				commitMessage: latestBuild?.commitMessage || triggerMessage,
+				branch: latestBuild?.branch || githubRepo.deployBranch || "main",
+				author: latestBuild?.author,
+				targetPlatform: platform,
+				status: "pending",
+			});
+
+			const serverId = await selectBuildServerForPlatform(serviceId, platform);
+			await enqueueWork(serverId, "build", { buildId });
+		}
+
+		return { success: true, buildId: buildIds[0] };
 	}
 
 	if (!service.githubRepoUrl) {
@@ -146,17 +190,26 @@ export async function triggerBuild(
 			? "Scheduled build trigger"
 			: "Manual build trigger";
 
-	await db.insert(builds).values({
-		id: newBuildId,
-		serviceId,
-		commitSha: "HEAD",
-		commitMessage: triggerMessage,
-		branch: service.githubBranch || "main",
-		status: "pending",
-	});
+	const targetPlatforms = await getTargetPlatformsForService(serviceId);
+	const buildIds: string[] = [];
 
-	const serverId = await selectBuildServer(serviceId);
-	await enqueueWork(serverId, "build", { buildId: newBuildId });
+	for (const platform of targetPlatforms) {
+		const buildId = randomUUID();
+		buildIds.push(buildId);
 
-	return { success: true, buildId: newBuildId };
+		await db.insert(builds).values({
+			id: buildId,
+			serviceId,
+			commitSha: "HEAD",
+			commitMessage: triggerMessage,
+			branch: service.githubBranch || "main",
+			targetPlatform: platform,
+			status: "pending",
+		});
+
+		const serverId = await selectBuildServerForPlatform(serviceId, platform);
+		await enqueueWork(serverId, "build", { buildId });
+	}
+
+	return { success: true, buildId: buildIds[0] };
 }

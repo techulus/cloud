@@ -13,7 +13,10 @@ import {
 	createGitHubDeployment,
 	updateGitHubDeploymentStatus,
 } from "@/lib/github";
-import { selectBuildServer } from "@/lib/build-assignment";
+import {
+	selectBuildServerForPlatform,
+	getTargetPlatformsForService,
+} from "@/lib/build-assignment";
 import { enqueueWork } from "@/lib/work-queue";
 
 type InstallationPayload = {
@@ -172,8 +175,6 @@ async function handlePushEvent(payload: PushPayload) {
 		});
 	}
 
-	const buildId = randomUUID();
-
 	let githubDeploymentId: number | undefined;
 	try {
 		githubDeploymentId = await createGitHubDeployment(
@@ -195,26 +196,40 @@ async function handlePushEvent(payload: PushPayload) {
 		console.error("[webhook:push] failed to create GitHub deployment:", error);
 	}
 
-	await db.insert(builds).values({
-		id: buildId,
-		githubRepoId: githubRepo.id,
-		serviceId: githubRepo.serviceId,
-		commitSha: head_commit.id,
-		commitMessage: head_commit.message.substring(0, 500),
-		branch,
-		author: head_commit.author.username || head_commit.author.name,
-		status: "pending",
-		githubDeploymentId,
-	});
-
-	const serverId = await selectBuildServer(githubRepo.serviceId);
-	await enqueueWork(serverId, "build", { buildId });
-
-	console.log(
-		`[webhook:push] created build ${buildId} for ${repository.full_name}@${head_commit.id.slice(0, 7)}, assigned to server ${serverId.slice(0, 8)}`,
+	const targetPlatforms = await getTargetPlatformsForService(
+		githubRepo.serviceId,
 	);
+	const buildIds: string[] = [];
 
-	return NextResponse.json({ ok: true, buildId, serverId });
+	for (const platform of targetPlatforms) {
+		const buildId = randomUUID();
+		buildIds.push(buildId);
+
+		await db.insert(builds).values({
+			id: buildId,
+			githubRepoId: githubRepo.id,
+			serviceId: githubRepo.serviceId,
+			commitSha: head_commit.id,
+			commitMessage: head_commit.message.substring(0, 500),
+			branch,
+			author: head_commit.author.username || head_commit.author.name,
+			targetPlatform: platform,
+			status: "pending",
+			githubDeploymentId,
+		});
+
+		const serverId = await selectBuildServerForPlatform(
+			githubRepo.serviceId,
+			platform,
+		);
+		await enqueueWork(serverId, "build", { buildId });
+
+		console.log(
+			`[webhook:push] created build ${buildId} (${platform}) for ${repository.full_name}@${head_commit.id.slice(0, 7)}, assigned to server ${serverId.slice(0, 8)}`,
+		);
+	}
+
+	return NextResponse.json({ ok: true, buildIds });
 }
 
 export async function POST(request: NextRequest) {
