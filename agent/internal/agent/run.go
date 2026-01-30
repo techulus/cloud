@@ -2,10 +2,21 @@ package agent
 
 import (
 	"context"
+	"log"
 	"time"
+
+	"techulus/cloud-agent/internal/container"
 )
 
 func (a *Agent) Run(ctx context.Context) {
+	if a.Config.RegistryURL != "" && a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
+		if err := container.Login(a.Config.RegistryURL, a.Config.RegistryUsername, a.Config.RegistryPassword, a.Config.RegistryInsecure); err != nil {
+			log.Printf("[registry] login failed: %v", err)
+		} else {
+			log.Printf("[registry] logged in to %s", a.Config.RegistryURL)
+		}
+	}
+
 	ticker := time.NewTicker(TickInterval)
 	defer ticker.Stop()
 

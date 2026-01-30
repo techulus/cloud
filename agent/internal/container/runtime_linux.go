@@ -4,11 +4,13 @@ package container
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -433,6 +435,61 @@ func Login(registryURL, username, password string, insecure bool) error {
 	}
 
 	log.Printf("[podman:login] successfully logged in to registry %s", registryURL)
+
+	if err := writeDockerConfig(registryURL, username, password); err != nil {
+		log.Printf("[registry] failed to write docker config: %v", err)
+	}
+
+	registryHost := strings.TrimPrefix(registryURL, "https://")
+	registryHost = strings.TrimPrefix(registryHost, "http://")
+	registryHost = strings.TrimSuffix(registryHost, "/")
+
+	craneArgs := []string{"auth", "login", "-u", username, "-p", password, registryHost}
+	craneCmd := exec.Command("/usr/local/bin/crane", craneArgs...)
+	if out, err := craneCmd.CombinedOutput(); err != nil {
+		log.Printf("[crane:login] failed: %s: %v", string(out), err)
+	} else {
+		log.Printf("[crane:login] successfully logged in to %s", registryHost)
+	}
+
+	return nil
+}
+
+func writeDockerConfig(registryURL, username, password string) error {
+	registryHost := strings.TrimPrefix(registryURL, "https://")
+	registryHost = strings.TrimPrefix(registryHost, "http://")
+	registryHost = strings.TrimSuffix(registryHost, "/")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	dockerDir := filepath.Join(homeDir, ".docker")
+	if err := os.MkdirAll(dockerDir, 0700); err != nil {
+		return err
+	}
+
+	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	config := map[string]interface{}{
+		"auths": map[string]interface{}{
+			registryHost: map[string]string{
+				"auth": auth,
+			},
+		},
+	}
+
+	configBytes, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	configPath := filepath.Join(dockerDir, "config.json")
+	if err := os.WriteFile(configPath, configBytes, 0600); err != nil {
+		return err
+	}
+
+	log.Printf("[registry] wrote docker config to %s", configPath)
 	return nil
 }
 
