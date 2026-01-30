@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { workQueue } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
+import { deployService } from "@/actions/projects";
 
 const MAX_TIMEOUT = 30000;
 const POLL_INTERVAL = 2000;
@@ -97,6 +98,34 @@ export async function POST(request: NextRequest) {
 			{ error: "Work queue item not found" },
 			{ status: 404 },
 		);
+	}
+
+	const item = result[0];
+
+	if (
+		item.type === "create_manifest" &&
+		data.status === "completed" &&
+		item.payload
+	) {
+		try {
+			const payload = JSON.parse(item.payload) as {
+				serviceId?: string;
+			};
+
+			if (payload.serviceId) {
+				console.log(
+					`[work-queue] create_manifest completed, triggering deployment for service ${payload.serviceId}`,
+				);
+				deployService(payload.serviceId).catch((error) => {
+					console.error(
+						`[work-queue] deployment failed after create_manifest:`,
+						error,
+					);
+				});
+			}
+		} catch (error) {
+			console.error(`[work-queue] failed to parse payload:`, error);
+		}
 	}
 
 	return NextResponse.json({ ok: true });

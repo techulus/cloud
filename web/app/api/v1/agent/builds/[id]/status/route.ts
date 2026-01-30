@@ -191,10 +191,6 @@ export async function POST(
 				console.log(
 					`[build:status] no buildGroupId, treating as single build`,
 				);
-				await db
-					.update(services)
-					.set({ image: baseImageUri })
-					.where(eq(services.id, build.serviceId));
 
 				const replicas = await db
 					.select()
@@ -204,16 +200,19 @@ export async function POST(
 				const shouldDeploy =
 					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
 
-				if (shouldDeploy) {
-					console.log(
-						`[build:complete] triggering deployment for service ${build.serviceId}`,
-					);
-					try {
-						await deployService(build.serviceId);
-					} catch (error) {
-						console.error("[build:complete] deployment failed:", error);
-					}
-				}
+				console.log(
+					`[build:complete] enqueueing create_manifest for single-target build ${baseImageUri} to server ${serverId.slice(0, 8)}`,
+				);
+				await enqueueWork(serverId, "create_manifest", {
+					images: [archImageUri],
+					finalImageUri: baseImageUri,
+					serviceId: shouldDeploy ? build.serviceId : undefined,
+				});
+
+				await db
+					.update(services)
+					.set({ image: baseImageUri })
+					.where(eq(services.id, build.serviceId));
 
 				console.log(
 					`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
@@ -246,25 +245,6 @@ export async function POST(
 					return `${baseImageUri}-${bArch}`;
 				});
 
-				if (images.length > 1) {
-					console.log(
-						`[build:complete] enqueueing create_manifest for ${baseImageUri} to server ${serverId.slice(0, 8)}`,
-					);
-					await enqueueWork(serverId, "create_manifest", {
-						images,
-						finalImageUri: baseImageUri,
-					});
-				} else {
-					console.log(
-						`[build:complete] single platform build, copying image to final tag`,
-					);
-				}
-
-				await db
-					.update(services)
-					.set({ image: baseImageUri })
-					.where(eq(services.id, build.serviceId));
-
 				const replicas = await db
 					.select()
 					.from(serviceReplicas)
@@ -273,25 +253,19 @@ export async function POST(
 				const shouldDeploy =
 					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
 
-				if (shouldDeploy) {
-					console.log(
-						`[build:complete] triggering deployment for service ${build.serviceId}`,
-					);
+				console.log(
+					`[build:complete] enqueueing create_manifest for ${baseImageUri} to server ${serverId.slice(0, 8)}`,
+				);
+				await enqueueWork(serverId, "create_manifest", {
+					images,
+					finalImageUri: baseImageUri,
+					serviceId: shouldDeploy ? build.serviceId : undefined,
+				});
 
-					try {
-						await deployService(build.serviceId);
-					} catch (error) {
-						console.error("[build:complete] deployment failed:", error);
-						await db
-							.update(builds)
-							.set({ error: `Deployment failed: ${error}` })
-							.where(eq(builds.id, buildId));
-					}
-				} else {
-					console.log(
-						`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
-					);
-				}
+				await db
+					.update(services)
+					.set({ image: baseImageUri })
+					.where(eq(services.id, build.serviceId));
 			} else {
 				console.log(
 					`[build:complete] waiting for other platform builds to complete for ${build.serviceId}@${build.commitSha.slice(0, 8)}`,
