@@ -161,19 +161,16 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 
 	buildConfig := &build.Config{
-		BuildID:          payload.BuildID,
-		CloneURL:         buildDetails.CloneURL,
-		CommitSha:        buildDetails.Build.CommitSha,
-		Branch:           buildDetails.Build.Branch,
-		ImageURI:         buildDetails.ImageURI,
-		ServiceID:        buildDetails.Build.ServiceID,
-		ProjectID:        buildDetails.Build.ProjectID,
-		RootDir:          buildDetails.RootDir,
-		Secrets:          decryptedSecrets,
-		TargetPlatforms:  buildDetails.TargetPlatforms,
-		RegistryUsername: a.Config.RegistryUsername,
-		RegistryPassword: a.Config.RegistryPassword,
-		RegistryInsecure: a.Config.RegistryInsecure,
+		BuildID:         payload.BuildID,
+		CloneURL:        buildDetails.CloneURL,
+		CommitSha:       buildDetails.Build.CommitSha,
+		Branch:          buildDetails.Build.Branch,
+		ImageURI:        buildDetails.ImageURI,
+		ServiceID:       buildDetails.Build.ServiceID,
+		ProjectID:       buildDetails.Build.ProjectID,
+		RootDir:         buildDetails.RootDir,
+		Secrets:         decryptedSecrets,
+		TargetPlatforms: buildDetails.TargetPlatforms,
 	}
 
 	onStatusChange := func(status string) {
@@ -224,13 +221,7 @@ func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[create_manifest] creating manifest for %s with %d images", payload.FinalImageUri, len(payload.Images))
 
-	craneArgs := []string{"index", "append", "-t", payload.FinalImageUri}
-	if a.Config.RegistryInsecure {
-		craneArgs = append(craneArgs, "--insecure")
-	}
-	if a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
-		craneArgs = append(craneArgs, "-u", a.Config.RegistryUsername, "-p", a.Config.RegistryPassword)
-	}
+	craneArgs := []string{"index", "append", "--insecure", "-t", payload.FinalImageUri}
 	for _, img := range payload.Images {
 		craneArgs = append(craneArgs, "-m", img)
 	}
