@@ -20,16 +20,19 @@ import (
 )
 
 type Config struct {
-	BuildID         string
-	CloneURL        string
-	CommitSha       string
-	Branch          string
-	ImageURI        string
-	ServiceID       string
-	ProjectID       string
-	RootDir         string
-	Secrets         map[string]string
-	TargetPlatforms []string
+	BuildID          string
+	CloneURL         string
+	CommitSha        string
+	Branch           string
+	ImageURI         string
+	ServiceID        string
+	ProjectID        string
+	RootDir          string
+	Secrets          map[string]string
+	TargetPlatforms  []string
+	RegistryUsername string
+	RegistryPassword string
+	RegistryInsecure bool
 }
 
 type LogSender interface {
@@ -195,7 +198,14 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	arch := strings.Split(platform, "/")[1]
 
 	archImageUri := config.ImageURI + "-" + arch
-	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", archImageUri)
+	insecureFlag := ""
+	if config.RegistryInsecure {
+		insecureFlag = ",registry.insecure=true"
+	}
+	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true%s", archImageUri, insecureFlag)
+	if config.RegistryUsername != "" && config.RegistryPassword != "" {
+		archOutputFlag = fmt.Sprintf("type=image,name=%s,push=true%s,registry.username=%s,registry.password=%s", archImageUri, insecureFlag, config.RegistryUsername, config.RegistryPassword)
+	}
 
 	if hasDockerfile {
 		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
