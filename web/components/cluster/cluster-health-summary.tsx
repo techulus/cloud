@@ -32,26 +32,30 @@ export function ClusterHealthSummary({
 
 	const stats = [
 		{
-			label: "Servers Online",
+			label: "Servers",
 			value: `${summary.onlineServers}/${summary.totalServers}`,
+			subtitle: "online",
 			icon: Server,
 			healthy: summary.onlineServers === summary.totalServers,
 		},
 		{
-			label: "Avg CPU",
+			label: "CPU",
 			value: `${summary.avgCpuUsage.toFixed(1)}%`,
+			subtitle: "avg usage",
 			icon: Cpu,
 			healthy: summary.avgCpuUsage < 80,
 		},
 		{
-			label: "Network Health",
+			label: "Tunnels",
 			value: `${summary.networkHealthy}/${summary.onlineServers}`,
+			subtitle: "connected",
 			icon: Network,
 			healthy: summary.networkHealthy === summary.onlineServers,
 		},
 		{
-			label: "Containers",
+			label: "Runtimes",
 			value: `${summary.containerHealthy}/${summary.onlineServers}`,
+			subtitle: "responsive",
 			icon: Activity,
 			healthy: summary.containerHealthy === summary.onlineServers,
 		},
@@ -80,8 +84,11 @@ export function ClusterHealthSummary({
 							</div>
 							<div>
 								<p className="text-xs text-muted-foreground">{stat.label}</p>
-								<p className="text-lg font-semibold tabular-nums">
+								<p className="text-lg font-semibold tabular-nums leading-tight">
 									{stat.value}
+									<span className="text-xs font-normal text-muted-foreground ml-1">
+										{stat.subtitle}
+									</span>
 								</p>
 							</div>
 						</CardContent>
