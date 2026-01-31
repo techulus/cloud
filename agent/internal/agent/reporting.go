@@ -5,14 +5,23 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/health"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+)
+
+var (
+	agentStartTime     = time.Now()
+	agentVersion       = "dev"
+	lastHealthCollect  time.Time
+	healthCollectMu    sync.Mutex
 )
 
 func (a *Agent) HeartbeatLoop(ctx context.Context) {
@@ -29,6 +38,10 @@ func (a *Agent) HeartbeatLoop(ctx context.Context) {
 	}
 }
 
+func SetAgentVersion(version string) {
+	agentVersion = version
+}
+
 func (a *Agent) ReportStatus(includeResources bool) {
 	report := &agenthttp.StatusReport{
 		PublicIP:   a.PublicIP,
@@ -41,6 +54,23 @@ func (a *Agent) ReportStatus(includeResources bool) {
 		report.Resources = GetSystemStats()
 		report.Meta = GetSystemMeta()
 	}
+
+	healthCollectMu.Lock()
+	if time.Since(lastHealthCollect) >= 60*time.Second {
+		report.HealthStats = health.CollectSystemStats()
+		report.NetworkHealth = health.CollectNetworkHealth("wg0")
+		report.ContainerHealth = health.CollectContainerHealth()
+		report.AgentHealth = &agenthttp.AgentHealth{
+			Version:    agentVersion,
+			UptimeSecs: int64(time.Since(agentStartTime).Seconds()),
+		}
+		lastHealthCollect = time.Now()
+		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
+			report.HealthStats.CpuUsagePercent, report.HealthStats.MemoryUsagePercent,
+			report.HealthStats.DiskUsagePercent, report.NetworkHealth.TunnelUp,
+			report.ContainerHealth.RunningContainers)
+	}
+	healthCollectMu.Unlock()
 
 	containers, err := container.List()
 	if err == nil {

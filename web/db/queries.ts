@@ -156,11 +156,67 @@ export async function getServerDetails(id: string) {
 			meta: servers.meta,
 			createdAt: servers.createdAt,
 			agentToken: servers.agentToken,
+			healthStats: servers.healthStats,
+			networkHealth: servers.networkHealth,
+			containerHealth: servers.containerHealth,
+			agentHealth: servers.agentHealth,
 		})
 		.from(servers)
 		.where(eq(servers.id, id));
 
 	return serverResults[0] || null;
+}
+
+export async function getClusterHealth() {
+	const allServers = await db
+		.select({
+			id: servers.id,
+			name: servers.name,
+			status: servers.status,
+			healthStats: servers.healthStats,
+			networkHealth: servers.networkHealth,
+			containerHealth: servers.containerHealth,
+			agentHealth: servers.agentHealth,
+		})
+		.from(servers);
+
+	const onlineServers = allServers.filter((s) => s.status === "online");
+	const serversWithHealth = onlineServers.filter((s) => s.healthStats);
+
+	let avgCpuUsage = 0;
+	let avgMemoryUsage = 0;
+
+	if (serversWithHealth.length > 0) {
+		const cpuSum = serversWithHealth.reduce(
+			(sum, s) => sum + (s.healthStats?.cpuUsagePercent ?? 0),
+			0,
+		);
+		const memSum = serversWithHealth.reduce(
+			(sum, s) => sum + (s.healthStats?.memoryUsagePercent ?? 0),
+			0,
+		);
+		avgCpuUsage = cpuSum / serversWithHealth.length;
+		avgMemoryUsage = memSum / serversWithHealth.length;
+	}
+
+	const networkHealthy = onlineServers.filter(
+		(s) => s.networkHealth?.tunnelUp,
+	).length;
+	const containerHealthy = onlineServers.filter(
+		(s) => s.containerHealth?.runtimeResponsive,
+	).length;
+
+	return {
+		summary: {
+			totalServers: allServers.length,
+			onlineServers: onlineServers.length,
+			avgCpuUsage,
+			avgMemoryUsage,
+			networkHealthy,
+			containerHealthy,
+		},
+		servers: allServers,
+	};
 }
 
 export async function getServerServices(serverId: string) {

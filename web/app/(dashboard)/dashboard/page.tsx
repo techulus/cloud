@@ -1,6 +1,7 @@
 import { Box } from "lucide-react";
 import Link from "next/link";
-import { listProjects, listServers } from "@/db/queries";
+import { getClusterHealth, listProjects, listServers } from "@/db/queries";
+import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summary";
 import { CreateProjectDialog } from "@/components/project/create-project-dialog";
 import { ServerList } from "@/components/server/server-list";
 import {
@@ -20,13 +21,16 @@ import {
 } from "@/components/ui/item";
 
 export default async function DashboardPage() {
-	const [servers, projects] = await Promise.all([
+	const [servers, projects, clusterHealth] = await Promise.all([
 		listServers(),
 		listProjects(),
+		getClusterHealth(),
 	]);
 
 	return (
 		<div className="container max-w-7xl mx-auto px-4 py-6 space-y-12">
+			{servers.length > 0 && <ClusterHealthSummary initialData={clusterHealth} />}
+
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">
 					<div>

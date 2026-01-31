@@ -12,6 +12,7 @@ import { LogViewer } from "@/components/logs/log-viewer";
 import { Label } from "@/components/ui/label";
 import { ServerDangerZone } from "@/components/server/server-danger-zone";
 import { ServerHeader } from "@/components/server/server-header";
+import { ServerHealthDetails } from "@/components/server/server-health-details";
 import { ServerServices } from "@/components/server/server-services";
 import { formatRelativeTime } from "@/lib/date";
 
@@ -138,6 +139,16 @@ export default async function ServerDetailPage({
 						</div>
 					</CardContent>
 				</Card>
+
+				<ServerHealthDetails
+					serverId={id}
+					initialData={{
+						healthStats: server.healthStats,
+						networkHealth: server.networkHealth,
+						containerHealth: server.containerHealth,
+						agentHealth: server.agentHealth,
+					}}
+				/>
 
 				<ServerServices serverId={id} />
 

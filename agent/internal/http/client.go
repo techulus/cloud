@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/crypto"
+	"techulus/cloud-agent/internal/health"
 )
 
 type Client struct {
@@ -234,13 +235,22 @@ type Resources struct {
 	DiskGb   int `json:"diskGb"`
 }
 
+type AgentHealth struct {
+	Version    string `json:"version"`
+	UptimeSecs int64  `json:"uptimeSecs"`
+}
+
 type StatusReport struct {
-	Resources  *Resources        `json:"resources,omitempty"`
-	PublicIP   string            `json:"publicIp,omitempty"`
-	PrivateIP  string            `json:"privateIp,omitempty"`
-	Meta       map[string]string `json:"meta,omitempty"`
-	Containers []ContainerStatus `json:"containers"`
-	DnsInSync  bool              `json:"dnsInSync,omitempty"`
+	Resources       *Resources                  `json:"resources,omitempty"`
+	PublicIP        string                      `json:"publicIp,omitempty"`
+	PrivateIP       string                      `json:"privateIp,omitempty"`
+	Meta            map[string]string           `json:"meta,omitempty"`
+	Containers      []ContainerStatus           `json:"containers"`
+	DnsInSync       bool                        `json:"dnsInSync,omitempty"`
+	HealthStats     *health.SystemStats         `json:"healthStats,omitempty"`
+	NetworkHealth   *health.NetworkHealth       `json:"networkHealth,omitempty"`
+	ContainerHealth *health.ContainerHealth     `json:"containerHealth,omitempty"`
+	AgentHealth     *AgentHealth                `json:"agentHealth,omitempty"`
 }
 
 func (c *Client) ReportStatus(report *StatusReport) error {

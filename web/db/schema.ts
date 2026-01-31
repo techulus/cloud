@@ -109,6 +109,38 @@ type ServerMeta = {
 	hostname?: string;
 };
 
+export type HealthStats = {
+	cpuUsagePercent: number;
+	memoryUsagePercent: number;
+	memoryUsedMb: number;
+	diskUsagePercent: number;
+	diskUsedGb: number;
+};
+
+export type NetworkPeer = {
+	id: string;
+	lastSeenSecs: number;
+	reachable: boolean;
+};
+
+export type NetworkHealth = {
+	tunnelUp: boolean;
+	peerCount: number;
+	peers: NetworkPeer[];
+};
+
+export type ContainerHealth = {
+	runtimeResponsive: boolean;
+	runningContainers: number;
+	stoppedContainers: number;
+	storageUsedGb: number;
+};
+
+export type AgentHealth = {
+	version: string;
+	uptimeSecs: number;
+};
+
 export const servers = pgTable("servers", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -127,6 +159,10 @@ export const servers = pgTable("servers", {
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),
 	meta: jsonb("meta").$type<ServerMeta>(),
+	healthStats: jsonb("health_stats").$type<HealthStats>(),
+	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
+	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
+	agentHealth: jsonb("agent_health").$type<AgentHealth>(),
 	agentToken: text("agent_token"),
 	tokenCreatedAt: timestamp("token_created_at", { withTimezone: true }),
 	tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),

@@ -6,6 +6,10 @@ import {
 	servers,
 	services,
 	rollouts,
+	type HealthStats,
+	type NetworkHealth,
+	type ContainerHealth,
+	type AgentHealth,
 } from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
@@ -30,6 +34,10 @@ type StatusReport = {
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
 	dnsInSync?: boolean;
+	healthStats?: HealthStats;
+	networkHealth?: NetworkHealth;
+	containerHealth?: ContainerHealth;
+	agentHealth?: AgentHealth;
 };
 
 async function checkRolloutProgress(rolloutId: string): Promise<void> {
@@ -202,6 +210,19 @@ export async function POST(request: NextRequest) {
 
 	if (report.meta) {
 		updateData.meta = report.meta;
+	}
+
+	if (report.healthStats) {
+		updateData.healthStats = report.healthStats;
+	}
+	if (report.networkHealth) {
+		updateData.networkHealth = report.networkHealth;
+	}
+	if (report.containerHealth) {
+		updateData.containerHealth = report.containerHealth;
+	}
+	if (report.agentHealth) {
+		updateData.agentHealth = report.agentHealth;
 	}
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
