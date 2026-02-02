@@ -40,6 +40,7 @@ func main() {
 		token            string
 		isProxy          bool
 		logsEndpointFlag string
+		disableDNS       bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
@@ -47,6 +48,7 @@ func main() {
 	flag.StringVar(&dataDir, "data-dir", paths.DataDir, "Data directory for agent state")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.StringVar(&logsEndpointFlag, "logs-endpoint", "", "Override logs endpoint URL (optional)")
+	flag.BoolVar(&disableDNS, "no-dns", false, "Disable local DNS server")
 	flag.Parse()
 
 	if controlPlaneURL == "" {
@@ -117,8 +119,12 @@ func main() {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
 		}
 
-		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to setup local DNS: %v", err)
+		if !disableDNS {
+			if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+				log.Printf("Warning: Failed to setup local DNS: %v", err)
+			}
+		} else {
+			log.Println("DNS server disabled via --no-dns flag")
 		}
 	} else {
 		if token == "" {
@@ -221,11 +227,15 @@ func main() {
 			log.Println("Container network ready")
 		}
 
-		log.Println("Setting up local DNS...")
-		if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to setup local DNS: %v", err)
+		if !disableDNS {
+			log.Println("Setting up local DNS...")
+			if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+				log.Printf("Warning: Failed to setup local DNS: %v", err)
+			} else {
+				log.Println("Local DNS configured successfully")
+			}
 		} else {
-			log.Println("Local DNS configured successfully")
+			log.Println("DNS server disabled via --no-dns flag")
 		}
 	}
 
@@ -285,17 +295,19 @@ func main() {
 	privateIP := getPrivateIP()
 	log.Printf("Agent started. Public IP: %s, Private IP: %s. Tick interval: %v", publicIP, privateIP, agent.TickInterval)
 
-	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, builder, config.IsProxy)
+	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, builder, config.IsProxy, disableDNS)
 	agentInstance.Run(ctx)
 
 	if agentLogFlusherDone != nil {
 		<-agentLogFlusherDone
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := dns.StopDNSServer(shutdownCtx); err != nil {
-		log.Printf("[dns] shutdown error: %v", err)
+	if !disableDNS {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := dns.StopDNSServer(shutdownCtx); err != nil {
+			log.Printf("[dns] shutdown error: %v", err)
+		}
 	}
 
 	log.Println("Agent stopped")

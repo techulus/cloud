@@ -82,7 +82,7 @@ func (a *Agent) handleProcessing() {
 
 	a.updateDnsInSync(a.expectedState, actual)
 
-	if !a.hasDrift(a.expectedState, actual) {
+	if len(a.detectChanges(a.expectedState, actual)) == 0 {
 		log.Printf("[processing] state converged, transitioning to IDLE")
 		a.ReportStatus(false)
 		a.SetState(StateIdle)
@@ -101,6 +101,10 @@ func (a *Agent) handleProcessing() {
 }
 
 func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {
+	if a.DisableDNS {
+		a.dnsInSync = true
+		return
+	}
 	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
 	for i, r := range expected.Dns.Records {
 		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
@@ -115,8 +119,10 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	}
 	state := &ActualState{
 		Containers:    containers,
-		DnsConfigHash: dns.GetCurrentConfigHash(),
 		WireguardHash: wireguard.GetCurrentPeersHash(),
+	}
+	if !a.DisableDNS {
+		state.DnsConfigHash = dns.GetCurrentConfigHash()
 	}
 	if a.IsProxy {
 		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
@@ -172,13 +178,15 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		}
 	}
 
-	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
-	for i, r := range expected.Dns.Records {
-		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
-	}
-	expectedDnsHash := dns.HashRecords(expectedDnsRecords)
-	if expectedDnsHash != actual.DnsConfigHash {
-		changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
+	if !a.DisableDNS {
+		expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
+		for i, r := range expected.Dns.Records {
+			expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
+		}
+		expectedDnsHash := dns.HashRecords(expectedDnsRecords)
+		if expectedDnsHash != actual.DnsConfigHash {
+			changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
+		}
 	}
 
 	if a.IsProxy {
@@ -223,102 +231,6 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 	}
 
 	return changes
-}
-
-func (a *Agent) hasDrift(expected *agenthttp.ExpectedState, actual *ActualState) bool {
-	if a.hasContainerDrift(expected.Containers, actual.Containers) {
-		return true
-	}
-
-	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
-	for i, r := range expected.Dns.Records {
-		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
-	}
-	if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
-		return true
-	}
-
-	if a.IsProxy {
-		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-		if traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName) != actual.TraefikConfigHash {
-			return true
-		}
-
-		tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
-		udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
-		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
-		if expectedL4Hash != actual.L4ConfigHash {
-			return true
-		}
-
-		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
-		for i, c := range expected.Traefik.Certificates {
-			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
-		}
-		if traefik.HashCertificates(expectedCerts) != actual.CertificatesHash {
-			return true
-		}
-
-		if expected.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
-			return true
-		}
-	}
-
-	expectedWgPeers := make([]wireguard.Peer, len(expected.Wireguard.Peers))
-	for i, p := range expected.Wireguard.Peers {
-		expectedWgPeers[i] = wireguard.Peer{
-			PublicKey:  p.PublicKey,
-			AllowedIPs: p.AllowedIPs,
-			Endpoint:   p.Endpoint,
-		}
-	}
-	if wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash {
-		return true
-	}
-
-	return false
-}
-
-func (a *Agent) hasContainerDrift(expected []agenthttp.ExpectedContainer, actual []container.Container) bool {
-	expectedMap := make(map[string]agenthttp.ExpectedContainer)
-	for _, c := range expected {
-		expectedMap[c.DeploymentID] = c
-	}
-
-	actualMap := make(map[string]container.Container)
-	for _, c := range actual {
-		if c.DeploymentID != "" {
-			actualMap[c.DeploymentID] = c
-		}
-	}
-
-	for _, c := range actual {
-		if c.DeploymentID == "" {
-			return true
-		}
-	}
-
-	for id := range expectedMap {
-		if _, exists := actualMap[id]; !exists {
-			return true
-		}
-	}
-
-	for id := range actualMap {
-		if _, exists := expectedMap[id]; !exists {
-			return true
-		}
-	}
-
-	for id, exp := range expectedMap {
-		if act, exists := actualMap[id]; exists {
-			if act.State != "running" || normalizeImage(exp.Image) != normalizeImage(act.Image) {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func normalizeImage(image string) string {
@@ -430,16 +342,18 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 		}
 	}
 
-	expectedDnsRecords := make([]dns.DnsRecord, len(a.expectedState.Dns.Records))
-	for i, r := range a.expectedState.Dns.Records {
-		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
-	}
-	if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
-		log.Printf("[reconcile] updating DNS records")
-		if err := dns.UpdateDnsRecords(expectedDnsRecords); err != nil {
-			return fmt.Errorf("failed to update DNS: %w", err)
+	if !a.DisableDNS {
+		expectedDnsRecords := make([]dns.DnsRecord, len(a.expectedState.Dns.Records))
+		for i, r := range a.expectedState.Dns.Records {
+			expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
 		}
-		return nil
+		if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
+			log.Printf("[reconcile] updating DNS records")
+			if err := dns.UpdateDnsRecords(expectedDnsRecords); err != nil {
+				return fmt.Errorf("failed to update DNS: %w", err)
+			}
+			return nil
+		}
 	}
 
 	if a.IsProxy {

@@ -77,6 +77,7 @@ type Agent struct {
 	currentBuildID      string
 	IsProxy             bool
 	dnsInSync           bool
+	DisableDNS          bool
 }
 
 func NewAgent(
@@ -88,6 +89,7 @@ func NewAgent(
 	traefikLogCollector *logs.TraefikCollector,
 	builder *build.Builder,
 	isProxy bool,
+	disableDNS bool,
 ) *Agent {
 	return &Agent{
 		state:               StateIdle,
@@ -101,6 +103,7 @@ func NewAgent(
 		TraefikLogCollector: traefikLogCollector,
 		Builder:             builder,
 		IsProxy:             isProxy,
+		DisableDNS:          disableDNS,
 	}
 }
 

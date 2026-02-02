@@ -121,8 +121,11 @@ echo "✓ Architecture: $ARCH ($AGENT_ARCH)"
 step "Collecting configuration..."
 
 prompt CONTROL_PLANE_URL "Enter Control Plane URL (e.g., https://api.example.com): " required
-if [[ ! "$CONTROL_PLANE_URL" =~ ^https:// ]]; then
-  error "Control Plane URL must start with https://"
+if [[ ! "$CONTROL_PLANE_URL" =~ ^https?:// ]]; then
+  error "Control Plane URL must start with http:// or https://"
+fi
+if [[ "$CONTROL_PLANE_URL" =~ ^http:// ]]; then
+  echo "⚠ Warning: Using HTTP. Use HTTPS for public networks."
 fi
 echo "✓ Control Plane URL: $CONTROL_PLANE_URL"
 
