@@ -500,6 +500,39 @@ func (c *Client) ReportBackupComplete(backupID string, sizeBytes int64, checksum
 	return nil
 }
 
+func (c *Client) ReportBackupFailed(backupID string, errorMsg string) error {
+	payload := map[string]interface{}{
+		"backupId": backupID,
+		"error":    errorMsg,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal backup failed: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/backup/failed", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to report backup failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("backup failed report failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 func (c *Client) ReportRestoreComplete(backupID string, success bool, errorMsg string) error {
 	payload := map[string]interface{}{
 		"backupId": backupID,

@@ -221,7 +221,7 @@ export async function getClusterHealth() {
 
 export async function getServerServices(serverId: string) {
 	const results = await db
-		.select({
+		.selectDistinctOn([services.id], {
 			deploymentId: deployments.id,
 			deploymentStatus: deployments.status,
 			serviceId: services.id,

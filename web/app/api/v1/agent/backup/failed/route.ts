@@ -13,20 +13,17 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 
-	let data: { backupId: string; sizeBytes: number; checksum: string };
+	let data: { backupId: string; error: string };
 	try {
 		data = JSON.parse(body);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
 
-	const { backupId, sizeBytes, checksum } = data;
+	const { backupId, error } = data;
 
-	if (!backupId || !checksum) {
-		return NextResponse.json(
-			{ error: "Missing required fields" },
-			{ status: 400 },
-		);
+	if (!backupId) {
+		return NextResponse.json({ error: "Missing backupId" }, { status: 400 });
 	}
 
 	const { serverId } = auth;
@@ -46,33 +43,31 @@ export async function POST(request: NextRequest) {
 	await db
 		.update(volumeBackups)
 		.set({
-			status: "completed",
-			sizeBytes,
-			checksum,
-			completedAt: new Date(),
+			status: "failed",
+			errorMessage: error || "Unknown error",
 		})
 		.where(eq(volumeBackups.id, backupId));
 
 	revalidatePath("/dashboard/projects");
 
 	await inngest.send({
-		name: "backup/completed",
+		name: "backup/failed",
 		data: {
 			backupId,
 			volumeId: backup.volumeId,
 			serviceId: backup.serviceId,
-			checksum,
-			sizeBytes,
+			error: error || "Unknown error",
 			isMigrationBackup: backup.isMigrationBackup ?? false,
 		},
 	});
 
 	if (backup.isMigrationBackup) {
 		await inngest.send({
-			name: "migration/backup-completed",
+			name: "migration/backup-failed",
 			data: {
 				backupId,
 				serviceId: backup.serviceId,
+				error: error || "Unknown error",
 			},
 		});
 	}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, memo, useReducer, useCallback } from "react";
+import { memo, useState } from "react";
+import useSWR from "swr";
 import { formatDateTime } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
@@ -28,97 +29,23 @@ import {
 	XCircle,
 	Loader2,
 } from "lucide-react";
-import {
-	createBackup,
-	listBackups,
-	restoreBackup,
-	deleteBackup,
-} from "@/actions/backups";
+import { createBackup, restoreBackup, deleteBackup } from "@/actions/backups";
 import { toast } from "sonner";
 import { detectDatabaseType } from "@/lib/database-utils";
 import { updateServiceBackupSettings } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { fetcher } from "@/lib/fetcher";
 
 type BackupItem = {
 	id: string;
 	volumeName: string;
 	status: string;
 	sizeBytes: number | null;
-	createdAt: Date;
-	completedAt: Date | null;
+	createdAt: string;
+	completedAt: string | null;
 	errorMessage: string | null;
 	serverName: string | null;
 };
-
-type BackupState = {
-	backups: BackupItem[];
-	loading: boolean;
-	error: string | null;
-	creatingBackup: boolean;
-	restoringId: string | null;
-	deletingId: string | null;
-	confirmRestoreId: string | null;
-	confirmDeleteId: string | null;
-	backupEnabled: boolean;
-	backupSchedule: string;
-	savingSettings: boolean;
-};
-
-type BackupAction =
-	| { type: "SET_BACKUPS"; payload: BackupItem[] }
-	| { type: "SET_LOADING"; payload: boolean }
-	| { type: "SET_ERROR"; payload: string | null }
-	| { type: "SET_CREATING_BACKUP"; payload: boolean }
-	| { type: "SET_RESTORING_ID"; payload: string | null }
-	| { type: "SET_DELETING_ID"; payload: string | null }
-	| { type: "SET_CONFIRM_RESTORE_ID"; payload: string | null }
-	| { type: "SET_CONFIRM_DELETE_ID"; payload: string | null }
-	| { type: "SET_BACKUP_ENABLED"; payload: boolean }
-	| { type: "SET_BACKUP_SCHEDULE"; payload: string }
-	| { type: "SET_SAVING_SETTINGS"; payload: boolean };
-
-function backupReducer(state: BackupState, action: BackupAction): BackupState {
-	switch (action.type) {
-		case "SET_BACKUPS":
-			return { ...state, backups: action.payload };
-		case "SET_LOADING":
-			return { ...state, loading: action.payload };
-		case "SET_ERROR":
-			return { ...state, error: action.payload };
-		case "SET_CREATING_BACKUP":
-			return { ...state, creatingBackup: action.payload };
-		case "SET_RESTORING_ID":
-			return { ...state, restoringId: action.payload };
-		case "SET_DELETING_ID":
-			return { ...state, deletingId: action.payload };
-		case "SET_CONFIRM_RESTORE_ID":
-			return { ...state, confirmRestoreId: action.payload };
-		case "SET_CONFIRM_DELETE_ID":
-			return { ...state, confirmDeleteId: action.payload };
-		case "SET_BACKUP_ENABLED":
-			return { ...state, backupEnabled: action.payload };
-		case "SET_BACKUP_SCHEDULE":
-			return { ...state, backupSchedule: action.payload };
-		case "SET_SAVING_SETTINGS":
-			return { ...state, savingSettings: action.payload };
-	}
-}
-
-function createInitialState(service: Service): BackupState {
-	return {
-		backups: [],
-		loading: true,
-		error: null,
-		creatingBackup: false,
-		restoringId: null,
-		deletingId: null,
-		confirmRestoreId: null,
-		confirmDeleteId: null,
-		backupEnabled: service.backupEnabled ?? false,
-		backupSchedule: service.backupSchedule ?? "",
-		savingSettings: false,
-	};
-}
 
 function formatBytes(bytes: number): string {
 	if (bytes === 0) return "0 B";
@@ -149,25 +76,19 @@ export const BackupTab = memo(function BackupTab({
 	service: Service;
 	onUpdate: () => void;
 }) {
-	const [state, dispatch] = useReducer(
-		backupReducer,
-		service,
-		createInitialState,
+	const [creatingBackup, setCreatingBackup] = useState(false);
+	const [restoringId, setRestoringId] = useState<string | null>(null);
+	const [deletingId, setDeletingId] = useState<string | null>(null);
+	const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+	const [backupEnabled, setBackupEnabled] = useState(
+		service.backupEnabled ?? false,
 	);
-
-	const {
-		backups,
-		loading,
-		error,
-		creatingBackup,
-		restoringId,
-		deletingId,
-		confirmRestoreId,
-		confirmDeleteId,
-		backupEnabled,
-		backupSchedule,
-		savingSettings,
-	} = state;
+	const [backupSchedule, setBackupSchedule] = useState(
+		service.backupSchedule ?? "",
+	);
+	const [savingSettings, setSavingSettings] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	const volumes = service.volumes || [];
 	const detectedDbType = detectDatabaseType(service.image);
@@ -177,85 +98,59 @@ export const BackupTab = memo(function BackupTab({
 		backupEnabled !== (service.backupEnabled ?? false) ||
 		backupSchedule !== (service.backupSchedule ?? "");
 
-	const loadBackups = useCallback(async () => {
-		dispatch({ type: "SET_LOADING", payload: true });
+	const { data, isLoading, mutate } = useSWR<{ backups: BackupItem[] }>(
+		`/api/services/${service.id}/backups`,
+		fetcher,
+		{ refreshInterval: 5000 },
+	);
+
+	const backups = data?.backups || [];
+
+	const handleCreateBackup = async (volumeId: string) => {
+		setCreatingBackup(true);
+		setError(null);
 		try {
-			const result = await listBackups(service.id);
-			dispatch({ type: "SET_BACKUPS", payload: result as BackupItem[] });
-		} catch {
-			dispatch({ type: "SET_ERROR", payload: "Failed to load backups" });
+			await createBackup(service.id, volumeId);
+			mutate();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Failed to create backup");
 		} finally {
-			dispatch({ type: "SET_LOADING", payload: false });
+			setCreatingBackup(false);
 		}
-	}, [service.id]);
+	};
 
-	useEffect(() => {
-		loadBackups();
-	}, [loadBackups]);
+	const handleRestore = async (backupId: string) => {
+		setConfirmRestoreId(null);
+		setRestoringId(backupId);
+		setError(null);
+		try {
+			await restoreBackup(service.id, backupId);
+			toast.success("Restore initiated");
+			onUpdate();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Failed to restore backup");
+		} finally {
+			setRestoringId(null);
+		}
+	};
 
-	const handleCreateBackup = useCallback(
-		async (volumeId: string) => {
-			dispatch({ type: "SET_CREATING_BACKUP", payload: true });
-			dispatch({ type: "SET_ERROR", payload: null });
-			try {
-				await createBackup(service.id, volumeId);
-				await loadBackups();
-			} catch (e) {
-				dispatch({
-					type: "SET_ERROR",
-					payload: e instanceof Error ? e.message : "Failed to create backup",
-				});
-			} finally {
-				dispatch({ type: "SET_CREATING_BACKUP", payload: false });
-			}
-		},
-		[service.id, loadBackups],
-	);
+	const handleDelete = async (backupId: string) => {
+		setConfirmDeleteId(null);
+		setDeletingId(backupId);
+		setError(null);
+		try {
+			await deleteBackup(backupId);
+			mutate();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Failed to delete backup");
+		} finally {
+			setDeletingId(null);
+		}
+	};
 
-	const handleRestore = useCallback(
-		async (backupId: string) => {
-			dispatch({ type: "SET_CONFIRM_RESTORE_ID", payload: null });
-			dispatch({ type: "SET_RESTORING_ID", payload: backupId });
-			dispatch({ type: "SET_ERROR", payload: null });
-			try {
-				await restoreBackup(service.id, backupId);
-				toast.success("Restore initiated");
-				onUpdate();
-			} catch (e) {
-				dispatch({
-					type: "SET_ERROR",
-					payload: e instanceof Error ? e.message : "Failed to restore backup",
-				});
-			} finally {
-				dispatch({ type: "SET_RESTORING_ID", payload: null });
-			}
-		},
-		[service.id, onUpdate],
-	);
-
-	const handleDelete = useCallback(
-		async (backupId: string) => {
-			dispatch({ type: "SET_CONFIRM_DELETE_ID", payload: null });
-			dispatch({ type: "SET_DELETING_ID", payload: backupId });
-			dispatch({ type: "SET_ERROR", payload: null });
-			try {
-				await deleteBackup(backupId);
-				await loadBackups();
-			} catch (e) {
-				dispatch({
-					type: "SET_ERROR",
-					payload: e instanceof Error ? e.message : "Failed to delete backup",
-				});
-			} finally {
-				dispatch({ type: "SET_DELETING_ID", payload: null });
-			}
-		},
-		[loadBackups],
-	);
-
-	const handleSaveSettings = useCallback(async () => {
-		dispatch({ type: "SET_SAVING_SETTINGS", payload: true });
-		dispatch({ type: "SET_ERROR", payload: null });
+	const handleSaveSettings = async () => {
+		setSavingSettings(true);
+		setError(null);
 		try {
 			await updateServiceBackupSettings(
 				service.id,
@@ -264,14 +159,11 @@ export const BackupTab = memo(function BackupTab({
 			);
 			onUpdate();
 		} catch (e) {
-			dispatch({
-				type: "SET_ERROR",
-				payload: e instanceof Error ? e.message : "Failed to save settings",
-			});
+			setError(e instanceof Error ? e.message : "Failed to save settings");
 		} finally {
-			dispatch({ type: "SET_SAVING_SETTINGS", payload: false });
+			setSavingSettings(false);
 		}
-	}, [service.id, backupEnabled, backupSchedule, onUpdate]);
+	};
 
 	if (!service.stateful) {
 		return (
@@ -310,12 +202,7 @@ export const BackupTab = memo(function BackupTab({
 							<input
 								type="checkbox"
 								checked={backupEnabled}
-								onChange={(e) =>
-									dispatch({
-										type: "SET_BACKUP_ENABLED",
-										payload: e.target.checked,
-									})
-								}
+								onChange={(e) => setBackupEnabled(e.target.checked)}
 								className="rounded"
 							/>
 							<span className="text-sm">Enable scheduled backups</span>
@@ -327,12 +214,7 @@ export const BackupTab = memo(function BackupTab({
 							<div className="flex items-center gap-4">
 								<NativeSelect
 									value={backupSchedule}
-									onChange={(e) =>
-										dispatch({
-											type: "SET_BACKUP_SCHEDULE",
-											payload: e.target.value,
-										})
-									}
+									onChange={(e) => setBackupSchedule(e.target.value)}
 								>
 									<NativeSelectOption value="">
 										Select schedule
@@ -391,11 +273,11 @@ export const BackupTab = memo(function BackupTab({
 						<Button
 							variant="ghost"
 							size="icon"
-							onClick={loadBackups}
-							disabled={loading}
+							onClick={() => mutate()}
+							disabled={isLoading}
 						>
 							<RefreshCcw
-								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+								className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
 							/>
 						</Button>
 					</div>
@@ -407,7 +289,7 @@ export const BackupTab = memo(function BackupTab({
 						</p>
 					)}
 
-					{loading ? (
+					{isLoading ? (
 						<p className="text-sm text-muted-foreground">Loading backups...</p>
 					) : backups.length === 0 ? (
 						<p className="text-sm text-muted-foreground">No backups found.</p>
@@ -439,12 +321,7 @@ export const BackupTab = memo(function BackupTab({
 										<Button
 											variant="outline"
 											size="sm"
-											onClick={() =>
-												dispatch({
-													type: "SET_CONFIRM_RESTORE_ID",
-													payload: backup.id,
-												})
-											}
+											onClick={() => setConfirmRestoreId(backup.id)}
 											disabled={restoringId === backup.id}
 										>
 											{restoringId === backup.id ? (
@@ -457,12 +334,7 @@ export const BackupTab = memo(function BackupTab({
 									<Button
 										variant="outline"
 										size="icon-sm"
-										onClick={() =>
-											dispatch({
-												type: "SET_CONFIRM_DELETE_ID",
-												payload: backup.id,
-											})
-										}
+										onClick={() => setConfirmDeleteId(backup.id)}
 										disabled={deletingId === backup.id}
 										title="Delete backup"
 									>
@@ -481,9 +353,7 @@ export const BackupTab = memo(function BackupTab({
 
 			<AlertDialog
 				open={confirmRestoreId !== null}
-				onOpenChange={(open) =>
-					!open && dispatch({ type: "SET_CONFIRM_RESTORE_ID", payload: null })
-				}
+				onOpenChange={(open) => !open && setConfirmRestoreId(null)}
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
@@ -508,9 +378,7 @@ export const BackupTab = memo(function BackupTab({
 
 			<AlertDialog
 				open={confirmDeleteId !== null}
-				onOpenChange={(open) =>
-					!open && dispatch({ type: "SET_CONFIRM_DELETE_ID", payload: null })
-				}
+				onOpenChange={(open) => !open && setConfirmDeleteId(null)}
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>

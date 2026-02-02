@@ -1,0 +1,40 @@
+import { serve } from "inngest/next";
+import { inngest } from "@/lib/inngest/client";
+import {
+	certificateRenewal,
+	challengeCleanup,
+	oldBackupsCleanup,
+	onDeploymentFailed,
+	rolloutWorkflow,
+	scheduledBackupsCheck,
+	scheduledDeploymentsCheck,
+	staleItemsCleanup,
+	staleServerCheck,
+	migrationWorkflow,
+	backupWorkflow,
+	onBackupFailed,
+	restoreWorkflow,
+	onRestoreFailed,
+	buildWorkflow,
+} from "@/lib/inngest/functions";
+
+export const { GET, POST, PUT } = serve({
+	client: inngest,
+	functions: [
+		rolloutWorkflow,
+		onDeploymentFailed,
+		staleServerCheck,
+		scheduledDeploymentsCheck,
+		certificateRenewal,
+		challengeCleanup,
+		scheduledBackupsCheck,
+		oldBackupsCleanup,
+		staleItemsCleanup,
+		migrationWorkflow,
+		backupWorkflow,
+		onBackupFailed,
+		restoreWorkflow,
+		onRestoreFailed,
+		buildWorkflow,
+	],
+});

@@ -15,6 +15,7 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
 import { revalidatePath } from "next/cache";
 import { deleteFromS3 } from "@/lib/s3";
+import { inngest } from "@/lib/inngest/client";
 
 export async function createBackup(
 	serviceId: string,
@@ -102,6 +103,16 @@ export async function createBackup(
 			endpoint: storageConfig.endpoint,
 			accessKey: storageConfig.accessKey,
 			secretKey: storageConfig.secretKey,
+		},
+	});
+
+	await inngest.send({
+		name: "backup/started",
+		data: {
+			backupId,
+			serviceId,
+			volumeId,
+			serverId: deployment.serverId,
 		},
 	});
 
@@ -207,6 +218,7 @@ export async function restoreBackup(
 		expectedChecksum: backup.checksum,
 		backupType,
 		serviceImage: service.image,
+		isMigrationRestore: false,
 		storageConfig: {
 			provider: storageConfig.provider,
 			bucket: storageConfig.bucket,
@@ -214,6 +226,15 @@ export async function restoreBackup(
 			endpoint: storageConfig.endpoint,
 			accessKey: storageConfig.accessKey,
 			secretKey: storageConfig.secretKey,
+		},
+	});
+
+	await inngest.send({
+		name: "restore/started",
+		data: {
+			backupId,
+			serviceId,
+			serverId,
 		},
 	});
 

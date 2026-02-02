@@ -4,6 +4,7 @@ import { workQueue } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { deployService } from "@/actions/projects";
+import { inngest } from "@/lib/inngest/client";
 
 const MAX_TIMEOUT = 30000;
 const POLL_INTERVAL = 2000;
@@ -102,25 +103,45 @@ export async function POST(request: NextRequest) {
 
 	const item = result[0];
 
-	if (
-		item.type === "create_manifest" &&
-		data.status === "completed" &&
-		item.payload
-	) {
+	if (item.type === "create_manifest" && item.payload) {
 		try {
 			const payload = JSON.parse(item.payload) as {
 				serviceId?: string;
+				finalImageUri?: string;
+				buildGroupId?: string;
 			};
 
-			if (payload.serviceId) {
-				console.log(
-					`[work-queue] create_manifest completed, triggering deployment for service ${payload.serviceId}`,
-				);
-				deployService(payload.serviceId).catch((error) => {
-					console.error(
-						`[work-queue] deployment failed after create_manifest:`,
-						error,
+			if (data.status === "completed") {
+				if (payload.serviceId && payload.finalImageUri) {
+					await inngest.send({
+						name: "manifest/completed",
+						data: {
+							serviceId: payload.serviceId,
+							buildGroupId: payload.buildGroupId || "",
+							imageUri: payload.finalImageUri,
+						},
+					});
+				}
+
+				if (payload.serviceId) {
+					console.log(
+						`[work-queue] create_manifest completed, triggering deployment for service ${payload.serviceId}`,
 					);
+					deployService(payload.serviceId).catch((error) => {
+						console.error(
+							`[work-queue] deployment failed after create_manifest:`,
+							error,
+						);
+					});
+				}
+			} else if (data.status === "failed" && payload.serviceId) {
+				await inngest.send({
+					name: "manifest/failed",
+					data: {
+						serviceId: payload.serviceId,
+						buildGroupId: payload.buildGroupId || "",
+						error: data.error || "Manifest creation failed",
+					},
 				});
 			}
 		} catch (error) {

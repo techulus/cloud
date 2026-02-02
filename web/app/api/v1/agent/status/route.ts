@@ -13,8 +13,7 @@ import {
 } from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { sendDeploymentFailureAlert } from "@/lib/email";
-import { continueMigrationAfterDeploy } from "@/actions/migrations";
+import { inngest } from "@/lib/inngest/client";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -39,135 +38,6 @@ type StatusReport = {
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
 };
-
-async function checkRolloutProgress(rolloutId: string): Promise<void> {
-	const rollout = await db
-		.select()
-		.from(rollouts)
-		.where(eq(rollouts.id, rolloutId))
-		.then((r) => r[0]);
-
-	if (!rollout || rollout.status !== "in_progress") return;
-
-	const rolloutDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.rolloutId, rolloutId));
-
-	const newDeployments = rolloutDeployments.filter(
-		(d) =>
-			d.status !== "running" &&
-			d.status !== "stopped" &&
-			d.status !== "rolled_back",
-	);
-
-	if (newDeployments.length === 0) return;
-
-	const allHealthy = newDeployments.every((d) => d.status === "healthy");
-
-	if (allHealthy && rollout.currentStage !== "dns_sync") {
-		const serviceId = newDeployments[0].serviceId;
-
-		const updated = await db
-			.update(rollouts)
-			.set({
-				currentStage: "dns_sync",
-			})
-			.where(
-				and(eq(rollouts.id, rolloutId), eq(rollouts.status, "in_progress")),
-			)
-			.returning();
-
-		if (updated.length > 0) {
-			console.log(`[rollout:${rolloutId}] all healthy → waiting for DNS sync`);
-
-			await db
-				.update(deployments)
-				.set({ status: "stopping" })
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						eq(deployments.status, "draining"),
-					),
-				);
-
-			await db
-				.update(deployments)
-				.set({ status: "running" })
-				.where(
-					and(
-						eq(deployments.rolloutId, rolloutId),
-						eq(deployments.status, "healthy"),
-					),
-				);
-		}
-	}
-}
-
-async function handleRolloutFailure(
-	rolloutId: string,
-	failedStage: string,
-): Promise<void> {
-	const rolloutDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.rolloutId, rolloutId));
-
-	if (rolloutDeployments.length === 0) return;
-
-	const serviceId = rolloutDeployments[0].serviceId;
-	const serverId = rolloutDeployments[0].serverId;
-
-	const updated = await db
-		.update(rollouts)
-		.set({ status: "failed", currentStage: failedStage })
-		.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "in_progress")))
-		.returning();
-
-	if (updated.length > 0) {
-		await db
-			.update(deployments)
-			.set({ status: "running" })
-			.where(
-				and(
-					eq(deployments.serviceId, serviceId),
-					eq(deployments.status, "draining"),
-				),
-			);
-
-		await db
-			.update(deployments)
-			.set({ status: "rolled_back", failedStage })
-			.where(
-				and(
-					eq(deployments.rolloutId, rolloutId),
-					inArray(deployments.status, [
-						"pending",
-						"pulling",
-						"starting",
-						"healthy",
-						"failed",
-					]),
-				),
-			);
-
-		await db
-			.update(rollouts)
-			.set({ status: "rolled_back", completedAt: new Date() })
-			.where(eq(rollouts.id, rolloutId));
-
-		sendDeploymentFailureAlert({
-			serviceId,
-			serverId,
-			failedStage,
-		}).catch((error) => {
-			console.error(
-				"[rollout:failure] failed to send deployment failure alert:",
-				error,
-			);
-		});
-	}
-}
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -336,18 +206,26 @@ export async function POST(request: NextRequest) {
 
 				if (!hasHealthCheck) {
 					if (deployment.rolloutId) {
-						await checkRolloutProgress(deployment.rolloutId);
+						await inngest.send({
+							name: "deployment/healthy",
+							data: {
+								deploymentId: deployment.id,
+								rolloutId: deployment.rolloutId,
+								serviceId: deployment.serviceId,
+							},
+						});
 					}
 
 					if (service?.migrationStatus === "deploying_target") {
 						console.log(
-							`[migration] stuck deployment ${deployment.id} recovered and healthy, triggering restore`,
+							`[migration] stuck deployment ${deployment.id} recovered and healthy, sending event`,
 						);
-						continueMigrationAfterDeploy(deployment.id).catch((err) => {
-							console.error(
-								`[migration] failed to continue migration after deploy:`,
-								err,
-							);
+						await inngest.send({
+							name: "migration/deployment-healthy",
+							data: {
+								deploymentId: deployment.id,
+								serviceId: deployment.serviceId,
+							},
 						});
 					}
 					continue;
@@ -386,34 +264,29 @@ export async function POST(request: NextRequest) {
 					.where(eq(deployments.id, deployment.id));
 
 				if (deployment.rolloutId) {
-					await checkRolloutProgress(deployment.rolloutId);
+					await inngest.send({
+						name: "deployment/healthy",
+						data: {
+							deploymentId: deployment.id,
+							rolloutId: deployment.rolloutId,
+							serviceId: deployment.serviceId,
+						},
+					});
 				}
 
 				if (service?.migrationStatus === "deploying_target") {
 					console.log(
-						`[migration] deployment ${deployment.id} healthy (no health check), triggering restore`,
+						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
 					);
-					continueMigrationAfterDeploy(deployment.id).catch((err) => {
-						console.error(
-							`[migration] failed to continue migration after deploy:`,
-							err,
-						);
+					await inngest.send({
+						name: "migration/deployment-healthy",
+						data: {
+							deploymentId: deployment.id,
+							serviceId: deployment.serviceId,
+						},
 					});
 				}
 				continue;
-			}
-
-			if (deployment.rolloutId) {
-				await db
-					.update(rollouts)
-					.set({ currentStage: "health_check" })
-					.where(
-						and(
-							eq(rollouts.id, deployment.rolloutId),
-							eq(rollouts.status, "in_progress"),
-							eq(rollouts.currentStage, "deploying"),
-						),
-					);
 			}
 		}
 
@@ -447,7 +320,14 @@ export async function POST(request: NextRequest) {
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
-				await checkRolloutProgress(deployment.rolloutId);
+				await inngest.send({
+					name: "deployment/healthy",
+					data: {
+						deploymentId: deployment.id,
+						rolloutId: deployment.rolloutId,
+						serviceId: deployment.serviceId,
+					},
+				});
 			}
 
 			const deployedService = await db
@@ -458,13 +338,14 @@ export async function POST(request: NextRequest) {
 
 			if (deployedService?.migrationStatus === "deploying_target") {
 				console.log(
-					`[migration] deployment ${deployment.id} healthy, triggering restore`,
+					`[migration] deployment ${deployment.id} healthy, sending event`,
 				);
-				continueMigrationAfterDeploy(deployment.id).catch((err) => {
-					console.error(
-						`[migration] failed to continue migration after deploy:`,
-						err,
-					);
+				await inngest.send({
+					name: "migration/deployment-healthy",
+					data: {
+						deploymentId: deployment.id,
+						serviceId: deployment.serviceId,
+					},
 				});
 			}
 		}
@@ -478,63 +359,40 @@ export async function POST(request: NextRequest) {
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
-				await handleRolloutFailure(deployment.rolloutId, "health_check");
+				await inngest.send({
+					name: "deployment/failed",
+					data: {
+						deploymentId: deployment.id,
+						rolloutId: deployment.rolloutId,
+						serviceId: deployment.serviceId,
+						reason: "health_check_failed",
+					},
+				});
 			}
 		}
 	}
 
-	const activeRollouts = await db
-		.select({ id: rollouts.id })
-		.from(rollouts)
-		.where(eq(rollouts.status, "in_progress"));
-
-	for (const rollout of activeRollouts) {
-		await checkRolloutProgress(rollout.id);
-	}
-
 	if (report.dnsInSync) {
-		await checkDnsSyncCompletion(serverId);
+		const rolloutsInDnsSync = await db
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				and(
+					eq(rollouts.status, "in_progress"),
+					eq(rollouts.currentStage, "dns_sync"),
+				),
+			);
+
+		for (const rollout of rolloutsInDnsSync) {
+			await inngest.send({
+				name: "server/dns-synced",
+				data: {
+					serverId,
+					rolloutId: rollout.id,
+				},
+			});
+		}
 	}
 
 	return NextResponse.json({ ok: true });
-}
-
-async function checkDnsSyncCompletion(serverId: string): Promise<void> {
-	const pendingRollouts = await db
-		.select({
-			id: rollouts.id,
-			serviceId: rollouts.serviceId,
-		})
-		.from(rollouts)
-		.where(
-			and(
-				eq(rollouts.status, "in_progress"),
-				eq(rollouts.currentStage, "dns_sync"),
-			),
-		);
-
-	if (pendingRollouts.length === 0) return;
-
-	for (const rollout of pendingRollouts) {
-		const rolloutDeployments = await db
-			.select({ serverId: deployments.serverId })
-			.from(deployments)
-			.where(eq(deployments.rolloutId, rollout.id));
-
-		const involvedServerIds = new Set(
-			rolloutDeployments.map((d) => d.serverId),
-		);
-		if (!involvedServerIds.has(serverId)) continue;
-
-		await db
-			.update(rollouts)
-			.set({
-				status: "completed",
-				currentStage: "completed",
-				completedAt: new Date(),
-			})
-			.where(eq(rollouts.id, rollout.id));
-
-		console.log(`[rollout:${rollout.id}] DNS synced, completing rollout`);
-	}
 }

@@ -9,6 +9,7 @@ import {
 	getTargetPlatformsForService,
 } from "@/lib/build-assignment";
 import { enqueueWork } from "@/lib/work-queue";
+import { inngest } from "@/lib/inngest/client";
 
 export async function cancelBuild(buildId: string) {
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
@@ -32,6 +33,14 @@ export async function cancelBuild(buildId: string) {
 		.update(builds)
 		.set({ status: "cancelled", completedAt: new Date() })
 		.where(eq(builds.id, buildId));
+
+	await inngest.send({
+		name: "build/cancelled",
+		data: {
+			buildId,
+			buildGroupId: build.buildGroupId,
+		},
+	});
 
 	return { success: true };
 }
@@ -148,6 +157,15 @@ export async function triggerBuild(
 			await enqueueWork(serverId, "build", { buildId });
 		}
 
+		await inngest.send({
+			name: "build/started",
+			data: {
+				buildId: buildIds[0],
+				serviceId,
+				buildGroupId,
+			},
+		});
+
 		return { success: true, buildId: buildIds[0] };
 	}
 
@@ -192,6 +210,15 @@ export async function triggerBuild(
 		const serverId = await selectBuildServerForPlatform(serviceId, platform);
 		await enqueueWork(serverId, "build", { buildId });
 	}
+
+	await inngest.send({
+		name: "build/started",
+		data: {
+			buildId: buildIds[0],
+			serviceId,
+			buildGroupId,
+		},
+	});
 
 	return { success: true, buildId: buildIds[0] };
 }

@@ -29,7 +29,9 @@ export default async function DashboardPage() {
 
 	return (
 		<div className="container max-w-7xl mx-auto px-4 py-6 space-y-12">
-			{servers.length > 0 && <ClusterHealthSummary initialData={clusterHealth} />}
+			{servers.length > 0 && (
+				<ClusterHealthSummary initialData={clusterHealth} />
+			)}
 
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">

@@ -59,9 +59,6 @@ func (a *Agent) handleIdle() {
 		return
 	}
 
-	if !fromCache {
-		a.ReportStatus(true)
-	}
 }
 
 func (a *Agent) handleProcessing() {

@@ -13,11 +13,28 @@ import { deployService } from "@/actions/projects";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { sendBuildFailureAlert } from "@/lib/email";
 import { enqueueWork } from "@/lib/work-queue";
+import { inngest } from "@/lib/inngest/client";
 
 type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
 	error?: string;
 };
+
+type BuildCompletedEventData = {
+	buildId: string;
+	serviceId: string;
+	buildGroupId: string | null;
+	status: "success" | "failed";
+	imageUri?: string;
+	error?: string;
+};
+
+async function sendBuildCompletedEvent(data: BuildCompletedEventData) {
+	await inngest.send({
+		name: "build/completed",
+		data,
+	});
+}
 
 export async function POST(
 	request: NextRequest,
@@ -142,6 +159,14 @@ export async function POST(
 				error,
 			);
 		});
+
+		await sendBuildCompletedEvent({
+			buildId,
+			serviceId: build.serviceId,
+			buildGroupId: build.buildGroupId,
+			status: "failed",
+			error: update.error,
+		});
 	}
 
 	if (update.status === "completed") {
@@ -188,9 +213,7 @@ export async function POST(
 				.where(eq(builds.id, buildId));
 
 			if (!build.buildGroupId) {
-				console.log(
-					`[build:status] no buildGroupId, treating as single build`,
-				);
+				console.log(`[build:status] no buildGroupId, treating as single build`);
 
 				const replicas = await db
 					.select()
@@ -213,6 +236,14 @@ export async function POST(
 					.update(services)
 					.set({ image: baseImageUri })
 					.where(eq(services.id, build.serviceId));
+
+				await sendBuildCompletedEvent({
+					buildId,
+					serviceId: build.serviceId,
+					buildGroupId: build.buildGroupId,
+					status: "success",
+					imageUri: archImageUri,
+				});
 
 				console.log(
 					`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
@@ -266,11 +297,15 @@ export async function POST(
 					.update(services)
 					.set({ image: baseImageUri })
 					.where(eq(services.id, build.serviceId));
-			} else {
-				console.log(
-					`[build:complete] waiting for other platform builds to complete for ${build.serviceId}@${build.commitSha.slice(0, 8)}`,
-				);
 			}
+
+			await sendBuildCompletedEvent({
+				buildId,
+				serviceId: build.serviceId,
+				buildGroupId: build.buildGroupId,
+				status: "success",
+				imageUri: `${baseImageUri}-${build.targetPlatform?.split("/")[1] || "amd64"}`,
+			});
 		} else {
 			console.log(
 				`[build:status] no targetPlatform, using legacy single-build path`,
@@ -313,6 +348,14 @@ export async function POST(
 					`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
 				);
 			}
+
+			await sendBuildCompletedEvent({
+				buildId,
+				serviceId: build.serviceId,
+				buildGroupId: build.buildGroupId,
+				status: "success",
+				imageUri: baseImageUri,
+			});
 		}
 	}
 

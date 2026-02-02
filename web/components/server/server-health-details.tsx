@@ -1,13 +1,15 @@
 "use client";
 
-import { Activity, Container, Cpu, HardDrive, MemoryStick, Network } from "lucide-react";
-import useSWR from "swr";
 import {
-	Card,
-	CardContent,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+	Activity,
+	Container,
+	Cpu,
+	HardDrive,
+	MemoryStick,
+	Network,
+} from "lucide-react";
+import useSWR from "swr";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResourceBar } from "@/components/cluster/resource-bar";
 import { HealthIndicator } from "@/components/cluster/health-indicator";
 import { Separator } from "@/components/ui/separator";
@@ -105,9 +107,7 @@ export function ServerHealthDetails({
 								healthy={!!agentHealth}
 								label="Agent"
 								detail={
-									agentHealth?.version
-										? `v${agentHealth.version}`
-										: "Unknown"
+									agentHealth?.version ? `v${agentHealth.version}` : "Unknown"
 								}
 								icon={<Activity className="size-4" />}
 							/>

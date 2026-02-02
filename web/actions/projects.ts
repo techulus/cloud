@@ -42,6 +42,7 @@ import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
 import { startMigration } from "./migrations";
+import { inngest } from "@/lib/inngest/client";
 
 function parseImageReference(image: string): {
 	registry: string;
@@ -917,6 +918,17 @@ export async function deployService(serviceId: string) {
 			.where(eq(services.id, serviceId));
 	}
 
+	await inngest.send({
+		name: "rollout/created",
+		data: {
+			rolloutId,
+			serviceId,
+			deploymentIds,
+			serverIds,
+			isRollingUpdate: useRollingUpdate,
+		},
+	});
+
 	return { deploymentIds, replicaCount: totalReplicas, rolloutId };
 }
 
@@ -1242,32 +1254,50 @@ export async function restartService(serviceId: string) {
 }
 
 export async function abortRollout(serviceId: string) {
-	const allRollouts = await db
-		.select()
-		.from(rollouts)
-		.where(eq(rollouts.serviceId, serviceId));
+	const updatedRollouts = await db
+		.update(rollouts)
+		.set({
+			status: "failed",
+			currentStage: "aborted",
+			completedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(rollouts.serviceId, serviceId),
+				eq(rollouts.status, "in_progress"),
+			),
+		)
+		.returning();
 
-	for (const rollout of allRollouts) {
-		if (rollout.status === "in_progress") {
-			await db
-				.update(rollouts)
-				.set({
-					status: "failed",
-					currentStage: "aborted",
-					completedAt: new Date(),
-				})
-				.where(eq(rollouts.id, rollout.id));
-		}
+	const inProgressRollout = updatedRollouts[0];
+
+	if (!inProgressRollout) {
+		return { success: false, error: "No in-progress rollout found" };
 	}
 
-	const allDeployments = await db
+	await inngest.send({
+		name: "rollout/cancelled",
+		data: { rolloutId: inProgressRollout.id },
+	});
+
+	await db
+		.update(deployments)
+		.set({ status: "running" })
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "draining"),
+			),
+		);
+
+	const rolloutDeployments = await db
 		.select()
 		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
+		.where(eq(deployments.rolloutId, inProgressRollout.id));
 
 	const serverContainers = new Map<string, string[]>();
 
-	for (const dep of allDeployments) {
+	for (const dep of rolloutDeployments) {
 		if (dep.containerId) {
 			const containers = serverContainers.get(dep.serverId) || [];
 			containers.push(dep.containerId);
@@ -1282,13 +1312,15 @@ export async function abortRollout(serviceId: string) {
 		});
 	}
 
-	for (const dep of allDeployments) {
+	for (const dep of rolloutDeployments) {
 		await db
 			.delete(deploymentPorts)
 			.where(eq(deploymentPorts.deploymentId, dep.id));
 	}
 
-	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
+	await db
+		.delete(deployments)
+		.where(eq(deployments.rolloutId, inProgressRollout.id));
 
 	await db.delete(workQueue).where(eq(workQueue.status, "pending"));
 

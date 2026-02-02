@@ -40,7 +40,7 @@ export async function ServerServices({ serverId }: { serverId: string }) {
 				<ItemGroup className="grid gap-3 md:grid-cols-2">
 					{services.map((service) => (
 						<Item
-							key={service.deploymentId}
+							key={service.serviceId}
 							variant="outline"
 							render={
 								<Link
