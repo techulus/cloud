@@ -19,6 +19,7 @@ docker compose -f compose.production.yml up -d --build
 | Registry | `https://registry.${ROOT_DOMAIN}` |
 | Logs | `https://logs.${ROOT_DOMAIN}` |
 | PostgreSQL | Internal only |
+| Inngest | Internal only |
 
 ## Environment Setup
 
@@ -26,6 +27,22 @@ Generate registry auth:
 ```bash
 htpasswd -nB admin
 # Escape $ as $$ in .env
+```
+
+Generate Inngest keys:
+```bash
+# Signing key (for request verification)
+openssl rand -hex 32
+# Prefix with: signkey-prod-
+
+# Event key (for sending events)
+openssl rand -hex 16
+```
+
+Add to `.env`:
+```
+INNGEST_SIGNING_KEY=signkey-prod-<your-signing-key>
+INNGEST_EVENT_KEY=<your-event-key>
 ```
 
 ## Commands

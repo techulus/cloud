@@ -13,6 +13,7 @@ A stateless container deployment platform with three core principles:
 |-----------|--------|-----------|
 | Control Plane | Next.js (full-stack) | Single deployment, React frontend + API routes |
 | Database | Postgres + Drizzle | Simple, no external deps, single file, easy backup |
+| Background Jobs | Inngest (self-hosted) | Durable workflows, event-driven orchestration, retries |
 | Server Agent | Go | Single binary, shells out to Podman |
 | Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
 | Reverse Proxy | Traefik | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only |
@@ -348,9 +349,12 @@ Let's Encrypt → HTTP request to example.com/.well-known/acme-challenge/{token}
 - `POST /api/v1/agent/status` - Receives container status, advances rollout stages
 - `GET /api/v1/acme/challenge/{token}` - Returns ACME challenge keyAuthorization for Let's Encrypt validation
 
-**Background Jobs (Cron):**
-- Every 24h: Check for certificates expiring in 30 days, trigger ACME renewal
-- Every 10m: Clean up expired ACME challenge tokens from database
+**Background Jobs (Inngest):**
+- Rollout orchestration: Event-driven deployment workflow with health checks and DNS updates
+- Migration orchestration: Backup, restore, and container migration workflows
+- Build orchestration: Multi-architecture builds with manifest creation
+- Backup/restore: Scheduled and on-demand volume backups
+- Certificate renewal: ACME renewal for expiring certificates
 
 ### 2. Server Agent (Go)
 

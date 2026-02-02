@@ -52,12 +52,17 @@ services:
       - VICTORIA_LOGS_URL=http://victoria-logs:9428
       - REGISTRY_URL=registry:5000
       - REGISTRY_HOST=registry.${ROOT_DOMAIN}
+      - INNGEST_BASE_URL=http://inngest:8288
+      - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
+      - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
     depends_on:
       postgres:
         condition: service_healthy
       victoria-logs:
         condition: service_started
       registry:
+        condition: service_started
+      inngest:
         condition: service_started
     labels:
       - "traefik.enable=true"
@@ -100,8 +105,24 @@ services:
       - "traefik.http.services.logs.loadbalancer.server.port=9428"
     restart: unless-stopped
 
+  inngest:
+    image: inngest/inngest:latest
+    environment:
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_LOG_LEVEL: info
+    volumes:
+      - inngest-data:/var/lib/inngest
+    command:
+      - "inngest"
+      - "start"
+      - "--sdk-url"
+      - "http://web:3000/api/inngest"
+    restart: unless-stopped
+
 volumes:
   letsencrypt:
   postgres-data:
   registry-data:
   victoria-logs-data:
+  inngest-data:
