@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import {
 	builds,
@@ -13,11 +12,7 @@ import {
 	createGitHubDeployment,
 	updateGitHubDeploymentStatus,
 } from "@/lib/github";
-import {
-	selectBuildServerForPlatform,
-	getTargetPlatformsForService,
-} from "@/lib/build-assignment";
-import { enqueueWork } from "@/lib/work-queue";
+import { inngest } from "@/lib/inngest/client";
 
 type InstallationPayload = {
 	action: "created" | "deleted" | "suspend" | "unsuspend";
@@ -196,42 +191,21 @@ async function handlePushEvent(payload: PushPayload) {
 		console.error("[webhook:push] failed to create GitHub deployment:", error);
 	}
 
-	const targetPlatforms = await getTargetPlatformsForService(
-		githubRepo.serviceId,
-	);
-	const buildGroupId = randomUUID();
-	const buildIds: string[] = [];
-
-	for (const platform of targetPlatforms) {
-		const buildId = randomUUID();
-		buildIds.push(buildId);
-
-		await db.insert(builds).values({
-			id: buildId,
-			githubRepoId: githubRepo.id,
+	await inngest.send({
+		name: "build/trigger",
+		data: {
 			serviceId: githubRepo.serviceId,
+			trigger: "push",
+			githubRepoId: githubRepo.id,
 			commitSha: head_commit.id,
 			commitMessage: head_commit.message.substring(0, 500),
 			branch,
 			author: head_commit.author.username || head_commit.author.name,
-			targetPlatform: platform,
-			buildGroupId,
-			status: "pending",
 			githubDeploymentId,
-		});
+		},
+	});
 
-		const serverId = await selectBuildServerForPlatform(
-			githubRepo.serviceId,
-			platform,
-		);
-		await enqueueWork(serverId, "build", { buildId });
-
-		console.log(
-			`[webhook:push] created build ${buildId} (${platform}) for ${repository.full_name}@${head_commit.id.slice(0, 7)}, assigned to server ${serverId.slice(0, 8)}`,
-		);
-	}
-
-	return NextResponse.json({ ok: true, buildIds });
+	return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: NextRequest) {

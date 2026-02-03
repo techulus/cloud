@@ -277,12 +277,10 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		setIsDeploying(true);
 		try {
 			if (isGithubWithNoDeployments) {
-				const result = await triggerBuild(service.id);
-				if (result.buildId) {
-					router.push(
-						`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${result.buildId}`,
-					);
-				}
+				await triggerBuild(service.id);
+				router.push(
+					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
+				);
 			} else {
 				await deployService(service.id);
 				router.push(

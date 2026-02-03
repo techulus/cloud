@@ -30,15 +30,11 @@ import {
 import { revalidatePath } from "next/cache";
 import { enqueueWork } from "@/lib/work-queue";
 import {
-	buildCurrentConfig,
 	type HealthCheckConfig as ServiceHealthCheckConfig,
 	type PortConfig,
 } from "@/lib/service-config";
-import { assignContainerIp } from "@/lib/wireguard";
 import { slugify } from "@/lib/utils";
 import { getEnvironment, getProject, getService } from "@/db/queries";
-import { calculateSpreadPlacement } from "@/lib/placement";
-import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
 import { startMigration } from "./migrations";
@@ -187,16 +183,6 @@ export async function validateDockerImage(
 		console.error("Image validation error:", error);
 		return { valid: false, error: "Failed to validate image" };
 	}
-}
-
-function normalizeImage(image: string): string {
-	if (!image.includes("/")) {
-		return `docker.io/library/${image}`;
-	}
-	if (!image.includes(".") && image.split("/").length === 2) {
-		return `docker.io/${image}`;
-	}
-	return image;
 }
 
 export async function createProject(name: string) {
@@ -567,80 +553,13 @@ export async function updateServiceGithubRepo(
 	}
 }
 
-const PORT_RANGE_START = 30000;
-const PORT_RANGE_END = 32767;
-
-async function getUsedPorts(serverId: string): Promise<Set<number>> {
-	const existingPorts = await db
-		.select({ hostPort: deploymentPorts.hostPort })
-		.from(deploymentPorts)
-		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
-		.where(eq(deployments.serverId, serverId));
-
-	return new Set(existingPorts.map((p) => p.hostPort));
-}
-
-async function allocateHostPorts(
-	serverId: string,
-	count: number,
-): Promise<number[]> {
-	const usedPorts = await getUsedPorts(serverId);
-	const allocated: number[] = [];
-
-	for (
-		let port = PORT_RANGE_START;
-		port <= PORT_RANGE_END && allocated.length < count;
-		port++
-	) {
-		if (!usedPorts.has(port)) {
-			allocated.push(port);
-		}
-	}
-
-	if (allocated.length < count) {
-		throw new Error("Not enough available ports on this server");
-	}
-
-	return allocated;
-}
-
 export async function deployService(serviceId: string) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
 	}
 
-	let placements: { serverId: string; replicas: number }[];
-
-	if (service.autoPlace && !service.stateful) {
-		const totalReplicas = service.replicas;
-		if (totalReplicas < 1) {
-			throw new Error("At least one replica is required");
-		}
-		if (totalReplicas > 10) {
-			throw new Error("Maximum 10 replicas allowed");
-		}
-
-		const calculatedPlacements = await calculateSpreadPlacement(totalReplicas);
-
-		await db
-			.delete(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, serviceId));
-
-		for (const placement of calculatedPlacements) {
-			await db.insert(serviceReplicas).values({
-				id: randomUUID(),
-				serviceId,
-				serverId: placement.serverId,
-				count: placement.count,
-			});
-		}
-
-		placements = calculatedPlacements.map((p) => ({
-			serverId: p.serverId,
-			replicas: p.count,
-		}));
-	} else {
+	if (service.stateful) {
 		const configuredReplicas = await db
 			.select({
 				serverId: serviceReplicas.serverId,
@@ -649,67 +568,28 @@ export async function deployService(serviceId: string) {
 			.from(serviceReplicas)
 			.where(eq(serviceReplicas.serviceId, serviceId));
 
-		placements = configuredReplicas.filter((p) => p.replicas > 0);
-
+		const placements = configuredReplicas.filter((p) => p.replicas > 0);
 		const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
-		if (totalReplicas < 1) {
-			throw new Error("At least one replica is required");
-		}
-		if (totalReplicas > 10) {
-			throw new Error("Maximum 10 replicas allowed");
+
+		if (totalReplicas !== 1) {
+			throw new Error("Stateful services can only have exactly 1 replica");
 		}
 
-		if (service.stateful) {
-			if (totalReplicas !== 1) {
-				throw new Error("Stateful services can only have exactly 1 replica");
-			}
-
-			const serverIds = placements.map((p) => p.serverId);
-			if (serverIds.length !== 1) {
-				throw new Error(
-					"Stateful services must be deployed to exactly one server",
-				);
-			}
-
-			const targetServerId = serverIds[0];
-			// If server is changing, trigger migration instead of normal deployment
-			if (service.lockedServerId && service.lockedServerId !== targetServerId) {
-				if (service.migrationStatus) {
-					throw new Error("Migration already in progress");
-				}
-				await startMigration(serviceId, targetServerId);
-				revalidatePath(`/dashboard/projects`);
-				return { migrationStarted: true };
-			}
+		const serverIds = placements.map((p) => p.serverId);
+		if (serverIds.length !== 1) {
+			throw new Error(
+				"Stateful services must be deployed to exactly one server",
+			);
 		}
-	}
 
-	const serverIds = placements.map((p) => p.serverId);
-	if (serverIds.length === 0) {
-		throw new Error("No servers selected for deployment");
-	}
-
-	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
-
-	const selectedServers = await db
-		.select()
-		.from(servers)
-		.where(inArray(servers.id, serverIds));
-
-	const serverMap = new Map(selectedServers.map((s) => [s.id, s]));
-
-	for (const placement of placements) {
-		if (placement.replicas > 0) {
-			const server = serverMap.get(placement.serverId);
-			if (!server) {
-				throw new Error(`Server ${placement.serverId} not found`);
+		const targetServerId = serverIds[0];
+		if (service.lockedServerId && service.lockedServerId !== targetServerId) {
+			if (service.migrationStatus) {
+				throw new Error("Migration already in progress");
 			}
-			if (server.status !== "online") {
-				throw new Error(`Server ${server.name} is not online`);
-			}
-			if (!server.wireguardIp) {
-				throw new Error(`Server ${server.name} has no WireGuard IP`);
-			}
+			await startMigration(serviceId, targetServerId);
+			revalidatePath(`/dashboard/projects`);
+			return { migrationStarted: true };
 		}
 	}
 
@@ -740,196 +620,18 @@ export async function deployService(serviceId: string) {
 		id: rolloutId,
 		serviceId,
 		status: "in_progress",
-		currentStage: "deploying",
+		currentStage: "queued",
 	});
-
-	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" || d.status === "healthy",
-	);
-
-	const useRollingUpdate = !service.stateful && runningDeployments.length > 0;
-
-	if (useRollingUpdate) {
-		for (const dep of runningDeployments) {
-			await db
-				.update(deployments)
-				.set({ status: "draining" })
-				.where(eq(deployments.id, dep.id));
-		}
-	} else {
-		for (const dep of existingDeployments) {
-			await db
-				.delete(deploymentPorts)
-				.where(eq(deploymentPorts.deploymentId, dep.id));
-			await db.delete(deployments).where(eq(deployments.id, dep.id));
-		}
-	}
-
-	const servicePortsList = await db
-		.select()
-		.from(servicePorts)
-		.where(eq(servicePorts.serviceId, serviceId));
-
-	const domainsNeedingCerts = servicePortsList
-		.filter((p) => p.isPublic && p.domain)
-		.map((p) => p.domain as string);
-
-	for (const domain of domainsNeedingCerts) {
-		const existingCert = await getCertificate(domain);
-		if (!existingCert) {
-			try {
-				await issueCertificate(domain);
-				console.log(`[deploy] issued certificate for ${domain}`);
-			} catch (error) {
-				console.error(
-					`[deploy] failed to issue certificate for ${domain}:`,
-					error,
-				);
-			}
-		}
-	}
-
-	const serviceSecrets = await db
-		.select()
-		.from(secrets)
-		.where(eq(secrets.serviceId, serviceId));
-
-	const volumes = await db
-		.select()
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.serviceId, serviceId));
-
-	const env: Record<string, string> = {};
-	for (const secret of serviceSecrets) {
-		env[secret.key] = secret.encryptedValue;
-	}
-
-	const updateData: { replicas: number; lockedServerId?: string } = {
-		replicas: totalReplicas,
-	};
-
-	if (service.stateful && !service.lockedServerId) {
-		updateData.lockedServerId = serverIds[0];
-	}
-
-	await db.update(services).set(updateData).where(eq(services.id, serviceId));
-
-	const deploymentIds: string[] = [];
-	let replicaIndex = 0;
-
-	for (const placement of placements) {
-		if (placement.replicas <= 0) continue;
-
-		const server = serverMap.get(placement.serverId)!;
-
-		for (let i = 0; i < placement.replicas; i++) {
-			replicaIndex++;
-			const hostPorts = await allocateHostPorts(
-				server.id,
-				servicePortsList.length,
-			);
-			const ipAddress = await assignContainerIp(server.id);
-
-			const deploymentId = randomUUID();
-			deploymentIds.push(deploymentId);
-
-			await db.insert(deployments).values({
-				id: deploymentId,
-				serviceId,
-				serverId: server.id,
-				ipAddress,
-				status: "pending",
-				rolloutId,
-			});
-
-			const portMappings: { containerPort: number; hostPort: number }[] = [];
-			for (let j = 0; j < servicePortsList.length; j++) {
-				const sp = servicePortsList[j];
-				const hostPort = hostPorts[j];
-
-				await db.insert(deploymentPorts).values({
-					id: randomUUID(),
-					deploymentId,
-					servicePortId: sp.id,
-					hostPort,
-				});
-
-				portMappings.push({ containerPort: sp.port, hostPort });
-			}
-
-			const healthCheck = service.healthCheckCmd
-				? {
-						cmd: service.healthCheckCmd,
-						interval: service.healthCheckInterval ?? 10,
-						timeout: service.healthCheckTimeout ?? 5,
-						retries: service.healthCheckRetries ?? 3,
-						startPeriod: service.healthCheckStartPeriod ?? 30,
-					}
-				: null;
-
-			const volumeMounts = volumes.map((v) => ({
-				name: v.name,
-				containerPath: v.containerPath,
-			}));
-
-			await enqueueWork(server.id, "deploy", {
-				deploymentId,
-				serviceId,
-				serviceName: service.name,
-				image: normalizeImage(service.image),
-				portMappings,
-				wireguardIp: server.wireguardIp,
-				ipAddress,
-				name: `${serviceId}-${replicaIndex}`,
-				healthCheck,
-				env,
-				volumeMounts,
-			});
-		}
-	}
-
-	const replicaConfigs = placements
-		.filter((p) => p.replicas > 0)
-		.map((p) => ({
-			serverId: p.serverId,
-			serverName: serverMap.get(p.serverId)?.name ?? "Unknown",
-			count: p.replicas,
-		}));
-
-	const portConfigs = servicePortsList.map((p) => ({
-		port: p.port,
-		isPublic: p.isPublic,
-		domain: p.domain,
-	}));
-
-	const updatedService = await getService(serviceId);
-	if (updatedService) {
-		const deployedConfig = buildCurrentConfig(
-			updatedService,
-			replicaConfigs,
-			portConfigs,
-			serviceSecrets,
-			volumes,
-		);
-
-		await db
-			.update(services)
-			.set({ deployedConfig: JSON.stringify(deployedConfig) })
-			.where(eq(services.id, serviceId));
-	}
 
 	await inngest.send({
 		name: "rollout/created",
 		data: {
 			rolloutId,
 			serviceId,
-			deploymentIds,
-			serverIds,
-			isRollingUpdate: useRollingUpdate,
 		},
 	});
 
-	return { deploymentIds, replicaCount: totalReplicas, rolloutId };
+	return { rolloutId };
 }
 
 export async function deleteDeployments(serviceId: string) {

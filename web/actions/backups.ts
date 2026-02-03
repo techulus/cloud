@@ -1,20 +1,11 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { detectDatabaseType } from "@/lib/database-utils";
-import {
-	serviceVolumes,
-	volumeBackups,
-	services,
-	deployments,
-	servers,
-} from "@/db/schema";
-import { getBackupStorageConfig } from "@/db/queries";
-import { enqueueWork } from "@/lib/work-queue";
+import { volumeBackups, servers } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { deleteFromS3 } from "@/lib/s3";
+import { getBackupStorageConfig } from "@/db/queries";
 import { inngest } from "@/lib/inngest/client";
 
 export async function createBackup(
@@ -22,112 +13,17 @@ export async function createBackup(
 	volumeId: string,
 	backupTypeOverride?: "volume" | "database",
 ) {
-	const storageConfig = await getBackupStorageConfig();
-	if (!storageConfig) {
-		throw new Error("Backup storage not configured");
-	}
-
-	const volume = await db
-		.select()
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.id, volumeId))
-		.then((r) => r[0]);
-
-	if (!volume) {
-		throw new Error("Volume not found");
-	}
-
-	const service = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.then((r) => r[0]);
-
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	const deployment = await db
-		.select({
-			id: deployments.id,
-			serverId: deployments.serverId,
-			containerId: deployments.containerId,
-		})
-		.from(deployments)
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
-			),
-		)
-		.then((r) => r[0]);
-
-	if (!deployment || !deployment.serverId) {
-		throw new Error("No running deployment found for this service");
-	}
-
-	if (!deployment.containerId) {
-		throw new Error("Deployment is missing container ID");
-	}
-
-	const backupType =
-		backupTypeOverride ??
-		(detectDatabaseType(service.image) ? "database" : "volume");
-	const backupId = randomUUID();
-	const fileExtension =
-		backupType === "database" ? getDbBackupExtension(service.image) : ".tar.gz";
-	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}${fileExtension}`;
-
-	await db.insert(volumeBackups).values({
-		id: backupId,
-		volumeId,
-		volumeName: volume.name,
-		serviceId,
-		serverId: deployment.serverId,
-		status: "pending",
-		storagePath,
-	});
-
-	await enqueueWork(deployment.serverId, "backup_volume", {
-		backupId,
-		serviceId,
-		containerId: deployment.containerId,
-		volumeName: volume.name,
-		storagePath,
-		backupType,
-		serviceImage: service.image,
-		storageConfig: {
-			provider: storageConfig.provider,
-			bucket: storageConfig.bucket,
-			region: storageConfig.region,
-			endpoint: storageConfig.endpoint,
-			accessKey: storageConfig.accessKey,
-			secretKey: storageConfig.secretKey,
-		},
-	});
-
 	await inngest.send({
-		name: "backup/started",
+		name: "backup/trigger",
 		data: {
-			backupId,
 			serviceId,
 			volumeId,
-			serverId: deployment.serverId,
+			backupTypeOverride,
 		},
 	});
 
 	revalidatePath(`/dashboard/projects`);
-	return { success: true, backupId };
-}
-
-function getDbBackupExtension(image: string): string {
-	const imageLower = image.toLowerCase();
-	if (imageLower.includes("postgres")) return ".dump";
-	if (imageLower.includes("mysql")) return ".sql";
-	if (imageLower.includes("mariadb")) return ".sql";
-	if (imageLower.includes("mongo")) return ".archive.gz";
-	if (imageLower.includes("redis")) return ".rdb";
-	return ".backup";
+	return { success: true };
 }
 
 export async function listBackups(serviceId: string) {
@@ -155,100 +51,17 @@ export async function restoreBackup(
 	backupId: string,
 	targetServerId?: string,
 ) {
-	const storageConfig = await getBackupStorageConfig();
-	if (!storageConfig) {
-		throw new Error("Backup storage not configured");
-	}
-
-	const backup = await db
-		.select()
-		.from(volumeBackups)
-		.where(eq(volumeBackups.id, backupId))
-		.then((r) => r[0]);
-
-	if (!backup) {
-		throw new Error("Backup not found");
-	}
-
-	if (backup.status !== "completed") {
-		throw new Error("Cannot restore incomplete backup");
-	}
-
-	if (!backup.storagePath || !backup.checksum) {
-		throw new Error("Backup data is incomplete");
-	}
-
-	const service = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.then((r) => r[0]);
-
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	const deployment = await db
-		.select({
-			serverId: deployments.serverId,
-			containerId: deployments.containerId,
-		})
-		.from(deployments)
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
-			),
-		)
-		.then((r) => r[0]);
-
-	if (!deployment || !deployment.serverId) {
-		throw new Error("No running deployment found for this service");
-	}
-
-	const serverId = targetServerId ?? deployment.serverId;
-	const backupType = detectBackupTypeFromPath(backup.storagePath);
-
-	await enqueueWork(serverId, "restore_volume", {
-		backupId,
-		serviceId,
-		containerId: deployment.containerId,
-		volumeName: backup.volumeName,
-		storagePath: backup.storagePath,
-		expectedChecksum: backup.checksum,
-		backupType,
-		serviceImage: service.image,
-		isMigrationRestore: false,
-		storageConfig: {
-			provider: storageConfig.provider,
-			bucket: storageConfig.bucket,
-			region: storageConfig.region,
-			endpoint: storageConfig.endpoint,
-			accessKey: storageConfig.accessKey,
-			secretKey: storageConfig.secretKey,
-		},
-	});
-
 	await inngest.send({
-		name: "restore/started",
+		name: "restore/trigger",
 		data: {
-			backupId,
 			serviceId,
-			serverId,
+			backupId,
+			targetServerId,
 		},
 	});
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };
-}
-
-function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
-	if (storagePath.endsWith(".tar.gz")) return "volume";
-	if (storagePath.endsWith(".dump")) return "database";
-	if (storagePath.endsWith(".sql")) return "database";
-	if (storagePath.endsWith(".archive.gz")) return "database";
-	if (storagePath.endsWith(".rdb")) return "database";
-	return "volume";
 }
 
 export async function deleteBackup(backupId: string) {

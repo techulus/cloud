@@ -82,7 +82,7 @@ type AlertOptions = {
 };
 
 export async function sendAlert(options: AlertOptions): Promise<void> {
-	const config = await getSmtpConfig();
+	const config = getSmtpConfig();
 
 	if (!config?.enabled || !config.alertEmails) {
 		return;

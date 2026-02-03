@@ -164,10 +164,10 @@ export function BuildDetails({
 	const handleRetry = async () => {
 		setIsRetrying(true);
 		try {
-			const result = await retryBuild(build.id);
+			await retryBuild(build.id);
 			toast.success("Build queued");
 			router.push(
-				`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${result.buildId}`,
+				`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
 			);
 		} catch (error) {
 			toast.error(

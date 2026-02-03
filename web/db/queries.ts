@@ -12,7 +12,12 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
-import type { SmtpConfig, EmailAlertsConfig } from "@/lib/settings-keys";
+import type {
+	SmtpConfig,
+	SmtpEncryption,
+	EmailAlertsConfig,
+} from "@/lib/settings-keys";
+import { DEFAULT_SMTP_PORT, DEFAULT_SMTP_TIMEOUT } from "@/lib/settings-keys";
 
 export async function listProjects() {
 	const projectList = await db
@@ -277,19 +282,15 @@ export async function getGlobalSettings() {
 		buildServers,
 		excludedServers,
 		buildTimeout,
-		backupConfig,
 		acmeEmail,
 		proxyDomain,
-		smtpConfig,
 		emailAlertsConfig,
 	] = await Promise.all([
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<string[]>("servers_excluded_from_workload_placement"),
 		getSetting<number>("build_timeout_minutes"),
-		getSetting<BackupStorageConfig>("backup_storage_config"),
 		getSetting<string>("acme_email"),
 		getSetting<string>("proxy_domain"),
-		getSetting<SmtpConfig>("smtp_config"),
 		getSetting<EmailAlertsConfig>("email_alerts_config"),
 	]);
 
@@ -297,10 +298,8 @@ export async function getGlobalSettings() {
 		buildServerIds: buildServers ?? [],
 		excludedServerIds: excludedServers ?? [],
 		buildTimeoutMinutes: buildTimeout ?? 30,
-		backupStorage: backupConfig ?? null,
 		acmeEmail: acmeEmail ?? null,
 		proxyDomain: proxyDomain ?? null,
-		smtpConfig: smtpConfig ?? null,
 		emailAlertsConfig: emailAlertsConfig ?? null,
 	};
 }
@@ -315,31 +314,61 @@ type BackupStorageConfig = {
 	retentionDays: number;
 };
 
-export async function getSmtpConfig(): Promise<SmtpConfig | null> {
-	const config = await getSetting<SmtpConfig>("smtp_config");
-	if (!config?.host || !config?.fromAddress) {
+export function getSmtpConfig(): SmtpConfig | null {
+	const enabled = process.env.SMTP_ENABLED === "true";
+	const host = process.env.SMTP_HOST;
+	const fromAddress = process.env.SMTP_FROM_ADDRESS;
+
+	if (!host || !fromAddress) {
 		return null;
 	}
-	return config;
+
+	const port = parseInt(process.env.SMTP_PORT ?? "", 10) || DEFAULT_SMTP_PORT;
+	const timeout =
+		parseInt(process.env.SMTP_TIMEOUT ?? "", 10) || DEFAULT_SMTP_TIMEOUT;
+	const encryption = (process.env.SMTP_ENCRYPTION ??
+		"starttls") as SmtpEncryption;
+
+	return {
+		enabled,
+		fromName: process.env.SMTP_FROM_NAME ?? "",
+		fromAddress,
+		host,
+		port,
+		username: process.env.SMTP_USERNAME ?? "",
+		password: process.env.SMTP_PASSWORD ?? "",
+		encryption,
+		timeout,
+		alertEmails: process.env.SMTP_ALERT_EMAILS ?? "",
+	};
 }
 
 export async function getEmailAlertsConfig(): Promise<EmailAlertsConfig | null> {
 	return getSetting<EmailAlertsConfig>("email_alerts_config");
 }
 
-export async function getBackupStorageConfig() {
-	const config = await getSetting<BackupStorageConfig>("backup_storage_config");
+export function getBackupStorageConfig(): BackupStorageConfig | null {
+	const provider = process.env.BACKUP_STORAGE_PROVIDER;
+	const bucket = process.env.BACKUP_STORAGE_BUCKET;
+	const accessKey = process.env.BACKUP_STORAGE_ACCESS_KEY;
+	const secretKey = process.env.BACKUP_STORAGE_SECRET_KEY;
 
-	if (
-		!config?.provider ||
-		!config?.bucket ||
-		!config?.accessKey ||
-		!config?.secretKey
-	) {
+	if (!provider || !bucket || !accessKey || !secretKey) {
 		return null;
 	}
 
-	return config;
+	return {
+		provider,
+		bucket,
+		region: process.env.BACKUP_STORAGE_REGION ?? "",
+		endpoint: process.env.BACKUP_STORAGE_ENDPOINT ?? "",
+		accessKey,
+		secretKey,
+		retentionDays: parseInt(
+			process.env.BACKUP_STORAGE_RETENTION_DAYS ?? "7",
+			10,
+		),
+	};
 }
 
 export async function setSetting<T>(key: string, value: T): Promise<void> {

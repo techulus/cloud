@@ -1,8 +1,19 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
+import { getService } from "@/db/queries";
 import { inngest } from "../client";
 import { handleRolloutFailure } from "./rollout-utils";
+import {
+	calculateServicePlacements,
+	validateServers,
+	prepareRollingUpdate,
+	cleanupExistingDeployments,
+	issueCertificatesForService,
+	createDeploymentRecords,
+	saveDeployedConfig,
+	checkForRollingUpdate,
+} from "./rollout-helpers";
 
 export const rolloutWorkflow = inngest.createFunction(
 	{
@@ -11,8 +22,98 @@ export const rolloutWorkflow = inngest.createFunction(
 	},
 	{ event: "rollout/created" },
 	async ({ event, step }) => {
-		const { rolloutId, serviceId, deploymentIds, serverIds, isRollingUpdate } =
-			event.data;
+		const { rolloutId, serviceId } = event.data;
+
+		await step.run("validate-service", async () => {
+			const svc = await getService(serviceId);
+			if (!svc) {
+				throw new Error("Service not found");
+			}
+		});
+
+		await step.run("mark-rollout-in-progress", async () => {
+			await db
+				.update(rollouts)
+				.set({ status: "in_progress", currentStage: "preparing" })
+				.where(eq(rollouts.id, rolloutId));
+		});
+
+		const { placements, totalReplicas } = await step.run(
+			"calculate-placements",
+			async () => {
+				const service = await getService(serviceId);
+				if (!service) {
+					throw new Error("Service not found");
+				}
+				return calculateServicePlacements(service);
+			},
+		);
+
+		const serverIds = await step.run("validate-servers", async () => {
+			const serverMap = await validateServers(placements);
+			return [...serverMap.keys()];
+		});
+
+		const isRollingUpdate = await step.run("check-rolling-update", async () => {
+			return checkForRollingUpdate(serviceId);
+		});
+
+		if (isRollingUpdate) {
+			await step.run("prepare-rolling-update", async () => {
+				await prepareRollingUpdate(serviceId);
+			});
+		} else {
+			await step.run("cleanup-existing", async () => {
+				await cleanupExistingDeployments(serviceId);
+			});
+		}
+
+		await step.run("issue-certificates", async () => {
+			await db
+				.update(rollouts)
+				.set({ currentStage: "certificates" })
+				.where(eq(rollouts.id, rolloutId));
+			await issueCertificatesForService(serviceId);
+		});
+
+		const { deploymentIds } = await step.run("create-deployments", async () => {
+			await db
+				.update(rollouts)
+				.set({ currentStage: "deploying" })
+				.where(eq(rollouts.id, rolloutId));
+
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+
+			const serverMap = await validateServers(placements);
+
+			return createDeploymentRecords(rolloutId, serviceId, {
+				service,
+				placements,
+				serverMap,
+				totalReplicas,
+				isRollingUpdate,
+			});
+		});
+
+		await step.run("save-deployed-config", async () => {
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+
+			const serverMap = await validateServers(placements);
+
+			await saveDeployedConfig(serviceId, {
+				service,
+				placements,
+				serverMap,
+				totalReplicas,
+				isRollingUpdate,
+			});
+		});
 
 		await step.run("start-health-check", async () => {
 			await db

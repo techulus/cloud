@@ -16,6 +16,9 @@ import {
 	restoreWorkflow,
 	onRestoreFailed,
 	buildWorkflow,
+	buildTriggerWorkflow,
+	backupTriggerWorkflow,
+	restoreTriggerWorkflow,
 } from "@/lib/inngest/functions";
 
 export const { GET, POST, PUT } = serve({
@@ -36,5 +39,8 @@ export const { GET, POST, PUT } = serve({
 		restoreWorkflow,
 		onRestoreFailed,
 		buildWorkflow,
+		buildTriggerWorkflow,
+		backupTriggerWorkflow,
+		restoreTriggerWorkflow,
 	],
 });

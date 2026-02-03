@@ -1,26 +1,13 @@
 "use client";
 
-import { useState, useReducer } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { toast } from "sonner";
-import {
-	Hammer,
-	Server,
-	Ban,
-	Clock,
-	HardDrive,
-	Shield,
-	Network,
-	Mail,
-} from "lucide-react";
+import { Hammer, Server, Ban, Clock, Shield, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
@@ -33,19 +20,11 @@ import {
 	updateBuildServers,
 	updateExcludedServers,
 	updateBuildTimeout,
-	updateBackupStorageConfig,
 	updateAcmeEmail,
 	updateProxyDomain,
 } from "@/actions/settings";
 import type { Server as ServerType } from "@/db/types";
-import {
-	MIN_BACKUP_RETENTION_DAYS,
-	MAX_BACKUP_RETENTION_DAYS,
-	DEFAULT_BACKUP_RETENTION_DAYS,
-	type BackupStorageProvider,
-	type SmtpConfig,
-	type EmailAlertsConfig,
-} from "@/lib/settings-keys";
+import type { EmailAlertsConfig } from "@/lib/settings-keys";
 import { GitHubAppSetup } from "@/components/github/github-app-setup";
 import { EmailSettings } from "@/components/settings/email-settings";
 
@@ -55,82 +34,11 @@ type Props = {
 		buildServerIds: string[];
 		excludedServerIds: string[];
 		buildTimeoutMinutes: number;
-		backupStorage: {
-			provider: string;
-			bucket: string;
-			region: string;
-			endpoint: string;
-			accessKey: string;
-			secretKey: string;
-			retentionDays: number;
-		} | null;
 		acmeEmail: string | null;
 		proxyDomain: string | null;
-		smtpConfig: SmtpConfig | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
 	};
 };
-
-type BackupStorageState = {
-	provider: string;
-	bucket: string;
-	region: string;
-	endpoint: string;
-	accessKey: string;
-	secretKey: string;
-	retentionDays: number;
-	isSaving: boolean;
-};
-
-type BackupStorageAction =
-	| { type: "SET_PROVIDER"; payload: string }
-	| { type: "SET_BUCKET"; payload: string }
-	| { type: "SET_REGION"; payload: string }
-	| { type: "SET_ENDPOINT"; payload: string }
-	| { type: "SET_ACCESS_KEY"; payload: string }
-	| { type: "SET_SECRET_KEY"; payload: string }
-	| { type: "SET_RETENTION_DAYS"; payload: number }
-	| { type: "SET_SAVING"; payload: boolean };
-
-function backupStorageReducer(
-	state: BackupStorageState,
-	action: BackupStorageAction,
-): BackupStorageState {
-	switch (action.type) {
-		case "SET_PROVIDER":
-			return { ...state, provider: action.payload };
-		case "SET_BUCKET":
-			return { ...state, bucket: action.payload };
-		case "SET_REGION":
-			return { ...state, region: action.payload };
-		case "SET_ENDPOINT":
-			return { ...state, endpoint: action.payload };
-		case "SET_ACCESS_KEY":
-			return { ...state, accessKey: action.payload };
-		case "SET_SECRET_KEY":
-			return { ...state, secretKey: action.payload };
-		case "SET_RETENTION_DAYS":
-			return { ...state, retentionDays: action.payload };
-		case "SET_SAVING":
-			return { ...state, isSaving: action.payload };
-	}
-}
-
-function createInitialBackupState(
-	backupStorage: Props["initialSettings"]["backupStorage"],
-): BackupStorageState {
-	return {
-		provider: backupStorage?.provider ?? "",
-		bucket: backupStorage?.bucket ?? "",
-		region: backupStorage?.region ?? "",
-		endpoint: backupStorage?.endpoint ?? "",
-		accessKey: backupStorage?.accessKey ?? "",
-		secretKey: backupStorage?.secretKey ?? "",
-		retentionDays:
-			backupStorage?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS,
-		isSaving: false,
-	};
-}
 
 export function GlobalSettings({ servers, initialSettings }: Props) {
 	const router = useRouter();
@@ -148,29 +56,12 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
 	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
 
-	const [backupState, dispatchBackup] = useReducer(
-		backupStorageReducer,
-		initialSettings.backupStorage,
-		createInitialBackupState,
-	);
-
 	const [acmeEmail, setAcmeEmail] = useState(initialSettings.acmeEmail ?? "");
 	const [proxyDomain, setProxyDomain] = useState(
 		initialSettings.proxyDomain ?? "",
 	);
 	const [isSavingAcmeEmail, setIsSavingAcmeEmail] = useState(false);
 	const [isSavingProxyDomain, setIsSavingProxyDomain] = useState(false);
-
-	const {
-		provider: backupProvider,
-		bucket: backupBucket,
-		region: backupRegion,
-		endpoint: backupEndpoint,
-		accessKey: backupAccessKey,
-		secretKey: backupSecretKey,
-		retentionDays: backupRetentionDays,
-		isSaving: isSavingBackup,
-	} = backupState;
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -241,38 +132,6 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 		}
 	};
 
-	const handleSaveBackupStorage = async () => {
-		if (
-			!backupProvider ||
-			!backupBucket ||
-			!backupAccessKey ||
-			!backupSecretKey
-		) {
-			toast.error("Please fill in all required fields");
-			return;
-		}
-		dispatchBackup({ type: "SET_SAVING", payload: true });
-		try {
-			await updateBackupStorageConfig({
-				provider: backupProvider as BackupStorageProvider,
-				bucket: backupBucket,
-				region: backupRegion,
-				endpoint: backupEndpoint,
-				accessKey: backupAccessKey,
-				secretKey: backupSecretKey,
-				retentionDays: backupRetentionDays,
-			});
-			toast.success("Backup volume settings updated");
-			router.refresh();
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to update settings",
-			);
-		} finally {
-			dispatchBackup({ type: "SET_SAVING", payload: false });
-		}
-	};
-
 	const handleSaveAcmeEmail = async () => {
 		setIsSavingAcmeEmail(true);
 		try {
@@ -316,17 +175,6 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 	const buildTimeoutChanged =
 		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
 
-	const initialBackup = initialSettings.backupStorage;
-	const backupStorageChanged =
-		backupProvider !== (initialBackup?.provider ?? "") ||
-		backupBucket !== (initialBackup?.bucket ?? "") ||
-		backupRegion !== (initialBackup?.region ?? "") ||
-		backupEndpoint !== (initialBackup?.endpoint ?? "") ||
-		backupAccessKey !== (initialBackup?.accessKey ?? "") ||
-		backupSecretKey !== (initialBackup?.secretKey ?? "") ||
-		backupRetentionDays !==
-			(initialBackup?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS);
-
 	const acmeEmailChanged = acmeEmail !== (initialSettings.acmeEmail ?? "");
 	const proxyDomainChanged =
 		proxyDomain !== (initialSettings.proxyDomain ?? "");
@@ -356,9 +204,6 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 				</TabsTrigger>
 				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
-				</TabsTrigger>
-				<TabsTrigger value="backup" className="px-4 shrink-0">
-					Backup
 				</TabsTrigger>
 				<TabsTrigger value="email" className="px-4 shrink-0">
 					Email
@@ -616,180 +461,8 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 				</div>
 			</TabsContent>
 
-			<TabsContent value="backup" className="space-y-6 pt-4">
-				<div className="rounded-lg border">
-					<Item className="border-0 border-b rounded-none">
-						<ItemMedia variant="icon">
-							<HardDrive className="size-5 text-muted-foreground" />
-						</ItemMedia>
-						<ItemContent>
-							<ItemTitle>Backup Storage</ItemTitle>
-						</ItemContent>
-					</Item>
-					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
-							Configure S3-compatible storage for volume backups. This is
-							required for backing up stateful services and migrating them
-							between servers.
-						</p>
-
-						<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-							<div className="space-y-2">
-								<Label htmlFor="backup-provider">Provider</Label>
-								<NativeSelect
-									id="backup-provider"
-									value={backupProvider}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_PROVIDER",
-											payload: e.target.value,
-										})
-									}
-								>
-									<NativeSelectOption value="">
-										Select provider
-									</NativeSelectOption>
-									<NativeSelectOption value="s3">AWS S3</NativeSelectOption>
-									<NativeSelectOption value="r2">
-										Cloudflare R2
-									</NativeSelectOption>
-									<NativeSelectOption value="gcs">
-										Google Cloud Storage
-									</NativeSelectOption>
-									<NativeSelectOption value="custom">
-										Custom S3-Compatible
-									</NativeSelectOption>
-								</NativeSelect>
-							</div>
-
-							<div className="space-y-2">
-								<Label htmlFor="backup-bucket">Bucket Name</Label>
-								<Input
-									id="backup-bucket"
-									value={backupBucket}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_BUCKET",
-											payload: e.target.value,
-										})
-									}
-									placeholder="my-backup-bucket"
-								/>
-							</div>
-
-							<div className="space-y-2">
-								<Label htmlFor="backup-region">
-									Region{" "}
-									<span className="text-muted-foreground">(optional)</span>
-								</Label>
-								<Input
-									id="backup-region"
-									value={backupRegion}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_REGION",
-											payload: e.target.value,
-										})
-									}
-									placeholder="us-east-1"
-								/>
-							</div>
-
-							<div className="space-y-2">
-								<Label htmlFor="backup-endpoint">
-									Endpoint{" "}
-									<span className="text-muted-foreground">(for R2/custom)</span>
-								</Label>
-								<Input
-									id="backup-endpoint"
-									value={backupEndpoint}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_ENDPOINT",
-											payload: e.target.value,
-										})
-									}
-									placeholder="https://..."
-								/>
-							</div>
-
-							<div className="space-y-2">
-								<Label htmlFor="backup-access-key">Access Key</Label>
-								<Input
-									id="backup-access-key"
-									value={backupAccessKey}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_ACCESS_KEY",
-											payload: e.target.value,
-										})
-									}
-									placeholder="AKIA..."
-								/>
-							</div>
-
-							<div className="space-y-2">
-								<Label htmlFor="backup-secret-key">Secret Key</Label>
-								<Input
-									id="backup-secret-key"
-									type="password"
-									value={backupSecretKey}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_SECRET_KEY",
-											payload: e.target.value,
-										})
-									}
-									placeholder="••••••••"
-								/>
-							</div>
-						</div>
-
-						<div className="space-y-2 pt-2">
-							<Label htmlFor="backup-retention">Retention Period</Label>
-							<div className="flex items-center gap-3">
-								<Input
-									id="backup-retention"
-									type="number"
-									min={MIN_BACKUP_RETENTION_DAYS}
-									max={MAX_BACKUP_RETENTION_DAYS}
-									value={backupRetentionDays}
-									onChange={(e) =>
-										dispatchBackup({
-											type: "SET_RETENTION_DAYS",
-											payload:
-												parseInt(e.target.value, 10) ||
-												MIN_BACKUP_RETENTION_DAYS,
-										})
-									}
-									className="w-24"
-								/>
-								<span className="text-sm text-muted-foreground">days</span>
-							</div>
-							<p className="text-xs text-muted-foreground">
-								Backups older than this will be automatically deleted. Range:{" "}
-								{MIN_BACKUP_RETENTION_DAYS}-{MAX_BACKUP_RETENTION_DAYS} days.
-							</p>
-						</div>
-
-						{backupStorageChanged && (
-							<div className="pt-3 border-t">
-								<Button
-									onClick={handleSaveBackupStorage}
-									disabled={isSavingBackup}
-									size="sm"
-								>
-									{isSavingBackup ? "Saving..." : "Save"}
-								</Button>
-							</div>
-						)}
-					</div>
-				</div>
-			</TabsContent>
-
 			<TabsContent value="email" className="space-y-6 pt-4">
 				<EmailSettings
-					initialConfig={initialSettings.smtpConfig}
 					initialAlertsConfig={initialSettings.emailAlertsConfig}
 				/>
 			</TabsContent>
