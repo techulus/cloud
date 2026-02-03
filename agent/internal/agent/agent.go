@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	TickInterval         = 60 * time.Second
+	TickInterval         = 15 * time.Second
 	ProcessingTimeout    = 5 * time.Minute
 	BuildCleanupInterval = 1 * time.Hour
 )
