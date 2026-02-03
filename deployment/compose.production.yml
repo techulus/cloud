@@ -44,12 +44,9 @@ services:
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
     depends_on:
-      victoria-logs:
-        condition: service_healthy
-      registry:
-        condition: service_healthy
-      inngest:
-        condition: service_healthy
+      - victoria-logs
+      - registry
+      - inngest
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.web.rule=Host(`${ROOT_DOMAIN}`)"
@@ -66,12 +63,6 @@ services:
       - ./.env
     volumes:
       - registry-data:/var/lib/registry
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/v2/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.registry.rule=Host(`registry.${ROOT_DOMAIN}`)"
@@ -91,12 +82,6 @@ services:
       - "-retentionPeriod=${VL_RETENTION:-7d}"
       - "-httpAuth.username=${VL_USERNAME}"
       - "-httpAuth.password=${VL_PASSWORD}"
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9428/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.logs.rule=Host(`logs.${ROOT_DOMAIN}`)"
@@ -119,12 +104,6 @@ services:
       - "start"
       - "--sdk-url"
       - "http://web:3000/api/inngest"
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8288/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     restart: unless-stopped
 
 volumes:
