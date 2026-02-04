@@ -17,11 +17,12 @@ import (
 )
 
 type Client struct {
-	baseURL   string
-	serverID  string
-	keyPair   *crypto.KeyPair
-	client    *http.Client
-	dataDir   string
+	baseURL    string
+	serverID   string
+	keyPair    *crypto.KeyPair
+	client     *http.Client
+	longClient *http.Client
+	dataDir    string
 }
 
 func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
@@ -32,6 +33,9 @@ func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string
 		dataDir:  dataDir,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
+		},
+		longClient: &http.Client{
+			Timeout: 40 * time.Second,
 		},
 	}
 }
@@ -241,44 +245,16 @@ type AgentHealth struct {
 }
 
 type StatusReport struct {
-	Resources       *Resources                  `json:"resources,omitempty"`
-	PublicIP        string                      `json:"publicIp,omitempty"`
-	PrivateIP       string                      `json:"privateIp,omitempty"`
-	Meta            map[string]string           `json:"meta,omitempty"`
-	Containers      []ContainerStatus           `json:"containers"`
-	DnsInSync       bool                        `json:"dnsInSync,omitempty"`
-	HealthStats     *health.SystemStats         `json:"healthStats,omitempty"`
-	NetworkHealth   *health.NetworkHealth       `json:"networkHealth,omitempty"`
-	ContainerHealth *health.ContainerHealth     `json:"containerHealth,omitempty"`
-	AgentHealth     *AgentHealth                `json:"agentHealth,omitempty"`
-}
-
-func (c *Client) ReportStatus(report *StatusReport) error {
-	body, err := json.Marshal(report)
-	if err != nil {
-		return fmt.Errorf("failed to marshal status report: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/status", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to report status: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status report failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	Resources       *Resources              `json:"resources,omitempty"`
+	PublicIP        string                  `json:"publicIp,omitempty"`
+	PrivateIP       string                  `json:"privateIp,omitempty"`
+	Meta            map[string]string       `json:"meta,omitempty"`
+	Containers      []ContainerStatus       `json:"containers"`
+	DnsInSync       bool                    `json:"dnsInSync,omitempty"`
+	HealthStats     *health.SystemStats     `json:"healthStats,omitempty"`
+	NetworkHealth   *health.NetworkHealth   `json:"networkHealth,omitempty"`
+	ContainerHealth *health.ContainerHealth `json:"containerHealth,omitempty"`
+	AgentHealth     *AgentHealth            `json:"agentHealth,omitempty"`
 }
 
 type BuildDetails struct {
@@ -376,11 +352,7 @@ func (c *Client) GetWorkQueue(timeout time.Duration) ([]WorkQueueItem, error) {
 
 	c.signRequest(req, "")
 
-	client := &http.Client{
-		Timeout: timeout + 10*time.Second,
-	}
-
-	resp, err := client.Do(req)
+	resp, err := c.longClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch work queue: %w", err)
 	}
@@ -401,6 +373,38 @@ func (c *Client) GetWorkQueue(timeout time.Duration) ([]WorkQueueItem, error) {
 	return result.Items, nil
 }
 
+func (c *Client) ReportStatus(report *StatusReport) error {
+	payload := map[string]interface{}{
+		"statusReport": report,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status report: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/status", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to report status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status report failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 func (c *Client) CompleteWorkItem(id, status, errorMsg string) error {
 	payload := map[string]string{
 		"id":     id,
@@ -415,7 +419,7 @@ func (c *Client) CompleteWorkItem(id, status, errorMsg string) error {
 		return fmt.Errorf("failed to marshal work item update: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/work-queue", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/work-queue/complete", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

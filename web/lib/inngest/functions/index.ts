@@ -16,3 +16,4 @@ export { buildWorkflow } from "./build-workflow";
 export { buildTriggerWorkflow } from "./build-trigger-workflow";
 export { backupTriggerWorkflow } from "./backup-trigger-workflow";
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
+export { processAgentStatus } from "./agent-status";

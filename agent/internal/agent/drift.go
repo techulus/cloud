@@ -53,9 +53,6 @@ func (a *Agent) handleIdle() {
 		a.expectedState = expected
 		a.processingStart = time.Now()
 		a.SetState(StateProcessing)
-		if !fromCache {
-			a.ReportStatus(false)
-		}
 		return
 	}
 
@@ -64,7 +61,6 @@ func (a *Agent) handleIdle() {
 func (a *Agent) handleProcessing() {
 	if time.Since(a.processingStart) > ProcessingTimeout {
 		log.Printf("[processing] timeout after %v, forcing transition to IDLE", ProcessingTimeout)
-		a.ReportStatus(false)
 		a.SetState(StateIdle)
 		return
 	}
@@ -72,7 +68,6 @@ func (a *Agent) handleProcessing() {
 	actual, err := a.getActualState()
 	if err != nil {
 		log.Printf("[processing] failed to get actual state: %v", err)
-		a.ReportStatus(false)
 		a.SetState(StateIdle)
 		return
 	}
@@ -81,7 +76,6 @@ func (a *Agent) handleProcessing() {
 
 	if len(a.detectChanges(a.expectedState, actual)) == 0 {
 		log.Printf("[processing] state converged, transitioning to IDLE")
-		a.ReportStatus(false)
 		a.SetState(StateIdle)
 		return
 	}
@@ -89,12 +83,9 @@ func (a *Agent) handleProcessing() {
 	err = a.reconcileOne(actual)
 	if err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
-		a.ReportStatus(false)
 		a.SetState(StateIdle)
 		return
 	}
-
-	a.ReportStatus(false)
 }
 
 func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {

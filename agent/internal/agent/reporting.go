@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"log"
 	"os"
 	"runtime"
@@ -18,31 +17,17 @@ import (
 )
 
 var (
-	agentStartTime     = time.Now()
-	agentVersion       = "dev"
-	lastHealthCollect  time.Time
-	healthCollectMu    sync.Mutex
+	agentStartTime    = time.Now()
+	agentVersion      = "dev"
+	lastHealthCollect time.Time
+	healthCollectMu   sync.Mutex
 )
-
-func (a *Agent) HeartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			a.ReportStatus(false)
-		}
-	}
-}
 
 func SetAgentVersion(version string) {
 	agentVersion = version
 }
 
-func (a *Agent) ReportStatus(includeResources bool) {
+func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport {
 	report := &agenthttp.StatusReport{
 		PublicIP:   a.PublicIP,
 		PrivateIP:  a.PrivateIP,
@@ -100,9 +85,7 @@ func (a *Agent) ReportStatus(includeResources bool) {
 		}
 	}
 
-	if err := a.Client.ReportStatus(report); err != nil {
-		log.Printf("[status] failed to report status: %v", err)
-	}
+	return report
 }
 
 func (a *Agent) CollectLogs() {

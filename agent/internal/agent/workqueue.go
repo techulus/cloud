@@ -5,7 +5,10 @@ import (
 	"time"
 )
 
-const LongPollTimeout = 30 * time.Second
+const (
+	LongPollTimeout         = 30 * time.Second
+	WorkQueueStatusInterval = 60 * time.Second
+)
 
 func (a *Agent) ProcessWorkQueue() {
 	items, err := a.Client.GetWorkQueue(LongPollTimeout)

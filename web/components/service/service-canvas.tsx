@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
 import {
+	ArrowLeftRight,
 	Box,
 	Globe,
 	HardDrive,
 	Lock,
 	Network,
+	Plus,
 	Settings,
 	Upload,
 } from "lucide-react";
@@ -30,6 +33,16 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
+import {
+	ContextMenu,
+	ContextMenuContent,
+	ContextMenuItem,
+	ContextMenuSeparator,
+	ContextMenuSub,
+	ContextMenuSubContent,
+	ContextMenuSubTrigger,
+	ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 function ServiceCardSkeleton() {
 	return (
@@ -99,6 +112,70 @@ function EnvironmentSelector({
 				<span className="hidden md:inline">Settings</span>
 			</Link>
 		</div>
+	);
+}
+
+function CanvasContextMenuContent({
+	projectSlug,
+	envName,
+	environments,
+	onCreateService,
+}: {
+	projectSlug: string;
+	envName: string;
+	environments: Environment[];
+	onCreateService: () => void;
+}) {
+	const router = useRouter();
+	return (
+		<ContextMenuContent>
+			<ContextMenuItem onClick={onCreateService}>
+				<Plus className="h-4 w-4" />
+				Create Service
+			</ContextMenuItem>
+			<ContextMenuItem
+				onClick={() =>
+					router.push(
+						`/dashboard/projects/${projectSlug}/${envName}/import-compose`,
+					)
+				}
+			>
+				<Upload className="h-4 w-4" />
+				Import Compose
+			</ContextMenuItem>
+			<ContextMenuSeparator />
+			{environments.length > 1 && (
+				<ContextMenuSub>
+					<ContextMenuSubTrigger>
+						<ArrowLeftRight className="h-4 w-4" />
+						Switch Environment
+					</ContextMenuSubTrigger>
+					<ContextMenuSubContent>
+						{environments.map((env) => (
+							<ContextMenuItem
+								key={env.id}
+								disabled={env.name === envName}
+								onClick={() =>
+									router.push(
+										`/dashboard/projects/${projectSlug}/${env.name}`,
+									)
+								}
+							>
+								{env.name}
+							</ContextMenuItem>
+						))}
+					</ContextMenuSubContent>
+				</ContextMenuSub>
+			)}
+			<ContextMenuItem
+				onClick={() =>
+					router.push(`/dashboard/projects/${projectSlug}/settings`)
+				}
+			>
+				<Settings className="h-4 w-4" />
+				Project Settings
+			</ContextMenuItem>
+		</ContextMenuContent>
 	);
 }
 
@@ -249,6 +326,8 @@ export function ServiceCanvas({
 		fetcher,
 	);
 
+	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
 	const {
 		data: services,
 		mutate,
@@ -332,55 +411,65 @@ export function ServiceCanvas({
 						</EmptyContent>
 					</Empty>
 				</div>
-				<div
-					className="
+				<ContextMenu>
+					<ContextMenuTrigger
+						className="
 						hidden md:flex
 						relative -mt-6 -mb-6
 						left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
 						bg-slate-50 dark:bg-slate-900/50
 						items-center justify-center
 					"
-					style={{
-						height: "calc(100vh - 5rem)",
-						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
-						backgroundSize: "20px 20px",
-					}}
-				>
-					<EnvironmentSelector
-						environments={environments}
-						selectedEnvName={envName}
+						style={{
+							height: "calc(100vh - 5rem)",
+							backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
+							backgroundSize: "20px 20px",
+						}}
+					>
+						<EnvironmentSelector
+							environments={environments}
+							selectedEnvName={envName}
+							projectSlug={projectSlug}
+							className="absolute top-4 left-4"
+						/>
+						<Empty>
+							<EmptyMedia variant="icon">
+								<Box className="size-5" />
+							</EmptyMedia>
+							<EmptyTitle>No services yet</EmptyTitle>
+							<EmptyDescription>
+								Add your first service to deploy.
+							</EmptyDescription>
+							<EmptyContent>
+								<div className="flex gap-2">
+									<CreateServiceDialog
+										projectId={projectId}
+										environmentId={envId}
+										projectSlug={projectSlug}
+										envName={envName}
+										onSuccess={() => mutate()}
+										open={createDialogOpen}
+										onOpenChange={setCreateDialogOpen}
+									/>
+									<Link
+										href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+									>
+										<Button variant="outline">
+											<Upload className="h-4 w-4 mr-2" />
+											Compose
+										</Button>
+									</Link>
+								</div>
+							</EmptyContent>
+						</Empty>
+					</ContextMenuTrigger>
+					<CanvasContextMenuContent
 						projectSlug={projectSlug}
-						className="absolute top-4 left-4"
+						envName={envName}
+						environments={environments}
+						onCreateService={() => setCreateDialogOpen(true)}
 					/>
-					<Empty>
-						<EmptyMedia variant="icon">
-							<Box className="size-5" />
-						</EmptyMedia>
-						<EmptyTitle>No services yet</EmptyTitle>
-						<EmptyDescription>
-							Add your first service to deploy.
-						</EmptyDescription>
-						<EmptyContent>
-							<div className="flex gap-2">
-								<CreateServiceDialog
-									projectId={projectId}
-									environmentId={envId}
-									projectSlug={projectSlug}
-									envName={envName}
-									onSuccess={() => mutate()}
-								/>
-								<Link
-									href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-								>
-									<Button variant="outline">
-										<Upload className="h-4 w-4 mr-2" />
-										Compose
-									</Button>
-								</Link>
-							</div>
-						</EmptyContent>
-					</Empty>
-				</div>
+				</ContextMenu>
 			</>
 		);
 	}
@@ -424,55 +513,65 @@ export function ServiceCanvas({
 					))}
 				</div>
 			</div>
-			<div
-				className="
-					hidden md:flex
-					relative -mt-6 -mb-6 p-10
-					left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
-					bg-slate-50/50 dark:bg-slate-900/30
-					items-center justify-center overflow-auto
-				"
-				style={{
-					height: "calc(100vh - 3.5rem)",
-					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
-					backgroundSize: "24px 24px",
-				}}
-			>
-				<EnvironmentSelector
-					environments={environments}
-					selectedEnvName={envName}
-					projectSlug={projectSlug}
-					className="absolute top-4 left-4"
-				/>
-				<div className="absolute top-4 right-4 flex gap-2">
-					<Link
-						href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-					>
-						<Button variant="outline">
-							<Upload className="h-4 w-4 mr-2" />
-							Compose
-						</Button>
-					</Link>
-					<CreateServiceDialog
-						projectId={projectId}
-						environmentId={envId}
+			<ContextMenu>
+				<ContextMenuTrigger
+					className="
+						hidden md:flex
+						relative -mt-6 -mb-6 p-10
+						left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen
+						bg-slate-50/50 dark:bg-slate-900/30
+						items-center justify-center overflow-auto
+					"
+					style={{
+						height: "calc(100vh - 3.5rem)",
+						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
+						backgroundSize: "24px 24px",
+					}}
+				>
+					<EnvironmentSelector
+						environments={environments}
+						selectedEnvName={envName}
 						projectSlug={projectSlug}
-						envName={envName}
-						onSuccess={() => mutate()}
+						className="absolute top-4 left-4"
 					/>
-				</div>
-				<div className="flex flex-wrap gap-10 justify-center items-center">
-					{services.map((service) => (
-						<ServiceCard
-							key={service.id}
-							service={service}
+					<div className="absolute top-4 right-4 flex gap-2">
+						<Link
+							href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
+						>
+							<Button variant="outline">
+								<Upload className="h-4 w-4 mr-2" />
+								Compose
+							</Button>
+						</Link>
+						<CreateServiceDialog
+							projectId={projectId}
+							environmentId={envId}
 							projectSlug={projectSlug}
 							envName={envName}
-							proxyDomain={proxyDomain}
+							onSuccess={() => mutate()}
+							open={createDialogOpen}
+							onOpenChange={setCreateDialogOpen}
 						/>
-					))}
-				</div>
-			</div>
+					</div>
+					<div className="flex flex-wrap gap-10 justify-center items-center">
+						{services.map((service) => (
+							<ServiceCard
+								key={service.id}
+								service={service}
+								projectSlug={projectSlug}
+								envName={envName}
+								proxyDomain={proxyDomain}
+							/>
+						))}
+					</div>
+				</ContextMenuTrigger>
+				<CanvasContextMenuContent
+					projectSlug={projectSlug}
+					envName={envName}
+					environments={environments}
+					onCreateService={() => setCreateDialogOpen(true)}
+				/>
+			</ContextMenu>
 		</>
 	);
 }

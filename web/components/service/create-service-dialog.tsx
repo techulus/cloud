@@ -32,16 +32,25 @@ export function CreateServiceDialog({
 	projectSlug,
 	envName,
 	onSuccess,
+	open: externalOpen,
+	onOpenChange: onExternalOpenChange,
 }: {
 	projectId: string;
 	environmentId: string;
 	projectSlug: string;
 	envName: string;
 	onSuccess?: () => void;
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
 }) {
 	const router = useRouter();
 	const { mutate } = useSWRConfig();
-	const [isOpen, setIsOpen] = useState(false);
+	const [internalOpen, setInternalOpen] = useState(false);
+	const isOpen = externalOpen ?? internalOpen;
+	const setIsOpen = (open: boolean) => {
+		setInternalOpen(open);
+		onExternalOpenChange?.(open);
+	};
 	const [name, setName] = useState("");
 	const [image, setImage] = useState("");
 	const [selectedRepo, setSelectedRepo] = useState<SelectedRepo | null>(null);

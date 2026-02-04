@@ -8,14 +8,34 @@ export const restoreWorkflow = inngest.createFunction(
 	async ({ event, step }) => {
 		const { backupId } = event.data;
 
-		const result = await step.waitForEvent("wait-restore-completed", {
-			event: "restore/completed",
-			timeout: "30m",
-			if: `async.data.backupId == "${backupId}"`,
-		});
+		const completedPromise = step
+			.waitForEvent("wait-restore-completed", {
+				event: "restore/completed",
+				timeout: "30m",
+				if: `async.data.backupId == "${backupId}"`,
+			})
+			.then((result) => ({ status: "completed" as const, result }));
 
-		if (!result) {
+		const failedPromise = step
+			.waitForEvent("wait-restore-failed", {
+				event: "restore/failed",
+				timeout: "30m",
+				if: `async.data.backupId == "${backupId}"`,
+			})
+			.then((result) => ({ status: "failed" as const, result }));
+
+		const outcome = await Promise.race([completedPromise, failedPromise]);
+
+		if (!outcome.result) {
 			return { status: "failed", reason: "timeout", backupId };
+		}
+
+		if (outcome.status === "failed") {
+			return {
+				status: "failed",
+				reason: outcome.result.data.error || "restore_failed",
+				backupId,
+			};
 		}
 
 		return { status: "completed", backupId };
