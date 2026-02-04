@@ -214,7 +214,7 @@ function EndpointsCard({
 
 function VolumeCard({ volumes }: { volumes: ServiceVolume[] }) {
 	return (
-		<div className="w-full md:w-[320px] rounded-b-xl border border-t-0 border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 py-2 space-y-1.5">
+		<div className="w-full md:w-[320px] -mt-3 rounded-b-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 pt-5 pb-2 space-y-1.5">
 			{volumes.map((volume) => (
 				<div
 					key={volume.id}
@@ -238,16 +238,14 @@ function VolumeCard({ volumes }: { volumes: ServiceVolume[] }) {
 function ServerBox({
 	serverName,
 	deployments,
-	hasVolumes,
 }: {
 	serverName: string;
 	deployments: Deployment[];
-	hasVolumes?: boolean;
 }) {
 	return (
 		<div
 			className={`
-				w-full md:w-[320px] px-2.5 py-2 ${hasVolumes ? "rounded-t-xl" : "rounded-xl"} border border-slate-200 dark:border-slate-700
+				relative z-10 w-full md:w-[320px] px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700
 				bg-white/50 dark:bg-slate-900/50
 				backdrop-blur-sm
 				transition-all duration-300 ease-in-out
@@ -352,7 +350,6 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 						<ServerBox
 							serverName={group.serverName}
 							deployments={group.deployments}
-							hasVolumes={hasVolumes}
 						/>
 						{hasVolumes && <VolumeCard volumes={service.volumes!} />}
 					</div>
@@ -387,8 +384,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 								<ServerBox
 									serverName={group.serverName}
 									deployments={group.deployments}
-									hasVolumes={hasVolumes}
-								/>
+										/>
 								{hasVolumes && (
 									<VolumeCard volumes={service.volumes!} />
 								)}
