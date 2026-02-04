@@ -212,25 +212,42 @@ function EndpointsCard({
 	);
 }
 
+function VolumeCard({ volumes }: { volumes: ServiceVolume[] }) {
+	return (
+		<div className="w-full md:w-[320px] rounded-b-xl border border-t-0 border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 py-2 space-y-1.5">
+			{volumes.map((volume) => (
+				<div
+					key={volume.id}
+					className="border-l-2 border-amber-500 pl-2.5 py-1"
+				>
+					<div className="flex items-center gap-1.5 text-muted-foreground">
+						<HardDrive className="h-3 w-3" />
+						<span className="text-xs font-medium text-foreground">
+							{volume.name}
+						</span>
+					</div>
+					<p className="mt-0.5 text-xs text-muted-foreground font-mono truncate">
+						{volume.containerPath}
+					</p>
+				</div>
+			))}
+		</div>
+	);
+}
+
 function ServerBox({
 	serverName,
 	deployments,
-	volumes,
+	hasVolumes,
 }: {
 	serverName: string;
 	deployments: Deployment[];
-	volumes?: ServiceVolume[];
+	hasVolumes?: boolean;
 }) {
-	const hasRunning = deployments.some((d) => d.status === "running");
-	const borderClass = hasRunning
-		? "border-emerald-500/30"
-		: "border-slate-200 dark:border-slate-700";
-	const hasVolumes = volumes && volumes.length > 0;
-
 	return (
 		<div
 			className={`
-				w-full md:w-[320px] px-2.5 py-2 rounded-xl border-2 ${borderClass}
+				w-full md:w-[320px] px-2.5 py-2 ${hasVolumes ? "rounded-t-xl" : "rounded-xl"} border border-slate-200 dark:border-slate-700
 				bg-white/50 dark:bg-slate-900/50
 				backdrop-blur-sm
 				transition-all duration-300 ease-in-out
@@ -241,20 +258,6 @@ function ServerBox({
 				<h3 className="font-semibold text-sm text-foreground truncate">
 					{serverName}
 				</h3>
-
-				{hasVolumes && (
-					<div className="ml-auto">
-						{volumes?.map((volume) => (
-							<div
-								key={volume.id}
-								className="flex items-center gap-2 text-xs text-muted-foreground"
-							>
-								<HardDrive className="h-3.5 w-3.5" />
-								<span>{volume.name}</span>
-							</div>
-						))}
-					</div>
-				)}
 			</div>
 
 			<div className="space-y-1.5">
@@ -330,6 +333,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	const hasEndpoints =
 		hasPublicIngress || hasTcpUdpPorts || hasRunningDeployments;
+	const hasVolumes = service.volumes && service.volumes.length > 0;
 
 	return (
 		<>
@@ -344,12 +348,14 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					/>
 				)}
 				{serverGroups.map((group) => (
-					<ServerBox
-						key={group.serverName}
-						serverName={group.serverName}
-						deployments={group.deployments}
-						volumes={service.volumes}
-					/>
+					<div key={group.serverName}>
+						<ServerBox
+							serverName={group.serverName}
+							deployments={group.deployments}
+							hasVolumes={hasVolumes}
+						/>
+						{hasVolumes && <VolumeCard volumes={service.volumes!} />}
+					</div>
 				))}
 			</div>
 
@@ -381,8 +387,11 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 								<ServerBox
 									serverName={group.serverName}
 									deployments={group.deployments}
-									volumes={service.volumes}
+									hasVolumes={hasVolumes}
 								/>
+								{hasVolumes && (
+									<VolumeCard volumes={service.volumes!} />
+								)}
 							</div>
 						))}
 					</div>
