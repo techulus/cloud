@@ -208,7 +208,7 @@ export async function applyStatusReport(serverId: string, report: StatusReport) 
 							.update(services)
 							.set({
 								migrationStatus: null,
-								migrationTargetId: null,
+								migrationTargetServerId: null,
 							})
 							.where(eq(services.id, service.id));
 					}
