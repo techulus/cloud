@@ -156,9 +156,7 @@ function CanvasContextMenuContent({
 								key={env.id}
 								disabled={env.name === envName}
 								onClick={() =>
-									router.push(
-										`/dashboard/projects/${projectSlug}/${env.name}`,
-									)
+									router.push(`/dashboard/projects/${projectSlug}/${env.name}`)
 								}
 							>
 								{env.name}

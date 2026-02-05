@@ -165,8 +165,7 @@ export const migrationWorkflow = inngest.createFunction(
 					.update(services)
 					.set({
 						migrationStatus: "failed",
-						migrationError:
-							backupFailure.result?.data.error || "Backup failed",
+						migrationError: backupFailure.result?.data.error || "Backup failed",
 					})
 					.where(eq(services.id, serviceId));
 			});
@@ -446,8 +445,7 @@ export const migrationWorkflow = inngest.createFunction(
 						.set({
 							migrationStatus: "failed",
 							migrationError:
-								restoreFailure.result?.data.error ||
-								"Database restore failed",
+								restoreFailure.result?.data.error || "Database restore failed",
 						})
 						.where(eq(services.id, serviceId));
 				});

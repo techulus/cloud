@@ -17,7 +17,6 @@ import { createSecretsBatch } from "./secrets";
 
 export type ServiceOverride = {
 	name?: string;
-	stateful?: boolean;
 };
 
 export type ImportComposeInput = {
@@ -119,15 +118,12 @@ export async function importCompose(
 		for (const service of parseResult.services) {
 			const override = serviceOverrides[service.name] || {};
 			const finalName = override.name || service.name;
-			const finalStateful =
-				override.stateful !== undefined ? override.stateful : service.stateful;
 
 			const result = await createService({
 				projectId,
 				environmentId,
 				name: finalName,
 				image: service.image,
-				stateful: finalStateful,
 			});
 
 			createdServiceIds.push(result.id);
@@ -137,7 +133,7 @@ export async function importCompose(
 				await createSecretsBatch(result.id, service.environment);
 			}
 
-			if (finalStateful && service.volumes.length > 0) {
+			if (service.volumes.length > 0) {
 				for (const volume of service.volumes) {
 					try {
 						await addServiceVolume(

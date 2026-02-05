@@ -62,7 +62,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 
 	return (
 		<div
-			className={`p-2 rounded-lg border ${colors.border} ${colors.bg} space-y-1 transition-all duration-300 ease-in-out -mx-1`}
+			className={`border-l-2 ${colors.border} pl-2.5 py-1 transition-all duration-300 ease-in-out`}
 		>
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-1">
@@ -94,7 +94,7 @@ function DeploymentCard({ deployment }: { deployment: Deployment }) {
 			</div>
 
 			{healthColor && deployment.status === "running" && (
-				<div className="flex items-center gap-1 animate-in fade-in duration-300">
+				<div className="flex items-center gap-1 mt-0.5 animate-in fade-in duration-300">
 					<HeartPulse
 						className={`h-3 w-3 ${healthColor.text} transition-colors duration-300`}
 					/>
@@ -214,7 +214,7 @@ function EndpointsCard({
 
 function VolumeCard({ volumes }: { volumes: ServiceVolume[] }) {
 	return (
-		<div className="w-full md:w-[320px] -mt-3 rounded-b-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 pt-5 pb-2 space-y-1.5">
+		<div className="w-full md:w-[320px] -mt-3 rounded-b-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 pt-4 pb-1.5 space-y-1">
 			{volumes.map((volume) => (
 				<div
 					key={volume.id}
@@ -384,10 +384,8 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 								<ServerBox
 									serverName={group.serverName}
 									deployments={group.deployments}
-										/>
-								{hasVolumes && (
-									<VolumeCard volumes={service.volumes!} />
-								)}
+								/>
+								{hasVolumes && <VolumeCard volumes={service.volumes!} />}
 							</div>
 						))}
 					</div>

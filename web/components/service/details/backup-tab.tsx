@@ -165,16 +165,6 @@ export const BackupTab = memo(function BackupTab({
 		}
 	};
 
-	if (!service.stateful) {
-		return (
-			<div className="rounded-lg border p-4">
-				<p className="text-sm text-muted-foreground">
-					Backups are only available for stateful services.
-				</p>
-			</div>
-		);
-	}
-
 	if (volumes.length === 0) {
 		return (
 			<div className="rounded-lg border p-4">

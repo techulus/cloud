@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -36,7 +35,6 @@ type Step = "upload" | "preview" | "configure" | "importing" | "complete";
 
 type ServiceConfig = {
 	name: string;
-	stateful: boolean;
 };
 
 type ImportComposeFormProps = {
@@ -92,7 +90,6 @@ export function ImportComposeForm({
 			for (const service of result.services) {
 				configs[service.name] = {
 					name: service.name,
-					stateful: service.stateful,
 				};
 			}
 			setServiceConfigs(configs);
@@ -122,10 +119,6 @@ export function ImportComposeForm({
 				if (originalService) {
 					overrides[originalName] = {
 						name: config.name !== originalName ? config.name : undefined,
-						stateful:
-							config.stateful !== originalService.stateful
-								? config.stateful
-								: undefined,
 					};
 				}
 			}
@@ -286,10 +279,10 @@ services:
 											<span className="font-medium">{service.name}</span>
 										</div>
 										<div className="flex items-center gap-2">
-											{service.stateful ? (
+											{service.volumes.length > 0 ? (
 												<Badge variant="secondary">
 													<HardDrive className="h-3 w-3 mr-1" />
-													Stateful
+													Volumes
 												</Badge>
 											) : null}
 											{service.replicas > 1 ? (
@@ -422,25 +415,16 @@ services:
 										/>
 									</div>
 
-									<div className="flex items-center justify-between">
-										<div className="space-y-0.5">
-											<Label htmlFor={`stateful-${service.name}`}>
-												Stateful
-											</Label>
-											<p className="text-sm text-muted-foreground">
-												{service.volumes.length > 0
-													? "Has volumes - recommended to keep enabled"
-													: "Enable for persistent storage"}
-											</p>
+									{service.volumes.length > 0 ? (
+										<div className="flex items-center gap-2 text-sm text-muted-foreground">
+											<HardDrive className="h-4 w-4" />
+											<span>
+												{service.volumes.length} volume
+												{service.volumes.length !== 1 ? "s" : ""} will be
+												attached
+											</span>
 										</div>
-										<Switch
-											id={`stateful-${service.name}`}
-											checked={config.stateful}
-											onCheckedChange={(checked) =>
-												updateServiceConfig(service.name, { stateful: checked })
-											}
-										/>
-									</div>
+									) : null}
 								</div>
 							);
 						})}

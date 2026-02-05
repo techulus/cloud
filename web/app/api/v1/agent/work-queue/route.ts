@@ -74,7 +74,9 @@ export async function GET(request: NextRequest) {
 
 	const { serverId } = auth;
 	const rawTimeout = request.nextUrl.searchParams.get("timeout");
-	const timeout = normalizeTimeout(rawTimeout ? parseInt(rawTimeout, 10) : null);
+	const timeout = normalizeTimeout(
+		rawTimeout ? parseInt(rawTimeout, 10) : null,
+	);
 
 	return longPollWorkQueue(request, serverId, timeout);
 }

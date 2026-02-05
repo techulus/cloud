@@ -7,7 +7,6 @@ import { createService, validateDockerImage } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
 	Dialog,
 	DialogContent,
@@ -56,7 +55,6 @@ export function CreateServiceDialog({
 	const [selectedRepo, setSelectedRepo] = useState<SelectedRepo | null>(null);
 	const [branch, setBranch] = useState("main");
 	const [rootDir, setRootDir] = useState("");
-	const [stateful, setStateful] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +78,6 @@ export function CreateServiceDialog({
 				environmentId,
 				name: name.trim(),
 				image: image.trim(),
-				stateful,
 			});
 			resetAndClose();
 			await mutate(`/api/projects/${projectId}/services`);
@@ -109,7 +106,6 @@ export function CreateServiceDialog({
 				environmentId,
 				name: name.trim(),
 				image: "",
-				stateful,
 				github: {
 					repoUrl: `https://github.com/${selectedRepo.fullName}`,
 					branch: branch.trim() || selectedRepo.defaultBranch,
@@ -139,7 +135,6 @@ export function CreateServiceDialog({
 		setSelectedRepo(null);
 		setBranch("main");
 		setRootDir("");
-		setStateful(false);
 		setError(null);
 	};
 
@@ -151,7 +146,6 @@ export function CreateServiceDialog({
 			setSelectedRepo(null);
 			setBranch("main");
 			setRootDir("");
-			setStateful(false);
 			setError(null);
 		}
 	};
@@ -196,20 +190,6 @@ export function CreateServiceDialog({
 									Supported: Docker Hub, GitHub Container Registry (ghcr.io), or
 									any public registry
 								</p>
-							</div>
-							<div className="flex items-center justify-between rounded-lg border p-3">
-								<div className="space-y-0.5">
-									<Label htmlFor="stateful-toggle">Stateful Service</Label>
-									<p className="text-xs text-muted-foreground">
-										Enable to add persistent volumes. Limited to 1 replica and
-										locked to a single server.
-									</p>
-								</div>
-								<Switch
-									id="stateful-toggle"
-									checked={stateful}
-									onCheckedChange={setStateful}
-								/>
 							</div>
 							<div className="flex justify-end gap-2">
 								<Button
@@ -275,20 +255,6 @@ export function CreateServiceDialog({
 								<p className="text-xs text-muted-foreground">
 									Subdirectory containing the app (leave empty for repo root)
 								</p>
-							</div>
-							<div className="flex items-center justify-between rounded-lg border p-3">
-								<div className="space-y-0.5">
-									<Label htmlFor="gh-stateful-toggle">Stateful Service</Label>
-									<p className="text-xs text-muted-foreground">
-										Enable to add persistent volumes. Limited to 1 replica and
-										locked to a single server.
-									</p>
-								</div>
-								<Switch
-									id="gh-stateful-toggle"
-									checked={stateful}
-									onCheckedChange={setStateful}
-								/>
 							</div>
 							<div className="flex justify-end gap-2">
 								<Button

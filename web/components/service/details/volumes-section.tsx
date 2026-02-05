@@ -21,10 +21,6 @@ export const VolumesSection = memo(function VolumesSection({
 	const [removingId, setRemovingId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
-	if (!service.stateful) {
-		return null;
-	}
-
 	const volumes = service.volumes || [];
 
 	const handleAdd = async () => {

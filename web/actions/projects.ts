@@ -341,7 +341,6 @@ type CreateServiceInput = {
 	environmentId: string;
 	name: string;
 	image: string;
-	stateful?: boolean;
 	github?: {
 		repoUrl: string;
 		branch: string;
@@ -352,14 +351,7 @@ type CreateServiceInput = {
 };
 
 export async function createService(input: CreateServiceInput) {
-	const {
-		projectId,
-		environmentId,
-		name,
-		image,
-		stateful = false,
-		github,
-	} = input;
+	const { projectId, environmentId, name, image, github } = input;
 	const env = await getEnvironment(environmentId);
 	if (!env) {
 		throw new Error("Environment not found");
@@ -402,9 +394,9 @@ export async function createService(input: CreateServiceInput) {
 		githubRepoUrl,
 		githubBranch,
 		githubRootDir,
-		replicas: stateful ? 0 : 1,
-		stateful,
-		autoPlace: !stateful,
+		replicas: 1,
+		stateful: false,
+		autoPlace: true,
 	});
 
 	if (github?.installationId && github?.repoId) {
@@ -421,7 +413,7 @@ export async function createService(input: CreateServiceInput) {
 		});
 	}
 
-	return { id, name, image: finalImage, stateful, sourceType };
+	return { id, name, image: finalImage, sourceType };
 }
 
 export async function deleteService(serviceId: string) {
@@ -1043,8 +1035,19 @@ export async function addServiceVolume(
 			throw new Error("Service not found");
 		}
 
-		if (!service.stateful) {
-			throw new Error("Volumes can only be added to stateful services");
+		let totalReplicas = service.replicas;
+		if (!service.autoPlace) {
+			const configuredReplicas = await db
+				.select({ count: serviceReplicas.count })
+				.from(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, serviceId));
+			totalReplicas = configuredReplicas.reduce((sum, r) => sum + r.count, 0);
+		}
+
+		if (totalReplicas > 1) {
+			throw new Error(
+				"Volumes can only be added to services with 1 replica. Reduce replicas to 1 first.",
+			);
 		}
 
 		const existing = await db
@@ -1067,6 +1070,13 @@ export async function addServiceVolume(
 			name: validatedName,
 			containerPath: validatedPath,
 		});
+
+		if (!service.stateful) {
+			await db
+				.update(services)
+				.set({ stateful: true, autoPlace: false })
+				.where(eq(services.id, serviceId));
+		}
 
 		return { id, name: validatedName, containerPath: validatedPath };
 	} catch (error) {
@@ -1115,6 +1125,18 @@ export async function removeServiceVolume(volumeId: string) {
 
 	await db.delete(serviceVolumes).where(eq(serviceVolumes.id, volumeId));
 
+	const remainingVolumes = await db
+		.select({ id: serviceVolumes.id })
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, volume[0].serviceId));
+
+	if (remainingVolumes.length === 0 && service.stateful) {
+		await db
+			.update(services)
+			.set({ stateful: false, autoPlace: true })
+			.where(eq(services.id, service.id));
+	}
+
 	return { success: true };
 }
 
@@ -1128,7 +1150,9 @@ export async function updateServiceAutoPlace(
 	}
 
 	if (service.stateful && autoPlace) {
-		throw new Error("Stateful services cannot use auto-placement");
+		throw new Error(
+			"Services with volumes cannot use auto-placement. Remove volumes first.",
+		);
 	}
 
 	await db
@@ -1158,7 +1182,9 @@ export async function updateServiceReplicas(
 		}
 
 		if (service.stateful && validatedReplicas > 1) {
-			throw new Error("Stateful services can only have exactly 1 replica");
+			throw new Error(
+				"Services with volumes can only have 1 replica. Remove volumes first to scale up.",
+			);
 		}
 
 		await db
@@ -1185,8 +1211,15 @@ export async function updateServiceBackupSettings(
 		throw new Error("Service not found");
 	}
 
-	if (!service.stateful) {
-		throw new Error("Backup settings are only available for stateful services");
+	const volumes = await db
+		.select({ id: serviceVolumes.id })
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
+	if (volumes.length === 0) {
+		throw new Error(
+			"Backup settings are only available for services with volumes",
+		);
 	}
 
 	if (backupEnabled && !backupSchedule) {

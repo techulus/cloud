@@ -37,7 +37,10 @@ export type StatusReport = {
 	agentHealth?: AgentHealth;
 };
 
-export async function applyStatusReport(serverId: string, report: StatusReport) {
+export async function applyStatusReport(
+	serverId: string,
+	report: StatusReport,
+) {
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
 		status: "online",
