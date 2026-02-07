@@ -13,6 +13,10 @@ ENV BETTER_AUTH_SECRET=build-secret
 ENV BETTER_AUTH_URL=http://localhost:3000
 RUN npx next build
 
+FROM node:24-slim AS drizzle
+WORKDIR /drizzle
+RUN npm install drizzle-kit drizzle-orm
+
 FROM node:24-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -22,6 +26,6 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/db ./db
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
-RUN npm install drizzle-kit drizzle-orm
+COPY --from=drizzle /drizzle/node_modules ./node_modules
 EXPOSE 3000
 CMD ["sh", "-c", "echo y | npx drizzle-kit push && node server.js"]
