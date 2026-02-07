@@ -50,6 +50,7 @@ jobs:
         with:
           name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
           path: agent/agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          retention-days: 1
 
   release:
     needs: build

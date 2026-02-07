@@ -9,6 +9,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV DATABASE_URL=postgres://build:build@localhost:5432/build
+ENV BETTER_AUTH_SECRET=build-secret
+ENV BETTER_AUTH_URL=http://localhost:3000
 RUN npx next build
 
 FROM node:24-slim AS runner
@@ -20,7 +22,6 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/db ./db
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder /app/package.json ./package.json
 RUN npm install drizzle-kit drizzle-orm
 EXPOSE 3000
 CMD ["sh", "-c", "echo y | npx drizzle-kit push && node server.js"]
