@@ -1,22 +1,15 @@
-FROM oven/bun:1 AS base
+FROM node:24-slim AS deps
 WORKDIR /app
+RUN corepack enable pnpm
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
-FROM base AS deps
-WORKDIR /app
-COPY package.json bun.lock ./
-RUN bun install
-
-FROM base AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ARG DATABASE_URL
-ARG NEXT_PUBLIC_APP_URL
-ARG BETTER_AUTH_URL
-ENV DATABASE_URL=$DATABASE_URL
-ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
-ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
-RUN bun run build
+ENV DATABASE_URL=postgres://build:build@localhost:5432/build
+RUN npx next build
 
 FROM node:24-slim AS runner
 WORKDIR /app
@@ -25,5 +18,9 @@ ENV HOSTNAME="0.0.0.0"
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/db ./db
+COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
+COPY --from=builder /app/package.json ./package.json
+RUN npm install drizzle-kit drizzle-orm
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "echo y | npx drizzle-kit push && node server.js"]

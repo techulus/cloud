@@ -5,8 +5,8 @@ Next.js-based control plane for Techulus Cloud container deployment platform.
 ## Development
 
 ```bash
-bun install
-bun dev
+pnpm install
+pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to access the control plane.

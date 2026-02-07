@@ -98,7 +98,7 @@ export async function POST(
 
 			if (githubRepo) {
 				const baseUrl =
-					process.env.NEXT_PUBLIC_APP_URL || "https://cloud.techulus.com";
+					process.env.APP_URL || "https://cloud.techulus.com";
 				const logUrl = `${baseUrl}/builds/${buildId}/logs`;
 
 				if (

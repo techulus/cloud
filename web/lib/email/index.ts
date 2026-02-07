@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { formatDateTime } from "@/lib/date";
 
 export function getAppBaseUrl(): string | undefined {
-	return process.env.NEXT_PUBLIC_APP_URL;
+	return process.env.APP_URL;
 }
 
 export function createTransporter(config: SmtpConfig): Transporter {

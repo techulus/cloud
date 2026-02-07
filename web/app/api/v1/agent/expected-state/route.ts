@@ -289,10 +289,10 @@ export async function GET(request: NextRequest) {
 		const routedDomains = httpRoutes.map((r) => r.domain);
 		const certificates = await getAllCertificatesForDomains(routedDomains);
 
-		const controlPlaneUrl = process.env.NEXT_PUBLIC_APP_URL;
+		const controlPlaneUrl = process.env.APP_URL;
 		if (!controlPlaneUrl) {
 			console.warn(
-				"[expected-state] NEXT_PUBLIC_APP_URL not set - ACME challenge route will not be configured",
+				"[expected-state] APP_URL not set - ACME challenge route will not be configured",
 			);
 		}
 

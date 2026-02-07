@@ -63,9 +63,9 @@ export default async function ServerDetailPage({
 							<div className="space-y-2">
 								<Label>Install Command</Label>
 								<code className="block p-3 bg-muted rounded-lg text-sm break-all font-mono">
-									sudo CONTROL_PLANE_URL={process.env.NEXT_PUBLIC_APP_URL}{" "}
+									sudo CONTROL_PLANE_URL={process.env.APP_URL}{" "}
 									REGISTRATION_TOKEN={server.agentToken} bash -c &quot;$(curl
-									-fsSL {process.env.NEXT_PUBLIC_APP_URL}/setup.sh)&quot;
+									-fsSL {process.env.APP_URL}/setup.sh)&quot;
 								</code>
 							</div>
 						</CardContent>
