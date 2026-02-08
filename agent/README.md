@@ -21,6 +21,7 @@ The agent supports two modes:
 
 ### Proxy Nodes Only
 - Traefik
+- CrowdSec (with Traefik bouncer plugin)
 
 ## Automated Installation
 
@@ -81,6 +82,46 @@ TRAEFIK_VERSION="v3.2.3"
 curl -fsSL "https://github.com/traefik/traefik/releases/download/${TRAEFIK_VERSION}/traefik_${TRAEFIK_VERSION}_linux_amd64.tar.gz" -o /tmp/traefik.tar.gz
 sudo tar -xzf /tmp/traefik.tar.gz -C /usr/local/bin traefik
 rm /tmp/traefik.tar.gz
+```
+
+## CrowdSec (Proxy Nodes Only)
+
+Proxy nodes run [CrowdSec](https://www.crowdsec.net/) with the Traefik bouncer plugin for automated threat detection and IP banning. It detects and blocks .env scanning, path probing, SQL injection attempts, bad user agents, and more.
+
+Installed automatically by the setup script. To set up manually:
+
+```bash
+curl -s https://install.crowdsec.net | sudo sh
+sudo apt install crowdsec
+sudo cscli collections install crowdsecurity/traefik
+```
+
+Configure log acquisition at `/etc/crowdsec/acquis.d/traefik.yaml`:
+```yaml
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+```
+
+Generate a bouncer key and write the Traefik middleware config at `/etc/traefik/dynamic/crowdsec.yaml`.
+
+### Community Blocklists
+
+Register at [app.crowdsec.net](https://app.crowdsec.net) (free) and enroll to receive crowdsourced IP blocklists that preemptively block known attackers:
+
+```bash
+sudo cscli console enroll <your-enrollment-key>
+sudo systemctl restart crowdsec
+```
+
+### Useful Commands
+
+```bash
+sudo cscli decisions list    # view active bans
+sudo cscli alerts list       # view recent alerts
+sudo cscli bouncers list     # verify bouncer is registered
+sudo cscli metrics           # detection/ban statistics
 ```
 
 ## BuildKit Setup
