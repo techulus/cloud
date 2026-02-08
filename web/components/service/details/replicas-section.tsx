@@ -95,14 +95,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 	]);
 
 	const hasChanges = useMemo(() => {
-		if (autoPlace !== (service.autoPlace ?? true)) return true;
-		if (autoPlace && totalReplicaCount !== (service.replicas ?? 1)) return true;
-
 		if (service.stateful) {
 			const currentServerId =
 				configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
 			return selectedServerId !== currentServerId;
 		}
+
+		if (autoPlace !== (service.autoPlace ?? true)) return true;
+		if (autoPlace && totalReplicaCount !== (service.replicas ?? 1)) return true;
 
 		if (!autoPlace) {
 			const configuredMap = new Map(
@@ -155,23 +155,25 @@ export const ReplicasSection = memo(function ReplicasSection({
 	const handleSave = async () => {
 		setIsSaving(true);
 		try {
-			if (autoPlace !== (service.autoPlace ?? true)) {
-				await updateServiceAutoPlace(service.id, autoPlace);
-			}
-			if (autoPlace) {
-				if (totalReplicaCount !== (service.replicas ?? 1)) {
-					await updateServiceReplicas(service.id, totalReplicaCount);
-				}
-			} else if (service.stateful) {
+			if (service.stateful) {
 				const replicas = selectedServerId
 					? [{ serverId: selectedServerId, count: 1 }]
 					: [];
 				await updateServiceConfig(service.id, { replicas });
 			} else {
-				const replicas = Object.entries(localReplicas)
-					.filter(([, count]) => count > 0)
-					.map(([serverId, count]) => ({ serverId, count }));
-				await updateServiceConfig(service.id, { replicas });
+				if (autoPlace !== (service.autoPlace ?? true)) {
+					await updateServiceAutoPlace(service.id, autoPlace);
+				}
+				if (autoPlace) {
+					if (totalReplicaCount !== (service.replicas ?? 1)) {
+						await updateServiceReplicas(service.id, totalReplicaCount);
+					}
+				} else {
+					const replicas = Object.entries(localReplicas)
+						.filter(([, count]) => count > 0)
+						.map(([serverId, count]) => ({ serverId, count }));
+					await updateServiceConfig(service.id, { replicas });
+				}
 			}
 			onUpdate();
 		} finally {

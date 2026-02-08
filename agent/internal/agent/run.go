@@ -6,10 +6,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
-	agenthttp "techulus/cloud-agent/internal/http"
 )
-
-const statusStaleness = 3 * time.Minute
 
 func (a *Agent) Run(ctx context.Context) {
 	if a.Config.RegistryURL != "" && a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
@@ -42,6 +39,7 @@ func (a *Agent) Run(ctx context.Context) {
 		cleanupTickerC = cleanupTicker.C
 	}
 
+	go a.StatusReportLoop(ctx)
 	go a.WorkQueueLoop(ctx)
 
 	a.Tick()
@@ -66,34 +64,34 @@ func (a *Agent) Run(ctx context.Context) {
 	}
 }
 
-func (a *Agent) WorkQueueLoop(ctx context.Context) {
-	nextStatusAt := time.Now()
-	var pendingReport *agenthttp.StatusReport
-	var reportBuiltAt time.Time
+func (a *Agent) StatusReportLoop(ctx context.Context) {
+	report := a.BuildStatusReport(false)
+	if err := a.Client.ReportStatus(report); err != nil {
+		log.Printf("[status] failed to report: %v", err)
+	}
+
+	ticker := time.NewTicker(WorkQueueStatusInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
-
-		if pendingReport != nil && time.Since(reportBuiltAt) > statusStaleness {
-			pendingReport = nil
-		}
-
-		if pendingReport == nil && time.Now().After(nextStatusAt) {
-			pendingReport = a.BuildStatusReport(false)
-			reportBuiltAt = time.Now()
-		}
-
-		if pendingReport != nil {
-			if err := a.Client.ReportStatus(pendingReport); err != nil {
+		case <-ticker.C:
+			report := a.BuildStatusReport(false)
+			if err := a.Client.ReportStatus(report); err != nil {
 				log.Printf("[status] failed to report: %v", err)
-			} else {
-				pendingReport = nil
-				nextStatusAt = time.Now().Add(WorkQueueStatusInterval)
 			}
+		}
+	}
+}
+
+func (a *Agent) WorkQueueLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
 
 		a.ProcessWorkQueue()
