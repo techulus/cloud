@@ -366,20 +366,32 @@ log:
 accessLog:
   filePath: /var/log/traefik/access.log
   format: json
+  bufferingSize: 0
   fields:
     defaultMode: keep
     headers:
       defaultMode: drop
+      names:
+        User-Agent: keep
 
 api:
   dashboard: false
   insecure: false
+
+experimental:
+  plugins:
+    bouncer:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      version: v1.4.2
 
 entryPoints:
   web:
     address: ":80"
   websecure:
     address: ":443"
+    http:
+      middlewares:
+        - crowdsec@file
 
 providers:
   file:
@@ -394,7 +406,7 @@ EOF
   cat > /etc/systemd/system/traefik.service << 'EOF'
 [Unit]
 Description=Traefik Reverse Proxy
-After=network-online.target
+After=network-online.target crowdsec.service
 Wants=network-online.target
 
 [Service]
@@ -436,6 +448,67 @@ EOF
       netfilter-persistent save 2>/dev/null || true
       echo "✓ iptables-persistent installed and rules saved"
     fi
+  fi
+
+  step "Installing CrowdSec..."
+  if command -v cscli &>/dev/null; then
+    echo "CrowdSec already installed, skipping package install"
+  else
+    curl -s https://install.crowdsec.net | sh
+    pkg_install crowdsec
+  fi
+  if ! cscli version &>/dev/null; then
+    error "Failed to install CrowdSec"
+  fi
+  echo "✓ CrowdSec installed"
+
+  cscli collections install crowdsecurity/traefik 2>/dev/null || true
+  echo "✓ CrowdSec Traefik collection installed"
+
+  mkdir -p /etc/crowdsec/acquis.d
+  cat > /etc/crowdsec/acquis.d/traefik.yaml << 'ACQUIS_EOF'
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+ACQUIS_EOF
+  echo "✓ CrowdSec log acquisition configured"
+
+  systemctl enable crowdsec
+  systemctl restart crowdsec
+  sleep 2
+  if ! systemctl is-active --quiet crowdsec; then
+    error "Failed to start CrowdSec"
+  fi
+  echo "✓ CrowdSec running"
+
+  if [ ! -f /etc/traefik/dynamic/crowdsec.yaml ]; then
+    BOUNCER_KEY=$(cscli bouncers add traefik-bouncer -o raw)
+    if [ -z "$BOUNCER_KEY" ]; then
+      error "Failed to generate CrowdSec bouncer key"
+    fi
+    cat > /etc/traefik/dynamic/crowdsec.yaml << BOUNCER_EOF
+http:
+  middlewares:
+    crowdsec:
+      plugin:
+        bouncer:
+          enabled: true
+          crowdsecMode: stream
+          updateIntervalSeconds: 15
+          defaultDecisionSeconds: 60
+          httpTimeoutSeconds: 10
+          crowdsecLapiScheme: http
+          crowdsecLapiHost: 127.0.0.1:8080
+          crowdsecLapiKey: ${BOUNCER_KEY}
+          forwardedHeadersTrustedIPs:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+BOUNCER_EOF
+    echo "✓ CrowdSec Traefik bouncer configured"
+  else
+    echo "CrowdSec bouncer config exists, skipping"
   fi
 fi
 
@@ -517,7 +590,7 @@ if [ "$IS_PROXY" = "true" ]; then
 fi
 
 if [ "$IS_PROXY" = "true" ]; then
-  AFTER_SERVICES="network-online.target traefik.service buildkitd.service"
+  AFTER_SERVICES="network-online.target crowdsec.service traefik.service buildkitd.service"
 else
   AFTER_SERVICES="network-online.target buildkitd.service"
 fi
@@ -610,7 +683,7 @@ echo "✓ Agent started"
 step "Final verification..."
 
 if [ "$IS_PROXY" = "true" ]; then
-  SERVICES=("traefik" "techulus-agent" "buildkitd")
+  SERVICES=("crowdsec" "traefik" "techulus-agent" "buildkitd")
 else
   SERVICES=("techulus-agent" "buildkitd")
 fi
@@ -643,6 +716,8 @@ echo "Useful commands:"
 echo "  View agent logs:    journalctl -u techulus-agent -f"
 if [ "$IS_PROXY" = "true" ]; then
   echo "  View Traefik logs:  journalctl -u traefik -f"
+  echo "  CrowdSec decisions: cscli decisions list"
+  echo "  CrowdSec alerts:    cscli alerts list"
 fi
 echo "  Agent status:       systemctl status techulus-agent"
 echo "  Restart agent:      systemctl restart techulus-agent"
