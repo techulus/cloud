@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { workQueue } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { deployService } from "@/actions/projects";
 import { inngest } from "@/lib/inngest/client";
 
 export async function POST(request: NextRequest) {
@@ -66,18 +65,6 @@ export async function POST(request: NextRequest) {
 							buildGroupId: payload.buildGroupId || "",
 							imageUri: payload.finalImageUri,
 						},
-					});
-				}
-
-				if (payload.serviceId) {
-					console.log(
-						`[work-queue] create_manifest completed, triggering deployment for service ${payload.serviceId}`,
-					);
-					deployService(payload.serviceId).catch((error) => {
-						console.error(
-							`[work-queue] deployment failed after create_manifest:`,
-							error,
-						);
 					});
 				}
 			} else if (data.status === "failed" && payload.serviceId) {
