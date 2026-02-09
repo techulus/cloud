@@ -305,6 +305,28 @@ export default function Page() {
 					</Card>
 				</div>
 			</div>
+
+			<footer className="border-t mt-24">
+				<div className="container mx-auto px-4 py-8 flex items-center justify-center gap-1 text-sm text-muted-foreground">
+					<span>Created by</span>
+					<Link
+						href="https://github.com/arjunkomath"
+						target="_blank"
+						className="font-medium text-foreground hover:underline"
+					>
+						Arjun Komath
+					</Link>
+					<span>·</span>
+					<Link
+						href="https://github.com/techulus/cloud"
+						target="_blank"
+						className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+					>
+						<Github className="h-4 w-4" />
+						GitHub
+					</Link>
+				</div>
+			</footer>
 		</div>
 	);
 }

@@ -3,7 +3,11 @@
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { Box, GitBranch, Github, Loader2 } from "lucide-react";
-import { updateServiceGithubRepo } from "@/actions/projects";
+import {
+	updateServiceGithubRepo,
+	updateServiceConfig,
+	validateDockerImage,
+} from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -51,14 +55,17 @@ export const SourceSection = memo(function SourceSection({
 	onUpdate?: () => void;
 }) {
 	const [isEditing, setIsEditing] = useState(false);
+	const [editMode, setEditMode] = useState<"github" | "image">("image");
 	const [isSaving, setIsSaving] = useState(false);
 	const [repoUrl, setRepoUrl] = useState(service.githubRepoUrl || "");
 	const [branch, setBranch] = useState(service.githubBranch || "main");
 	const [rootDir, setRootDir] = useState(service.githubRootDir || "");
+	const [image, setImage] = useState(service.image);
+	const [imageError, setImageError] = useState<string | null>(null);
 
 	const { registry, repository, tag } = parseImageInfo(service.image);
 
-	const handleSave = async () => {
+	const handleSaveGithub = async () => {
 		setIsSaving(true);
 		try {
 			await updateServiceGithubRepo(
@@ -77,11 +84,52 @@ export const SourceSection = memo(function SourceSection({
 		}
 	};
 
+	const handleSaveImage = async () => {
+		if (!image.trim()) return;
+		setIsSaving(true);
+		setImageError(null);
+		try {
+			const validation = await validateDockerImage(image.trim());
+			if (!validation.valid) {
+				setImageError(validation.error || "Invalid image");
+				setIsSaving(false);
+				return;
+			}
+			await updateServiceConfig(service.id, {
+				source: { type: "image", image: image.trim() },
+			});
+			toast.success("Docker image updated");
+			setIsEditing(false);
+			onUpdate?.();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Failed to update");
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
 	const handleCancel = () => {
 		setRepoUrl(service.githubRepoUrl || "");
 		setBranch(service.githubBranch || "main");
 		setRootDir(service.githubRootDir || "");
+		setImage(service.image);
+		setImageError(null);
 		setIsEditing(false);
+	};
+
+	const startEditImage = () => {
+		setEditMode("image");
+		setImage(service.image);
+		setImageError(null);
+		setIsEditing(true);
+	};
+
+	const startEditGithub = () => {
+		setEditMode("github");
+		setRepoUrl(service.githubRepoUrl || "");
+		setBranch(service.githubBranch || "main");
+		setRootDir(service.githubRootDir || "");
+		setIsEditing(true);
 	};
 
 	if (service.sourceType === "github" && service.githubRepoUrl) {
@@ -99,7 +147,7 @@ export const SourceSection = memo(function SourceSection({
 							<Button
 								variant="ghost"
 								size="sm"
-								onClick={() => setIsEditing(true)}
+								onClick={startEditGithub}
 							>
 								Edit
 							</Button>
@@ -140,7 +188,7 @@ export const SourceSection = memo(function SourceSection({
 								</p>
 							</div>
 							<div className="flex items-center gap-2">
-								<Button onClick={handleSave} disabled={isSaving} size="sm">
+								<Button onClick={handleSaveGithub} disabled={isSaving} size="sm">
 									{isSaving && (
 										<Loader2 className="size-4 mr-1.5 animate-spin" />
 									)}
@@ -209,7 +257,14 @@ export const SourceSection = memo(function SourceSection({
 						<Button
 							variant="ghost"
 							size="sm"
-							onClick={() => setIsEditing(true)}
+							onClick={startEditImage}
+						>
+							Edit
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={startEditGithub}
 						>
 							Connect GitHub
 						</Button>
@@ -217,7 +272,49 @@ export const SourceSection = memo(function SourceSection({
 				)}
 			</Item>
 			<div className="p-4">
-				{isEditing ? (
+				{isEditing && editMode === "image" ? (
+					<div className="space-y-4">
+						<div className="space-y-2">
+							<Label htmlFor="docker-image">Docker Image</Label>
+							<Input
+								id="docker-image"
+								placeholder="nginx:latest"
+								value={image}
+								onChange={(e) => {
+									setImage(e.target.value);
+									setImageError(null);
+								}}
+							/>
+							{imageError && (
+								<p className="text-sm text-red-500">{imageError}</p>
+							)}
+							<p className="text-xs text-muted-foreground">
+								Supported: Docker Hub, GitHub Container Registry (ghcr.io), or
+								any public registry
+							</p>
+						</div>
+						<div className="flex items-center gap-2">
+							<Button
+								onClick={handleSaveImage}
+								disabled={isSaving || !image.trim()}
+								size="sm"
+							>
+								{isSaving && (
+									<Loader2 className="size-4 mr-1.5 animate-spin" />
+								)}
+								Save
+							</Button>
+							<Button
+								variant="outline"
+								onClick={handleCancel}
+								disabled={isSaving}
+								size="sm"
+							>
+								Cancel
+							</Button>
+						</div>
+					</div>
+				) : isEditing && editMode === "github" ? (
 					<div className="space-y-4">
 						<div className="space-y-2">
 							<Label htmlFor="repo-url">Public GitHub Repository URL</Label>
@@ -254,7 +351,7 @@ export const SourceSection = memo(function SourceSection({
 						</div>
 						<div className="flex items-center gap-2">
 							<Button
-								onClick={handleSave}
+								onClick={handleSaveGithub}
 								disabled={isSaving || !repoUrl}
 								size="sm"
 							>

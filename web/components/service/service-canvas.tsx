@@ -1,24 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
 import {
 	ArrowLeftRight,
 	Box,
+	Github,
 	Globe,
 	HardDrive,
 	Lock,
 	Network,
-	Plus,
 	Settings,
 	Upload,
 } from "lucide-react";
 import type { Environment, ServiceWithDetails } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
-import { CreateServiceDialog } from "./create-service-dialog";
+import {
+	AddServiceMenu,
+	CreateDockerServiceDialog,
+	CreateGitHubServiceDialog,
+} from "./create-service-dialog";
 import { Button } from "@/components/ui/button";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import { buttonVariants } from "@/components/ui/button";
@@ -119,19 +123,25 @@ function CanvasContextMenuContent({
 	projectSlug,
 	envName,
 	environments,
-	onCreateService,
+	onCreateDocker,
+	onCreateGitHub,
 }: {
 	projectSlug: string;
 	envName: string;
 	environments: Environment[];
-	onCreateService: () => void;
+	onCreateDocker: () => void;
+	onCreateGitHub: () => void;
 }) {
 	const router = useRouter();
 	return (
 		<ContextMenuContent>
-			<ContextMenuItem onClick={onCreateService}>
-				<Plus className="h-4 w-4" />
-				Create Service
+			<ContextMenuItem onClick={onCreateGitHub}>
+				<Github className="h-4 w-4" />
+				GitHub Repo
+			</ContextMenuItem>
+			<ContextMenuItem onClick={onCreateDocker}>
+				<Box className="h-4 w-4" />
+				Docker Image
 			</ContextMenuItem>
 			<ContextMenuItem
 				onClick={() =>
@@ -324,7 +334,8 @@ export function ServiceCanvas({
 		fetcher,
 	);
 
-	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+	const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
+	const [githubDialogOpen, setGithubDialogOpen] = useState(false);
 
 	const {
 		data: services,
@@ -337,6 +348,36 @@ export function ServiceCanvas({
 			refreshInterval: 5000,
 			revalidateOnFocus: true,
 		},
+	);
+
+	const composeHref = `/dashboard/projects/${projectSlug}/${envName}/import-compose`;
+
+	const menuCallbacks = useMemo(
+		() => ({
+			onSelectDocker: () => setDockerDialogOpen(true),
+			onSelectGitHub: () => setGithubDialogOpen(true),
+			composeHref,
+		}),
+		[composeHref],
+	);
+
+	const contextMenuCallbacks = useMemo(
+		() => ({
+			onCreateDocker: () => setDockerDialogOpen(true),
+			onCreateGitHub: () => setGithubDialogOpen(true),
+		}),
+		[],
+	);
+
+	const dialogProps = useMemo(
+		() => ({
+			projectId,
+			environmentId: envId,
+			projectSlug,
+			envName,
+			onSuccess: () => mutate(),
+		}),
+		[projectId, envId, projectSlug, envName, mutate],
 	);
 
 	if (!environments || isLoading) {
@@ -372,6 +413,16 @@ export function ServiceCanvas({
 	if (!services || services.length === 0) {
 		return (
 			<>
+				<CreateDockerServiceDialog
+					{...dialogProps}
+					open={dockerDialogOpen}
+					onOpenChange={setDockerDialogOpen}
+				/>
+				<CreateGitHubServiceDialog
+					{...dialogProps}
+					open={githubDialogOpen}
+					onOpenChange={setGithubDialogOpen}
+				/>
 				<div className="flex flex-col gap-4 py-4 md:hidden">
 					<div className="flex items-center gap-2">
 						<EnvironmentSelector
@@ -389,23 +440,7 @@ export function ServiceCanvas({
 							Add your first service to deploy.
 						</EmptyDescription>
 						<EmptyContent>
-							<div className="flex flex-col gap-2">
-								<CreateServiceDialog
-									projectId={projectId}
-									environmentId={envId}
-									projectSlug={projectSlug}
-									envName={envName}
-									onSuccess={() => mutate()}
-								/>
-								<Link
-									href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-								>
-									<Button variant="outline">
-										<Upload className="h-4 w-4 mr-2" />
-										Compose
-									</Button>
-								</Link>
-							</div>
+							<AddServiceMenu {...menuCallbacks} />
 						</EmptyContent>
 					</Empty>
 				</div>
@@ -439,25 +474,7 @@ export function ServiceCanvas({
 								Add your first service to deploy.
 							</EmptyDescription>
 							<EmptyContent>
-								<div className="flex gap-2">
-									<CreateServiceDialog
-										projectId={projectId}
-										environmentId={envId}
-										projectSlug={projectSlug}
-										envName={envName}
-										onSuccess={() => mutate()}
-										open={createDialogOpen}
-										onOpenChange={setCreateDialogOpen}
-									/>
-									<Link
-										href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-									>
-										<Button variant="outline">
-											<Upload className="h-4 w-4 mr-2" />
-											Compose
-										</Button>
-									</Link>
-								</div>
+								<AddServiceMenu {...menuCallbacks} />
 							</EmptyContent>
 						</Empty>
 					</ContextMenuTrigger>
@@ -465,7 +482,7 @@ export function ServiceCanvas({
 						projectSlug={projectSlug}
 						envName={envName}
 						environments={environments}
-						onCreateService={() => setCreateDialogOpen(true)}
+						{...contextMenuCallbacks}
 					/>
 				</ContextMenu>
 			</>
@@ -474,6 +491,16 @@ export function ServiceCanvas({
 
 	return (
 		<>
+			<CreateDockerServiceDialog
+				{...dialogProps}
+				open={dockerDialogOpen}
+				onOpenChange={setDockerDialogOpen}
+			/>
+			<CreateGitHubServiceDialog
+				{...dialogProps}
+				open={githubDialogOpen}
+				onOpenChange={setGithubDialogOpen}
+			/>
 			<div className="flex flex-col gap-4 py-4 md:hidden">
 				<div className="flex items-center justify-between gap-2">
 					<EnvironmentSelector
@@ -481,23 +508,7 @@ export function ServiceCanvas({
 						selectedEnvName={envName}
 						projectSlug={projectSlug}
 					/>
-					<div className="flex gap-2">
-						<Link
-							href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-						>
-							<Button variant="outline" size="sm">
-								<Upload className="h-4 w-4 md:mr-2" />
-								<span className="hidden md:inline">Compose</span>
-							</Button>
-						</Link>
-						<CreateServiceDialog
-							projectId={projectId}
-							environmentId={envId}
-							projectSlug={projectSlug}
-							envName={envName}
-							onSuccess={() => mutate()}
-						/>
-					</div>
+					<AddServiceMenu {...menuCallbacks} />
 				</div>
 				<div className="flex flex-col gap-4">
 					{services.map((service) => (
@@ -532,24 +543,8 @@ export function ServiceCanvas({
 						projectSlug={projectSlug}
 						className="absolute top-4 left-4"
 					/>
-					<div className="absolute top-4 right-4 flex gap-2">
-						<Link
-							href={`/dashboard/projects/${projectSlug}/${envName}/import-compose`}
-						>
-							<Button variant="outline">
-								<Upload className="h-4 w-4 mr-2" />
-								Compose
-							</Button>
-						</Link>
-						<CreateServiceDialog
-							projectId={projectId}
-							environmentId={envId}
-							projectSlug={projectSlug}
-							envName={envName}
-							onSuccess={() => mutate()}
-							open={createDialogOpen}
-							onOpenChange={setCreateDialogOpen}
-						/>
+					<div className="absolute top-4 right-4">
+						<AddServiceMenu {...menuCallbacks} />
 					</div>
 					<div className="flex flex-wrap gap-10 justify-center items-center">
 						{services.map((service) => (
@@ -567,7 +562,7 @@ export function ServiceCanvas({
 					projectSlug={projectSlug}
 					envName={envName}
 					environments={environments}
-					onCreateService={() => setCreateDialogOpen(true)}
+					{...contextMenuCallbacks}
 				/>
 			</ContextMenu>
 		</>
