@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { deleteService } from "@/actions/projects";
 import { useService } from "@/components/service/service-layout-client";
@@ -36,6 +37,11 @@ export default function ConfigurationPage() {
 	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
 	const [isDeleting, setIsDeleting] = useState(false);
 
+	const handleConfigSave = useCallback(() => {
+		onUpdate();
+		toast.info("Changes saved. Deploy to apply them.");
+	}, [onUpdate]);
+
 	const handleDelete = async () => {
 		setIsDeleting(true);
 		try {
@@ -49,29 +55,29 @@ export default function ConfigurationPage() {
 
 	return (
 		<div className="space-y-6">
-			<SourceSection service={service} onUpdate={onUpdate} />
+			<SourceSection service={service} onUpdate={handleConfigSave} />
 
-			<ReplicasSection service={service} onUpdate={onUpdate} />
+			<ReplicasSection service={service} onUpdate={handleConfigSave} />
 
-			<VolumesSection service={service} onUpdate={onUpdate} />
+			<VolumesSection service={service} onUpdate={handleConfigSave} />
 
-			<SecretsSection service={service} onUpdate={onUpdate} />
+			<SecretsSection service={service} onUpdate={handleConfigSave} />
 
-			<PortsSection service={service} onUpdate={onUpdate} />
+			<PortsSection service={service} onUpdate={handleConfigSave} />
 
 			<TCPProxySection
 				service={service}
 				proxyDomain={proxyDomain}
-				onUpdate={onUpdate}
+				onUpdate={handleConfigSave}
 			/>
 
-			<HealthCheckSection service={service} onUpdate={onUpdate} />
+			<HealthCheckSection service={service} onUpdate={handleConfigSave} />
 
-			<ResourceLimitsSection service={service} onUpdate={onUpdate} />
+			<ResourceLimitsSection service={service} onUpdate={handleConfigSave} />
 
-			<StartCommandSection service={service} onUpdate={onUpdate} />
+			<StartCommandSection service={service} onUpdate={handleConfigSave} />
 
-			<ScheduleSection service={service} onUpdate={onUpdate} />
+			<ScheduleSection service={service} onUpdate={handleConfigSave} />
 
 			<div className="space-y-3">
 				<h2 className="text-xl font-semibold text-destructive">Danger Zone</h2>

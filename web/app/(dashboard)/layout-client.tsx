@@ -117,7 +117,7 @@ function DashboardHeader({ email }: { email: string }) {
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
 							variant="destructive"
-							onClick={() => signOut().then(() => router.push("/login"))}
+							onClick={() => signOut().then(() => router.push("/"))}
 							className="cursor-pointer"
 						>
 							<LogOut className="size-4" />
@@ -140,7 +140,7 @@ export function DashboardLayoutClient({
 
 	useEffect(() => {
 		if (!isPending && !session) {
-			router.push("/login");
+			router.push("/");
 		}
 	}, [session, isPending, router]);
 

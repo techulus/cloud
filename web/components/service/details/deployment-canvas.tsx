@@ -313,9 +313,9 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 					<p className="text-muted-foreground mt-4">No deployments yet.</p>
 				</div>
 				<CanvasWrapper
-					height="82vh"
+					height="auto"
 					isEmpty
-					className="hidden md:flex"
+					className="hidden md:flex min-h-[300px]"
 					emptyContent={
 						<div className="text-center space-y-4">
 							<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -335,7 +335,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	return (
 		<>
-			<div className="flex flex-col gap-4 py-4 pb-16 md:hidden">
+			<div className="flex flex-col gap-4 py-4 md:hidden">
 				{hasEndpoints && (
 					<EndpointsCard
 						publicPorts={publicPorts}
@@ -357,8 +357,8 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 			</div>
 
 			<CanvasWrapper
-				height="82vh"
-				className="hidden md:flex items-center justify-center"
+				height="auto"
+				className="hidden md:flex min-h-[300px] items-center justify-center"
 			>
 				<div className="flex items-center justify-center gap-6">
 					{hasEndpoints && (

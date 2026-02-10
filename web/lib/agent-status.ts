@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { inngest } from "@/lib/inngest/client";
+import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -245,6 +246,10 @@ export async function applyStatusReport(
 				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.status} to ${newStatus}`,
 			);
 
+			if (deployment.rolloutId) {
+				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "deploying", `Deployment ${deployment.id} starting on server ${serverId}`);
+			}
+
 			if (!hasHealthCheck) {
 				await db
 					.update(deployments)
@@ -308,6 +313,7 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
+				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "health_check", `Deployment ${deployment.id} is healthy`);
 				await inngest.send({
 					name: "deployment/healthy",
 					data: {
@@ -347,6 +353,7 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
+				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "health_check", `Deployment ${deployment.id} failed health check`);
 				await inngest.send({
 					name: "deployment/failed",
 					data: {
@@ -372,6 +379,7 @@ export async function applyStatusReport(
 			);
 
 		for (const rollout of rolloutsInDnsSync) {
+			await ingestRolloutLog(rollout.id, "", "dns_sync", `DNS synced on server ${serverId}`);
 			await inngest.send({
 				name: "server/dns-synced",
 				data: {

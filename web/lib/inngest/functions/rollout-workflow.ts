@@ -4,6 +4,7 @@ import { deployments, rollouts } from "@/db/schema";
 import { getService } from "@/db/queries";
 import { inngest } from "../client";
 import { handleRolloutFailure } from "./rollout-utils";
+import { ingestRolloutLog } from "@/lib/victoria-logs";
 import {
 	calculateServicePlacements,
 	validateServers,
@@ -36,6 +37,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				.update(rollouts)
 				.set({ status: "in_progress", currentStage: "preparing" })
 				.where(eq(rollouts.id, rolloutId));
+			await ingestRolloutLog(rolloutId, serviceId, "preparing", "Rollout started");
 		});
 
 		const { placements, totalReplicas } = await step.run(
@@ -45,13 +47,17 @@ export const rolloutWorkflow = inngest.createFunction(
 				if (!service) {
 					throw new Error("Service not found");
 				}
-				return calculateServicePlacements(service);
+				const result = await calculateServicePlacements(service);
+				await ingestRolloutLog(rolloutId, serviceId, "preparing", `Calculated placements: ${result.totalReplicas} replica(s)`);
+				return result;
 			},
 		);
 
 		const serverIds = await step.run("validate-servers", async () => {
 			const serverMap = await validateServers(placements);
-			return [...serverMap.keys()];
+			const ids = [...serverMap.keys()];
+			await ingestRolloutLog(rolloutId, serviceId, "preparing", `Validated ${ids.length} server(s)`);
+			return ids;
 		});
 
 		const isRollingUpdate = await step.run("check-rolling-update", async () => {
@@ -61,10 +67,12 @@ export const rolloutWorkflow = inngest.createFunction(
 		if (isRollingUpdate) {
 			await step.run("prepare-rolling-update", async () => {
 				await prepareRollingUpdate(serviceId);
+				await ingestRolloutLog(rolloutId, serviceId, "preparing", "Prepared rolling update");
 			});
 		} else {
 			await step.run("cleanup-existing", async () => {
 				await cleanupExistingDeployments(serviceId);
+				await ingestRolloutLog(rolloutId, serviceId, "preparing", "Cleaned up existing deployments");
 			});
 		}
 
@@ -74,6 +82,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				.set({ currentStage: "certificates" })
 				.where(eq(rollouts.id, rolloutId));
 			await issueCertificatesForService(serviceId);
+			await ingestRolloutLog(rolloutId, serviceId, "certificates", "Certificates issued");
 		});
 
 		const { deploymentIds } = await step.run("create-deployments", async () => {
@@ -89,13 +98,17 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			const serverMap = await validateServers(placements);
 
-			return createDeploymentRecords(rolloutId, serviceId, {
+			const result = await createDeploymentRecords(rolloutId, serviceId, {
 				service,
 				placements,
 				serverMap,
 				totalReplicas,
 				isRollingUpdate,
 			});
+
+			await ingestRolloutLog(rolloutId, serviceId, "deploying", `Created ${result.deploymentIds.length} deployment(s)`);
+
+			return result;
 		});
 
 		await step.run("save-deployed-config", async () => {
@@ -120,6 +133,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				.update(rollouts)
 				.set({ currentStage: "health_check" })
 				.where(eq(rollouts.id, rolloutId));
+			await ingestRolloutLog(rolloutId, serviceId, "health_check", "Waiting for health checks");
 		});
 
 		const healthResults = await Promise.all(
@@ -135,6 +149,9 @@ export const rolloutWorkflow = inngest.createFunction(
 		const timedOutIndex = healthResults.indexOf(null);
 		if (timedOutIndex !== -1) {
 			const failedDeploymentId = deploymentIds[timedOutIndex];
+			await step.run("log-health-timeout", async () => {
+				await ingestRolloutLog(rolloutId, serviceId, "health_check", `Health check timed out for deployment ${failedDeploymentId}`);
+			});
 			await step.run("handle-health-timeout", async () => {
 				await handleRolloutFailure(
 					rolloutId,
@@ -175,6 +192,8 @@ export const rolloutWorkflow = inngest.createFunction(
 						eq(deployments.status, "healthy"),
 					),
 				);
+
+			await ingestRolloutLog(rolloutId, serviceId, "dns_sync", "Routing traffic to new deployments");
 		});
 
 		const dnsResults = await Promise.all(
@@ -187,13 +206,16 @@ export const rolloutWorkflow = inngest.createFunction(
 			),
 		);
 
-		dnsResults.forEach((result, index) => {
-			if (result === null) {
+		for (let i = 0; i < dnsResults.length; i++) {
+			if (dnsResults[i] === null) {
 				console.warn(
-					`[rollout:${rolloutId}] DNS sync timeout for server ${serverIds[index]}`,
+					`[rollout:${rolloutId}] DNS sync timeout for server ${serverIds[i]}`,
 				);
+				await step.run(`log-dns-timeout-${serverIds[i]}`, async () => {
+					await ingestRolloutLog(rolloutId, serviceId, "dns_sync", `DNS sync timed out for server ${serverIds[i]}`);
+				});
 			}
-		});
+		}
 
 		await step.run("complete-rollout", async () => {
 			await db
@@ -204,6 +226,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					completedAt: new Date(),
 				})
 				.where(eq(rollouts.id, rolloutId));
+			await ingestRolloutLog(rolloutId, serviceId, "completed", "Rollout completed successfully");
 		});
 
 		return { status: "completed", rolloutId };

@@ -19,6 +19,12 @@ import {
 } from "@/actions/projects";
 import { useService } from "@/components/service/service-layout-client";
 import { DeploymentCanvas } from "@/components/service/details/deployment-canvas";
+import {
+	DeploymentProgress,
+	getBarState,
+} from "@/components/service/details/deployment-progress";
+import { PendingChangesBanner } from "@/components/service/details/pending-changes-banner";
+import { RolloutHistory } from "@/components/service/details/rollout-history";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -42,10 +48,13 @@ import {
 
 type ConfirmAction = "redeploy" | "stop" | "delete" | null;
 
-export default function ArchitecturePage() {
-	const { service, onUpdate } = useService();
+export default function DeploymentsPage() {
+	const { service, pendingChanges, projectSlug, envName, onUpdate } =
+		useService();
 	const [isLoading, setIsLoading] = useState<string | null>(null);
 	const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+
+	const barState = getBarState(service, pendingChanges);
 
 	const handleAction = async (
 		actionName: string,
@@ -123,114 +132,136 @@ export default function ArchitecturePage() {
 		(service.configuredReplicas || []).length > 0;
 
 	return (
-		<div className="relative space-y-4">
-			{service.deployments.length > 0 && (
-				<div className="fixed bottom-4 right-4 z-10 md:absolute md:bottom-auto md:top-4 md:left-4 md:right-auto">
-					{hasRunningDeployments && (
-						<ButtonGroup>
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={isLoading !== null}
-								onClick={() =>
-									handleAction(
-										"restart",
-										() => restartService(service.id),
-										"Restart queued",
-									)
-								}
-							>
-								<RefreshCwIcon data-icon="inline-start" />
-								{isLoading === "restart" ? "Restarting..." : "Restart"}
-							</Button>
-							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="outline"
-											size="icon-sm"
-											disabled={isLoading !== null}
-										/>
-									}
-								>
-									<ChevronDownIcon />
-								</DropdownMenuTrigger>
-								<DropdownMenuContent side="bottom" align="end">
-									<DropdownMenuItem
-										disabled={isLoading !== null}
-										onClick={() => setConfirmAction("redeploy")}
-									>
-										<RotateCcwIcon />
-										Redeploy
-									</DropdownMenuItem>
-									<DropdownMenuSeparator />
-									<DropdownMenuItem
-										disabled={isLoading !== null}
-										onClick={() => setConfirmAction("stop")}
-										className="text-orange-600 dark:text-orange-500"
-									>
-										<StopCircleIcon />
-										Stop All
-									</DropdownMenuItem>
-									<DropdownMenuItem
-										variant="destructive"
-										disabled={isLoading !== null}
-										onClick={() => setConfirmAction("delete")}
-									>
-										<Trash2Icon />
-										Delete All
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						</ButtonGroup>
-					)}
-					{canStartAll && (
-						<ButtonGroup>
-							<Button
-								variant="default"
-								size="sm"
-								disabled={isLoading !== null}
-								onClick={() =>
-									handleAction("start", () => deployService(service.id))
-								}
-							>
-								<PlayIcon data-icon="inline-start" />
-								{isLoading === "start" ? "Starting..." : "Start All"}
-							</Button>
-							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={
-										<Button
-											variant="default"
-											size="icon-sm"
-											disabled={isLoading !== null}
-										/>
-									}
-								>
-									<ChevronDownIcon />
-								</DropdownMenuTrigger>
-								<DropdownMenuContent side="bottom" align="end">
-									<DropdownMenuItem
-										variant="destructive"
-										disabled={isLoading !== null}
-										onClick={() => setConfirmAction("delete")}
-									>
-										<Trash2Icon />
-										Delete All
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						</ButtonGroup>
-					)}
-				</div>
-			)}
+		<div className="space-y-4">
+			<DeploymentProgress
+				service={service}
+				changes={pendingChanges}
+				projectSlug={projectSlug}
+				envName={envName}
+				onUpdate={onUpdate}
+			/>
+
+			<PendingChangesBanner
+				service={service}
+				changes={pendingChanges}
+				projectSlug={projectSlug}
+				envName={envName}
+				onUpdate={onUpdate}
+				barMode={barState.mode}
+			/>
+
 			<DeploymentCanvas service={service} />
+
+			<RolloutHistory
+				serviceId={service.id}
+				projectSlug={projectSlug}
+				envName={envName}
+				actions={
+					service.deployments.length > 0 ? (
+						hasRunningDeployments ? (
+							<ButtonGroup>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={isLoading !== null}
+									onClick={() => setConfirmAction("redeploy")}
+								>
+									<RotateCcwIcon data-icon="inline-start" />
+									{isLoading === "redeploy" ? "Redeploying..." : "Redeploy"}
+								</Button>
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										render={
+											<Button
+												variant="outline"
+												size="icon-sm"
+												disabled={isLoading !== null}
+											/>
+										}
+									>
+										<ChevronDownIcon />
+									</DropdownMenuTrigger>
+									<DropdownMenuContent side="bottom" align="end">
+										<DropdownMenuItem
+											disabled={isLoading !== null}
+											onClick={() =>
+												handleAction(
+													"restart",
+													() => restartService(service.id),
+													"Restart queued",
+												)
+											}
+										>
+											<RefreshCwIcon />
+											Restart
+										</DropdownMenuItem>
+										<DropdownMenuSeparator />
+										<DropdownMenuItem
+											disabled={isLoading !== null}
+											onClick={() => setConfirmAction("stop")}
+											className="text-orange-600 dark:text-orange-500"
+										>
+											<StopCircleIcon />
+											Stop All
+										</DropdownMenuItem>
+										<DropdownMenuItem
+											variant="destructive"
+											disabled={isLoading !== null}
+											onClick={() => setConfirmAction("delete")}
+										>
+											<Trash2Icon />
+											Delete All
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							</ButtonGroup>
+						) : canStartAll ? (
+							<ButtonGroup>
+								<Button
+									variant="default"
+									size="sm"
+									disabled={isLoading !== null}
+									onClick={() =>
+										handleAction("start", () => deployService(service.id))
+									}
+								>
+									<PlayIcon data-icon="inline-start" />
+									{isLoading === "start" ? "Starting..." : "Start All"}
+								</Button>
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										render={
+											<Button
+												variant="default"
+												size="icon-sm"
+												disabled={isLoading !== null}
+											/>
+										}
+									>
+										<ChevronDownIcon />
+									</DropdownMenuTrigger>
+									<DropdownMenuContent side="bottom" align="end">
+										<DropdownMenuItem
+											variant="destructive"
+											disabled={isLoading !== null}
+											onClick={() => setConfirmAction("delete")}
+										>
+											<Trash2Icon />
+											Delete All
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							</ButtonGroup>
+						) : undefined
+					) : undefined
+				}
+			/>
 
 			<AlertDialog
 				open={confirmAction !== null}
 				onOpenChange={(open) => !open && setConfirmAction(null)}
 			>
-				{confirmAction && (
+				{confirmAction ? (
 					<AlertDialogContent size="sm">
 						<AlertDialogHeader>
 							<AlertDialogMedia
@@ -264,7 +295,7 @@ export default function ArchitecturePage() {
 							</AlertDialogAction>
 						</AlertDialogFooter>
 					</AlertDialogContent>
-				)}
+				) : null}
 			</AlertDialog>
 		</div>
 	);

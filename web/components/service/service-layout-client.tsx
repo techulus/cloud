@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useMemo } from "react";
 import useSWR from "swr";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import type { ConfigChange } from "@/lib/service-config";
 import { fetcher } from "@/lib/fetcher";
 import {
 	buildCurrentConfig,
@@ -12,7 +13,6 @@ import {
 	parseDeployedConfig,
 } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
-import { DeploymentStatusBar } from "./details/deployment-status-bar";
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -82,7 +82,7 @@ export function ServiceLayoutClient({
 	const hasPublicPorts = service?.ports?.some((p) => p.isPublic);
 
 	const tabs = [
-		{ name: "Deployment", href: basePath },
+		{ name: "Deployments", href: basePath },
 		{ name: "Configuration", href: `${basePath}/configuration` },
 		{ name: "Logs", href: `${basePath}/logs` },
 		...(hasPublicPorts
@@ -152,13 +152,14 @@ export function ServiceLayoutClient({
 
 			<div
 				className={cn(
-					"px-4 py-2 pb-24",
+					"px-4 py-2",
 					isConstrainedTab && "container max-w-7xl mx-auto",
 				)}
 			>
 				<ServiceContext.Provider
 					value={{
 						service,
+						pendingChanges,
 						projectSlug,
 						envName,
 						proxyDomain,
@@ -168,20 +169,13 @@ export function ServiceLayoutClient({
 					{children}
 				</ServiceContext.Provider>
 			</div>
-
-			<DeploymentStatusBar
-				changes={pendingChanges}
-				service={service}
-				projectSlug={projectSlug}
-				envName={envName}
-				onUpdate={handleActionComplete}
-			/>
 		</>
 	);
 }
 
 interface ServiceContextType {
 	service: Service;
+	pendingChanges: ConfigChange[];
 	projectSlug: string;
 	envName: string;
 	proxyDomain: string | null;
