@@ -11,25 +11,7 @@ permissions:
   packages: write
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      web: ${{ steps.filter.outputs.web }}
-      registry: ${{ steps.filter.outputs.registry }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            web:
-              - 'web/**'
-            registry:
-              - 'registry/**'
-
   web:
-    needs: changes
-    if: needs.changes.outputs.web == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,8 +38,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=web
 
   registry:
-    needs: changes
-    if: needs.changes.outputs.registry == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
