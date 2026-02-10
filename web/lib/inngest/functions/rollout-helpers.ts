@@ -78,42 +78,6 @@ export async function allocateHostPorts(
 	return allocated;
 }
 
-export async function validateDeploymentPreconditions(
-	serviceId: string,
-): Promise<{
-	valid: boolean;
-	error?: string;
-	migrationNeeded?: { targetServerId: string };
-}> {
-	const service = await getService(serviceId);
-	if (!service) {
-		return { valid: false, error: "Service not found" };
-	}
-
-	const existingDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const inProgressStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"stopping",
-	];
-
-	const hasInProgressDeployment = existingDeployments.some((d) =>
-		inProgressStatuses.includes(d.status),
-	);
-
-	if (hasInProgressDeployment) {
-		return { valid: false, error: "A deployment is already in progress" };
-	}
-
-	return { valid: true };
-}
-
 export async function calculateServicePlacements(
 	service: NonNullable<Awaited<ReturnType<typeof getService>>>,
 ): Promise<{

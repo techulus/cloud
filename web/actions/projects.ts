@@ -604,27 +604,6 @@ export async function deployService(serviceId: string) {
 		}
 	}
 
-	const existingDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const inProgressStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"stopping",
-	];
-
-	const hasInProgressDeployment = existingDeployments.some((d) =>
-		inProgressStatuses.includes(d.status),
-	);
-
-	if (hasInProgressDeployment) {
-		throw new Error("A deployment is already in progress");
-	}
-
 	const rolloutId = randomUUID();
 
 	await db.insert(rollouts).values({

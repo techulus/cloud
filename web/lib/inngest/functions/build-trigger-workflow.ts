@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { builds } from "@/db/schema";
 import { inngest } from "../client";
@@ -12,6 +11,7 @@ import { enqueueWork } from "@/lib/work-queue";
 export const buildTriggerWorkflow = inngest.createFunction(
 	{
 		id: "build-trigger-workflow",
+		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
 	},
 	{ event: "build/trigger" },
 	async ({ event, step }) => {
@@ -24,22 +24,6 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			author,
 			githubDeploymentId,
 		} = event.data;
-
-		const pendingBuild = await step.run("check-pending-build", async () => {
-			const existing = await db
-				.select()
-				.from(builds)
-				.where(
-					and(eq(builds.serviceId, serviceId), eq(builds.status, "pending")),
-				)
-				.then((r) => r[0]);
-
-			return !!existing;
-		});
-
-		if (pendingBuild) {
-			return { status: "skipped", reason: "build_already_pending" };
-		}
 
 		const { buildIds, buildGroupId } = await step.run(
 			"create-builds",

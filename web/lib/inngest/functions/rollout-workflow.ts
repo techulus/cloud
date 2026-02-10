@@ -19,6 +19,7 @@ import {
 export const rolloutWorkflow = inngest.createFunction(
 	{
 		id: "rollout-workflow",
+		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
 		cancelOn: [{ event: "rollout/cancelled", match: "data.rolloutId" }],
 	},
 	{ event: "rollout/created" },
