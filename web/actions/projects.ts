@@ -40,6 +40,18 @@ import cronstrue from "cronstrue";
 import { startMigration } from "./migrations";
 import { inngest } from "@/lib/inngest/client";
 
+function isValidImageReferencePart(reference: string): boolean {
+	// Allow only characters that are valid in Docker tags/digests and avoid path traversal.
+	// Tags: letters, digits, underscores, periods and dashes; Digests: "algorithm:hex".
+	// This regex is intentionally conservative.
+	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+	const digestPattern = /^[A-Za-z0-9_+.-]+:[0-9a-fA-F]{32,256}$/;
+
+	return reference === "latest" ||
+		tagPattern.test(reference) ||
+		digestPattern.test(reference);
+}
+
 function parseImageReference(image: string): {
 	registry: string;
 	namespace: string;
@@ -95,6 +107,13 @@ export async function validateDockerImage(
 		const { registry, namespace, repository, tag, digest } =
 			parseImageReference(image);
 		const reference = digest || tag || "latest";
+
+		if (!isValidImageReferencePart(reference)) {
+			return {
+				valid: false,
+				error: "Invalid image tag or digest",
+			};
+		}
 
 		if (registry === "docker.io") {
 			const repoPath =

@@ -2,20 +2,12 @@
 
 import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
-import { FloatingBar } from "@/components/ui/floating-bar";
-import { Spinner } from "@/components/ui/spinner";
-import { deployService, abortRollout } from "@/actions/projects";
-import { triggerBuild } from "@/actions/builds";
+import { abortRollout } from "@/actions/projects";
 import { cancelMigration } from "@/actions/migrations";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import type { ConfigChange } from "@/lib/service-config";
 import type {
 	DeploymentStatus,
@@ -43,6 +35,22 @@ const MIGRATION_STAGES: Record<string, string> = {
 	failed: "Migration failed",
 };
 
+const ACTIVE_BUILD_STATUSES = [
+	"pending",
+	"claimed",
+	"cloning",
+	"building",
+	"pushing",
+];
+
+const BUILD_STATUS_LABELS: Record<string, string> = {
+	pending: "Queued",
+	claimed: "Starting",
+	cloning: "Cloning",
+	building: "Building",
+	pushing: "Pushing",
+};
+
 function mapDeploymentStatusToStage(status: DeploymentStatus): string {
 	switch (status) {
 		case "pending":
@@ -68,16 +76,10 @@ type BarState =
 	| { mode: "ready"; hasChanges: boolean; changesCount: number }
 	| { mode: "hidden" };
 
-const ACTIVE_BUILD_STATUSES = [
-	"pending",
-	"claimed",
-	"cloning",
-	"building",
-	"pushing",
-];
-
-function getBarState(service: Service, changes: ConfigChange[]): BarState {
-	// Migration takes precedence over builds and deployments
+export function getBarState(
+	service: Service,
+	changes: ConfigChange[],
+): BarState {
 	if (service.migrationStatus) {
 		return {
 			mode: "deploying",
@@ -104,7 +106,6 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 
 	if (activeRollout) {
 		const currentStage = activeRollout.currentStage || "deploying";
-
 		return {
 			mode: "deploying",
 			stage: currentStage,
@@ -128,7 +129,9 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 			const maxStageIndex = Math.max(
 				...service.deployments
 					.filter((d) => inProgressStatuses.includes(d.status))
-					.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status))),
+					.map((d) =>
+						getStageIndex(mapDeploymentStatusToStage(d.status)),
+					),
 			);
 			return {
 				mode: "deploying",
@@ -156,81 +159,25 @@ function getBarState(service: Service, changes: ConfigChange[]): BarState {
 	return { mode: "hidden" };
 }
 
-function PendingChangesModal({
-	changes,
-	isOpen,
-	onClose,
-	onDeploy,
-	isDeploying,
-	canDeploy,
-}: {
-	changes: ConfigChange[];
-	isOpen: boolean;
-	onClose: () => void;
-	onDeploy: () => void;
-	isDeploying: boolean;
-	canDeploy: boolean;
-}) {
-	if (!isOpen) return null;
-
-	return (
-		<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
-				<DialogHeader>
-					<DialogTitle>Pending Changes</DialogTitle>
-				</DialogHeader>
-				<div className="space-y-3 max-h-[60vh] overflow-y-auto">
-					{changes.map((change, i) => (
-						<div
-							key={`change-${change.field}-${i}`}
-							className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 p-3 bg-muted rounded-md text-sm"
-						>
-							<span className="font-medium shrink-0">{change.field}:</span>
-							<div className="flex items-center gap-2 min-w-0">
-								<span className="text-muted-foreground truncate">
-									{change.from}
-								</span>
-								<ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-								<span className="text-foreground truncate">{change.to}</span>
-							</div>
-						</div>
-					))}
-				</div>
-				<div className="flex justify-end gap-2 pt-4">
-					<Button variant="outline" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						variant="positive"
-						onClick={onDeploy}
-						disabled={isDeploying || !canDeploy}
-					>
-						{isDeploying ? "Deploying..." : `Deploy Now`}
-					</Button>
-				</div>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-export const DeploymentStatusBar = memo(function DeploymentStatusBar({
-	service,
-	changes,
-	projectSlug,
-	envName,
-	onUpdate,
-}: {
+interface DeploymentProgressProps {
 	service: Service;
 	changes: ConfigChange[];
 	projectSlug: string;
 	envName: string;
 	onUpdate: () => void;
-}) {
+}
+
+export const DeploymentProgress = memo(function DeploymentProgress({
+	service,
+	changes,
+	projectSlug,
+	envName,
+	onUpdate,
+}: DeploymentProgressProps) {
 	const router = useRouter();
-	const [showModal, setShowModal] = useState(false);
-	const [isDeploying, setIsDeploying] = useState(false);
 	const [isAborting, setIsAborting] = useState(false);
 	const [isCancellingMigration, setIsCancellingMigration] = useState(false);
+
 	const barState = useMemo(
 		() => getBarState(service, changes),
 		[service, changes],
@@ -266,34 +213,6 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		}
 	}, [barState.mode, service.rollouts]);
 
-	const totalReplicas = service.autoPlace
-		? service.replicas
-		: service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
-	const hasNoDeployments = service.deployments.length === 0;
-	const isGithubWithNoDeployments =
-		service.sourceType === "github" && hasNoDeployments;
-
-	const handleDeploy = async () => {
-		setIsDeploying(true);
-		try {
-			if (isGithubWithNoDeployments) {
-				await triggerBuild(service.id);
-				router.push(
-					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
-				);
-			} else {
-				await deployService(service.id);
-				router.push(
-					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`,
-				);
-			}
-			onUpdate();
-			setShowModal(false);
-		} finally {
-			setIsDeploying(false);
-		}
-	};
-
 	const handleAbort = async () => {
 		setIsAborting(true);
 		try {
@@ -319,44 +238,48 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 		}
 	};
 
-	if (barState.mode === "hidden") {
-		return null;
-	}
+	const isVisible =
+		barState.mode === "building" || barState.mode === "deploying";
+
+	let content: React.ReactNode = null;
 
 	if (barState.mode === "building") {
-		const statusLabels: Record<string, string> = {
-			pending: "Queued",
-			claimed: "Starting",
-			cloning: "Cloning",
-			building: "Building",
-			pushing: "Pushing",
-		};
-
-		return (
-			<FloatingBar
-				visible
-				loading
-				status={statusLabels[barState.buildStatus] || "Building"}
-				action={
-					<button
-						type="button"
+		content = (
+			<div className="rounded-lg border bg-card p-4">
+				<div className="flex items-center justify-between gap-4">
+					<div className="flex items-center gap-3">
+						<div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
+							<Loader2 className="size-4 animate-spin" />
+						</div>
+						<div>
+							<p className="font-medium text-foreground">
+								Building
+							</p>
+							<p className="text-sm text-muted-foreground">
+								{BUILD_STATUS_LABELS[barState.buildStatus] || "Building"}
+							</p>
+						</div>
+					</div>
+					<Button
+						variant="outline"
+						size="sm"
 						onClick={() =>
 							router.push(
 								`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds/${barState.buildId}`,
 							)
 						}
-						className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors"
 					>
 						View Logs
-					</button>
-				}
-			/>
+					</Button>
+				</div>
+			</div>
 		);
 	}
 
 	if (barState.mode === "deploying") {
 		const currentStage = STAGES[barState.stageIndex];
 		const isMigrating = !!service.migrationStatus;
+		const isMigrationFailed = service.migrationStatus === "failed";
 
 		let status = currentStage?.label || "Deploying";
 		if (isMigrating && service.migrationStatus) {
@@ -366,77 +289,61 @@ export const DeploymentStatusBar = memo(function DeploymentStatusBar({
 				"Migrating";
 		}
 
-		const isMigrationFailed = service.migrationStatus === "failed";
-
-		return (
-			<FloatingBar
-				visible
-				loading={!isMigrationFailed}
-				status={status}
-				action={
-					isMigrating ? (
-						<button
-							type="button"
+		content = (
+			<div className="rounded-lg border bg-card p-4">
+				<div className="flex items-center justify-between gap-4">
+					<div className="flex items-center gap-3">
+						{isMigrationFailed ? (
+							<div className="p-2 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400">
+								<XCircle className="size-4" />
+							</div>
+						) : (
+							<div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
+								<Loader2 className="size-4 animate-spin" />
+							</div>
+						)}
+						<div>
+							<p className="font-medium text-foreground">
+								{isMigrating ? "Migrating" : "Deploying"}
+							</p>
+							<p className="text-sm text-muted-foreground">
+								{status}
+							</p>
+						</div>
+					</div>
+					{isMigrating ? (
+						<Button
+							variant="outline"
+							size="sm"
 							onClick={handleCancelMigration}
 							disabled={isCancellingMigration}
-							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
 						>
 							{isCancellingMigration ? <Spinner /> : "Cancel"}
-						</button>
+						</Button>
 					) : (
-						<button
-							type="button"
+						<Button
+							variant="outline"
+							size="sm"
 							onClick={handleAbort}
 							disabled={isAborting}
-							className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
 						>
 							{isAborting ? <Spinner /> : "Abort"}
-						</button>
-					)
-				}
-			/>
+						</Button>
+					)}
+				</div>
+			</div>
 		);
 	}
 
 	return (
-		<>
-			<FloatingBar
-				visible
-				status={
-					barState.hasChanges
-						? `${barState.changesCount} change${barState.changesCount !== 1 ? "s" : ""}`
-						: "Ready to deploy"
-				}
-				action={
-					<div className="flex items-center gap-3">
-						{barState.hasChanges && (
-							<button
-								type="button"
-								onClick={() => setShowModal(true)}
-								className="text-sm font-medium text-white/70 hover:text-white transition-colors"
-							>
-								View
-							</button>
-						)}
-						<button
-							type="button"
-							onClick={handleDeploy}
-							disabled={isDeploying || totalReplicas === 0}
-							className="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
-						>
-							{isDeploying ? <Spinner /> : "Deploy"}
-						</button>
-					</div>
-				}
-			/>
-			<PendingChangesModal
-				changes={changes}
-				isOpen={showModal}
-				onClose={() => setShowModal(false)}
-				onDeploy={handleDeploy}
-				isDeploying={isDeploying}
-				canDeploy={totalReplicas > 0}
-			/>
-		</>
+		<div
+			className="grid transition-[grid-template-rows,opacity] duration-300 ease-in-out"
+			style={{
+				gridTemplateRows: isVisible ? "1fr" : "0fr",
+				opacity: isVisible ? 1 : 0,
+			}}
+		>
+			<div className="overflow-hidden">{content}</div>
+		</div>
 	);
 });

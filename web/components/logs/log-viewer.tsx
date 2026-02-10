@@ -70,7 +70,8 @@ type LogViewerProps =
 	| { variant: "service-logs"; serviceId: string; servers?: Server[] }
 	| { variant: "requests"; serviceId: string }
 	| { variant: "build-logs"; buildId: string; isLive: boolean }
-	| { variant: "server-logs"; serverId: string };
+	| { variant: "server-logs"; serverId: string }
+	| { variant: "rollout-logs"; rolloutId: string; isLive: boolean };
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
 	error: "text-red-500 bg-red-500/10",
@@ -138,11 +139,16 @@ function useLogData(props: LogViewerProps, filterServerId?: string) {
 				return `/api/builds/${props.buildId}/logs`;
 			case "server-logs":
 				return `/api/servers/${props.serverId}/logs?limit=500`;
+			case "rollout-logs":
+				return `/api/rollouts/${props.rolloutId}/logs`;
 		}
 	}, [props, filterServerId]);
 
 	const pollingInterval = useMemo(() => {
 		if (props.variant === "build-logs") {
+			return props.isLive ? 2000 : 0;
+		}
+		if (props.variant === "rollout-logs") {
 			return props.isLive ? 2000 : 0;
 		}
 		if (props.variant === "server-logs") {
@@ -789,6 +795,13 @@ export function LogViewer(props: LogViewerProps) {
 					!entry.message.toLowerCase().includes(search.toLowerCase())
 				)
 					return false;
+			} else if (props.variant === "rollout-logs") {
+				const entry = log as BuildLogEntry;
+				if (
+					search &&
+					!entry.message.toLowerCase().includes(search.toLowerCase())
+				)
+					return false;
 			}
 
 			return true;
@@ -849,6 +862,14 @@ export function LogViewer(props: LogViewerProps) {
 					emptyMessage: "No agent logs available",
 					noMatchMessage: "No logs match filters",
 					loadMoreLabel: "Load older logs",
+					height: "h-[84vh]",
+				};
+			case "rollout-logs":
+				return {
+					searchPlaceholder: "Search logs...",
+					emptyMessage: "Waiting for rollout logs...",
+					noMatchMessage: "No logs match your search",
+					loadMoreLabel: "",
 					height: "h-[84vh]",
 				};
 		}
@@ -979,6 +1000,16 @@ export function LogViewer(props: LogViewerProps) {
 								return (
 									<ServerLogRow
 										key={`${e.id}-${idx}`}
+										entry={e}
+										search={search}
+									/>
+								);
+							}
+							if (props.variant === "rollout-logs") {
+								const e = entry as BuildLogEntry;
+								return (
+									<BuildLogRow
+										key={`${e.timestamp}-${idx}`}
 										entry={e}
 										search={search}
 									/>

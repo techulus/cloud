@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { rollouts } from "@/db/schema";
 import { inngest } from "../client";
 import { handleRolloutFailure } from "./rollout-utils";
+import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 export const onDeploymentFailed = inngest.createFunction(
 	{ id: "on-deployment-failed" },
@@ -19,6 +20,8 @@ export const onDeploymentFailed = inngest.createFunction(
 		});
 
 		if (!rollout || rollout.status !== "in_progress") return;
+
+		await ingestRolloutLog(rolloutId, serviceId, reason, `Rollout failed: ${reason}`);
 
 		await step.sendEvent("cancel-rollout", {
 			name: "rollout/cancelled",

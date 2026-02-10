@@ -77,7 +77,9 @@ export async function queryLogsByService(
 	if (logType === "http") {
 		query += ` log_type:http`;
 	} else if (logType === "container") {
-		query += ` -log_type:http`;
+		query += ` -log_type:http -log_type:build -log_type:rollout`;
+	} else {
+		query += ` -log_type:build -log_type:rollout`;
 	}
 	if (serverId) {
 		query += ` server_id:${serverId}`;
@@ -200,6 +202,81 @@ export async function queryLogsByServer(
 	if (hasMore) logs.pop();
 
 	return { logs, hasMore };
+}
+
+export type RolloutLog = {
+	_msg: string;
+	_time: string;
+	rollout_id: string;
+	service_id: string;
+	stage: string;
+	log_type: "rollout";
+};
+
+export async function ingestRolloutLog(
+	rolloutId: string,
+	serviceId: string,
+	stage: string,
+	message: string,
+): Promise<void> {
+	try {
+		const endpoint = getQueryEndpoint();
+		if (!endpoint) return;
+
+		const entry: RolloutLog = {
+			_msg: message,
+			_time: new Date().toISOString(),
+			rollout_id: rolloutId,
+			service_id: serviceId,
+			stage,
+			log_type: "rollout",
+		};
+
+		const url = `${endpoint.url}/insert/jsonline`;
+		const options = buildFetchOptions(endpoint);
+
+		await fetch(url, {
+			...options,
+			method: "POST",
+			body: JSON.stringify(entry) + "\n",
+			headers: {
+				...((options.headers as Record<string, string>) || {}),
+				"Content-Type": "application/json",
+			},
+		});
+	} catch (error) {
+		console.error("Failed to ingest rollout log:", error);
+	}
+}
+
+export async function queryLogsByRollout(
+	rolloutId: string,
+	limit: number = 1000,
+): Promise<{ logs: RolloutLog[] }> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
+	const query = `rollout_id:${rolloutId} log_type:rollout | sort by (_time)`;
+
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query rollout logs: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const text = await response.text();
+	const lines = text.trim().split("\n").filter(Boolean);
+	const logs = lines.map((line) => JSON.parse(line) as RolloutLog);
+
+	return { logs };
 }
 
 export async function queryLogsByBuild(
