@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - release
-    paths:
-      - "web/**"
-      - "registry/**"
   workflow_dispatch:
 
 permissions:
