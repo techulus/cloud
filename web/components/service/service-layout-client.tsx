@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useMemo } from "react";
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useMemo,
+	useState,
+} from "react";
 import useSWR from "swr";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import type { ConfigChange } from "@/lib/service-config";
@@ -13,6 +19,20 @@ import {
 	parseDeployedConfig,
 } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
+
+const ACTIVE_BUILD_STATUSES = [
+	"pending",
+	"claimed",
+	"cloning",
+	"building",
+	"pushing",
+];
+const IN_PROGRESS_DEPLOY_STATUSES = [
+	"pending",
+	"pulling",
+	"starting",
+	"healthy",
+];
 
 interface ServiceLayoutClientProps {
 	serviceId: string;
@@ -33,13 +53,28 @@ export function ServiceLayoutClient({
 }: ServiceLayoutClientProps) {
 	const pathname = usePathname();
 
+	const [hasActiveActivity, setHasActiveActivity] = useState(false);
+
 	const {
 		data: services,
 		mutate,
 		isLoading,
 	} = useSWR<Service[]>(`/api/projects/${projectId}/services`, fetcher, {
-		refreshInterval: 5000,
+		refreshInterval: hasActiveActivity ? 3000 : 10000,
 		revalidateOnFocus: true,
+		onSuccess: (data) => {
+			const svc = data?.find((s) => s.id === serviceId);
+			if (!svc) return;
+			const isActive =
+				(svc.latestBuild != null &&
+					ACTIVE_BUILD_STATUSES.includes(svc.latestBuild.status)) ||
+				svc.rollouts?.[0]?.status === "in_progress" ||
+				!!svc.migrationStatus ||
+				svc.deployments.some((d) =>
+					IN_PROGRESS_DEPLOY_STATUSES.includes(d.status),
+				);
+			setHasActiveActivity(isActive);
+		},
 	});
 
 	const service = services?.find((s) => s.id === serviceId);
@@ -69,6 +104,7 @@ export function ServiceLayoutClient({
 	}, [service]);
 
 	const handleActionComplete = useCallback(() => {
+		setHasActiveActivity(true);
 		mutate();
 	}, [mutate]);
 

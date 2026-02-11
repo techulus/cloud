@@ -249,6 +249,8 @@ export async function issueCertificatesForService(
 		.filter((p) => p.isPublic && p.domain)
 		.map((p) => p.domain as string);
 
+	const failedDomains: string[] = [];
+
 	for (const domain of domainsNeedingCerts) {
 		const existingCert = await getCertificate(domain);
 		if (!existingCert) {
@@ -260,8 +262,15 @@ export async function issueCertificatesForService(
 					`[deploy] failed to issue certificate for ${domain}:`,
 					error,
 				);
+				failedDomains.push(domain);
 			}
 		}
+	}
+
+	if (failedDomains.length > 0) {
+		throw new Error(
+			`Certificate provisioning failed for: ${failedDomains.join(", ")}`,
+		);
 	}
 }
 

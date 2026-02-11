@@ -144,11 +144,7 @@ export const SourceSection = memo(function SourceSection({
 					</ItemContent>
 					{!isEditing && (
 						<ItemActions>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={startEditGithub}
-							>
+							<Button variant="ghost" size="sm" onClick={startEditGithub}>
 								Edit
 							</Button>
 						</ItemActions>
@@ -188,7 +184,11 @@ export const SourceSection = memo(function SourceSection({
 								</p>
 							</div>
 							<div className="flex items-center gap-2">
-								<Button onClick={handleSaveGithub} disabled={isSaving} size="sm">
+								<Button
+									onClick={handleSaveGithub}
+									disabled={isSaving}
+									size="sm"
+								>
 									{isSaving && (
 										<Loader2 className="size-4 mr-1.5 animate-spin" />
 									)}
@@ -254,18 +254,10 @@ export const SourceSection = memo(function SourceSection({
 				</ItemContent>
 				{!isEditing && (
 					<ItemActions>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={startEditImage}
-						>
+						<Button variant="ghost" size="sm" onClick={startEditImage}>
 							Edit
 						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={startEditGithub}
-						>
+						<Button variant="ghost" size="sm" onClick={startEditGithub}>
 							Connect GitHub
 						</Button>
 					</ItemActions>
@@ -299,9 +291,7 @@ export const SourceSection = memo(function SourceSection({
 								disabled={isSaving || !image.trim()}
 								size="sm"
 							>
-								{isSaving && (
-									<Loader2 className="size-4 mr-1.5 animate-spin" />
-								)}
+								{isSaving && <Loader2 className="size-4 mr-1.5 animate-spin" />}
 								Save
 							</Button>
 							<Button

@@ -129,9 +129,7 @@ export function getBarState(
 			const maxStageIndex = Math.max(
 				...service.deployments
 					.filter((d) => inProgressStatuses.includes(d.status))
-					.map((d) =>
-						getStageIndex(mapDeploymentStatusToStage(d.status)),
-					),
+					.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status))),
 			);
 			return {
 				mode: "deploying",
@@ -252,9 +250,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 							<Loader2 className="size-4 animate-spin" />
 						</div>
 						<div>
-							<p className="font-medium text-foreground">
-								Building
-							</p>
+							<p className="font-medium text-foreground">Building</p>
 							<p className="text-sm text-muted-foreground">
 								{BUILD_STATUS_LABELS[barState.buildStatus] || "Building"}
 							</p>
@@ -306,9 +302,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 							<p className="font-medium text-foreground">
 								{isMigrating ? "Migrating" : "Deploying"}
 							</p>
-							<p className="text-sm text-muted-foreground">
-								{status}
-							</p>
+							<p className="text-sm text-muted-foreground">{status}</p>
 						</div>
 					</div>
 					{isMigrating ? (
@@ -343,7 +337,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 				opacity: isVisible ? 1 : 0,
 			}}
 		>
-			<div className="overflow-hidden">{content}</div>
+			<div className="overflow-hidden pb-4">{content}</div>
 		</div>
 	);
 });

@@ -1,12 +1,7 @@
 "use client";
 
-import {
-	CheckCircle2,
-	Clock,
-	Loader2,
-	RotateCcw,
-	XCircle,
-} from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, Clock, Loader2, RotateCcw, XCircle } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import {
@@ -118,11 +113,19 @@ export function RolloutHistory({
 	envName: string;
 	actions?: React.ReactNode;
 }) {
+	const [hasInProgress, setHasInProgress] = useState(false);
+
 	const { data, isLoading } = useSWR<{ rollouts: RolloutListItem[] }>(
 		`/api/services/${serviceId}/rollouts`,
 		fetcher,
 		{
-			refreshInterval: 10000,
+			refreshInterval: hasInProgress ? 3000 : 30000,
+			revalidateOnFocus: true,
+			onSuccess: (data) => {
+				setHasInProgress(
+					data?.rollouts?.some((r) => r.status === "in_progress") ?? false,
+				);
+			},
 		},
 	);
 
@@ -174,10 +177,7 @@ export function RolloutHistory({
 										<span>{formatRelativeTime(rollout.createdAt)}</span>
 										<span className="ml-3">
 											Duration:{" "}
-											{formatDuration(
-												rollout.createdAt,
-												rollout.completedAt,
-											)}
+											{formatDuration(rollout.createdAt, rollout.completedAt)}
 										</span>
 									</ItemDescription>
 								</ItemContent>

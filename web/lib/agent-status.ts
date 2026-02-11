@@ -247,7 +247,12 @@ export async function applyStatusReport(
 			);
 
 			if (deployment.rolloutId) {
-				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "deploying", `Deployment ${deployment.id} starting on server ${serverId}`);
+				await ingestRolloutLog(
+					deployment.rolloutId,
+					deployment.serviceId,
+					"deploying",
+					`Deployment ${deployment.id} starting on server ${serverId}`,
+				);
 			}
 
 			if (!hasHealthCheck) {
@@ -313,7 +318,12 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
-				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "health_check", `Deployment ${deployment.id} is healthy`);
+				await ingestRolloutLog(
+					deployment.rolloutId,
+					deployment.serviceId,
+					"health_check",
+					`Deployment ${deployment.id} is healthy`,
+				);
 				await inngest.send({
 					name: "deployment/healthy",
 					data: {
@@ -353,7 +363,12 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
-				await ingestRolloutLog(deployment.rolloutId, deployment.serviceId, "health_check", `Deployment ${deployment.id} failed health check`);
+				await ingestRolloutLog(
+					deployment.rolloutId,
+					deployment.serviceId,
+					"health_check",
+					`Deployment ${deployment.id} failed health check`,
+				);
 				await inngest.send({
 					name: "deployment/failed",
 					data: {
@@ -379,7 +394,12 @@ export async function applyStatusReport(
 			);
 
 		for (const rollout of rolloutsInDnsSync) {
-			await ingestRolloutLog(rollout.id, "", "dns_sync", `DNS synced on server ${serverId}`);
+			await ingestRolloutLog(
+				rollout.id,
+				"",
+				"dns_sync",
+				`DNS synced on server ${serverId}`,
+			);
 			await inngest.send({
 				name: "server/dns-synced",
 				data: {

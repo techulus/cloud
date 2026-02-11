@@ -309,7 +309,11 @@ export function BuildDetails({
 				<Alert variant="destructive">
 					<XCircle className="size-4" />
 					<AlertTitle>Build Failed</AlertTitle>
-					<AlertDescription>{build.error}</AlertDescription>
+					<AlertDescription>
+						<pre className="whitespace-pre-wrap font-mono text-xs mt-1">
+							{build.error}
+						</pre>
+					</AlertDescription>
 				</Alert>
 			)}
 
