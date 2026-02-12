@@ -285,9 +285,9 @@ export function BuildsViewer({
 									)}
 								</ItemDescription>
 								{build.error && (
-									<div className="mt-1 text-xs text-red-500 bg-red-500/10 rounded p-2">
+									<pre className="mt-1 text-xs text-red-500 bg-red-500/10 rounded p-2 whitespace-pre-wrap font-mono">
 										{build.error}
-									</div>
+									</pre>
 								)}
 							</ItemContent>
 							<ItemActions onClick={(e) => e.stopPropagation()}>

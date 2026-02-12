@@ -123,9 +123,7 @@ export function RolloutDetails({
 						<span
 							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${config.color} ${config.bgColor}`}
 						>
-							<Icon
-								className={`size-4 ${isLive ? "animate-spin" : ""}`}
-							/>
+							<Icon className={`size-4 ${isLive ? "animate-spin" : ""}`} />
 							{config.label}
 						</span>
 						{rollout.currentStage && isLive && (

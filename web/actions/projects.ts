@@ -47,9 +47,11 @@ function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 	const digestPattern = /^[A-Za-z0-9_+.-]+:[0-9a-fA-F]{32,256}$/;
 
-	return reference === "latest" ||
+	return (
+		reference === "latest" ||
 		tagPattern.test(reference) ||
-		digestPattern.test(reference);
+		digestPattern.test(reference)
+	);
 }
 
 function parseImageReference(image: string): {
@@ -602,27 +604,6 @@ export async function deployService(serviceId: string) {
 			revalidatePath(`/dashboard/projects`);
 			return { migrationStarted: true };
 		}
-	}
-
-	const existingDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const inProgressStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"stopping",
-	];
-
-	const hasInProgressDeployment = existingDeployments.some((d) =>
-		inProgressStatuses.includes(d.status),
-	);
-
-	if (hasInProgressDeployment) {
-		throw new Error("A deployment is already in progress");
 	}
 
 	const rolloutId = randomUUID();

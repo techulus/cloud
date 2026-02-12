@@ -1,2 +1,2 @@
 export const fetcher = <T = unknown>(url: string): Promise<T> =>
-	fetch(url).then((res) => res.json());
+	fetch(url, { cache: "no-store" }).then((res) => res.json());

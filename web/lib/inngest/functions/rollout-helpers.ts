@@ -78,42 +78,6 @@ export async function allocateHostPorts(
 	return allocated;
 }
 
-export async function validateDeploymentPreconditions(
-	serviceId: string,
-): Promise<{
-	valid: boolean;
-	error?: string;
-	migrationNeeded?: { targetServerId: string };
-}> {
-	const service = await getService(serviceId);
-	if (!service) {
-		return { valid: false, error: "Service not found" };
-	}
-
-	const existingDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const inProgressStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"stopping",
-	];
-
-	const hasInProgressDeployment = existingDeployments.some((d) =>
-		inProgressStatuses.includes(d.status),
-	);
-
-	if (hasInProgressDeployment) {
-		return { valid: false, error: "A deployment is already in progress" };
-	}
-
-	return { valid: true };
-}
-
 export async function calculateServicePlacements(
 	service: NonNullable<Awaited<ReturnType<typeof getService>>>,
 ): Promise<{
@@ -285,6 +249,8 @@ export async function issueCertificatesForService(
 		.filter((p) => p.isPublic && p.domain)
 		.map((p) => p.domain as string);
 
+	const failedDomains: string[] = [];
+
 	for (const domain of domainsNeedingCerts) {
 		const existingCert = await getCertificate(domain);
 		if (!existingCert) {
@@ -296,8 +262,15 @@ export async function issueCertificatesForService(
 					`[deploy] failed to issue certificate for ${domain}:`,
 					error,
 				);
+				failedDomains.push(domain);
 			}
 		}
+	}
+
+	if (failedDomains.length > 0) {
+		throw new Error(
+			`Certificate provisioning failed for: ${failedDomains.join(", ")}`,
+		);
 	}
 }
 

@@ -39,7 +39,8 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 
 	const hasChanges = changes.length > 0;
 	const showBanner =
-		barMode === "ready" && (hasChanges || (hasNoDeployments && totalReplicas > 0));
+		barMode === "ready" &&
+		(hasChanges || (hasNoDeployments && totalReplicas > 0));
 
 	const handleDeploy = async () => {
 		setIsDeploying(true);
@@ -66,7 +67,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 				opacity: showBanner ? 1 : 0,
 			}}
 		>
-			<div className="overflow-hidden">
+			<div className="overflow-hidden pb-4">
 				<div className="rounded-lg border bg-card p-4">
 					<div className="flex items-start justify-between gap-4">
 						<div className="flex items-start gap-3 min-w-0">
@@ -93,7 +94,9 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 													{change.from}
 												</span>
 												<ArrowRight className="size-3 shrink-0 text-muted-foreground" />
-												<span className="text-foreground truncate">{change.to}</span>
+												<span className="text-foreground truncate">
+													{change.to}
+												</span>
 											</div>
 										))}
 									</div>

@@ -19,6 +19,7 @@ import {
 export const rolloutWorkflow = inngest.createFunction(
 	{
 		id: "rollout-workflow",
+		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
 		cancelOn: [{ event: "rollout/cancelled", match: "data.rolloutId" }],
 	},
 	{ event: "rollout/created" },
@@ -37,7 +38,12 @@ export const rolloutWorkflow = inngest.createFunction(
 				.update(rollouts)
 				.set({ status: "in_progress", currentStage: "preparing" })
 				.where(eq(rollouts.id, rolloutId));
-			await ingestRolloutLog(rolloutId, serviceId, "preparing", "Rollout started");
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"preparing",
+				"Rollout started",
+			);
 		});
 
 		const { placements, totalReplicas } = await step.run(
@@ -48,7 +54,12 @@ export const rolloutWorkflow = inngest.createFunction(
 					throw new Error("Service not found");
 				}
 				const result = await calculateServicePlacements(service);
-				await ingestRolloutLog(rolloutId, serviceId, "preparing", `Calculated placements: ${result.totalReplicas} replica(s)`);
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					`Calculated placements: ${result.totalReplicas} replica(s)`,
+				);
 				return result;
 			},
 		);
@@ -56,7 +67,12 @@ export const rolloutWorkflow = inngest.createFunction(
 		const serverIds = await step.run("validate-servers", async () => {
 			const serverMap = await validateServers(placements);
 			const ids = [...serverMap.keys()];
-			await ingestRolloutLog(rolloutId, serviceId, "preparing", `Validated ${ids.length} server(s)`);
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"preparing",
+				`Validated ${ids.length} server(s)`,
+			);
 			return ids;
 		});
 
@@ -67,23 +83,63 @@ export const rolloutWorkflow = inngest.createFunction(
 		if (isRollingUpdate) {
 			await step.run("prepare-rolling-update", async () => {
 				await prepareRollingUpdate(serviceId);
-				await ingestRolloutLog(rolloutId, serviceId, "preparing", "Prepared rolling update");
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					"Prepared rolling update",
+				);
 			});
 		} else {
 			await step.run("cleanup-existing", async () => {
 				await cleanupExistingDeployments(serviceId);
-				await ingestRolloutLog(rolloutId, serviceId, "preparing", "Cleaned up existing deployments");
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					"Cleaned up existing deployments",
+				);
 			});
 		}
 
-		await step.run("issue-certificates", async () => {
+		const certResult = await step.run("issue-certificates", async () => {
 			await db
 				.update(rollouts)
 				.set({ currentStage: "certificates" })
 				.where(eq(rollouts.id, rolloutId));
-			await issueCertificatesForService(serviceId);
-			await ingestRolloutLog(rolloutId, serviceId, "certificates", "Certificates issued");
+			try {
+				await issueCertificatesForService(serviceId);
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"certificates",
+					"Certificates issued",
+				);
+				return { success: true as const };
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: "Certificate provisioning failed";
+				await ingestRolloutLog(rolloutId, serviceId, "certificates", message);
+				return { success: false as const, reason: message };
+			}
 		});
+
+		if (!certResult.success) {
+			await step.run("handle-certificate-failure", async () => {
+				await handleRolloutFailure(
+					rolloutId,
+					serviceId,
+					"certificate_provisioning_failed",
+					isRollingUpdate,
+				);
+			});
+			return {
+				status: "failed",
+				reason: certResult.reason,
+			};
+		}
 
 		const { deploymentIds } = await step.run("create-deployments", async () => {
 			await db
@@ -106,7 +162,12 @@ export const rolloutWorkflow = inngest.createFunction(
 				isRollingUpdate,
 			});
 
-			await ingestRolloutLog(rolloutId, serviceId, "deploying", `Created ${result.deploymentIds.length} deployment(s)`);
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"deploying",
+				`Created ${result.deploymentIds.length} deployment(s)`,
+			);
 
 			return result;
 		});
@@ -133,7 +194,12 @@ export const rolloutWorkflow = inngest.createFunction(
 				.update(rollouts)
 				.set({ currentStage: "health_check" })
 				.where(eq(rollouts.id, rolloutId));
-			await ingestRolloutLog(rolloutId, serviceId, "health_check", "Waiting for health checks");
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"health_check",
+				"Waiting for health checks",
+			);
 		});
 
 		const healthResults = await Promise.all(
@@ -150,7 +216,12 @@ export const rolloutWorkflow = inngest.createFunction(
 		if (timedOutIndex !== -1) {
 			const failedDeploymentId = deploymentIds[timedOutIndex];
 			await step.run("log-health-timeout", async () => {
-				await ingestRolloutLog(rolloutId, serviceId, "health_check", `Health check timed out for deployment ${failedDeploymentId}`);
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"health_check",
+					`Health check timed out for deployment ${failedDeploymentId}`,
+				);
 			});
 			await step.run("handle-health-timeout", async () => {
 				await handleRolloutFailure(
@@ -193,7 +264,12 @@ export const rolloutWorkflow = inngest.createFunction(
 					),
 				);
 
-			await ingestRolloutLog(rolloutId, serviceId, "dns_sync", "Routing traffic to new deployments");
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"dns_sync",
+				"Routing traffic to new deployments",
+			);
 		});
 
 		const dnsResults = await Promise.all(
@@ -212,7 +288,12 @@ export const rolloutWorkflow = inngest.createFunction(
 					`[rollout:${rolloutId}] DNS sync timeout for server ${serverIds[i]}`,
 				);
 				await step.run(`log-dns-timeout-${serverIds[i]}`, async () => {
-					await ingestRolloutLog(rolloutId, serviceId, "dns_sync", `DNS sync timed out for server ${serverIds[i]}`);
+					await ingestRolloutLog(
+						rolloutId,
+						serviceId,
+						"dns_sync",
+						`DNS sync timed out for server ${serverIds[i]}`,
+					);
 				});
 			}
 		}
@@ -226,7 +307,12 @@ export const rolloutWorkflow = inngest.createFunction(
 					completedAt: new Date(),
 				})
 				.where(eq(rollouts.id, rolloutId));
-			await ingestRolloutLog(rolloutId, serviceId, "completed", "Rollout completed successfully");
+			await ingestRolloutLog(
+				rolloutId,
+				serviceId,
+				"completed",
+				"Rollout completed successfully",
+			);
 		});
 
 		return { status: "completed", rolloutId };

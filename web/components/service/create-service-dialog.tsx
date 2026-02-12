@@ -188,8 +188,8 @@ export function CreateDockerServiceDialog({
 						/>
 						{error && <p className="text-sm text-red-500">{error}</p>}
 						<p className="text-xs text-muted-foreground">
-							Supported: Docker Hub, GitHub Container Registry (ghcr.io), or
-							any public registry
+							Supported: Docker Hub, GitHub Container Registry (ghcr.io), or any
+							public registry
 						</p>
 					</div>
 					<div className="flex justify-end gap-2">

@@ -90,6 +90,14 @@ func truncateStr(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
+func tailLines(output string, n int) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) <= n {
+		return strings.TrimSpace(output)
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
 func computeSecretsHash(secrets map[string]string) string {
 	if len(secrets) == 0 {
 		return ""
@@ -220,7 +228,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed with output: %s", truncateStr(config.BuildID, 8), output)
 			b.sendLog(config, fmt.Sprintf("Build error: %s", output))
-			return fmt.Errorf("buildctl build failed: %w", err)
+			return fmt.Errorf("buildctl build failed:\n%s", tailLines(output, 20))
 		}
 	} else {
 		log.Printf("[build:%s] building with Railpack via buildctl for %s", truncateStr(config.BuildID, 8), platform)
@@ -238,7 +246,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] railpack prepare failed with output: %s", truncateStr(config.BuildID, 8), output)
 			b.sendLog(config, fmt.Sprintf("Railpack prepare error: %s", output))
-			return fmt.Errorf("railpack prepare failed: %w", err)
+			return fmt.Errorf("railpack prepare failed:\n%s", tailLines(output, 20))
 		}
 
 		b.sendLog(config, fmt.Sprintf("Building for %s...", platform))
@@ -268,7 +276,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)
 			b.sendLog(config, fmt.Sprintf("Build error (%s): %s", platform, output))
-			return fmt.Errorf("buildctl build failed for %s: %w", platform, err)
+			return fmt.Errorf("buildctl build failed for %s:\n%s", platform, tailLines(output, 20))
 		}
 	}
 

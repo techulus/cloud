@@ -21,7 +21,12 @@ export const onDeploymentFailed = inngest.createFunction(
 
 		if (!rollout || rollout.status !== "in_progress") return;
 
-		await ingestRolloutLog(rolloutId, serviceId, reason, `Rollout failed: ${reason}`);
+		await ingestRolloutLog(
+			rolloutId,
+			serviceId,
+			reason,
+			`Rollout failed: ${reason}`,
+		);
 
 		await step.sendEvent("cancel-rollout", {
 			name: "rollout/cancelled",
