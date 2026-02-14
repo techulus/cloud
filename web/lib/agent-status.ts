@@ -230,6 +230,10 @@ export async function applyStatusReport(
 		}
 
 		if (deployment.status === "pending" || deployment.status === "pulling") {
+			if (container.status !== "running") {
+				continue;
+			}
+
 			const service = await db
 				.select()
 				.from(services)
@@ -306,6 +310,7 @@ export async function applyStatusReport(
 
 		if (
 			deployment.status === "starting" &&
+			container.status === "running" &&
 			(healthStatus === "healthy" || healthStatus === "none")
 		) {
 			console.log(

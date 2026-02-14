@@ -1016,7 +1016,37 @@ export async function abortRollout(serviceId: string) {
 		.delete(deployments)
 		.where(eq(deployments.rolloutId, inProgressRollout.id));
 
-	await db.delete(workQueue).where(eq(workQueue.status, "pending"));
+	const pendingWork = await db
+		.select({ id: workQueue.id, payload: workQueue.payload })
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.status, "pending"),
+				eq(workQueue.type, "deploy"),
+				inArray(workQueue.serverId, [...serverContainers.keys()]),
+			),
+		);
+
+	const rolloutDeploymentIds = new Set(rolloutDeployments.map((d) => d.id));
+	const workToDelete = pendingWork.filter((w) => {
+		try {
+			const parsed = JSON.parse(w.payload);
+			return rolloutDeploymentIds.has(parsed.deploymentId);
+		} catch {
+			return false;
+		}
+	});
+
+	if (workToDelete.length > 0) {
+		await db
+			.delete(workQueue)
+			.where(
+				inArray(
+					workQueue.id,
+					workToDelete.map((w) => w.id),
+				),
+			);
+	}
 
 	return { success: true };
 }

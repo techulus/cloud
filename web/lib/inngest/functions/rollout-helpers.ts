@@ -211,13 +211,6 @@ export async function prepareRollingUpdate(
 		(d) => d.status === "running" || d.status === "healthy",
 	);
 
-	for (const dep of runningDeployments) {
-		await db
-			.update(deployments)
-			.set({ status: "draining" })
-			.where(eq(deployments.id, dep.id));
-	}
-
 	return { deploymentIds: runningDeployments.map((d) => d.id) };
 }
 

@@ -14,7 +14,24 @@ export async function handleRolloutFailure(
 		.from(deployments)
 		.where(eq(deployments.rolloutId, rolloutId));
 
-	if (rolloutDeployments.length === 0) return;
+	await db
+		.update(rollouts)
+		.set({ status: "rolled_back", completedAt: new Date() })
+		.where(eq(rollouts.id, rolloutId));
+
+	if (rolloutDeployments.length === 0) {
+		sendDeploymentFailureAlert({
+			serviceId,
+			serverId: null,
+			failedStage: reason,
+		}).catch((error) => {
+			console.error(
+				"[rollout:failure] failed to send deployment failure alert:",
+				error,
+			);
+		});
+		return;
+	}
 
 	const serverId = rolloutDeployments[0].serverId;
 
@@ -41,15 +58,11 @@ export async function handleRolloutFailure(
 					"pulling",
 					"starting",
 					"healthy",
+					"running",
 					"failed",
 				]),
 			),
 		);
-
-	await db
-		.update(rollouts)
-		.set({ status: "rolled_back", completedAt: new Date() })
-		.where(eq(rollouts.id, rolloutId));
 
 	sendDeploymentFailureAlert({
 		serviceId,

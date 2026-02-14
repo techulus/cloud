@@ -337,7 +337,9 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 				opacity: isVisible ? 1 : 0,
 			}}
 		>
-			<div className="overflow-hidden pb-4">{content}</div>
+			<div className="overflow-hidden">
+				{content && <div className="pb-4">{content}</div>}
+			</div>
 		</div>
 	);
 });

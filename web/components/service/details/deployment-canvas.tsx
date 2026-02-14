@@ -305,27 +305,19 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	if (service.deployments.length === 0) {
 		return (
-			<>
-				<div className="flex flex-col items-center justify-center pt-8 pb-12 md:hidden">
-					<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-						<Box className="h-8 w-8 text-slate-400" />
-					</div>
-					<p className="text-muted-foreground mt-4">No deployments yet.</p>
-				</div>
-				<CanvasWrapper
-					height="auto"
-					isEmpty
-					className="hidden md:flex min-h-[300px]"
-					emptyContent={
-						<div className="text-center space-y-4">
-							<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-								<Box className="h-8 w-8 text-slate-400" />
-							</div>
-							<p className="text-muted-foreground">No deployments yet.</p>
+			<CanvasWrapper
+				height="auto"
+				isEmpty
+				className="min-h-[200px] md:min-h-[300px]"
+				emptyContent={
+					<div className="text-center space-y-4">
+						<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+							<Box className="h-8 w-8 text-slate-400" />
 						</div>
-					}
-				/>
-			</>
+						<p className="text-muted-foreground">No deployments yet.</p>
+					</div>
+				}
+			/>
 		);
 	}
 
@@ -335,26 +327,28 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	return (
 		<>
-			<div className="flex flex-col gap-4 pb-4 md:hidden">
-				{hasEndpoints && (
-					<EndpointsCard
-						publicPorts={publicPorts}
-						tcpUdpPorts={tcpUdpPorts}
-						proxyDomain={proxyDomain}
-						internalHostname={`${service.hostname || service.name}.internal`}
-						hasRunningDeployments={hasRunningDeployments}
-					/>
-				)}
-				{serverGroups.map((group) => (
-					<div key={group.serverName}>
-						<ServerBox
-							serverName={group.serverName}
-							deployments={group.deployments}
+			<CanvasWrapper height="auto" className="md:hidden">
+				<div className="flex flex-col gap-4">
+					{hasEndpoints && (
+						<EndpointsCard
+							publicPorts={publicPorts}
+							tcpUdpPorts={tcpUdpPorts}
+							proxyDomain={proxyDomain}
+							internalHostname={`${service.hostname || service.name}.internal`}
+							hasRunningDeployments={hasRunningDeployments}
 						/>
-						{hasVolumes && <VolumeCard volumes={service.volumes!} />}
-					</div>
-				))}
-			</div>
+					)}
+					{serverGroups.map((group) => (
+						<div key={group.serverName}>
+							<ServerBox
+								serverName={group.serverName}
+								deployments={group.deployments}
+							/>
+							{hasVolumes && <VolumeCard volumes={service.volumes!} />}
+						</div>
+					))}
+				</div>
+			</CanvasWrapper>
 
 			<CanvasWrapper
 				height="auto"
