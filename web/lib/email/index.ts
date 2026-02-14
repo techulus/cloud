@@ -259,7 +259,7 @@ export async function sendBuildFailureAlert(
 
 type DeploymentFailureAlertOptions = {
 	serviceId: string;
-	serverId: string;
+	serverId: string | null;
 	failedStage?: string;
 };
 
@@ -272,44 +272,79 @@ export async function sendDeploymentFailureAlert(
 		return;
 	}
 
-	const [result] = await db
-		.select({
-			serviceName: services.name,
-			projectName: projects.name,
-			projectSlug: projects.slug,
-			envName: environments.name,
-			serverName: servers.name,
-		})
-		.from(services)
-		.innerJoin(projects, eq(projects.id, services.projectId))
-		.innerJoin(environments, eq(environments.id, services.environmentId))
-		.innerJoin(servers, eq(servers.id, options.serverId))
-		.where(eq(services.id, options.serviceId));
+	let serviceName: string;
+	let projectName: string;
+	let projectSlug: string;
+	let envName: string;
+	let serverName: string;
 
-	if (!result) {
-		return;
+	if (options.serverId) {
+		const [result] = await db
+			.select({
+				serviceName: services.name,
+				projectName: projects.name,
+				projectSlug: projects.slug,
+				envName: environments.name,
+				serverName: servers.name,
+			})
+			.from(services)
+			.innerJoin(projects, eq(projects.id, services.projectId))
+			.innerJoin(environments, eq(environments.id, services.environmentId))
+			.innerJoin(servers, eq(servers.id, options.serverId))
+			.where(eq(services.id, options.serviceId));
+
+		if (!result) {
+			return;
+		}
+
+		serviceName = result.serviceName;
+		projectName = result.projectName;
+		projectSlug = result.projectSlug;
+		envName = result.envName;
+		serverName = result.serverName;
+	} else {
+		const [result] = await db
+			.select({
+				serviceName: services.name,
+				projectName: projects.name,
+				projectSlug: projects.slug,
+				envName: environments.name,
+			})
+			.from(services)
+			.innerJoin(projects, eq(projects.id, services.projectId))
+			.innerJoin(environments, eq(environments.id, services.environmentId))
+			.where(eq(services.id, options.serviceId));
+
+		if (!result) {
+			return;
+		}
+
+		serviceName = result.serviceName;
+		projectName = result.projectName;
+		projectSlug = result.projectSlug;
+		envName = result.envName;
+		serverName = "Unknown";
 	}
-
 	const baseUrl = getAppBaseUrl();
 	const serviceUrl = baseUrl
-		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}`
+		? `${baseUrl}/dashboard/projects/${projectSlug}/${envName}/services/${options.serviceId}`
 		: undefined;
 
 	const details = [
-		{ label: "Service", value: result.serviceName },
-		{ label: "Project", value: result.projectName },
-		{ label: "Server", value: result.serverName },
+		{ label: "Service", value: serviceName },
+		{ label: "Project", value: projectName },
+		{ label: "Server", value: serverName },
 		...(options.failedStage
 			? [{ label: "Failed Stage", value: options.failedStage }]
 			: []),
 	];
 
 	await sendAlert({
-		subject: `Deployment Failed: ${result.serviceName}`,
+		subject: `Deployment Failed: ${serviceName}`,
 		template: Alert({
 			bannerText: "DEPLOYMENT FAILED",
 			heading: "Deployment Failure Alert",
-			description: `The deployment for service "${result.serviceName}" in project "${result.projectName}" has failed on server "${result.serverName}".`,
+			description: `The deployment for service "${serviceName}" in project "${projectName}" has failed on server "${serverName}".`,
 			details,
 			buttonText: serviceUrl ? "View Service" : undefined,
 			buttonUrl: serviceUrl,

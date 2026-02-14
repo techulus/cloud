@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
 import { getService } from "@/db/queries";
@@ -246,21 +246,25 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			await db
 				.update(deployments)
-				.set({ status: "stopping" })
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						eq(deployments.status, "draining"),
-					),
-				);
-
-			await db
-				.update(deployments)
 				.set({ status: "running" })
 				.where(
 					and(
 						eq(deployments.rolloutId, rolloutId),
 						eq(deployments.status, "healthy"),
+					),
+				);
+
+			await db
+				.update(deployments)
+				.set({ status: "draining" })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						inArray(deployments.status, ["running", "healthy"]),
+						or(
+							ne(deployments.rolloutId, rolloutId),
+							isNull(deployments.rolloutId),
+						),
 					),
 				);
 
@@ -282,6 +286,8 @@ export const rolloutWorkflow = inngest.createFunction(
 			),
 		);
 
+		const dnsTimedOut = dnsResults.some((r) => r === null);
+
 		for (let i = 0; i < dnsResults.length; i++) {
 			if (dnsResults[i] === null) {
 				console.warn(
@@ -296,6 +302,38 @@ export const rolloutWorkflow = inngest.createFunction(
 					);
 				});
 			}
+		}
+
+		if (dnsTimedOut) {
+			await step.run("rollback-dns-timeout", async () => {
+				await handleRolloutFailure(
+					rolloutId,
+					serviceId,
+					"dns_sync_timeout",
+					isRollingUpdate,
+				);
+			});
+			return { status: "rolled_back", rolloutId, reason: "dns_sync_timeout" };
+		}
+
+		if (isRollingUpdate) {
+			await step.run("stop-old-deployments", async () => {
+				await db
+					.update(deployments)
+					.set({ status: "stopping" })
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.status, "draining"),
+						),
+					);
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"dns_sync",
+					"Stopping old deployments after DNS sync",
+				);
+			});
 		}
 
 		await step.run("complete-rollout", async () => {
