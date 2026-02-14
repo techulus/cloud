@@ -67,7 +67,8 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 				opacity: showBanner ? 1 : 0,
 			}}
 		>
-			<div className="overflow-hidden pb-4">
+			<div className="overflow-hidden">
+				<div className="pb-4">
 				<div className="rounded-lg border bg-card p-4">
 					<div className="flex items-start justify-between gap-4">
 						<div className="flex items-start gap-3 min-w-0">
@@ -121,6 +122,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 						</Button>
 					</div>
 				</div>
+			</div>
 			</div>
 		</div>
 	);
