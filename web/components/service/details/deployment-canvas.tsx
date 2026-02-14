@@ -306,7 +306,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 	if (service.deployments.length === 0) {
 		return (
 			<>
-				<div className="flex flex-col items-center justify-center py-12 md:hidden">
+				<div className="flex flex-col items-center justify-center pt-8 pb-12 md:hidden">
 					<div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
 						<Box className="h-8 w-8 text-slate-400" />
 					</div>
@@ -335,7 +335,7 @@ export function DeploymentCanvas({ service }: DeploymentCanvasProps) {
 
 	return (
 		<>
-			<div className="flex flex-col gap-4 py-4 md:hidden">
+			<div className="flex flex-col gap-4 pb-4 md:hidden">
 				{hasEndpoints && (
 					<EndpointsCard
 						publicPorts={publicPorts}
