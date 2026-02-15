@@ -122,6 +122,12 @@ export function buildCloneUrl(token: string, repoFullName: string): string {
 	return `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 }
 
+function validateRepoFullName(repoFullName: string): void {
+	if (!/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repoFullName)) {
+		throw new Error("Invalid repository name");
+	}
+}
+
 type DeploymentState =
 	| "pending"
 	| "in_progress"
@@ -136,6 +142,7 @@ export async function createGitHubDeployment(
 	environment: string,
 	description: string,
 ): Promise<number> {
+	validateRepoFullName(repoFullName);
 	const token = await getInstallationToken(installationId);
 
 	const response = await fetch(
@@ -178,6 +185,7 @@ export async function updateGitHubDeploymentStatus(
 		environmentUrl?: string;
 	},
 ): Promise<void> {
+	validateRepoFullName(repoFullName);
 	const token = await getInstallationToken(installationId);
 
 	const body: Record<string, unknown> = {

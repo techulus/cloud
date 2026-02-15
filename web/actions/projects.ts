@@ -41,9 +41,6 @@ import { startMigration } from "./migrations";
 import { inngest } from "@/lib/inngest/client";
 
 function isValidImageReferencePart(reference: string): boolean {
-	// Allow only characters that are valid in Docker tags/digests and avoid path traversal.
-	// Tags: letters, digits, underscores, periods and dashes; Digests: "algorithm:hex".
-	// This regex is intentionally conservative.
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 	const digestPattern = /^[A-Za-z0-9_+.-]+:[0-9a-fA-F]{32,256}$/;
 
@@ -52,6 +49,11 @@ function isValidImageReferencePart(reference: string): boolean {
 		tagPattern.test(reference) ||
 		digestPattern.test(reference)
 	);
+}
+
+function isValidImageNamePart(part: string): boolean {
+	const segmentPattern = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+	return part.split("/").every((segment) => segmentPattern.test(segment));
 }
 
 function parseImageReference(image: string): {
@@ -114,6 +116,13 @@ export async function validateDockerImage(
 			return {
 				valid: false,
 				error: "Invalid image tag or digest",
+			};
+		}
+
+		if (!isValidImageNamePart(namespace) || !isValidImageNamePart(repository)) {
+			return {
+				valid: false,
+				error: "Invalid image name",
 			};
 		}
 
