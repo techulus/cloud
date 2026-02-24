@@ -13,7 +13,7 @@ import {
 	parseAsStringLiteral,
 	useQueryState,
 } from "nuqs";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -116,7 +116,7 @@ function highlightMatches(text: string, search: string): React.ReactNode {
 	return parts.map((part, i) =>
 		regex.test(part) ? (
 			<mark
-				key={i}
+				key={`${part}-${i}`}
 				className="bg-yellow-300 dark:bg-yellow-700 text-inherit rounded-sm px-0.5"
 			>
 				{part}
@@ -648,6 +648,14 @@ export function LogViewer(props: LogViewerProps) {
 	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 	const [olderHasMore, setOlderHasMore] = useState(true);
+	const [prevSelectedServerId, setPrevSelectedServerId] =
+		useState(selectedServerId);
+
+	if (selectedServerId !== prevSelectedServerId) {
+		setPrevSelectedServerId(selectedServerId);
+		setOlderLogs([]);
+		setOlderHasMore(true);
+	}
 
 	const servers = props.variant === "service-logs" ? props.servers : undefined;
 
@@ -687,11 +695,6 @@ export function LogViewer(props: LogViewerProps) {
 	}, [olderLogs, recentLogs]);
 	const hasMore =
 		olderLogs.length === 0 ? data?.hasMore || false : olderHasMore;
-
-	useEffect(() => {
-		setOlderLogs([]);
-		setOlderHasMore(true);
-	}, [selectedServerId]);
 
 	const loadOlderLogs = async () => {
 		if (isLoadingOlder || !hasMore) return;
@@ -974,12 +977,12 @@ export function LogViewer(props: LogViewerProps) {
 					</Empty>
 				) : (
 					<div className="p-4 py-2">
-						{filteredLogs.map((entry, idx) => {
+						{filteredLogs.map((entry) => {
 							if (props.variant === "service-logs") {
 								const e = entry as ServiceLogEntry;
 								return (
 									<ServiceLogRow
-										key={`${e.id}-${idx}`}
+										key={e.id}
 										entry={e}
 										search={search}
 									/>
@@ -989,7 +992,7 @@ export function LogViewer(props: LogViewerProps) {
 								const e = entry as RequestEntry;
 								return (
 									<RequestRow
-										key={`${e.id}-${idx}`}
+										key={e.id}
 										entry={e}
 										search={search}
 									/>
@@ -999,7 +1002,7 @@ export function LogViewer(props: LogViewerProps) {
 								const e = entry as ServerLogEntry;
 								return (
 									<ServerLogRow
-										key={`${e.id}-${idx}`}
+										key={e.id}
 										entry={e}
 										search={search}
 									/>
@@ -1009,7 +1012,7 @@ export function LogViewer(props: LogViewerProps) {
 								const e = entry as BuildLogEntry;
 								return (
 									<BuildLogRow
-										key={`${e.timestamp}-${idx}`}
+										key={e.timestamp}
 										entry={e}
 										search={search}
 									/>
@@ -1018,7 +1021,7 @@ export function LogViewer(props: LogViewerProps) {
 							const e = entry as BuildLogEntry;
 							return (
 								<BuildLogRow
-									key={`${e.timestamp}-${idx}`}
+									key={e.timestamp}
 									entry={e}
 									search={search}
 								/>
