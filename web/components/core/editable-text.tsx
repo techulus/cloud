@@ -30,7 +30,7 @@ export function EditableText({
 }) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
-	const [inputValue, setInputValue] = useState(value);
+	const [inputValue, setInputValue] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	const handleFocus = () => {

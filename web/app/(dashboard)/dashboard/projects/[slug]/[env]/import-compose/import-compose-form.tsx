@@ -243,8 +243,8 @@ services:
 							<AlertCircle className="h-4 w-4" />
 							<AlertTitle>Error</AlertTitle>
 							<AlertDescription>
-								{errors.map((err, i) => (
-									<div key={i}>{err.message}</div>
+								{errors.map((err) => (
+									<div key={err.message}>{err.message}</div>
 								))}
 							</AlertDescription>
 						</Alert>
@@ -335,8 +335,8 @@ services:
 							</AlertTitle>
 							<AlertDescription className="text-yellow-700/80 dark:text-yellow-500/80">
 								<ul className="list-disc list-inside space-y-1 mt-1">
-									{warnings.map((w, i) => (
-										<li key={i}>
+									{warnings.map((w) => (
+										<li key={`${w.service}-${w.message}`}>
 											{w.service ? <strong>{w.service}:</strong> : null}{" "}
 											{w.message}
 										</li>
@@ -352,8 +352,8 @@ services:
 							<AlertTitle>Errors ({errors.length})</AlertTitle>
 							<AlertDescription>
 								<ul className="list-disc list-inside space-y-1 mt-1">
-									{errors.map((e, i) => (
-										<li key={i}>
+									{errors.map((e) => (
+										<li key={`${e.service}-${e.message}`}>
 											{e.service ? <strong>{e.service}:</strong> : null}{" "}
 											{e.message}
 										</li>
@@ -482,8 +482,8 @@ services:
 							</AlertTitle>
 							<AlertDescription className="text-yellow-700/80 dark:text-yellow-500/80">
 								<ul className="list-disc list-inside space-y-1 mt-1">
-									{importResult.warnings.map((w, i) => (
-										<li key={i}>
+									{importResult.warnings.map((w) => (
+										<li key={`${w.service}-${w.message}`}>
 											{w.service ? <strong>{w.service}:</strong> : null}{" "}
 											{w.message}
 										</li>

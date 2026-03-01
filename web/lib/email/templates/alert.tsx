@@ -38,8 +38,8 @@ export function Alert({
 			<Text style={paragraph}>{description}</Text>
 
 			<Section style={detailsBox}>
-				{details.map((detail, index) => (
-					<div key={index}>
+				{details.map((detail) => (
+					<div key={detail.label}>
 						<Text style={detailLabel}>{detail.label}</Text>
 						<Text style={detailValue}>{detail.value}</Text>
 					</div>

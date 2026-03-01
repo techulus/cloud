@@ -68,7 +68,7 @@ function StatusBadge({ status }: { status: RolloutStatus }) {
 
 	return (
 		<span
-			className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ${config.color} bg-current/10`}
+			className={`inline-flex items-center justify-center gap-1.5 w-28 px-2 py-1 rounded-md text-xs font-medium ${config.color} bg-current/10`}
 		>
 			<Icon className={`size-3.5 ${isAnimated ? "animate-spin" : ""}`} />
 			{config.label}

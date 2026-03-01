@@ -278,7 +278,7 @@ export const SecretsSection = memo(function SecretsSection({
 						)}
 						{pendingVars.map((variable, index) => (
 							<div
-								key={`${variable.key}-${index}`}
+								key={variable.key}
 								className="flex items-center justify-between px-3 py-2 rounded-md text-sm bg-green-500/10 border border-green-500/20"
 							>
 								<div className="flex items-center gap-2 min-w-0 flex-1">

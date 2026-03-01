@@ -4,7 +4,7 @@ export async function GET(request: NextRequest) {
 	const searchParams = request.nextUrl.searchParams;
 	const code = searchParams.get("code");
 
-	if (!code) {
+	if (!code || !/^[a-zA-Z0-9]+$/.test(code)) {
 		return NextResponse.redirect(
 			new URL("/dashboard/settings?github_error=missing_code", request.url),
 		);

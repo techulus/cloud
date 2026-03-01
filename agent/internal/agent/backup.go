@@ -957,6 +957,14 @@ func extractTarGz(archivePath, destPath string) error {
 			return fmt.Errorf("invalid tar entry: %s", header.Name)
 		}
 
+		parentDir := filepath.Dir(targetPath)
+		if resolvedParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+			if !strings.HasPrefix(resolvedParent, filepath.Clean(destPath)+string(os.PathSeparator)) &&
+				resolvedParent != filepath.Clean(destPath) {
+				return fmt.Errorf("invalid tar entry (symlink traversal): %s", header.Name)
+			}
+		}
+
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
@@ -976,6 +984,15 @@ func extractTarGz(archivePath, destPath string) error {
 			}
 			outFile.Close()
 		case tar.TypeSymlink:
+			linkTarget := header.Linkname
+			if !filepath.IsAbs(linkTarget) {
+				linkTarget = filepath.Join(filepath.Dir(targetPath), linkTarget)
+			}
+			resolvedLink := filepath.Clean(linkTarget)
+			if !strings.HasPrefix(resolvedLink, filepath.Clean(destPath)+string(os.PathSeparator)) &&
+			resolvedLink != filepath.Clean(destPath) {
+				return fmt.Errorf("invalid symlink target: %s -> %s", header.Name, header.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
