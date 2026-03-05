@@ -10,6 +10,7 @@ import {
 	validateServers,
 	prepareRollingUpdate,
 	cleanupExistingDeployments,
+	cleanupTerminalDeployments,
 	issueCertificatesForService,
 	createDeploymentRecords,
 	saveDeployedConfig,
@@ -74,6 +75,10 @@ export const rolloutWorkflow = inngest.createFunction(
 				`Validated ${ids.length} server(s)`,
 			);
 			return ids;
+		});
+
+		await step.run("cleanup-terminal-deployments", async () => {
+			await cleanupTerminalDeployments(serviceId);
 		});
 
 		const isRollingUpdate = await step.run("check-rolling-update", async () => {

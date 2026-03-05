@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -212,6 +212,27 @@ export async function prepareRollingUpdate(
 	);
 
 	return { deploymentIds: runningDeployments.map((d) => d.id) };
+}
+
+export async function cleanupTerminalDeployments(
+	serviceId: string,
+): Promise<void> {
+	const terminalDeployments = await db
+		.select()
+		.from(deployments)
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				inArray(deployments.status, ["rolled_back", "stopped", "failed"]),
+			),
+		);
+
+	for (const dep of terminalDeployments) {
+		await db
+			.delete(deploymentPorts)
+			.where(eq(deploymentPorts.deploymentId, dep.id));
+		await db.delete(deployments).where(eq(deployments.id, dep.id));
+	}
 }
 
 export async function cleanupExistingDeployments(
