@@ -7,6 +7,7 @@ import { deployService } from "@/actions/projects";
 export const buildWorkflow = inngest.createFunction(
 	{
 		id: "build-workflow",
+		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
 		cancelOn: [{ event: "build/cancelled", match: "data.buildGroupId" }],
 	},
 	{ event: "build/started" },
