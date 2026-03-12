@@ -494,7 +494,7 @@ func writeDockerConfig(registryURL, username, password string) error {
 }
 
 func ImagePrune() {
-	exec.Command("podman", "image", "prune", "-f").Run()
+	exec.Command("podman", "image", "prune", "-a", "-f").Run()
 }
 
 type podmanContainer struct {
