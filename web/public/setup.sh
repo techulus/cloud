@@ -300,8 +300,8 @@ fi
 echo "✓ crane installed"
 
 step "Downloading Techulus Cloud agent..."
-AGENT_URL="https://github.com/techulus/cloud/releases/download/tip/agent-linux-${AGENT_ARCH}"
-CHECKSUM_URL="https://github.com/techulus/cloud/releases/download/tip/checksums.txt"
+AGENT_URL="https://github.com/techulus/cloud/releases/latest/download/agent-linux-${AGENT_ARCH}"
+CHECKSUM_URL="https://github.com/techulus/cloud/releases/latest/download/checksums.txt"
 
 curl -fsSL -o /tmp/techulus-agent "$AGENT_URL"
 if [ ! -f /tmp/techulus-agent ]; then

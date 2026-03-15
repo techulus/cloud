@@ -16,16 +16,13 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+var Version = "dev"
+
 var (
 	agentStartTime    = time.Now()
-	agentVersion      = "dev"
 	lastHealthCollect time.Time
 	healthCollectMu   sync.Mutex
 )
-
-func SetAgentVersion(version string) {
-	agentVersion = version
-}
 
 func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport {
 	report := &agenthttp.StatusReport{
@@ -46,7 +43,7 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
 		report.AgentHealth = &agenthttp.AgentHealth{
-			Version:    agentVersion,
+			Version:    Version,
 			UptimeSecs: int64(time.Since(agentStartTime).Seconds()),
 		}
 		lastHealthCollect = time.Now()
