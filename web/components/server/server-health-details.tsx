@@ -106,9 +106,7 @@ export function ServerHealthDetails({
 							<HealthIndicator
 								healthy={!!agentHealth}
 								label="Agent"
-								detail={
-									agentHealth?.version ? `v${agentHealth.version}` : "Unknown"
-								}
+								detail={agentHealth?.version ?? "Unknown"}
 								icon={<Activity className="size-4" />}
 							/>
 						</div>
