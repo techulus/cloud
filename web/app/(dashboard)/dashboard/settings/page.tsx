@@ -24,7 +24,11 @@ export default async function SettingsPage() {
 					</p>
 				</div>
 
-				<GlobalSettings servers={servers} initialSettings={settings} />
+				<GlobalSettings
+					servers={servers}
+					initialSettings={settings}
+					appVersion={process.env.NEXT_PUBLIC_APP_VERSION ?? null}
+				/>
 			</div>
 		</>
 	);

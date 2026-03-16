@@ -980,51 +980,25 @@ export function LogViewer(props: LogViewerProps) {
 						{filteredLogs.map((entry) => {
 							if (props.variant === "service-logs") {
 								const e = entry as ServiceLogEntry;
-								return (
-									<ServiceLogRow
-										key={e.id}
-										entry={e}
-										search={search}
-									/>
-								);
+								return <ServiceLogRow key={e.id} entry={e} search={search} />;
 							}
 							if (props.variant === "requests") {
 								const e = entry as RequestEntry;
-								return (
-									<RequestRow
-										key={e.id}
-										entry={e}
-										search={search}
-									/>
-								);
+								return <RequestRow key={e.id} entry={e} search={search} />;
 							}
 							if (props.variant === "server-logs") {
 								const e = entry as ServerLogEntry;
-								return (
-									<ServerLogRow
-										key={e.id}
-										entry={e}
-										search={search}
-									/>
-								);
+								return <ServerLogRow key={e.id} entry={e} search={search} />;
 							}
 							if (props.variant === "rollout-logs") {
 								const e = entry as BuildLogEntry;
 								return (
-									<BuildLogRow
-										key={e.timestamp}
-										entry={e}
-										search={search}
-									/>
+									<BuildLogRow key={e.timestamp} entry={e} search={search} />
 								);
 							}
 							const e = entry as BuildLogEntry;
 							return (
-								<BuildLogRow
-									key={e.timestamp}
-									entry={e}
-									search={search}
-								/>
+								<BuildLogRow key={e.timestamp} entry={e} search={search} />
 							);
 						})}
 					</div>
