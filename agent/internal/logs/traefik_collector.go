@@ -79,6 +79,7 @@ type TraefikCollector struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	lastPos      int64
+	initialized  bool
 	droppedCount int
 }
 
@@ -128,8 +129,15 @@ func (c *TraefikCollector) tailFile() error {
 	}
 	defer file.Close()
 
-	if c.lastPos == 0 {
-		log.Printf("[traefik-logs] started tailing %s", traefikLogPath)
+	if !c.initialized {
+		endPos, err := file.Seek(0, io.SeekEnd)
+		if err != nil {
+			return err
+		}
+		c.lastPos = endPos
+		c.initialized = true
+		log.Printf("[traefik-logs] started tailing %s (skipped to position %d)", traefikLogPath, endPos)
+		return nil
 	}
 
 	stat, err := file.Stat()
