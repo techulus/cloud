@@ -31,8 +31,10 @@ import (
 	"github.com/hashicorp/go-sockaddr"
 )
 
-var httpClient *api.Client
-var dataDir string
+var (
+	httpClient *api.Client
+	dataDir    string
+)
 
 func main() {
 	var (
@@ -82,7 +84,7 @@ func main() {
 		log.Fatalf("Build prerequisites check failed: %v", err)
 	}
 
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
@@ -115,12 +117,12 @@ func main() {
 			logsEndpoint = config.LoggingEndpoint
 		}
 
-		if err := container.EnsureNetwork(config.SubnetID); err != nil {
+		if err = container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
 		}
 
 		if !disableDNS {
-			if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+			if err = dns.SetupLocalDNS(config.SubnetID); err != nil {
 				log.Printf("Warning: Failed to setup local DNS: %v", err)
 			}
 		} else {
@@ -147,7 +149,7 @@ func main() {
 			log.Fatalf("Failed to generate WireGuard key pair: %v", err)
 		}
 
-		if err := wireguard.SavePrivateKey(dataDir, wgPrivateKey); err != nil {
+		if err = wireguard.SavePrivateKey(dataDir, wgPrivateKey); err != nil {
 			log.Fatalf("Failed to save WireGuard private key: %v", err)
 		}
 
@@ -194,7 +196,7 @@ func main() {
 			logsEndpoint = respLoggingEndpoint
 		}
 
-		if err := saveConfig(configPath, config); err != nil {
+		if err = saveConfig(configPath, config); err != nil {
 			log.Fatalf("Failed to save config: %v", err)
 		}
 
@@ -209,19 +211,19 @@ func main() {
 		}
 
 		log.Println("Writing WireGuard config...")
-		if err := wireguard.WriteConfig(wireguard.DefaultInterface, wgConfig); err != nil {
+		if err = wireguard.WriteConfig(wireguard.DefaultInterface, wgConfig); err != nil {
 			log.Fatalf("Failed to write WireGuard config: %v", err)
 		}
 
 		log.Println("Bringing up WireGuard interface...")
-		if err := wireguard.Up(wireguard.DefaultInterface); err != nil {
+		if err = wireguard.Up(wireguard.DefaultInterface); err != nil {
 			log.Fatalf("Failed to bring up WireGuard: %v", err)
 		}
 
 		log.Println("WireGuard interface is up!")
 
 		log.Println("Ensuring container network exists...")
-		if err := container.EnsureNetwork(config.SubnetID); err != nil {
+		if err = container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to create container network: %v", err)
 		} else {
 			log.Println("Container network ready")
@@ -229,7 +231,7 @@ func main() {
 
 		if !disableDNS {
 			log.Println("Setting up local DNS...")
-			if err := dns.SetupLocalDNS(config.SubnetID); err != nil {
+			if err = dns.SetupLocalDNS(config.SubnetID); err != nil {
 				log.Printf("Warning: Failed to setup local DNS: %v", err)
 			} else {
 				log.Println("Local DNS configured successfully")
@@ -333,7 +335,7 @@ func saveConfig(path string, config *agent.Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func getPublicIP() string {
@@ -366,7 +368,7 @@ func getPrivateIP() string {
 		return ""
 	}
 
-	for _, ip := range strings.Split(ips, " ") {
+	for ip := range strings.SplitSeq(ips, " ") {
 		if ip == "" {
 			continue
 		}
