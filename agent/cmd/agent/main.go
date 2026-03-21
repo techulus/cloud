@@ -2,38 +2,34 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
 	"techulus/cloud-agent/internal/agent"
 	"techulus/cloud-agent/internal/api"
 	"techulus/cloud-agent/internal/build"
+	"techulus/cloud-agent/internal/configuration"
 	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/crypto"
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
+	"techulus/cloud-agent/internal/network"
 	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/reconcile"
 	"techulus/cloud-agent/internal/traefik"
 	"techulus/cloud-agent/internal/wireguard"
-
-	"github.com/hashicorp/go-sockaddr"
 )
 
 var (
 	httpClient *api.Client
-	dataDir    string
+	dataDir    string = paths.DataDir
 )
 
 func main() {
@@ -47,7 +43,6 @@ func main() {
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
-	flag.StringVar(&dataDir, "data-dir", paths.DataDir, "Data directory for agent state")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.StringVar(&logsEndpointFlag, "logs-endpoint", "", "Override logs endpoint URL (optional)")
 	flag.BoolVar(&disableDNS, "no-dns", false, "Disable local DNS server")
@@ -89,7 +84,6 @@ func main() {
 	}
 
 	keyDir := filepath.Join(dataDir, "keys")
-	configPath := filepath.Join(dataDir, "config.json")
 
 	httpClient = api.NewClient(controlPlaneURL)
 
@@ -97,14 +91,16 @@ func main() {
 	var config *agent.Config
 	var err error
 
-	if crypto.KeyPairExists(keyDir) {
+	setupComplete := crypto.KeyPairExists(keyDir)
+
+	if setupComplete {
 		log.Println("Loading existing signing key pair...")
 		signingKeyPair, err = crypto.LoadKeyPair(keyDir)
 		if err != nil {
 			log.Fatalf("Failed to load signing key pair: %v", err)
 		}
 
-		config, err = loadConfig(configPath)
+		config, err = configuration.Load()
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
@@ -154,8 +150,8 @@ func main() {
 		}
 
 		log.Println("Registering with control plane...")
-		publicIP := getPublicIP()
-		privateIP := getPrivateIP()
+		publicIP := network.PublicIP()
+		privateIP := network.PrivateIP()
 		resp, err := httpClient.Register(token, wgPublicKey, signingKeyPair.PublicKeyBase64(), publicIP, privateIP, isProxy)
 		if err != nil {
 			log.Fatalf("Failed to register: %v", err)
@@ -196,7 +192,7 @@ func main() {
 			logsEndpoint = respLoggingEndpoint
 		}
 
-		if err = saveConfig(configPath, config); err != nil {
+		if err = configuration.Save(config); err != nil {
 			log.Fatalf("Failed to save config: %v", err)
 		}
 
@@ -255,6 +251,7 @@ func main() {
 	var traefikLogCollector *logs.TraefikCollector
 	var logsSender *logs.VictoriaLogsSender
 	var agentLogWriter *logs.AgentLogWriter
+
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint, config.ServerID)
@@ -293,8 +290,8 @@ func main() {
 		agentLogFlusherDone = agentLogWriter.StartFlusher(ctx)
 	}
 
-	publicIP := getPublicIP()
-	privateIP := getPrivateIP()
+	publicIP := network.PublicIP()
+	privateIP := network.PrivateIP()
 	log.Printf("Agent v%s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
 
 	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, builder, config.IsProxy, disableDNS)
@@ -313,70 +310,4 @@ func main() {
 	}
 
 	log.Println("Agent stopped")
-}
-
-func loadConfig(path string) (*agent.Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var config agent.Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
-}
-
-func saveConfig(path string, config *agent.Config) error {
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0o600)
-}
-
-func getPublicIP() string {
-	ip, err := sockaddr.GetPublicIP()
-	if err == nil && ip != "" {
-		return ip
-	}
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("https://api.ipify.org")
-	if err != nil {
-		log.Printf("Failed to get public IP from ipify: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Failed to read ipify response: %v", err)
-		return ""
-	}
-
-	return strings.TrimSpace(string(body))
-}
-
-func getPrivateIP() string {
-	ips, err := sockaddr.GetPrivateIPs()
-	if err != nil {
-		log.Printf("Failed to get private IPs: %v", err)
-		return ""
-	}
-
-	for ip := range strings.SplitSeq(ips, " ") {
-		if ip == "" {
-			continue
-		}
-		if strings.HasPrefix(ip, "10.100.") || strings.HasPrefix(ip, "10.200.") {
-			continue
-		}
-		return ip
-	}
-
-	return ""
 }
