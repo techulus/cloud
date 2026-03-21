@@ -300,6 +300,12 @@ fi
 echo "✓ crane installed"
 
 step "Downloading Techulus Cloud agent..."
+LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/techulus/cloud/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+if [ -z "$LATEST_VERSION" ]; then
+  error "Failed to resolve latest version"
+fi
+echo "Installing version: $LATEST_VERSION"
+
 AGENT_URL="https://github.com/techulus/cloud/releases/latest/download/agent-linux-${AGENT_ARCH}"
 CHECKSUM_URL="https://github.com/techulus/cloud/releases/latest/download/checksums.txt"
 

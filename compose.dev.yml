@@ -49,6 +49,14 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
 
+  inngest:
+    image: inngest/inngest
+    ports:
+      - "8288:8288"
+      - "8289:8289"
+    command: inngest dev -u http://host.docker.internal:3000/api/inngest
+    restart: unless-stopped
+
 volumes:
   registry-data:
   victoria-logs-data:

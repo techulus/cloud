@@ -14,7 +14,24 @@ import { ServerDangerZone } from "@/components/server/server-danger-zone";
 import { ServerHeader } from "@/components/server/server-header";
 import { ServerHealthDetails } from "@/components/server/server-health-details";
 import { ServerServices } from "@/components/server/server-services";
+import { AgentUpdateNudge } from "@/components/server/agent-update-nudge";
 import { formatRelativeTime } from "@/lib/date";
+
+async function getLatestAgentVersion(): Promise<string | null> {
+	try {
+		const res = await fetch(
+			"https://api.github.com/repos/techulus/cloud/releases/latest",
+			{
+				headers: { Accept: "application/vnd.github.v3+json" },
+			},
+		);
+		if (!res.ok) return null;
+		const data = await res.json();
+		return data.tag_name ?? null;
+	} catch {
+		return null;
+	}
+}
 
 export default async function ServerDetailPage({
 	params,
@@ -22,13 +39,19 @@ export default async function ServerDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
-	const server = await getServerDetails(id);
+	const [server, latestVersion] = await Promise.all([
+		getServerDetails(id),
+		getLatestAgentVersion(),
+	]);
 
 	if (!server) {
 		notFound();
 	}
 
 	const isUnregistered = !server.wireguardIp && server.agentToken;
+	const currentVersion = server.agentHealth?.version;
+	const hasUpdate =
+		currentVersion && latestVersion && currentVersion !== latestVersion;
 
 	return (
 		<>
@@ -40,6 +63,14 @@ export default async function ServerDetailPage({
 			/>
 			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
 				<ServerHeader server={server} />
+
+				{hasUpdate && (
+					<AgentUpdateNudge
+						currentVersion={currentVersion}
+						latestVersion={latestVersion}
+						appUrl={process.env.APP_URL!}
+					/>
+				)}
 
 				{isUnregistered && (
 					<Card className="border-amber-500/50 bg-amber-500/5">
