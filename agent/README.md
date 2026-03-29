@@ -165,24 +165,24 @@ GOOS=linux GOARCH=amd64 go build -o bin/agent-linux-amd64 ./cmd/agent
 
 Worker node:
 ```bash
-sudo ./agent --url <control-plane-url> --token <registration-token> --data-dir /var/lib/techulus-agent
+sudo ./agent --url <control-plane-url> --token <registration-token>
 ```
 
 Proxy node:
 ```bash
-sudo ./agent --url <control-plane-url> --token <registration-token> --data-dir /var/lib/techulus-agent --proxy
+sudo ./agent --url <control-plane-url> --token <registration-token> --proxy
 ```
 
 ### Subsequent Runs
 
 Worker node:
 ```bash
-sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+sudo ./agent --url <control-plane-url>
 ```
 
 Proxy node:
 ```bash
-sudo ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --proxy
+sudo ./agent --url <control-plane-url> --proxy
 ```
 
 ### Run as systemd Service
@@ -199,7 +199,7 @@ After=network.target buildkitd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+ExecStart=/usr/local/bin/agent --url <control-plane-url>
 Restart=always
 RestartSec=5
 KillMode=process
@@ -216,7 +216,7 @@ After=network.target traefik.service buildkitd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/agent --url <control-plane-url> --data-dir /var/lib/techulus-agent --proxy
+ExecStart=/usr/local/bin/agent --url <control-plane-url> --proxy
 Restart=always
 RestartSec=5
 KillMode=process
@@ -239,7 +239,6 @@ sudo systemctl start techulus-agent
 |------|---------|-------------|
 | `--url` | (required) | Control plane URL |
 | `--token` | | Registration token (required for first run) |
-| `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
 | `--logs-endpoint` | | VictoriaLogs endpoint |
 | `--proxy` | `false` | Run as proxy node (handles TLS and public traffic) |
 

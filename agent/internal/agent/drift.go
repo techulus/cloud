@@ -415,10 +415,21 @@ func (a *Agent) reconcileOne(actual *ActualState) error {
 			Endpoint:   p.Endpoint,
 		}
 	}
-	if wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash {
+	wgPeersChanged := wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash
+	wgIsUp := wireguard.IsUp(wireguard.DefaultInterface)
+
+	if wgPeersChanged {
 		log.Printf("[reconcile] updating WireGuard peers")
 		if err := a.reconcileWireguard(expectedWgPeers); err != nil {
 			return fmt.Errorf("failed to update WireGuard: %w", err)
+		}
+		return nil
+	}
+
+	if !wgIsUp {
+		log.Printf("[reconcile] WireGuard interface is down, bringing it up")
+		if err := wireguard.Up(wireguard.DefaultInterface); err != nil {
+			return fmt.Errorf("failed to bring up WireGuard: %w", err)
 		}
 		return nil
 	}

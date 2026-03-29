@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: Build
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w -X techulus/cloud-agent/internal/agent.Version=${{ github.ref_name }}" -o agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/agent
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: agent/agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          retention-days: 1
+
+  release:
+    needs: agent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download agent artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: binaries
+          pattern: agent-*
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd binaries
+          sha256sum agent-* > checksums.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo ${{ github.repository }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            binaries/agent-* binaries/checksums.txt
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/web:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/web:tip
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: registry
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/registry:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/registry:tip
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=registry
+          cache-to: type=gha,mode=max,scope=registry

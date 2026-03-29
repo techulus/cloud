@@ -300,8 +300,14 @@ fi
 echo "✓ crane installed"
 
 step "Downloading Techulus Cloud agent..."
-AGENT_URL="https://github.com/techulus/cloud/releases/download/tip/agent-linux-${AGENT_ARCH}"
-CHECKSUM_URL="https://github.com/techulus/cloud/releases/download/tip/checksums.txt"
+LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/techulus/cloud/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+if [ -z "$LATEST_VERSION" ]; then
+  error "Failed to resolve latest version"
+fi
+echo "Installing version: $LATEST_VERSION"
+
+AGENT_URL="https://github.com/techulus/cloud/releases/latest/download/agent-linux-${AGENT_ARCH}"
+CHECKSUM_URL="https://github.com/techulus/cloud/releases/latest/download/checksums.txt"
 
 curl -fsSL -o /tmp/techulus-agent "$AGENT_URL"
 if [ ! -f /tmp/techulus-agent ]; then
@@ -573,7 +579,6 @@ step "Creating agent configuration..."
 
 cat > /var/lib/techulus-agent/environment << EOF
 AGENT_URL=${CONTROL_PLANE_URL}
-AGENT_DATA_DIR=/var/lib/techulus-agent
 EOF
 chmod 600 /var/lib/techulus-agent/environment
 
@@ -604,7 +609,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/var/lib/techulus-agent/environment
-ExecStart=/usr/local/bin/techulus-agent --url \${AGENT_URL} --data-dir \${AGENT_DATA_DIR} ${PROXY_ARG}
+ExecStart=/usr/local/bin/techulus-agent --url \${AGENT_URL} ${PROXY_ARG}
 Restart=always
 RestartSec=10
 KillMode=process
@@ -630,7 +635,7 @@ if [ "$NEW_SETUP" = true ]; then
     REGISTER_PROXY_ARG="--proxy"
   fi
 
-  /usr/local/bin/techulus-agent --url "$CONTROL_PLANE_URL" --token "$REGISTRATION_TOKEN" --data-dir /var/lib/techulus-agent $REGISTER_PROXY_ARG &
+  /usr/local/bin/techulus-agent --url "$CONTROL_PLANE_URL" --token "$REGISTRATION_TOKEN" $REGISTER_PROXY_ARG &
   AGENT_PID=$!
 
   REGISTERED=false

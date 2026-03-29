@@ -1,7 +1,9 @@
+// Package logs provides log collection and state tracking for containers.
 package logs
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -73,9 +75,8 @@ func (s *State) Save(dataDir string) error {
 	sf := stateFile{
 		Positions: make(map[string]string, len(s.positions)),
 	}
-	for k, v := range s.positions {
-		sf.Positions[k] = v
-	}
+
+	maps.Copy(sf.Positions, s.positions)
 	s.mu.RUnlock()
 
 	data, err := json.MarshalIndent(sf, "", "  ")
@@ -84,5 +85,5 @@ func (s *State) Save(dataDir string) error {
 	}
 
 	path := filepath.Join(dataDir, stateFileName)
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(path, data, 0o600)
 }

@@ -409,7 +409,7 @@ func (b *Builder) Cleanup() error {
 		}
 	}
 
-	log.Printf("[build:cleanup] pruning dangling images")
+	log.Printf("[build:cleanup] pruning unused images")
 	container.ImagePrune()
 
 	return nil

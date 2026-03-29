@@ -1047,14 +1047,12 @@ export async function abortRollout(serviceId: string) {
 	});
 
 	if (workToDelete.length > 0) {
-		await db
-			.delete(workQueue)
-			.where(
-				inArray(
-					workQueue.id,
-					workToDelete.map((w) => w.id),
-				),
-			);
+		await db.delete(workQueue).where(
+			inArray(
+				workQueue.id,
+				workToDelete.map((w) => w.id),
+			),
+		);
 	}
 
 	return { success: true };

@@ -4,7 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { toast } from "sonner";
-import { Hammer, Server, Ban, Clock, Shield, Network } from "lucide-react";
+import {
+	Hammer,
+	Server,
+	Ban,
+	Clock,
+	Shield,
+	Network,
+	Info,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +33,7 @@ import {
 } from "@/actions/settings";
 import type { Server as ServerType } from "@/db/types";
 import type { EmailAlertsConfig } from "@/lib/settings-keys";
-import { GitHubAppSetup } from "@/components/github/github-app-setup";
+
 import { EmailSettings } from "@/components/settings/email-settings";
 
 type Props = {
@@ -38,9 +46,14 @@ type Props = {
 		proxyDomain: string | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
 	};
+	appVersion: string | null;
 };
 
-export function GlobalSettings({ servers, initialSettings }: Props) {
+export function GlobalSettings({
+	servers,
+	initialSettings,
+	appVersion,
+}: Props) {
 	const router = useRouter();
 	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
@@ -208,8 +221,8 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 				<TabsTrigger value="email" className="px-4 shrink-0">
 					Email
 				</TabsTrigger>
-				<TabsTrigger value="github" className="px-4 shrink-0">
-					GitHub
+				<TabsTrigger value="about" className="px-4 shrink-0">
+					About
 				</TabsTrigger>
 			</TabsList>
 
@@ -467,8 +480,20 @@ export function GlobalSettings({ servers, initialSettings }: Props) {
 				/>
 			</TabsContent>
 
-			<TabsContent value="github" className="space-y-6 pt-4">
-				<GitHubAppSetup />
+			<TabsContent value="about" className="space-y-6 pt-4">
+				<div className="rounded-lg border">
+					<Item className="border-0 border-b rounded-none">
+						<ItemMedia variant="icon">
+							<Info className="size-5 text-muted-foreground" />
+						</ItemMedia>
+						<ItemContent>
+							<ItemTitle>Version</ItemTitle>
+						</ItemContent>
+					</Item>
+					<div className="p-4">
+						<p className="text-sm font-mono">{appVersion ?? "dev"}</p>
+					</div>
+				</div>
 			</TabsContent>
 		</Tabs>
 	);

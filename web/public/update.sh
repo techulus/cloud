@@ -35,9 +35,14 @@ case $ARCH in
 esac
 echo "Architecture: $ARCH ($AGENT_ARCH)"
 
-echo "Downloading latest agent..."
-AGENT_URL="https://github.com/techulus/cloud/releases/download/tip/agent-linux-${AGENT_ARCH}"
-CHECKSUM_URL="https://github.com/techulus/cloud/releases/download/tip/checksums.txt"
+LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/techulus/cloud/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+if [ -z "$LATEST_VERSION" ]; then
+  error "Failed to resolve latest version"
+fi
+echo "Updating to version: $LATEST_VERSION"
+
+AGENT_URL="https://github.com/techulus/cloud/releases/latest/download/agent-linux-${AGENT_ARCH}"
+CHECKSUM_URL="https://github.com/techulus/cloud/releases/latest/download/checksums.txt"
 
 curl -fsSL -o /tmp/techulus-agent "$AGENT_URL"
 if [ ! -f /tmp/techulus-agent ]; then

@@ -66,7 +66,6 @@ Containers without `techulus.deployment.id` are considered orphans and will be c
 |------|---------|-------------|
 | `--url` | (required) | Control plane URL |
 | `--token` | | Registration token (required for first run) |
-| `--data-dir` | `/var/lib/techulus-agent` | Data directory for agent state |
 | `--logs-endpoint` | | VictoriaLogs endpoint for log shipping |
 | `--proxy` | `false` | Run as proxy node (handles TLS/public traffic) |
 

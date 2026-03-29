@@ -75,13 +75,13 @@ docker run -d --name buildkitd --privileged moby/buildkit:latest
 Then run the agent with the `BUILDKIT_HOST` env var. Use `sudo -E` to preserve environment variables:
 
 ```bash
-sudo BUILDKIT_HOST=docker-container://buildkitd ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+sudo BUILDKIT_HOST=docker-container://buildkitd ./agent --url <control-plane-url>
 ```
 
 Or with `-E`:
 
 ```bash
-BUILDKIT_HOST=docker-container://buildkitd sudo -E ./agent --url <control-plane-url> --data-dir /var/lib/techulus-agent
+BUILDKIT_HOST=docker-container://buildkitd sudo -E ./agent --url <control-plane-url>
 ```
 
 ## Insecure Registry (HTTP)

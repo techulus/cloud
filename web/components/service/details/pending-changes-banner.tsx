@@ -69,60 +69,60 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 		>
 			<div className="overflow-hidden">
 				<div className="pb-4">
-				<div className="rounded-lg border bg-card p-4">
-					<div className="flex items-start justify-between gap-4">
-						<div className="flex items-start gap-3 min-w-0">
-							<div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-								<AlertTriangle className="size-4" />
-							</div>
-							<div className="min-w-0">
-								<p className="font-medium text-foreground">
-									{hasChanges
-										? `${changes.length} pending change${changes.length !== 1 ? "s" : ""}`
-										: "Ready to deploy"}
-								</p>
-								{hasChanges ? (
-									<div className="mt-2 space-y-1.5">
-										{changes.map((change, i) => (
-											<div
-												key={change.field}
-												className="flex items-center gap-2 text-sm"
-											>
-												<span className="font-medium shrink-0 text-muted-foreground">
-													{change.field}:
-												</span>
-												<span className="text-muted-foreground truncate">
-													{change.from}
-												</span>
-												<ArrowRight className="size-3 shrink-0 text-muted-foreground" />
-												<span className="text-foreground truncate">
-													{change.to}
-												</span>
-											</div>
-										))}
-									</div>
-								) : (
-									<p className="text-sm text-muted-foreground mt-1">
-										This service has no active deployments.
+					<div className="rounded-lg border bg-card p-4">
+						<div className="flex items-start justify-between gap-4">
+							<div className="flex items-start gap-3 min-w-0">
+								<div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+									<AlertTriangle className="size-4" />
+								</div>
+								<div className="min-w-0">
+									<p className="font-medium text-foreground">
+										{hasChanges
+											? `${changes.length} pending change${changes.length !== 1 ? "s" : ""}`
+											: "Ready to deploy"}
 									</p>
-								)}
+									{hasChanges ? (
+										<div className="mt-2 space-y-1.5">
+											{changes.map((change, i) => (
+												<div
+													key={change.field}
+													className="flex items-center gap-2 text-sm"
+												>
+													<span className="font-medium shrink-0 text-muted-foreground">
+														{change.field}:
+													</span>
+													<span className="text-muted-foreground truncate">
+														{change.from}
+													</span>
+													<ArrowRight className="size-3 shrink-0 text-muted-foreground" />
+													<span className="text-foreground truncate">
+														{change.to}
+													</span>
+												</div>
+											))}
+										</div>
+									) : (
+										<p className="text-sm text-muted-foreground mt-1">
+											This service has no active deployments.
+										</p>
+									)}
+								</div>
 							</div>
+							<Button
+								size="sm"
+								onClick={handleDeploy}
+								disabled={isDeploying || totalReplicas === 0}
+							>
+								{isDeploying ? (
+									<Spinner className="size-4" />
+								) : (
+									<Rocket className="size-4" data-icon="inline-start" />
+								)}
+								{isGithubWithNoDeployments ? "Build" : "Deploy"}
+							</Button>
 						</div>
-						<Button
-							size="sm"
-							onClick={handleDeploy}
-							disabled={isDeploying || totalReplicas === 0}
-						>
-							{isDeploying ? (
-								<Spinner className="size-4" />
-							) : (
-								<Rocket className="size-4" data-icon="inline-start" />
-							)}
-							{isGithubWithNoDeployments ? "Build" : "Deploy"}
-						</Button>
 					</div>
 				</div>
-			</div>
 			</div>
 		</div>
 	);

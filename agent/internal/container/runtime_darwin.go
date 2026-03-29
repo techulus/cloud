@@ -494,7 +494,7 @@ func writeDockerConfig(registryURL, username, password string) error {
 }
 
 func ImagePrune() {
-	exec.Command("docker", "image", "prune", "-f").Run()
+	exec.Command("docker", "image", "prune", "-a", "-f").Run()
 }
 
 type dockerContainer struct {
