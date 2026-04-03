@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ghcr.io/techulus/cloud/web:latest
+    image: ghcr.io/techulus/cloud/web:tip
     env_file:
       - ./.env
     environment:
@@ -63,7 +63,7 @@ services:
     restart: unless-stopped
 
   registry:
-    image: ghcr.io/techulus/cloud/registry:latest
+    image: ghcr.io/techulus/cloud/registry:tip
     env_file:
       - ./.env
     volumes:
