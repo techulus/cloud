@@ -49,6 +49,15 @@ verify_dns() {
     local elapsed=0
     local domains=("$domain" "registry.$domain" "logs.$domain")
 
+    if ! command -v dig &>/dev/null; then
+        log_info "Installing dnsutils..."
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            apt-get install -y -qq dnsutils >/dev/null 2>&1
+        else
+            $PKG_MGR install -y -q bind-utils >/dev/null 2>&1
+        fi
+    fi
+
     log_info "Verifying DNS records (timeout: ${timeout}s, checking every ${interval}s)..."
     echo -e "  ${YELLOW}Press Ctrl+C to skip verification and continue${NC}"
     echo ""
@@ -61,7 +70,7 @@ verify_dns() {
 
         for d in "${domains[@]}"; do
             local resolved
-            resolved=$(dig +short "$d" A 2>/dev/null | head -1)
+            resolved=$(dig +short "$d" A 2>/dev/null | head -1 || true)
 
             if [[ "$resolved" == "$expected_ip" ]]; then
                 echo -e "  ${GREEN}✓${NC} ${d} → ${resolved}"
