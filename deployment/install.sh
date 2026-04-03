@@ -120,6 +120,7 @@ install_docker_debian() {
     log_info "Installing Docker via official apt repository..."
 
     apt-get update -qq
+    apt-mark hold sudo sudo-rs 2>/dev/null || true
     apt-get install -y -qq ca-certificates curl gnupg dnsutils >/dev/null
 
     install -m 0755 -d /etc/apt/keyrings
@@ -143,6 +144,7 @@ install_docker_rhel() {
         PKG_MGR="yum"
     fi
 
+    $PKG_MGR versionlock add sudo sudo-rs 2>/dev/null || true
     $PKG_MGR install -y -q yum-utils >/dev/null 2>&1 || true
     $PKG_MGR config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || \
         yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null
