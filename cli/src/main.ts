@@ -2,7 +2,6 @@ import { access, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
-import { spawn } from "node:child_process";
 import { deleteConfig, readConfig, writeConfig } from "./config.js";
 import { loadManifest, slugify, type TechulusManifest } from "./manifest.js";
 
@@ -77,24 +76,6 @@ function printUsage() {
   tcloud status`);
 }
 
-function openBrowser(url: string) {
-	const command =
-		process.platform === "darwin"
-			? "open"
-			: process.platform === "win32"
-				? "cmd"
-				: "xdg-open";
-	const args =
-		process.platform === "win32" ? ["/c", "start", "", url] : [url];
-
-	const child = spawn(command, args, {
-		detached: true,
-		stdio: "ignore",
-	});
-
-	child.unref();
-}
-
 async function ensureManifest(cwd: string) {
 	try {
 		return await loadManifest(cwd);
@@ -154,13 +135,7 @@ async function commandAuthLogin(args: string[]) {
 
 	console.log(`Visit ${deviceCode.verification_uri}`);
 	console.log(`Enter code: ${deviceCode.user_code}`);
-
-	try {
-		openBrowser(deviceCode.verification_uri_complete || deviceCode.verification_uri);
-		console.log("Opened your browser for approval.");
-	} catch {
-		console.log("Could not open the browser automatically.");
-	}
+	console.log("Open the verification URL in your browser to continue.");
 
 	let accessToken = "";
 	let intervalMs = deviceCode.interval * 1000;
