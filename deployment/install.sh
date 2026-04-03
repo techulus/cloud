@@ -343,6 +343,8 @@ REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
 INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
 INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
 
+ALLOW_SIGNUP=true
+
 COMPOSE_FILE=${COMPOSE_FILE}
 EOF
 
@@ -383,6 +385,10 @@ build_and_start() {
     echo -e "  ${BOLD}Compose file:${NC} ${DEPLOY_DIR}/${COMPOSE_FILE}"
     echo ""
     echo -e "${YELLOW}It may take a few minutes for SSL certificates to be provisioned.${NC}"
+    echo ""
+    echo -e "${YELLOW}${BOLD}IMPORTANT:${NC} Signup is enabled. After creating your account, disable it:${NC}"
+    echo -e "  1. Edit ${DEPLOY_DIR}/.env and set ${BOLD}ALLOW_SIGNUP=false${NC}"
+    echo -e "  2. Run: ${BOLD}cd ${DEPLOY_DIR} && docker compose -f ${COMPOSE_FILE} up -d${NC}"
     echo ""
 
     docker compose -f "$COMPOSE_FILE" ps

@@ -49,6 +49,7 @@ services:
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
+      - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
     depends_on:
       - postgres
       - victoria-logs
