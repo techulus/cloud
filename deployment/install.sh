@@ -33,6 +33,56 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_header() { echo -e "\n${BOLD}${CYAN}=== $1 ===${NC}\n"; }
 
+detect_public_ip() {
+    local ip
+    ip=$(curl -fsSL -4 --connect-timeout 5 https://ifconfig.me 2>/dev/null) || \
+    ip=$(curl -fsSL -4 --connect-timeout 5 https://api.ipify.org 2>/dev/null) || \
+    ip="<COULD_NOT_DETECT>"
+    echo "$ip"
+}
+
+verify_dns() {
+    local domain="$1"
+    local expected_ip="$2"
+    local timeout=300
+    local interval=10
+    local elapsed=0
+    local domains=("$domain" "registry.$domain" "logs.$domain")
+
+    log_info "Verifying DNS records (timeout: ${timeout}s, checking every ${interval}s)..."
+    echo ""
+
+    while (( elapsed < timeout )); do
+        local all_ok=true
+
+        for d in "${domains[@]}"; do
+            local resolved
+            resolved=$(dig +short "$d" A 2>/dev/null | head -1)
+
+            if [[ "$resolved" == "$expected_ip" ]]; then
+                echo -e "  ${GREEN}✓${NC} ${d} → ${resolved}"
+            else
+                echo -e "  ${RED}✗${NC} ${d} → ${resolved:-not found} (expected ${expected_ip})"
+                all_ok=false
+            fi
+        done
+
+        if $all_ok; then
+            echo ""
+            log_success "All DNS records verified!"
+            return 0
+        fi
+
+        (( elapsed += interval ))
+        echo -e "\n  Retrying in ${interval}s... (${elapsed}s/${timeout}s)\n"
+        sleep "$interval"
+    done
+
+    echo ""
+    log_warn "DNS verification timed out. Some records may not have propagated yet."
+    log_warn "Continuing with installation — SSL certificate provisioning may fail until DNS propagates."
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root (use sudo)"
@@ -70,7 +120,7 @@ install_docker_debian() {
     log_info "Installing Docker via official apt repository..."
 
     apt-get update -qq
-    apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+    apt-get install -y -qq ca-certificates curl gnupg dnsutils >/dev/null
 
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
@@ -96,6 +146,7 @@ install_docker_rhel() {
     $PKG_MGR install -y -q yum-utils >/dev/null 2>&1 || true
     $PKG_MGR config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || \
         yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null
+    $PKG_MGR install -y -q bind-utils >/dev/null 2>&1 || true
     $PKG_MGR install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null
 }
 
@@ -162,6 +213,22 @@ configure_interactive() {
     log_header "Configuration"
 
     prompt_value ROOT_DOMAIN "Enter your root domain (e.g. cloud.example.com)"
+
+    local public_ip
+    public_ip=$(detect_public_ip)
+
+    echo ""
+    log_info "Please add the following DNS A records pointing to this server:"
+    echo ""
+    echo -e "  ${BOLD}${ROOT_DOMAIN}${NC}            →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}registry.${ROOT_DOMAIN}${NC}   →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}logs.${ROOT_DOMAIN}${NC}       →  A  →  ${GREEN}${public_ip}${NC}"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Press Enter once you have configured DNS records...${NC}")"
+    echo ""
+
+    verify_dns "$ROOT_DOMAIN" "$public_ip"
+
     prompt_value ACME_EMAIL "Enter email for Let's Encrypt certificates"
 
     echo ""
