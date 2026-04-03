@@ -289,7 +289,7 @@ configure_interactive() {
     REGISTRY_USERNAME="admin"
     REGISTRY_PASSWORD="$(openssl rand -hex 16)"
     REGISTRY_HTTP_SECRET="$(openssl rand -hex 32)"
-    INNGEST_SIGNING_KEY="signkey-prod-$(openssl rand -hex 32)"
+    INNGEST_SIGNING_KEY="$(openssl rand -hex 32)"
     INNGEST_EVENT_KEY="$(openssl rand -hex 16)"
 
     if [[ "$USE_BUNDLED_PG" == "true" ]]; then
