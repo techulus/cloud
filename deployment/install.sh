@@ -50,9 +50,13 @@ verify_dns() {
     local domains=("$domain" "registry.$domain" "logs.$domain")
 
     log_info "Verifying DNS records (timeout: ${timeout}s, checking every ${interval}s)..."
+    echo -e "  ${YELLOW}Press Ctrl+C to skip verification and continue${NC}"
     echo ""
 
-    while (( elapsed < timeout )); do
+    local skipped=false
+    trap 'skipped=true' INT
+
+    while (( elapsed < timeout )) && ! $skipped; do
         local all_ok=true
 
         for d in "${domains[@]}"; do
@@ -70,16 +74,23 @@ verify_dns() {
         if $all_ok; then
             echo ""
             log_success "All DNS records verified!"
+            trap - INT
             return 0
         fi
 
         (( elapsed += interval ))
         echo -e "\n  Retrying in ${interval}s... (${elapsed}s/${timeout}s)\n"
-        sleep "$interval"
+        sleep "$interval" || true
     done
 
+    trap - INT
+
     echo ""
-    log_warn "DNS verification timed out. Some records may not have propagated yet."
+    if $skipped; then
+        log_warn "DNS verification skipped."
+    else
+        log_warn "DNS verification timed out. Some records may not have propagated yet."
+    fi
     log_warn "Continuing with installation — SSL certificate provisioning may fail until DNS propagates."
 }
 
