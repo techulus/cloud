@@ -41,8 +41,8 @@
     ],
     "primary": {
       "type": "button",
-      "label": "Dashboard",
-      "href": "https://cloud.techulus.com"
+      "label": "GitHub",
+      "href": "https://github.com/techulus/cloud"
     }
   },
   "contextual": {
