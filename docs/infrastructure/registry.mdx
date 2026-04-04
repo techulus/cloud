@@ -1,0 +1,46 @@
+---
+title: "Registry"
+description: "Private container image registry."
+---
+
+Techulus Cloud runs a private [Docker Distribution Registry](https://distribution.github.io/distribution/) for storing container images built from source.
+
+## How It Works
+
+When you deploy from a GitHub repository, an agent builds the container image using BuildKit and pushes it to the registry. Other agents pull the image from the registry during deployment.
+
+Images are tagged with the commit SHA:
+
+```
+registry.example.com/{project_id}/{service_id}:{commit_sha}
+```
+
+## Configuration
+
+The registry runs as a Docker container alongside the control plane, available at `https://registry.<ROOT_DOMAIN>`.
+
+| Variable | Description |
+| --- | --- |
+| `REGISTRY_USERNAME` | Basic auth username |
+| `REGISTRY_PASSWORD` | Basic auth password |
+| `REGISTRY_HTTP_SECRET` | Internal HTTP signing secret |
+
+Agents receive registry credentials automatically during [registration](/agents/setup#registration).
+
+## Storage
+
+Images are stored on the local filesystem in a persistent Docker volume (`registry-data`). Delete operations are enabled for garbage collection.
+
+### Garbage Collection
+
+To reclaim disk space from deleted images, run garbage collection manually:
+
+```bash
+docker exec registry /bin/registry garbage-collect /etc/docker/registry/config.yml
+```
+
+For automatic cleanup, add a daily cron job:
+
+```bash
+0 2 * * * docker exec registry /bin/registry garbage-collect /etc/docker/registry/config.yml
+```

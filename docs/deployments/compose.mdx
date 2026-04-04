@@ -1,0 +1,34 @@
+---
+title: "Compose Import"
+description: "Import existing Docker Compose files to create services."
+---
+
+You can import an existing Docker Compose file to create multiple services at once. The compose parser extracts service definitions and maps them to Techulus Cloud services.
+
+## Supported Fields
+
+The following Compose fields are parsed and applied:
+
+| Field | Mapping |
+| --- | --- |
+| `image` | Container image |
+| `environment` | Secrets (encrypted at rest) |
+| `volumes` | Named volumes with container paths |
+| `ports` | Service ports (public/private, protocol) |
+| `healthcheck` | Health check command, interval, timeout, retries, start period |
+| `deploy.replicas` | Replica count |
+| `deploy.resources.limits` | CPU and memory limits |
+| `command` | Start command override |
+
+## How It Works
+
+1. Paste or upload your `docker-compose.yml` in the project settings.
+2. The parser validates the file and shows a preview of services to be created.
+3. Warnings are shown for any unsupported options.
+4. On confirmation, services are created with their configuration, secrets, volumes, and ports.
+
+Each service in the compose file becomes a separate Techulus Cloud service within the same project and environment.
+
+## Stateful Services
+
+If a service in the compose file defines volumes, it is automatically marked as stateful. Stateful services are limited to 1 replica and pinned to a single server.

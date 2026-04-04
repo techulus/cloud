@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "sequoia",
+  "theme": "aspen",
   "name": "Techulus Cloud",
   "colors": {
     "primary": "#DE434A",
@@ -17,8 +17,55 @@
             "group": "Core",
             "pages": [
               "index",
-              "architecture",
-              "agent"
+              "architecture"
+            ]
+          },
+          {
+            "group": "Control Plane",
+            "pages": [
+              "installation"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/introduction",
+              "agents/architecture",
+              "agents/setup",
+              "agents/updating"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/configuration",
+              "services/volumes",
+              "services/scaling",
+              "services/domains"
+            ]
+          },
+          {
+            "group": "Deployments",
+            "pages": [
+              "deployments/github",
+              "deployments/compose",
+              "deployments/scheduled"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "networking/service-discovery",
+              "networking/tcp-udp-proxy"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infrastructure/logging",
+              "infrastructure/registry",
+              "infrastructure/backups",
+              "infrastructure/alerts"
             ]
           }
         ]

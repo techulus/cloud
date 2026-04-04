@@ -1,0 +1,41 @@
+---
+title: "Custom Domains"
+description: "Bind custom domains with automatic HTTPS."
+---
+
+## Adding a Domain
+
+Custom domains are bound to a specific service port. When you add a domain:
+
+1. Point your domain's DNS to a proxy node's IP address (or your GeoDNS hostname).
+2. Add the domain in the service port settings.
+3. The platform automatically provisions a TLS certificate via Let's Encrypt.
+
+Traffic flows: `Internet → Proxy Node → Traefik (TLS) → WireGuard → Container`.
+
+## TLS Certificates
+
+Certificates are provisioned using the ACME HTTP-01 challenge. The control plane handles the challenge validation — Traefik routes `/.well-known/acme-challenge/*` requests back to the control plane.
+
+Certificates are:
+- Issued automatically when a domain is added.
+- Stored in the database and distributed to all proxy nodes.
+- Renewed automatically before expiration.
+
+## Multiple Proxy Nodes
+
+When using multiple proxy nodes for geographic distribution, all proxies share the same TLS certificates from the control plane.
+
+Set up a GeoDNS hostname that routes clients to the nearest healthy proxy, then point your custom domains to that hostname. See the [Architecture](/architecture#multiple-proxy-nodes) page for details.
+
+## Protocols
+
+Each service port specifies a protocol:
+
+| Protocol | Description |
+| --- | --- |
+| `http` | HTTP/HTTPS traffic routed through Traefik |
+| `tcp` | Raw TCP traffic — see [TCP/UDP Proxy](/networking/tcp-udp-proxy) |
+| `udp` | Raw UDP traffic — see [TCP/UDP Proxy](/networking/tcp-udp-proxy) |
+
+For HTTP ports, you can optionally bind a custom domain. For TCP/UDP ports, traffic is exposed via an external port on the proxy node.

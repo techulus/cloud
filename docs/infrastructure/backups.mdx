@@ -1,0 +1,36 @@
+---
+title: "Backups"
+description: "Automated database backups to S3-compatible storage."
+---
+
+Techulus Cloud can automatically back up databases running in your containers to S3-compatible storage. Backups are triggered on a schedule or manually from the web UI.
+
+## Supported Databases
+
+The agent detects the database type from the container image name and runs the appropriate dump command:
+
+| Database | Dump Command |
+| --- | --- |
+| PostgreSQL | `pg_dump -Fc` |
+| MySQL | `mysqldump` |
+| MariaDB | `mysqldump` |
+| MongoDB | `mongodump --archive --gzip` |
+| Redis | `redis-cli BGSAVE` |
+
+Backups are compressed and uploaded as `.tar.gz` archives.
+
+## Configuration
+
+Configure S3-compatible storage in the control plane environment:
+
+| Variable | Description |
+| --- | --- |
+| `BACKUP_STORAGE_PROVIDER` | Storage provider (e.g., `s3`) |
+| `BACKUP_STORAGE_BUCKET` | Bucket name |
+| `BACKUP_STORAGE_REGION` | AWS region |
+| `BACKUP_STORAGE_ENDPOINT` | Custom endpoint for MinIO or other S3-compatible providers |
+| `BACKUP_STORAGE_ACCESS_KEY` | Access key |
+| `BACKUP_STORAGE_SECRET_KEY` | Secret key |
+| `BACKUP_STORAGE_RETENTION_DAYS` | Number of days to retain backups (default: `7`) |
+
+Works with AWS S3, MinIO, DigitalOcean Spaces, and any S3-compatible provider.

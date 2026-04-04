@@ -1,0 +1,25 @@
+---
+title: "Scheduled Deployments"
+description: "Cron-based automatic redeployments."
+---
+
+You can configure a service to redeploy automatically on a schedule. This is useful for workloads that need periodic restarts or for pulling the latest version of an image tag.
+
+## Configuration
+
+Set a deployment schedule using a cron expression in the service settings.
+
+Examples:
+
+| Schedule | Cron Expression |
+| --- | --- |
+| Every hour | `0 * * * *` |
+| Daily at midnight UTC | `0 0 * * *` |
+| Every 6 hours | `0 */6 * * *` |
+| Weekdays at 9 AM UTC | `0 9 * * 1-5` |
+
+The platform tracks the last scheduled deployment time to prevent duplicate runs.
+
+## How It Works
+
+A background job checks for services with deployment schedules and triggers a new rollout when the schedule is due. The rollout follows the same process as a manual deployment — pulling the image, starting new containers, running health checks, and stopping old containers.

@@ -1,0 +1,34 @@
+---
+title: "Email Alerts"
+description: "Get notified about server issues, build failures, and deployment problems."
+---
+
+Techulus Cloud can send email alerts when things go wrong. Alerts are delivered via SMTP to a configurable list of recipients.
+
+## Alert Types
+
+| Alert | Trigger |
+| --- | --- |
+| Server offline | A server stops reporting to the control plane |
+| Build failure | A container image build fails |
+| Deployment failure | A deployment fails during rollout |
+| Deployment moved | A deployment is moved to a different server |
+
+## Configuration
+
+Add the following environment variables to the control plane:
+
+| Variable | Description |
+| --- | --- |
+| `SMTP_ENABLED` | Set to `true` to enable alerts |
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP port (e.g., `587`) |
+| `SMTP_USERNAME` | SMTP authentication username |
+| `SMTP_PASSWORD` | SMTP authentication password |
+| `SMTP_ENCRYPTION` | `starttls` or `tls` |
+| `SMTP_FROM_NAME` | Sender display name (e.g., `Techulus Cloud`) |
+| `SMTP_FROM_ADDRESS` | Sender email address |
+| `SMTP_TIMEOUT` | Connection timeout in milliseconds (default: `10000`) |
+| `SMTP_ALERT_EMAILS` | Comma-separated list of recipient email addresses |
+
+Works with any SMTP provider — Amazon SES, Resend, Mailgun, Postmark, or your own mail server.

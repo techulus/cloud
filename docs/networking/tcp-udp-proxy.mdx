@@ -1,0 +1,27 @@
+---
+title: "TCP/UDP Proxy"
+description: "Expose non-HTTP services like databases and game servers."
+---
+
+Not every service speaks HTTP. Techulus Cloud supports exposing raw TCP and UDP ports through proxy nodes for services like databases, game servers, or custom protocols.
+
+## Configuration
+
+When adding a port to a service, set the protocol to `tcp` or `udp`:
+
+| Field | Description |
+| --- | --- |
+| Port | The container port your service listens on |
+| Protocol | `tcp` or `udp` |
+| External port | The port exposed on the proxy node |
+| Public | Whether this port is accessible from the internet |
+
+Traffic is routed from the proxy node's external port through the WireGuard mesh to the container.
+
+## TLS Passthrough
+
+For TCP services that handle their own TLS (e.g., a database with native SSL), enable **TLS passthrough**. This forwards the encrypted connection directly to the container without Traefik terminating TLS.
+
+## Firewall
+
+The agent setup script configures firewall rules to allow traffic on the TCP/UDP proxy port ranges. If you set up servers manually, ensure the relevant ports are open.
