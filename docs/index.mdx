@@ -1,0 +1,97 @@
+---
+title: "Techulus Cloud"
+description: "Private-first container deployment with WireGuard networking and proxy-worker orchestration."
+---
+
+# Simple, Scalable
+
+# Container Deployment
+
+Run your containers without the headache. Fast, reliable, and you're in control.
+
+<Card title="Architecture" icon="map" href="/architecture" horizontal>
+  Learn how peers, proxy nodes, worker nodes, and private networking fit together.
+</Card>
+
+<Card title="Agent" icon="server" href="/agent" horizontal>
+  See how the agent reconciles state, builds images, and keeps deployments running.
+</Card>
+
+## Built for Real Infrastructure
+
+<Columns cols={2}>
+  <Card title="Machines are Peers" icon="share-nodes">
+    No master nodes, no single points of failure. Every machine pulls its weight equally. One goes down? The others pick up the slack.
+  </Card>
+  <Card title="Proxy & Worker Nodes" icon="shuffle">
+    Separate concerns with node types. Proxy nodes handle public traffic and TLS. Worker nodes just run containers.
+  </Card>
+  <Card title="Your Infrastructure, Your Way" icon="server">
+    If it runs in a container, it runs here, on your metal, cloud VMs, or that Raspberry Pi. Scale as you grow. Your data, your rules, no lock-in.
+  </Card>
+  <Card title="Stateless or Stateful" icon="database">
+    Containers come and go, that's the point. But when you need data to stick around, volumes have you covered.
+  </Card>
+</Columns>
+
+## Storage & Data Safety
+
+<Columns cols={2}>
+  <Card title="Persistent Volumes" icon="hard-drive">
+    Named volumes that survive container restarts. Your data stays put.
+  </Card>
+  <Card title="Scheduled Backups" icon="clock-rotate-left">
+    Automatic and manual backups to S3-compatible storage. Set it and forget it.
+  </Card>
+</Columns>
+
+## Networking & Routing
+
+<Columns cols={2}>
+  <Card title="WireGuard Mesh" icon="shield-halved">
+    All server-to-server traffic is encrypted via WireGuard. Your containers communicate over a private mesh network.
+  </Card>
+  <Card title="Service Discovery" icon="globe">
+    Services find each other via `.internal` domains. No hardcoded IPs, no service mesh complexity. Just DNS that works.
+  </Card>
+  <Card title="Automatic HTTPS" icon="lock">
+    TLS certificates are handled automatically. Point your domain and get HTTPS without manual certificate management.
+  </Card>
+  <Card title="TCP/UDP Proxy" icon="arrow-right-arrow-left">
+    Not everything speaks HTTP. Expose databases, game servers, or whatever else you need.
+  </Card>
+  <Card title="GeoDNS" icon="location-dot">
+    Route users to the nearest proxy with automatic failover when things go wrong.
+  </Card>
+</Columns>
+
+## Deployments & Automation
+
+<Columns cols={2}>
+  <Card title="GitHub Auto-Deploy" icon="code-branch">
+    Push to your branch, watch it deploy. Connect your GitHub repo and get automatic builds and deployments on every commit.
+  </Card>
+  <Card title="Build from Source" icon="hammer">
+    Push code, we build it. Use Railpack or bring your own Dockerfile.
+  </Card>
+  <Card title="Scheduled Deployments" icon="calendar">
+    Cron-based deployments let you redeploy on a schedule without lifting a finger.
+  </Card>
+  <Card title="Multi-Environment" icon="layer-group">
+    Production, staging, and dev all live in one project. Deploy the same service differently across environments.
+  </Card>
+</Columns>
+
+## Operations & Security
+
+<Columns cols={2}>
+  <Card title="Private by Default" icon="eye-slash">
+    Your services talk to each other privately. Nothing gets exposed unless you say so. Public traffic only goes through proxy nodes.
+  </Card>
+  <Card title="Environment Secrets" icon="key">
+    Inject secrets at runtime. Never bake credentials into your images.
+  </Card>
+  <Card title="Logs & Monitoring" icon="chart-line">
+    Stream logs from containers, builds, and requests in one place.
+  </Card>
+</Columns>
