@@ -2,8 +2,15 @@ import { access, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
+import { stdin as input, stdout as output } from "node:process";
+import { createInterface } from "node:readline/promises";
 import { deleteConfig, readConfig, writeConfig } from "./config.js";
-import { loadManifest, slugify, type TechulusManifest } from "./manifest.js";
+import {
+	loadManifest,
+	slugify,
+	stringifyManifest,
+	type TechulusManifest,
+} from "./manifest.js";
 
 const CLI_VERSION = "0.1.0";
 const CLI_CLIENT_ID = "techulus-cli";
@@ -12,6 +19,28 @@ type JsonRequestOptions = {
 	method?: string;
 	headers?: Record<string, string>;
 	body?: unknown;
+};
+
+type LinkServiceTarget = {
+	id: string;
+	name: string;
+	project: string;
+	environment: string;
+	linkSupported: boolean;
+	unsupportedReason: string | null;
+};
+
+type LinkEnvironmentTarget = {
+	id: string;
+	name: string;
+	services: LinkServiceTarget[];
+};
+
+type LinkProjectTarget = {
+	id: string;
+	name: string;
+	slug: string;
+	environments: LinkEnvironmentTarget[];
 };
 
 function normalizeHost(host: string) {
@@ -71,9 +100,79 @@ function printUsage() {
   tcloud auth logout
   tcloud auth whoami
   tcloud init
+  tcloud link [--force]
   tcloud apply
   tcloud deploy
   tcloud status`);
+}
+
+async function pathExists(filePath: string) {
+	try {
+		await access(filePath, fsConstants.F_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function countSupportedServices(projects: LinkProjectTarget[]) {
+	return projects.reduce(
+		(total, project) =>
+			total +
+			project.environments.reduce(
+				(environmentTotal, environment) =>
+					environmentTotal +
+					environment.services.filter((service) => service.linkSupported).length,
+				0,
+			),
+		0,
+	);
+}
+
+async function selectFromList<T>(
+	title: string,
+	items: T[],
+	renderItem: (item: T, index: number) => string,
+	getDisabledReason?: (item: T) => string | null,
+) {
+	if (items.length === 0) {
+		throw new Error(`No options available for "${title}"`);
+	}
+
+	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+		throw new Error("tcloud link requires an interactive terminal.");
+	}
+
+	const rl = createInterface({ input, output });
+
+	try {
+		while (true) {
+			console.log(`\n${title}`);
+			for (const [index, item] of items.entries()) {
+				console.log(`  ${index + 1}. ${renderItem(item, index)}`);
+			}
+
+			const answer = (await rl.question("> ")).trim();
+			const choice = Number.parseInt(answer, 10);
+
+			if (!Number.isInteger(choice) || choice < 1 || choice > items.length) {
+				console.log("Enter the number of the option you want.");
+				continue;
+			}
+
+			const selected = items[choice - 1];
+			const disabledReason = getDisabledReason?.(selected) ?? null;
+
+			if (disabledReason) {
+				console.log(disabledReason);
+				continue;
+			}
+
+			return selected;
+		}
+	} finally {
+		rl.close();
+	}
 }
 
 async function ensureManifest(cwd: string) {
@@ -270,6 +369,100 @@ service:
 	console.log(`Created ${manifestPath}`);
 }
 
+async function commandLink(cwd: string, args: string[]) {
+	const config = await requireConfig();
+	const manifestPath = path.join(cwd, "techulus.yml");
+	const force = args.includes("--force");
+
+	if ((await pathExists(manifestPath)) && !force) {
+		throw new Error(
+			"techulus.yml already exists. Run `tcloud link --force` to replace it.",
+		);
+	}
+
+	const targets = await requestJson<{ projects: LinkProjectTarget[] }>(
+		`${config.host}/api/v1/manifest/link-targets`,
+		{
+			headers: authHeaders(config.apiKey),
+		},
+	);
+
+	if (countSupportedServices(targets.projects) === 0) {
+		throw new Error("No linkable services were found in your account.");
+	}
+
+	const projectChoices = targets.projects.filter(
+		(project) =>
+			project.environments.some((environment) => environment.services.length > 0),
+	);
+	if (projectChoices.length === 0) {
+		throw new Error("No services were found in your account.");
+	}
+
+	const project = await selectFromList(
+		"Select a project:",
+		projectChoices,
+		(project) => {
+			const serviceCount = project.environments.reduce(
+				(total, environment) => total + environment.services.length,
+				0,
+			);
+			return `${project.name} (${serviceCount} service${serviceCount === 1 ? "" : "s"})`;
+		},
+	);
+
+	const environmentChoices = project.environments.filter(
+		(environment) => environment.services.length > 0,
+	);
+	const environment = await selectFromList(
+		"Select an environment:",
+		environmentChoices,
+		(environment) => {
+			const supportedCount = environment.services.filter(
+				(service) => service.linkSupported,
+			).length;
+			return `${environment.name} (${supportedCount}/${environment.services.length} linkable)`;
+		},
+	);
+
+	const service = await selectFromList(
+		"Select a service:",
+		environment.services,
+		(service) =>
+			service.linkSupported
+				? service.name
+				: `${service.name} (unsupported: ${service.unsupportedReason})`,
+		(service) =>
+			service.linkSupported
+				? null
+				: service.unsupportedReason ?? "This service can't be linked.",
+	);
+
+	const result = await requestJson<{
+		manifest: TechulusManifest;
+		service: {
+			id: string;
+			name: string;
+			project: string;
+			environment: string;
+		};
+	}>(`${config.host}/api/v1/manifest/link`, {
+		method: "POST",
+		headers: authHeaders(config.apiKey),
+		body: {
+			serviceId: service.id,
+		},
+	});
+
+	await writeFile(manifestPath, stringifyManifest(result.manifest), "utf8");
+
+	console.log(
+		`Linked ${result.service.project}/${result.service.environment}/${result.service.name}`,
+	);
+	console.log(`Wrote ${manifestPath}`);
+	console.log("Next: run `tcloud status` or `tcloud apply`.");
+}
+
 function printApplyResult(result: {
 	action: "created" | "updated" | "noop";
 	serviceId: string;
@@ -398,6 +591,9 @@ async function main() {
 			}
 		case "init":
 			await commandInit(cwd);
+			return;
+		case "link":
+			await commandLink(cwd, rest);
 			return;
 		case "apply":
 			await commandApply(cwd);

@@ -81,6 +81,10 @@ export async function loadManifest(cwd: string) {
 	};
 }
 
+export function stringifyManifest(manifest: TechulusManifest) {
+	return YAML.stringify(techulusManifestSchema.parse(manifest));
+}
+
 export function slugify(value: string) {
 	return value
 		.toLowerCase()

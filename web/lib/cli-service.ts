@@ -9,7 +9,10 @@ import {
 	serviceVolumes,
 	services,
 } from "@/db/schema";
-import type { TechulusManifest } from "@/lib/cli-manifest";
+import {
+	techulusManifestSchema,
+	type TechulusManifest,
+} from "@/lib/cli-manifest";
 import {
 	getManifestEnvironmentName,
 	getManifestProjectSlug,
@@ -43,10 +46,94 @@ export type ManifestApplyResult = {
 	changes: ManifestChange[];
 };
 
+export type LinkServiceTarget = {
+	id: string;
+	name: string;
+	project: string;
+	environment: string;
+	linkSupported: boolean;
+	unsupportedReason: string | null;
+};
+
+export type LinkEnvironmentTarget = {
+	id: string;
+	name: string;
+	services: LinkServiceTarget[];
+};
+
+export type LinkProjectTarget = {
+	id: string;
+	name: string;
+	slug: string;
+	environments: LinkEnvironmentTarget[];
+};
+
+export type LinkTargetsResult = {
+	projects: LinkProjectTarget[];
+};
+
+export type LinkManifestResult = {
+	manifest: TechulusManifest;
+	service: {
+		id: string;
+		name: string;
+		project: string;
+		environment: string;
+	};
+};
+
 type ManifestIdentity = {
 	project: string;
 	environment: string;
 	service: string;
+};
+
+type ServiceCompatibilityRecord = Pick<
+	typeof services.$inferSelect,
+	| "sourceType"
+	| "stateful"
+	| "autoPlace"
+	| "replicas"
+	| "resourceCpuLimit"
+	| "resourceMemoryLimitMb"
+>;
+
+type PortCompatibilityRecord = Pick<
+	typeof servicePorts.$inferSelect,
+	"protocol" | "isPublic" | "domain"
+>;
+
+type LinkValidationService = Pick<
+	typeof services.$inferSelect,
+	| "id"
+	| "name"
+	| "projectId"
+	| "environmentId"
+	| "hostname"
+	| "image"
+	| "sourceType"
+	| "replicas"
+	| "stateful"
+	| "autoPlace"
+	| "healthCheckCmd"
+	| "healthCheckInterval"
+	| "healthCheckTimeout"
+	| "healthCheckRetries"
+	| "healthCheckStartPeriod"
+	| "startCommand"
+	| "resourceCpuLimit"
+	| "resourceMemoryLimitMb"
+>;
+
+type LinkValidationPort = Pick<
+	typeof servicePorts.$inferSelect,
+	"serviceId" | "port" | "isPublic" | "domain" | "protocol"
+>;
+
+type ServiceLinkValidation = {
+	service: LinkValidationService;
+	ports: LinkValidationPort[];
+	unsupportedReason: string | null;
 };
 
 function formatPort(port: { port: number; isPublic: boolean; domain: string | null }) {
@@ -143,6 +230,102 @@ async function findServiceByName(
 		.limit(1);
 
 	return service ?? null;
+}
+
+function getUnsupportedReason(
+	service: ServiceCompatibilityRecord,
+	ports: PortCompatibilityRecord[],
+	volumeCount: number,
+) {
+	if (service.sourceType !== "image") {
+		return "CLI v1 only supports image-backed services. This service uses an unsupported source.";
+	}
+
+	if (service.stateful || volumeCount > 0) {
+		return "CLI v1 does not support stateful services or volumes. Manage this service from the web UI.";
+	}
+
+	if (!service.autoPlace) {
+		return "CLI v1 only supports auto-placement. Manage this service from the web UI.";
+	}
+
+	if (ports.some((port) => port.protocol !== "http")) {
+		return "CLI v1 only supports HTTP ports. This service has TCP or UDP ports configured.";
+	}
+
+	if (ports.some((port) => port.isPublic && !port.domain)) {
+		return "CLI v1 requires every public HTTP port to have a domain.";
+	}
+
+	if (service.replicas < 1 || service.replicas > 10) {
+		return "CLI v1 only supports replica counts between 1 and 10.";
+	}
+
+	const hasCpu = service.resourceCpuLimit !== null;
+	const hasMemory = service.resourceMemoryLimitMb !== null;
+
+	if (hasCpu !== hasMemory) {
+		return "CLI v1 requires both CPU and memory limits to be set together.";
+	}
+
+	return null;
+}
+
+async function getServiceLinkValidation(
+	serviceId: string,
+): Promise<ServiceLinkValidation | null> {
+	const [service] = await db
+		.select({
+			id: services.id,
+			name: services.name,
+			projectId: services.projectId,
+			environmentId: services.environmentId,
+			hostname: services.hostname,
+			image: services.image,
+			sourceType: services.sourceType,
+			replicas: services.replicas,
+			stateful: services.stateful,
+			autoPlace: services.autoPlace,
+			healthCheckCmd: services.healthCheckCmd,
+			healthCheckInterval: services.healthCheckInterval,
+			healthCheckTimeout: services.healthCheckTimeout,
+			healthCheckRetries: services.healthCheckRetries,
+			healthCheckStartPeriod: services.healthCheckStartPeriod,
+			startCommand: services.startCommand,
+			resourceCpuLimit: services.resourceCpuLimit,
+			resourceMemoryLimitMb: services.resourceMemoryLimitMb,
+		})
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.limit(1);
+
+	if (!service) {
+		return null;
+	}
+
+	const [ports, volumes] = await Promise.all([
+		db
+			.select({
+				serviceId: servicePorts.serviceId,
+				port: servicePorts.port,
+				isPublic: servicePorts.isPublic,
+				domain: servicePorts.domain,
+				protocol: servicePorts.protocol,
+			})
+			.from(servicePorts)
+			.where(eq(servicePorts.serviceId, serviceId))
+			.orderBy(servicePorts.port),
+		db
+			.select({ id: serviceVolumes.id })
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, serviceId)),
+	]);
+
+	return {
+		service,
+		ports,
+		unsupportedReason: getUnsupportedReason(service, ports, volumes.length),
+	};
 }
 
 async function syncHostname(
@@ -276,7 +459,14 @@ async function syncPorts(
 
 async function syncHealthCheck(
 	serviceId: string,
-	currentService: typeof services.$inferSelect,
+	currentService: Pick<
+		LinkValidationService,
+		| "healthCheckCmd"
+		| "healthCheckInterval"
+		| "healthCheckTimeout"
+		| "healthCheckRetries"
+		| "healthCheckStartPeriod"
+	>,
 	manifest: TechulusManifest,
 	changes: ManifestChange[],
 ) {
@@ -330,7 +520,10 @@ async function syncStartCommand(
 
 async function syncResources(
 	serviceId: string,
-	currentService: typeof services.$inferSelect,
+	currentService: Pick<
+		LinkValidationService,
+		"resourceCpuLimit" | "resourceMemoryLimitMb"
+	>,
 	manifest: TechulusManifest,
 	changes: ManifestChange[],
 ) {
@@ -365,7 +558,7 @@ async function syncResources(
 
 async function syncReplicas(
 	serviceId: string,
-	currentService: typeof services.$inferSelect,
+	currentService: Pick<LinkValidationService, "autoPlace" | "replicas">,
 	desiredReplicas: number,
 	changes: ManifestChange[],
 ) {
@@ -385,57 +578,16 @@ async function syncReplicas(
 }
 
 async function assertSupportedExistingService(serviceId: string) {
-	const [service] = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.limit(1);
-
-	if (!service) {
+	const validation = await getServiceLinkValidation(serviceId);
+	if (!validation) {
 		throw new Error("Service not found");
 	}
 
-	if (service.sourceType !== "image") {
-		throw new Error(
-			"CLI v1 only supports image-backed services. This service uses an unsupported source.",
-		);
+	if (validation.unsupportedReason) {
+		throw new Error(validation.unsupportedReason);
 	}
 
-	if (service.stateful) {
-		throw new Error(
-			"CLI v1 does not support stateful services or volumes. Manage this service from the web UI.",
-		);
-	}
-
-	if (!service.autoPlace) {
-		throw new Error(
-			"CLI v1 only supports auto-placement. Manage this service from the web UI.",
-		);
-	}
-
-	const ports = await db
-		.select()
-		.from(servicePorts)
-		.where(eq(servicePorts.serviceId, serviceId));
-
-	if (ports.some((port) => port.protocol !== "http")) {
-		throw new Error(
-			"CLI v1 only supports HTTP ports. This service has TCP or UDP ports configured.",
-		);
-	}
-
-	const volumes = await db
-		.select({ id: serviceVolumes.id })
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.serviceId, serviceId));
-
-	if (volumes.length > 0) {
-		throw new Error(
-			"CLI v1 does not support services with volumes. Manage this service from the web UI.",
-		);
-	}
-
-	return service;
+	return validation.service;
 }
 
 export async function applyManifest(
@@ -630,5 +782,212 @@ export async function getManifestStatus(identity: ManifestIdentity) {
 		ports,
 		latestRollout: latestRollout ?? null,
 		deployments: serviceDeployments,
+	};
+}
+
+export async function listLinkTargets(): Promise<LinkTargetsResult> {
+	const [projectRows, environmentRows, serviceRows, portRows, volumeRows] =
+		await Promise.all([
+			db
+				.select({
+					id: projects.id,
+					name: projects.name,
+					slug: projects.slug,
+				})
+				.from(projects)
+				.orderBy(projects.createdAt),
+			db
+				.select({
+					id: environments.id,
+					projectId: environments.projectId,
+					name: environments.name,
+				})
+				.from(environments)
+				.orderBy(environments.createdAt),
+			db
+				.select({
+					id: services.id,
+					name: services.name,
+					projectId: services.projectId,
+					environmentId: services.environmentId,
+					sourceType: services.sourceType,
+					stateful: services.stateful,
+					autoPlace: services.autoPlace,
+					replicas: services.replicas,
+					resourceCpuLimit: services.resourceCpuLimit,
+					resourceMemoryLimitMb: services.resourceMemoryLimitMb,
+				})
+				.from(services)
+				.orderBy(services.createdAt),
+			db
+				.select({
+					serviceId: servicePorts.serviceId,
+					protocol: servicePorts.protocol,
+					isPublic: servicePorts.isPublic,
+					domain: servicePorts.domain,
+				})
+				.from(servicePorts),
+			db.select({ serviceId: serviceVolumes.serviceId })
+				.from(serviceVolumes)
+				.orderBy(serviceVolumes.id),
+		]);
+
+	const projectNameById = new Map(
+		projectRows.map((project) => [project.id, project.name]),
+	);
+	const environmentById = new Map(
+		environmentRows.map((environment) => [environment.id, environment]),
+	);
+
+	const portsByServiceId = new Map<string, PortCompatibilityRecord[]>();
+	for (const port of portRows) {
+		const current = portsByServiceId.get(port.serviceId) ?? [];
+		current.push(port);
+		portsByServiceId.set(port.serviceId, current);
+	}
+
+	const volumeCountByServiceId = new Map<string, number>();
+	for (const volume of volumeRows) {
+		volumeCountByServiceId.set(
+			volume.serviceId,
+			(volumeCountByServiceId.get(volume.serviceId) ?? 0) + 1,
+		);
+	}
+
+	const servicesByEnvironmentId = new Map<string, LinkServiceTarget[]>();
+	for (const service of serviceRows) {
+		const projectName = projectNameById.get(service.projectId);
+		const environment = environmentById.get(service.environmentId);
+		if (!projectName || !environment) {
+			continue;
+		}
+
+		const current = servicesByEnvironmentId.get(service.environmentId) ?? [];
+		const ports = portsByServiceId.get(service.id) ?? [];
+		const unsupportedReason = getUnsupportedReason(
+			service,
+			ports,
+			volumeCountByServiceId.get(service.id) ?? 0,
+		);
+
+		current.push({
+			id: service.id,
+			name: service.name,
+			project: projectName,
+			environment: environment.name,
+			linkSupported: unsupportedReason === null,
+			unsupportedReason,
+		});
+		servicesByEnvironmentId.set(service.environmentId, current);
+	}
+
+	const environmentsByProjectId = new Map<string, LinkEnvironmentTarget[]>();
+	for (const environment of environmentRows) {
+		const current = environmentsByProjectId.get(environment.projectId) ?? [];
+		current.push({
+			id: environment.id,
+			name: environment.name,
+			services: servicesByEnvironmentId.get(environment.id) ?? [],
+		});
+		environmentsByProjectId.set(environment.projectId, current);
+	}
+
+	return {
+		projects: projectRows.map((project) => ({
+			id: project.id,
+			name: project.name,
+			slug: project.slug,
+			environments: environmentsByProjectId.get(project.id) ?? [],
+		})),
+	};
+}
+
+export async function exportManifestForLinkedService(
+	serviceId: string,
+): Promise<LinkManifestResult> {
+	const validation = await getServiceLinkValidation(serviceId);
+	if (!validation) {
+		throw new Error("Service not found");
+	}
+
+	if (validation.unsupportedReason) {
+		throw new Error(validation.unsupportedReason);
+	}
+
+	const [project, environment] = await Promise.all([
+		db
+			.select()
+			.from(projects)
+			.where(eq(projects.id, validation.service.projectId))
+			.limit(1),
+		db
+			.select()
+			.from(environments)
+			.where(eq(environments.id, validation.service.environmentId))
+			.limit(1),
+	]);
+
+	const projectRow = project[0];
+	const environmentRow = environment[0];
+
+	if (!projectRow || !environmentRow) {
+		throw new Error("Failed to resolve the selected service");
+	}
+
+	const manifest = techulusManifestSchema.parse({
+		apiVersion: "v1",
+		project: projectRow.name,
+		environment: environmentRow.name,
+		service: {
+			name: validation.service.name,
+			source: {
+				type: "image",
+				image: validation.service.image,
+			},
+			...(validation.service.hostname
+				? { hostname: validation.service.hostname }
+				: {}),
+			ports: validation.ports.map((port) => ({
+				port: port.port,
+				public: port.isPublic,
+				...(port.isPublic && port.domain ? { domain: port.domain } : {}),
+			})),
+			replicas: {
+				count: validation.service.replicas,
+			},
+			...(validation.service.healthCheckCmd
+				? {
+						healthCheck: {
+							cmd: validation.service.healthCheckCmd,
+							interval: validation.service.healthCheckInterval ?? 10,
+							timeout: validation.service.healthCheckTimeout ?? 5,
+							retries: validation.service.healthCheckRetries ?? 3,
+							startPeriod: validation.service.healthCheckStartPeriod ?? 30,
+						},
+					}
+				: {}),
+			...(validation.service.startCommand
+				? { startCommand: validation.service.startCommand }
+				: {}),
+			...(validation.service.resourceCpuLimit !== null &&
+			validation.service.resourceMemoryLimitMb !== null
+				? {
+						resources: {
+							cpuCores: validation.service.resourceCpuLimit,
+							memoryMb: validation.service.resourceMemoryLimitMb,
+						},
+					}
+				: {}),
+		},
+	});
+
+	return {
+		manifest,
+		service: {
+			id: validation.service.id,
+			name: validation.service.name,
+			project: projectRow.name,
+			environment: environmentRow.name,
+		},
 	};
 }
