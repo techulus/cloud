@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { RegisterPage } from "@/components/auth/register-page";
+import { DeviceAuthorizationPage } from "@/components/auth/device-authorization-page";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function Page() {
@@ -11,7 +11,7 @@ export default function Page() {
 				</div>
 			}
 		>
-			<RegisterPage />
+			<DeviceAuthorizationPage />
 		</Suspense>
 	);
 }
