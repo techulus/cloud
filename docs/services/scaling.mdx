@@ -1,0 +1,28 @@
+---
+title: "Scaling"
+description: "Replicas, placement, and server pinning."
+---
+
+## Replicas
+
+Each service can run multiple replicas across your cluster. Set the replica count from the service settings — the platform distributes containers across available servers.
+
+Replica count ranges from 1 to 10 per service.
+
+## Auto-Placement
+
+By default, **auto-placement** is enabled. The control plane decides which servers run each replica based on available capacity.
+
+When auto-placement is disabled, you manually configure how many replicas run on each server using per-server replica assignments.
+
+## Server Pinning
+
+Stateful services (those with [volumes](/services/volumes)) are automatically pinned to a single server. This ensures the container always has access to its persistent data.
+
+You can also manually lock any service to a specific server by setting the locked server. This is useful for workloads that need to run on a particular machine.
+
+## Limitations
+
+- Stateful services are limited to 1 replica.
+- Stateful services cannot use auto-placement — they are always pinned to their locked server.
+- Maximum 10 replicas per service.

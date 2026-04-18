@@ -1,0 +1,42 @@
+---
+title: "Logging"
+description: "Centralized log aggregation with Victoria Logs."
+---
+
+Techulus Cloud uses [Victoria Logs](https://docs.victoriametrics.com/victorialogs/) for centralized log aggregation. All log types — container output, HTTP access logs, build logs, and agent system logs — are collected and searchable from the web UI.
+
+## Log Types
+
+| Type | Source | Fields |
+| --- | --- | --- |
+| `container` | Container stdout/stderr | `deployment_id`, `service_id`, `server_id`, `stream` |
+| `http` | Traefik access logs (proxy nodes) | `service_id`, `host`, `method`, `path`, `status`, `duration_ms`, `client_ip` |
+| `build` | BuildKit image builds | `build_id`, `service_id`, `project_id` |
+| `agent` | Agent process output | `server_id`, `level` |
+
+## How It Works
+
+Each agent ships logs directly to Victoria Logs over HTTP using the JSON Lines format.
+
+- **Container logs** are streamed from running containers, batched in groups of 1000, and flushed every 5 seconds. Log positions are tracked per container to prevent duplicates.
+- **HTTP logs** are tailed from Traefik's access log file on proxy nodes, batched in groups of 500.
+- **Build logs** are captured during image builds and streamed in real time.
+- **Agent logs** intercept the agent's own stdout/stderr with automatic log level detection.
+
+All log batches retry up to 3 times with exponential backoff on failure.
+
+## Configuration
+
+Victoria Logs runs as a Docker container alongside the control plane.
+
+| Variable | Description |
+| --- | --- |
+| `VL_USERNAME` | Authentication username |
+| `VL_PASSWORD` | Authentication password |
+| `VL_RETENTION` | Log retention period (default: `7d`) |
+
+The control plane exposes logs at `https://logs.<ROOT_DOMAIN>` with basic auth. Agents write to the internal endpoint at `http://victoria-logs:9428`.
+
+## Accessing Logs
+
+Logs are accessible from the web UI for each service, deployment, build, and server. The control plane queries Victoria Logs using LogSQL with filters for `service_id`, `deployment_id`, `server_id`, and time ranges.

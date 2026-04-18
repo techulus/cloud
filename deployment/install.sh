@@ -33,6 +33,76 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_header() { echo -e "\n${BOLD}${CYAN}=== $1 ===${NC}\n"; }
 
+detect_public_ip() {
+    local ip
+    ip=$(curl -fsSL -4 --connect-timeout 5 https://ifconfig.me 2>/dev/null) || \
+    ip=$(curl -fsSL -4 --connect-timeout 5 https://api.ipify.org 2>/dev/null) || \
+    ip="<COULD_NOT_DETECT>"
+    echo "$ip"
+}
+
+verify_dns() {
+    local domain="$1"
+    local expected_ip="$2"
+    local timeout=300
+    local interval=10
+    local elapsed=0
+    local domains=("$domain" "registry.$domain" "logs.$domain")
+
+    if ! command -v dig &>/dev/null; then
+        log_info "Installing dnsutils..."
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            apt-get install -y -qq dnsutils >/dev/null 2>&1
+        else
+            $PKG_MGR install -y -q bind-utils >/dev/null 2>&1
+        fi
+    fi
+
+    log_info "Verifying DNS records (timeout: ${timeout}s, checking every ${interval}s)..."
+    echo -e "  ${YELLOW}Press Ctrl+C to skip verification and continue${NC}"
+    echo ""
+
+    local skipped=false
+    trap 'skipped=true' INT
+
+    while (( elapsed < timeout )) && ! $skipped; do
+        local all_ok=true
+
+        for d in "${domains[@]}"; do
+            local resolved
+            resolved=$(dig +short "$d" A 2>/dev/null | head -1 || true)
+
+            if [[ "$resolved" == "$expected_ip" ]]; then
+                echo -e "  ${GREEN}✓${NC} ${d} → ${resolved}"
+            else
+                echo -e "  ${RED}✗${NC} ${d} → ${resolved:-not found} (expected ${expected_ip})"
+                all_ok=false
+            fi
+        done
+
+        if $all_ok; then
+            echo ""
+            log_success "All DNS records verified!"
+            trap - INT
+            return 0
+        fi
+
+        (( elapsed += interval ))
+        echo -e "\n  Retrying in ${interval}s... (${elapsed}s/${timeout}s)\n"
+        sleep "$interval" || true
+    done
+
+    trap - INT
+
+    echo ""
+    if $skipped; then
+        log_warn "DNS verification skipped."
+    else
+        log_warn "DNS verification timed out. Some records may not have propagated yet."
+    fi
+    log_warn "Continuing with installation — SSL certificate provisioning may fail until DNS propagates."
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root (use sudo)"
@@ -70,7 +140,7 @@ install_docker_debian() {
     log_info "Installing Docker via official apt repository..."
 
     apt-get update -qq
-    apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+    apt-get install -y -qq ca-certificates curl gnupg dnsutils >/dev/null
 
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
@@ -96,6 +166,7 @@ install_docker_rhel() {
     $PKG_MGR install -y -q yum-utils >/dev/null 2>&1 || true
     $PKG_MGR config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || \
         yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null
+    $PKG_MGR install -y -q bind-utils >/dev/null 2>&1 || true
     $PKG_MGR install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null
 }
 
@@ -162,6 +233,22 @@ configure_interactive() {
     log_header "Configuration"
 
     prompt_value ROOT_DOMAIN "Enter your root domain (e.g. cloud.example.com)"
+
+    local public_ip
+    public_ip=$(detect_public_ip)
+
+    echo ""
+    log_info "Please add the following DNS A records pointing to this server:"
+    echo ""
+    echo -e "  ${BOLD}${ROOT_DOMAIN}${NC}            →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}registry.${ROOT_DOMAIN}${NC}   →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}logs.${ROOT_DOMAIN}${NC}       →  A  →  ${GREEN}${public_ip}${NC}"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Press Enter once you have configured DNS records...${NC}")"
+    echo ""
+
+    verify_dns "$ROOT_DOMAIN" "$public_ip"
+
     prompt_value ACME_EMAIL "Enter email for Let's Encrypt certificates"
 
     echo ""
@@ -202,7 +289,7 @@ configure_interactive() {
     REGISTRY_USERNAME="admin"
     REGISTRY_PASSWORD="$(openssl rand -hex 16)"
     REGISTRY_HTTP_SECRET="$(openssl rand -hex 32)"
-    INNGEST_SIGNING_KEY="signkey-prod-$(openssl rand -hex 32)"
+    INNGEST_SIGNING_KEY="$(openssl rand -hex 32)"
     INNGEST_EVENT_KEY="$(openssl rand -hex 16)"
 
     if [[ "$USE_BUNDLED_PG" == "true" ]]; then
@@ -256,6 +343,8 @@ REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
 INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
 INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
 
+ALLOW_SIGNUP=true
+
 COMPOSE_FILE=${COMPOSE_FILE}
 EOF
 
@@ -297,6 +386,10 @@ build_and_start() {
     echo ""
     echo -e "${YELLOW}It may take a few minutes for SSL certificates to be provisioned.${NC}"
     echo ""
+    echo -e "${YELLOW}${BOLD}IMPORTANT:${NC} Signup is enabled. After creating your account, disable it:${NC}"
+    echo -e "  1. Edit ${DEPLOY_DIR}/.env and set ${BOLD}ALLOW_SIGNUP=false${NC}"
+    echo -e "  2. Run: ${BOLD}cd ${DEPLOY_DIR} && docker compose -f ${COMPOSE_FILE} up -d${NC}"
+    echo ""
 
     docker compose -f "$COMPOSE_FILE" ps
 }
@@ -314,6 +407,14 @@ main() {
 
     check_root
     detect_os
+
+    # Prevent sudo/sudo-rs from being upgraded mid-session (breaks sudo on Ubuntu 25.10+)
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        apt-mark hold sudo sudo-rs 2>/dev/null || true
+    elif command -v dnf &>/dev/null; then
+        dnf versionlock add sudo sudo-rs 2>/dev/null || true
+    fi
+
     install_docker
     download_compose_files
 

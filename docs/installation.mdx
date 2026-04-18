@@ -1,0 +1,142 @@
+---
+title: "Installation"
+description: "Deploy the Techulus Cloud control plane on your own infrastructure."
+---
+
+## Prerequisites
+
+- Docker and Docker Compose
+- A domain name with DNS configured
+- Ports 80 and 443 available
+
+You need three DNS records pointing to your server:
+
+| Record | Purpose |
+| --- | --- |
+| `your-domain.com` | Control plane web UI |
+| `registry.your-domain.com` | Container image registry |
+| `logs.your-domain.com` | Log aggregation (Victoria Logs) |
+
+## Quick Start
+
+Run the automated install script on a fresh server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/techulus/cloud/main/deployment/install.sh | bash
+```
+
+The script detects your OS, installs Docker, walks you through DNS and environment configuration, and starts all services.
+
+## Manual Setup
+
+Clone the repository and configure your environment:
+
+```bash
+cd deployment
+cp .env.example .env
+```
+
+Edit `.env` with your values (see below), then start the stack:
+
+```bash
+docker compose -f compose.production.yml up -d --pull always
+```
+
+To use the bundled PostgreSQL instead of an external database:
+
+```bash
+docker compose -f compose.postgres.yml up -d --pull always
+```
+
+## Environment Variables
+
+### Required
+
+| Variable | Description |
+| --- | --- |
+| `ROOT_DOMAIN` | Your domain (e.g., `cloud.example.com`) |
+| `ACME_EMAIL` | Email for Let's Encrypt certificates |
+| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`) |
+| `BETTER_AUTH_SECRET` | Secret key for authentication |
+| `ENCRYPTION_KEY` | 32 bytes as a 64-character hex string |
+
+### Victoria Logs
+
+| Variable | Description |
+| --- | --- |
+| `VL_USERNAME` | Logs service username |
+| `VL_PASSWORD` | Logs service password |
+| `VL_RETENTION` | Log retention period (default: `7d`) |
+
+### Registry
+
+| Variable | Description |
+| --- | --- |
+| `REGISTRY_USERNAME` | Registry username for agents |
+| `REGISTRY_PASSWORD` | Registry password for agents |
+| `REGISTRY_HTTP_SECRET` | Internal registry secret |
+
+### Inngest
+
+| Variable | Description |
+| --- | --- |
+| `INNGEST_SIGNING_KEY` | Request verification key (prefix with `signkey-prod-`) |
+| `INNGEST_EVENT_KEY` | Event API key |
+
+### GitHub Integration (Optional)
+
+| Variable | Description |
+| --- | --- |
+| `GITHUB_APP_ID` | GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
+| `GITHUB_WEBHOOK_SECRET` | Webhook secret |
+
+## Generating Secrets
+
+```bash
+# Encryption key (64 hex characters)
+openssl rand -hex 32
+
+# Auth secret
+openssl rand -hex 32
+
+# Inngest signing key
+echo "signkey-prod-$(openssl rand -hex 32)"
+
+# Inngest event key
+openssl rand -hex 16
+```
+
+## Services
+
+Once running, the following services are available:
+
+| Service | Endpoint |
+| --- | --- |
+| Web | `https://<ROOT_DOMAIN>` |
+| Registry | `https://registry.<ROOT_DOMAIN>` |
+| Logs | `https://logs.<ROOT_DOMAIN>` |
+| PostgreSQL | Internal only |
+| Inngest | Internal only |
+
+Traefik handles TLS termination and automatic certificate renewal via Let's Encrypt.
+
+## Database Migrations
+
+The schema is synced automatically on container startup via `drizzle-kit push`. Non-destructive changes (adding tables, columns, indexes) are applied automatically. Destructive changes like dropping columns require manual intervention.
+
+## Common Commands
+
+```bash
+# Check service status
+docker compose -f compose.production.yml ps
+
+# View logs
+docker compose -f compose.production.yml logs -f
+
+# Stop all services
+docker compose -f compose.production.yml down
+
+# Update to latest version
+docker compose -f compose.production.yml up -d --pull always
+```

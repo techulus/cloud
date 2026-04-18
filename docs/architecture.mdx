@@ -1,0 +1,235 @@
+---
+title: "Architecture"
+description: "System design, networking model, rollout lifecycle, and reconciliation flow."
+---
+
+# Techulus Cloud Architecture
+
+## Overview
+
+Techulus Cloud is a stateless container deployment platform built around three core principles:
+
+1. **Workloads are disposable**: containers can be killed and recreated at any time.
+2. **Two node types**: proxy nodes handle public traffic, worker nodes run containers.
+3. **Networking is private-first**: services communicate over a WireGuard mesh, with public exposure routed through proxy nodes.
+
+## Tech Stack
+
+| Component | Choice | Rationale |
+| --- | --- | --- |
+| Control Plane | Next.js (full-stack) | Single deployment with React frontend and API routes |
+| Database | Postgres + Drizzle | Simple, low operational overhead, easy backup |
+| Background Jobs | Inngest (self-hosted) | Durable workflows, retries, event-driven orchestration |
+| Server Agent | Go | Single binary that shells out to Podman |
+| Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
+| Reverse Proxy | Traefik | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only |
+| Private Network | WireGuard | Full mesh coordinated by the control plane |
+| Service Discovery | Built-in DNS | Agent serves `.internal` domains |
+| Agent Communication | Pull-based HTTP | Agent polls expected state and reports status |
+
+## Node Types
+
+| Type | Traefik | Public Traffic | Containers |
+| --- | --- | --- | --- |
+| Proxy | Yes | Handles TLS termination | Yes |
+| Worker | No | None | Yes |
+
+- **Proxy nodes** handle incoming public traffic, terminate TLS using HTTP-01 ACME, and route requests to containers over WireGuard.
+- **Worker nodes** run containers only and have no public exposure.
+
+## Architecture Diagram
+
+```mermaid
+graph TD
+    Internet["Internet"] -->|"DNS"| P1
+
+    CP["Control Plane<br/>Next.js + API Routes + Postgres"]
+    CP -- "HTTPS poll every 10s" --> P1
+    CP -- "HTTPS poll every 10s" --> W1
+    CP -- "HTTPS poll every 10s" --> W2
+
+    subgraph Servers
+        P1["Proxy Node<br/>Agent · Podman · Traefik · DNS · WireGuard<br/>WG: 10.100.1.1 · Containers: 10.200.1.2-254"]
+        W1["Worker Node 1<br/>Agent · Podman · DNS · WireGuard<br/>WG: 10.100.2.1 · Containers: 10.200.2.2-254"]
+        W2["Worker Node 2<br/>Agent · Podman · DNS · WireGuard<br/>WG: 10.100.3.1 · Containers: 10.200.3.2-254"]
+        P1 -. "WireGuard Mesh" .- W1
+        P1 -. "WireGuard Mesh" .- W2
+        W1 -. "WireGuard Mesh" .- W2
+    end
+```
+
+## Agent State Machine
+
+The agent uses a two-state machine to prevent race conditions during reconciliation.
+
+```mermaid
+stateDiagram-v2
+    IDLE: IDLE (poll every 10s)
+    PROCESSING: PROCESSING (no poll)
+
+    IDLE --> PROCESSING: Drift detected
+    PROCESSING --> IDLE: Done / Failed / Timeout (5 min)
+```
+
+### IDLE State
+
+- Poll the control plane every 10 seconds for expected state.
+- Compare expected state versus actual state for containers, DNS, Traefik, and WireGuard.
+- If no drift exists, send a status report and remain in `IDLE`.
+- If drift is detected, snapshot expected state and transition to `PROCESSING`.
+
+Traefik drift detection only applies on proxy nodes.
+
+### PROCESSING State
+
+- Stop polling and work from the expected-state snapshot.
+- Apply one change at a time with verification.
+- Re-check drift after every change.
+- Transition back to `IDLE` once drift is resolved.
+- Force a return to `IDLE` after 5 minutes if reconciliation stalls.
+- Always send a status report before returning to `IDLE`.
+
+### Drift Detection
+
+The agent uses hash comparisons for deterministic drift detection:
+
+- **Containers**: missing, orphaned, wrong state, or image mismatch.
+- **DNS**: hash of sorted records versus current DNS config.
+- **Traefik**: hash of sorted routes versus current Traefik config on proxy nodes.
+- **WireGuard**: hash of sorted peers versus current `wg0.conf`.
+
+### Container Reconciliation Order
+
+1. Stop orphan containers with no deployment ID.
+2. Start containers in `created` or `exited` state.
+3. Deploy missing containers.
+4. Redeploy containers with wrong state or image mismatch.
+5. Update DNS records.
+6. Update Traefik routes on proxy nodes.
+7. Update WireGuard peers.
+
+## Rollout Stages
+
+```text
+pending -> pulling -> starting -> healthy -> dns_updating -> traefik_updating -> stopping_old -> running
+```
+
+| Stage | Description |
+| --- | --- |
+| `pending` | Deployment created and waiting for an agent |
+| `pulling` | Agent is pulling the container image |
+| `starting` | Container started and waiting for health checks |
+| `healthy` | Health check passed, or no health check is configured |
+| `dns_updating` | DNS records are being updated |
+| `traefik_updating` | Traefik routes are being updated |
+| `stopping_old` | Old deployment containers are being stopped |
+| `running` | Deployment is complete and serving traffic |
+
+Special states:
+
+- `unknown`: the agent stopped reporting this deployment and the container may still exist.
+- `stopped`: the container was explicitly stopped.
+- `failed`: the deployment failed, such as during health checks.
+- `rolled_back`: rollout failed and reverted to the previous deployment.
+
+## Networking
+
+### IP Address Scheme
+
+| Range | Purpose |
+| --- | --- |
+| `10.100.X.1` | WireGuard IP for server `X` |
+| `10.200.X.2-254` | Container IPs on server `X` |
+
+`X` is the server subnet ID from `1` to `255`.
+
+### WireGuard Mesh
+
+Each server gets a `/24` subnet for routing:
+
+- Server 1: `10.100.1.0/24` with WireGuard IP `10.100.1.1`
+- Server 2: `10.100.2.0/24` with WireGuard IP `10.100.2.1`
+
+Every server peers with every other server. `AllowedIPs` includes both WireGuard and container subnets:
+
+```ini
+AllowedIPs = 10.100.2.0/24, 10.200.2.0/24
+```
+
+### Container Network
+
+Each server has a Podman bridge network:
+
+```bash
+podman network create \
+  --driver bridge \
+  --subnet 10.200.1.0/24 \
+  --gateway 10.200.1.1 \
+  --disable-dns \
+  techulus
+```
+
+Containers receive static IPs assigned by the control plane:
+
+```bash
+podman run -d \
+  --name service-deployment \
+  --network techulus \
+  --ip 10.200.1.2 \
+  --label techulus.deployment.id=<deployment-id> \
+  --label techulus.service.id=<service-id> \
+  traefik/whoami
+```
+
+### DNS Resolution
+
+Each agent runs a built-in DNS server for `.internal` domains:
+
+- It listens on the container gateway IP, such as `10.200.1.1`.
+- It configures `systemd-resolved` to forward `.internal` queries.
+- Records are pushed from the control plane through expected state.
+
+Services resolve through `.internal` names with round-robin across replicas.
+
+### Traefik on Proxy Nodes
+
+Proxy nodes receive routes and certificates from the control plane:
+
+- Routes live in `/etc/traefik/dynamic/routes.yaml`.
+- Certificates live in `/etc/traefik/dynamic/tls.yaml`.
+- Routes map `subdomain.example.com` to container IPs over WireGuard.
+- TLS certificates are managed centrally by the control plane.
+- `/.well-known/acme-challenge/*` is routed back to the control plane for ACME validation.
+
+Worker nodes do not run Traefik.
+
+### Multiple Proxy Nodes
+
+The platform supports geographically distributed proxy nodes with proximity steering:
+
+- Users point custom domains to a single GeoDNS-managed hostname.
+- GeoDNS routes clients to the nearest healthy proxy.
+- Health checks fail over automatically when a proxy becomes unavailable.
+- All proxies share the same TLS certificates from the control plane.
+
+Example:
+
+```text
+Proxy US:   1.2.3.4
+Proxy EU:   5.6.7.8
+Proxy SYD:  9.10.11.12
+
+GeoDNS:
+  example.com -> lb.techulus.cloud
+  -> route client to nearest proxy
+  -> fail over when a proxy is unhealthy
+```
+
+### Proximity-Aware Load Balancing
+
+Within a proxy node, traffic is distributed using weighted round-robin:
+
+1. Local replicas on the same proxy server use weight `5`.
+2. Remote replicas on other proxy servers use weight `1`.
+
+That keeps the majority of traffic local whenever possible while still preserving cross-node routing.

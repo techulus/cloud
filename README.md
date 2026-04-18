@@ -2,7 +2,7 @@
 
 A container deployment platform with private-first networking.
 
-> ⚠️ **Experimental**: This is a very experimental project and is nowhere near production ready. Use at your own risk.
+> **Beta**: This project is currently in beta and pre-production. Use at your own risk.
 
 ## Features
 

@@ -1,0 +1,171 @@
+---
+title: "Setup"
+description: "Install the agent and add servers to your cluster."
+---
+
+## Automated Setup
+
+The setup script installs all dependencies, registers the server, and configures systemd services.
+
+### Interactive
+
+```bash
+curl -sSL https://your-control-plane.com/setup.sh | sudo bash
+```
+
+The script prompts for the control plane URL, registration token, and node type.
+
+### Non-Interactive
+
+```bash
+export CONTROL_PLANE_URL=https://your-control-plane.com
+export REGISTRATION_TOKEN=your-token
+export IS_PROXY=false
+curl -sSL $CONTROL_PLANE_URL/setup.sh | sudo bash
+```
+
+## What Gets Installed
+
+### All Nodes
+
+- **WireGuard** — encrypted mesh networking
+- **Podman** — container runtime
+- **BuildKit** — container image builds
+- **Railpack** — build plan generation
+
+### Proxy Nodes Only
+
+- **Traefik** — reverse proxy and TLS termination
+- **CrowdSec** — automated threat detection and IP banning
+
+The script also enables IP forwarding and configures firewall rules for ports 80, 443, and 51820 (WireGuard).
+
+## Registration
+
+Servers register with the control plane using a one-time token. Generate a token from the web UI, then pass it during the first run.
+
+On registration, the agent:
+
+1. Generates an Ed25519 signing key pair and a WireGuard key pair.
+2. Sends its public keys and IP addresses to the control plane.
+3. Receives a server ID, WireGuard subnet, and encryption key.
+4. Saves configuration to `/var/lib/techulus-agent/config.json`.
+
+After registration, the token is invalidated. Subsequent runs do not require a token.
+
+## Manual Setup
+
+### Worker Node
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install wireguard wireguard-tools podman git -y
+
+# Install Railpack
+curl -sSL https://railpack.com/install.sh | sh
+sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
+
+# Install BuildKit
+curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0.26.3.linux-amd64.tar.gz \
+  | sudo tar -xz -C /usr/local
+```
+
+### Proxy Node
+
+Install everything above, plus Traefik:
+
+```bash
+TRAEFIK_VERSION="v3.2.3"
+curl -fsSL "https://github.com/traefik/traefik/releases/download/${TRAEFIK_VERSION}/traefik_${TRAEFIK_VERSION}_linux_amd64.tar.gz" \
+  -o /tmp/traefik.tar.gz
+sudo tar -xzf /tmp/traefik.tar.gz -C /usr/local/bin traefik
+rm /tmp/traefik.tar.gz
+```
+
+### First Run
+
+Worker node:
+
+```bash
+sudo ./agent --url <control-plane-url> --token <registration-token>
+```
+
+Proxy node:
+
+```bash
+sudo ./agent --url <control-plane-url> --token <registration-token> --proxy
+```
+
+## Running as a Service
+
+### Worker Node
+
+Create `/etc/systemd/system/techulus-agent.service`:
+
+```ini
+[Unit]
+Description=Techulus Cloud Agent
+After=network.target buildkitd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent --url <control-plane-url>
+Restart=always
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Proxy Node
+
+```ini
+[Unit]
+Description=Techulus Cloud Agent
+After=network.target traefik.service buildkitd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent --url <control-plane-url> --proxy
+Restart=always
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable techulus-agent
+sudo systemctl start techulus-agent
+```
+
+<Note>
+  `KillMode=process` ensures only the agent process is stopped on restart, not the containers it manages.
+</Note>
+
+## Troubleshooting
+
+### Agent restart kills containers
+
+Ensure `KillMode=process` is set in the systemd service file.
+
+### Containers stuck in "created" state
+
+This is normal after a restart. The agent detects drift and starts them automatically.
+
+### Checking agent logs
+
+```bash
+sudo journalctl -u techulus-agent -f
+```
+
+### Inspecting containers
+
+```bash
+podman ps -a --format "table {{.Names}}\t{{.State}}\t{{.Labels}}"
+```

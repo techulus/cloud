@@ -1,0 +1,32 @@
+---
+title: "Service Discovery"
+description: "Internal DNS for service-to-service communication."
+---
+
+Services discover each other using `.internal` domain names. Every agent runs a built-in DNS server that resolves these names to container IP addresses over the [WireGuard mesh](/architecture#wireguard-mesh).
+
+## How It Works
+
+Each service gets a hostname like `my-service.internal`. The DNS server on every agent is configured with all service records pushed from the control plane.
+
+When a container queries `my-service.internal`, the local DNS server resolves it to the container IPs of that service. If the service has multiple replicas, responses use round-robin across all healthy containers.
+
+All DNS resolution happens over the private WireGuard network — no traffic leaves the mesh.
+
+## Configuration
+
+Service discovery works automatically. The DNS server:
+
+- Listens on the container gateway IP (e.g., `10.200.1.1`).
+- Configures `systemd-resolved` to forward `.internal` queries.
+- Receives record updates from the control plane as part of expected state.
+
+No manual configuration is needed. Services can reference each other by name immediately after deployment.
+
+## Example
+
+If you have a `postgres` service and a `web` service, the web service can connect to the database using:
+
+```
+postgres://user:pass@postgres.internal:5432/mydb
+```

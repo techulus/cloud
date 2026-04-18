@@ -1,0 +1,113 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Techulus Cloud",
+  "colors": {
+    "primary": "#3B82F6",
+    "light": "#60A5FA",
+    "dark": "#2563EB"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "index",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Control Plane",
+            "pages": [
+              "installation"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/introduction",
+              "agents/architecture",
+              "agents/setup",
+              "agents/updating"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/configuration",
+              "services/volumes",
+              "services/scaling",
+              "services/domains"
+            ]
+          },
+          {
+            "group": "Deployments",
+            "pages": [
+              "deployments/github",
+              "deployments/compose",
+              "deployments/scheduled"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "networking/service-discovery",
+              "networking/tcp-udp-proxy"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infrastructure/logging",
+              "infrastructure/registry",
+              "infrastructure/backups",
+              "infrastructure/alerts"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": []
+    }
+  },
+  "logo": {
+    "light": "/logo/logo.png",
+    "dark": "/logo/logo.png"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "mailto:hi@techulus.cloud"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/techulus/cloud"
+    }
+  },
+  "contextual": {
+    "options": [
+     "copy",
+     "view",
+     "chatgpt",
+     "claude",
+     "perplexity",
+     "mcp",
+     "cursor",
+     "vscode"
+   ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/techulus/cloud"
+    }
+  },
+  "description": "Simple, Scalable Container Deployment"
+}

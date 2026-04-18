@@ -1,0 +1,52 @@
+---
+title: "Updating"
+description: "Update agents to the latest version."
+---
+
+## Automated Update
+
+Run the update script on the server:
+
+```bash
+curl -sSL https://your-control-plane.com/update.sh | sudo bash
+```
+
+The script:
+
+1. Downloads the latest agent binary from GitHub releases.
+2. Verifies the SHA256 checksum.
+3. Replaces the existing binary.
+4. Restarts the systemd service.
+
+No configuration or dependencies are changed during an update.
+
+## Manual Update
+
+Download the binary for your architecture:
+
+```bash
+# For x86_64
+curl -fsSL https://github.com/techulus/cloud/releases/latest/download/agent-linux-amd64 \
+  -o /usr/local/bin/agent
+chmod +x /usr/local/bin/agent
+
+# For arm64
+curl -fsSL https://github.com/techulus/cloud/releases/latest/download/agent-linux-arm64 \
+  -o /usr/local/bin/agent
+chmod +x /usr/local/bin/agent
+```
+
+Restart the service:
+
+```bash
+sudo systemctl restart techulus-agent
+```
+
+## Verify
+
+Check that the agent is running after the update:
+
+```bash
+sudo systemctl status techulus-agent
+sudo journalctl -u techulus-agent -n 20
+```

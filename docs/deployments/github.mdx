@@ -1,0 +1,67 @@
+---
+title: "GitHub Integration"
+description: "Automatic builds and deployments from GitHub repositories."
+---
+
+## Setup
+
+Techulus Cloud integrates with GitHub through a [GitHub App](https://docs.github.com/en/apps). To enable it:
+
+1. Create a GitHub App and configure it with your control plane URL.
+2. Set the following environment variables on the control plane:
+
+| Variable | Description |
+| --- | --- |
+| `GITHUB_APP_ID` | Your GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | Private key (base64-encoded) |
+| `GITHUB_WEBHOOK_SECRET` | Webhook secret for verifying payloads |
+
+3. Install the GitHub App on your GitHub account or organization.
+
+## Connecting a Repository
+
+Once the GitHub App is installed, connect a repository to a service:
+
+1. Set the service source type to `github`.
+2. Select the repository from your installed GitHub accounts.
+3. Choose the branch to deploy from (defaults to `main`).
+4. Optionally set a root directory if your app isn't at the repository root.
+
+## Auto-Deploy
+
+When auto-deploy is enabled (the default), pushing to the configured branch triggers a build and deployment automatically.
+
+The flow:
+
+1. GitHub sends a push webhook to the control plane.
+2. The control plane creates a build for the new commit.
+3. An agent claims the build, clones the repository, and builds the image.
+4. On success, a rollout deploys the new image.
+
+GitHub deployment statuses are updated on the commit so you can track progress from pull requests.
+
+## Build Process
+
+Agents build images using one of two methods:
+
+| Method | When Used |
+| --- | --- |
+| Railpack | No Dockerfile present — Railpack auto-detects the framework and generates a build plan |
+| Dockerfile | A `Dockerfile` exists in the repository (or specified root directory) |
+
+Images are built with BuildKit, tagged with the commit SHA, and pushed to the [private registry](/infrastructure/registry).
+
+Build statuses:
+
+| Status | Description |
+| --- | --- |
+| `pending` | Waiting for an available agent |
+| `claimed` | Agent has taken the build |
+| `cloning` | Cloning the repository |
+| `building` | Building the container image |
+| `pushing` | Pushing the image to the registry |
+| `completed` | Build succeeded |
+| `failed` | Build failed |
+| `cancelled` | Build was cancelled |
+
+Build logs stream to [Victoria Logs](/infrastructure/logging) in real time and are viewable from the web UI.

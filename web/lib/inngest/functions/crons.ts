@@ -11,7 +11,7 @@ import {
 import { inngest } from "../client";
 
 export const staleServerCheck = inngest.createFunction(
-	{ id: "cron-stale-server-check" },
+	{ id: "cron-stale-server-check", singleton: { mode: "skip" } },
 	{ cron: "*/5 * * * *" },
 	async ({ step }) => {
 		await step.run("check-stale-servers", async () => {
@@ -22,7 +22,7 @@ export const staleServerCheck = inngest.createFunction(
 );
 
 export const scheduledDeploymentsCheck = inngest.createFunction(
-	{ id: "cron-scheduled-deployments" },
+	{ id: "cron-scheduled-deployments", singleton: { mode: "skip" } },
 	{ cron: "*/15 * * * *" },
 	async ({ step }) => {
 		await step.run("check-scheduled-deployments", async () => {
@@ -33,7 +33,7 @@ export const scheduledDeploymentsCheck = inngest.createFunction(
 );
 
 export const certificateRenewal = inngest.createFunction(
-	{ id: "cron-certificate-renewal" },
+	{ id: "cron-certificate-renewal", singleton: { mode: "skip" } },
 	{ cron: "0 2 * * *" },
 	async ({ step }) => {
 		await step.run("renew-certificates", async () => {
@@ -44,7 +44,7 @@ export const certificateRenewal = inngest.createFunction(
 );
 
 export const challengeCleanup = inngest.createFunction(
-	{ id: "cron-challenge-cleanup" },
+	{ id: "cron-challenge-cleanup", singleton: { mode: "skip" } },
 	{ cron: "*/10 * * * *" },
 	async ({ step }) => {
 		await step.run("cleanup-challenges", async () => {
@@ -54,7 +54,7 @@ export const challengeCleanup = inngest.createFunction(
 );
 
 export const scheduledBackupsCheck = inngest.createFunction(
-	{ id: "cron-scheduled-backups" },
+	{ id: "cron-scheduled-backups", singleton: { mode: "skip" } },
 	{ cron: "*/15 * * * *" },
 	async ({ step }) => {
 		await step.run("check-scheduled-backups", async () => {
@@ -65,7 +65,7 @@ export const scheduledBackupsCheck = inngest.createFunction(
 );
 
 export const oldBackupsCleanup = inngest.createFunction(
-	{ id: "cron-old-backups-cleanup" },
+	{ id: "cron-old-backups-cleanup", singleton: { mode: "skip" } },
 	{ cron: "0 3 * * *" },
 	async ({ step }) => {
 		await step.run("cleanup-old-backups", async () => {
@@ -76,7 +76,7 @@ export const oldBackupsCleanup = inngest.createFunction(
 );
 
 export const staleItemsCleanup = inngest.createFunction(
-	{ id: "cron-stale-items-cleanup" },
+	{ id: "cron-stale-items-cleanup", singleton: { mode: "skip" } },
 	{ cron: "*/5 * * * *" },
 	async ({ step }) => {
 		await step.run("cleanup-stale-items", async () => {

@@ -1,0 +1,61 @@
+---
+title: "Configuration"
+description: "Environment variables, secrets, resource limits, and start commands."
+---
+
+## Source Type
+
+Each service is deployed from one of two sources:
+
+| Source | Description |
+| --- | --- |
+| `image` | Deploy a pre-built container image |
+| `github` | Build from a GitHub repository |
+
+For GitHub sources, you can specify the branch, root directory, and whether to auto-deploy on push. See [GitHub Integration](/deployments/github) for details.
+
+## Environment Variables & Secrets
+
+Secrets are encrypted at rest and injected into containers at runtime. They are never baked into images.
+
+Each secret has a key and an encrypted value, scoped to a single service. You can add, update, and remove secrets from the service settings in the web UI.
+
+Secrets are passed as environment variables to the container when it starts.
+
+## Start Command
+
+Override the container's default entrypoint by setting a custom start command. This is useful when deploying from pre-built images that need different startup behavior.
+
+## Resource Limits
+
+You can set CPU and memory limits per service:
+
+| Setting | Description |
+| --- | --- |
+| CPU limit | Maximum CPU cores (e.g., `0.5`, `1`, `2`) |
+| Memory limit | Maximum memory in MB (e.g., `256`, `512`, `1024`) |
+
+When no limits are set, the container uses whatever resources are available on the host.
+
+## Health Checks
+
+Health checks verify that a container is ready to receive traffic. When configured, the platform waits for the health check to pass before routing traffic to a new deployment.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Command | — | Shell command to run inside the container |
+| Interval | `10s` | Time between checks |
+| Timeout | `5s` | Maximum time for a single check |
+| Retries | `3` | Consecutive failures before marking unhealthy |
+| Start period | `30s` | Grace period after container start before checks count |
+
+Health check statuses:
+
+| Status | Description |
+| --- | --- |
+| `none` | No health check configured |
+| `starting` | Within the start period |
+| `healthy` | Check is passing |
+| `unhealthy` | Check has failed after retries |
+
+If no health check command is set, the deployment proceeds immediately after the container starts.

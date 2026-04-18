@@ -1,0 +1,24 @@
+{
+	"name": "techulus-cli",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+"scripts": {
+		"dev": "node --import tsx src/main.ts",
+		"build": "bun build src/main.ts --compile --outfile dist/tcloud",
+		"build:linux-x64": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/tcloud-linux-x64",
+		"build:linux-arm64": "bun build src/main.ts --compile --target=bun-linux-arm64 --outfile dist/tcloud-linux-arm64",
+		"build:darwin-x64": "bun build src/main.ts --compile --target=bun-darwin-x64 --outfile dist/tcloud-darwin-x64",
+		"build:darwin-arm64": "bun build src/main.ts --compile --target=bun-darwin-arm64 --outfile dist/tcloud-darwin-arm64",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"yaml": "^2.8.2",
+		"zod": "^4.3.5"
+	},
+	"devDependencies": {
+		"@types/node": "^22.17.0",
+		"tsx": "^4.19.2",
+		"typescript": "^5.9.2"
+	}
+}

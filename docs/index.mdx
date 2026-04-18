@@ -1,0 +1,39 @@
+---
+title: "Introduction"
+description: "Techulus Cloud is an open-source, self-hosted container deployment platform with private networking."
+---
+
+Techulus Cloud is an open-source container deployment platform that you host on your own infrastructure. It turns any set of machines — bare metal servers, cloud VMs, or Raspberry Pis — into a private container platform with encrypted networking, automatic HTTPS, and zero-downtime deployments.
+
+## How It Works
+
+Every machine in your cluster runs a lightweight **agent** that pulls its expected state from a central **control plane** and reconciles containers, networking, and routing automatically. There are no master nodes or schedulers to manage — each server operates independently.
+
+Machines are assigned one of two roles:
+
+- **Proxy nodes** handle public traffic, terminate TLS, and route requests to containers.
+- **Worker nodes** run containers with no public exposure.
+
+All communication between nodes happens over an encrypted **WireGuard mesh network**. Services discover each other via `.internal` DNS — no hardcoded IPs or service mesh required.
+
+## Key Features
+
+- **Private by default** — services communicate over WireGuard. Nothing is exposed publicly unless you configure it.
+- **Build from source** — push code and build with Railpack or your own Dockerfile. Or deploy pre-built images.
+- **GitHub auto-deploy** — connect a repo and deploy on every push.
+- **Automatic HTTPS** — TLS certificates are provisioned and renewed automatically via Let's Encrypt.
+- **Persistent volumes** — attach named volumes for stateful workloads with scheduled backups to S3-compatible storage.
+- **Service discovery** — containers resolve each other by name using `.internal` domains.
+- **Multi-environment** — run production, staging, and dev within the same project.
+- **GeoDNS** — route users to the nearest proxy node with automatic failover.
+- **TCP/UDP proxy** — expose non-HTTP services like databases or game servers.
+
+## Next Steps
+
+<Card title="Architecture" icon="map" href="/architecture" horizontal>
+  Learn how the control plane, agents, networking, and rollout lifecycle fit together.
+</Card>
+
+<Card title="Agent" icon="server" href="/agent" horizontal>
+  Understand how the agent reconciles state, builds images, and manages containers.
+</Card>

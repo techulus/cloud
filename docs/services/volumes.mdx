@@ -1,0 +1,47 @@
+---
+title: "Volumes"
+description: "Persistent storage for stateful services."
+---
+
+Volumes provide persistent storage that survives container restarts and redeployments.
+
+## Adding Volumes
+
+Each volume has a name and a container path:
+
+| Field | Description |
+| --- | --- |
+| Name | Unique identifier for the volume |
+| Container path | Where the volume is mounted inside the container (e.g., `/var/lib/postgresql/data`) |
+
+When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica. When the last volume is removed, the service reverts to stateless.
+
+## Volume Backups
+
+Volumes can be backed up to S3-compatible storage on a schedule or on demand.
+
+| Setting | Description |
+| --- | --- |
+| Backup enabled | Toggle automatic backups |
+| Backup schedule | Cron expression for backup frequency |
+
+Backups are compressed as `.tar.gz` archives and uploaded to the configured [backup storage](/infrastructure/backups). Each backup tracks its size, checksum, and completion status.
+
+Backup statuses:
+
+| Status | Description |
+| --- | --- |
+| `pending` | Backup queued |
+| `uploading` | Uploading to storage |
+| `completed` | Successfully stored |
+| `failed` | Backup failed |
+
+## Restoring
+
+You can restore a volume from any completed backup. The restore process downloads the backup archive from storage and extracts it to the volume path on the target server.
+
+## Limitations
+
+- Services with volumes are locked to a single server — they cannot be auto-placed across multiple nodes.
+- Replica count is fixed at 1 for stateful services.
+- Volume data lives on the host filesystem. If the server is lost, data is only recoverable from backups.

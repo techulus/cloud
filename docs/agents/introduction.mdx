@@ -1,0 +1,50 @@
+---
+title: "Introduction"
+description: "What the agent does, node types, and how it communicates with the control plane."
+---
+
+The agent is a lightweight Go binary that runs on every server in your cluster. It polls the control plane for expected state and reconciles containers, networking, and routing automatically.
+
+## Node Types
+
+Each agent runs in one of two modes:
+
+| Type | Flag | Traefik | Description |
+| --- | --- | --- | --- |
+| Worker | Default | No | Runs containers only |
+| Proxy | `--proxy` | Yes | Handles TLS and public traffic |
+
+### Proxy Node
+
+- Runs Traefik for TLS termination.
+- Receives Traefik routes from the control plane.
+- Handles public traffic and routes requests to containers over WireGuard.
+- Collects and ships Traefik access logs.
+
+### Worker Node
+
+- Does not run Traefik.
+- Receives empty Traefik route sets from the control plane.
+- Skips Traefik-related drift detection and reconciliation.
+- Keeps a lighter runtime footprint focused on container workloads.
+
+## Container Labels
+
+The agent tracks managed containers with Podman labels:
+
+| Label | Description |
+| --- | --- |
+| `techulus.deployment.id` | Links the container to a deployment |
+| `techulus.service.id` | Links the container to a service |
+| `techulus.service.name` | Human-readable service name |
+
+Containers without `techulus.deployment.id` are treated as orphans and cleaned up.
+
+## Command Line Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--url` | Required | Control plane URL |
+| `--token` | Empty | Registration token, required on first run |
+| `--logs-endpoint` | Empty | VictoriaLogs endpoint for log shipping |
+| `--proxy` | `false` | Run as a proxy node |
