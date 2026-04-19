@@ -65,7 +65,7 @@ func (a *Agent) Run(ctx context.Context) {
 }
 
 func (a *Agent) StatusReportLoop(ctx context.Context) {
-	report := a.BuildStatusReport(false)
+	report := a.BuildStatusReport(true)
 	if err := a.Client.ReportStatus(report); err != nil {
 		log.Printf("[status] failed to report: %v", err)
 	}
@@ -78,7 +78,7 @@ func (a *Agent) StatusReportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			report := a.BuildStatusReport(false)
+			report := a.BuildStatusReport(true)
 			if err := a.Client.ReportStatus(report); err != nil {
 				log.Printf("[status] failed to report: %v", err)
 			}
