@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { servers } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { inngest } from "@/lib/inngest/client";
-import type { StatusReport } from "@/lib/agent-status";
+import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -29,18 +25,7 @@ export async function POST(request: NextRequest) {
 
 	const { serverId } = auth;
 
-	await db
-		.update(servers)
-		.set({ lastHeartbeat: new Date(), status: "online" })
-		.where(eq(servers.id, serverId));
+	await applyStatusReport(serverId, data.statusReport);
 
-	await inngest.send({
-		name: "agent/status-reported",
-		data: {
-			serverId,
-			report: data.statusReport,
-		},
-	});
-
-	return NextResponse.json({ ok: true }, { status: 202 });
+	return NextResponse.json({ ok: true });
 }
