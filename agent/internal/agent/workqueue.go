@@ -28,7 +28,7 @@ func (a *Agent) ProcessWorkQueue() {
 		case "stop":
 			processErr = a.ProcessStop(item)
 		case "deploy":
-			log.Printf("[work-queue] deploy handled via expected state reconciliation, marking complete")
+			a.RequestReconcile("deploy work item " + Truncate(item.ID, 8))
 		case "force_cleanup":
 			processErr = a.ProcessForceCleanup(item)
 		case "cleanup_volumes":

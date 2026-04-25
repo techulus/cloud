@@ -24,6 +24,48 @@ func (a *Agent) Tick() {
 	}
 }
 
+func (a *Agent) RequestReconcile(reason string) {
+	if a.GetState() == StateProcessing {
+		a.requestExpectedStateRefresh()
+		log.Printf("[reconcile] refresh requested during processing: %s", reason)
+	} else {
+		log.Printf("[reconcile] immediate reconcile requested: %s", reason)
+	}
+
+	select {
+	case a.reconcileRequested <- struct{}{}:
+	default:
+	}
+}
+
+func (a *Agent) requestExpectedStateRefresh() {
+	a.refreshMutex.Lock()
+	defer a.refreshMutex.Unlock()
+	a.pendingExpectedStateRefresh = true
+}
+
+func (a *Agent) consumeExpectedStateRefresh() bool {
+	a.refreshMutex.Lock()
+	defer a.refreshMutex.Unlock()
+
+	if !a.pendingExpectedStateRefresh {
+		return false
+	}
+
+	a.pendingExpectedStateRefresh = false
+	return true
+}
+
+func (a *Agent) transitionToIdle() {
+	a.SetState(StateIdle)
+	if a.consumeExpectedStateRefresh() {
+		log.Printf("[processing] fetching latest expected state after pending refresh")
+		// A deploy wake can arrive while processing a previous snapshot. Run one
+		// immediate idle pass after processing to pick up the latest expected state.
+		a.handleIdle()
+	}
+}
+
 func (a *Agent) handleIdle() {
 	expected, fromCache, err := a.Client.GetExpectedStateWithFallback()
 	if err != nil {
@@ -61,14 +103,14 @@ func (a *Agent) handleIdle() {
 func (a *Agent) handleProcessing() {
 	if time.Since(a.processingStart) > ProcessingTimeout {
 		log.Printf("[processing] timeout after %v, forcing transition to IDLE", ProcessingTimeout)
-		a.SetState(StateIdle)
+		a.transitionToIdle()
 		return
 	}
 
 	actual, err := a.getActualState()
 	if err != nil {
 		log.Printf("[processing] failed to get actual state: %v", err)
-		a.SetState(StateIdle)
+		a.transitionToIdle()
 		return
 	}
 
@@ -76,16 +118,18 @@ func (a *Agent) handleProcessing() {
 
 	if len(a.detectChanges(a.expectedState, actual)) == 0 {
 		log.Printf("[processing] state converged, transitioning to IDLE")
-		a.SetState(StateIdle)
+		a.transitionToIdle()
 		return
 	}
 
 	err = a.reconcileOne(actual)
 	if err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
-		a.SetState(StateIdle)
+		a.transitionToIdle()
 		return
 	}
+
+	a.RequestStatusReport("reconcile completed")
 }
 
 func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {

@@ -384,6 +384,7 @@ export async function createDeploymentRecords(
 			}));
 
 			await enqueueWork(server.id, "deploy", {
+				reason: "rollout_deployment_created",
 				deploymentId,
 				serviceId,
 				serviceName: service.name,

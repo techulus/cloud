@@ -1,18 +1,18 @@
 "use client";
 
-import { memo, useMemo, useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, XCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { abortRollout } from "@/actions/projects";
 import { cancelMigration } from "@/actions/migrations";
+import { abortRollout } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import type { ConfigChange } from "@/lib/service-config";
 import type {
 	DeploymentStatus,
 	ServiceWithDetails as Service,
 } from "@/db/types";
+import type { ConfigChange } from "@/lib/service-config";
 
 type StageInfo = {
 	id: string;
@@ -278,6 +278,9 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 		const isMigrationFailed = service.migrationStatus === "failed";
 
 		let status = currentStage?.label || "Deploying";
+		if (barState.stage === "health_check" && !service.healthCheckCmd) {
+			status = "Starting container";
+		}
 		if (isMigrating && service.migrationStatus) {
 			status =
 				MIGRATION_STAGES[service.migrationStatus] ||

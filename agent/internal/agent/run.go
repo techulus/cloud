@@ -56,6 +56,13 @@ func (a *Agent) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.Tick()
+		case <-a.reconcileRequested:
+			if a.GetState() == StateProcessing {
+				a.requestExpectedStateRefresh()
+			} else {
+				a.consumeExpectedStateRefresh()
+			}
+			a.Tick()
 		case <-logTickerC:
 			a.CollectLogs()
 		case <-cleanupTickerC:
@@ -65,10 +72,7 @@ func (a *Agent) Run(ctx context.Context) {
 }
 
 func (a *Agent) StatusReportLoop(ctx context.Context) {
-	report := a.BuildStatusReport(true)
-	if err := a.Client.ReportStatus(report); err != nil {
-		log.Printf("[status] failed to report: %v", err)
-	}
+	a.reportStatus("startup")
 
 	ticker := time.NewTicker(WorkQueueStatusInterval)
 	defer ticker.Stop()
@@ -78,12 +82,29 @@ func (a *Agent) StatusReportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			report := a.BuildStatusReport(true)
-			if err := a.Client.ReportStatus(report); err != nil {
-				log.Printf("[status] failed to report: %v", err)
-			}
+			a.reportStatus("periodic")
+		case reason := <-a.statusReportRequested:
+			a.reportStatus(reason)
 		}
 	}
+}
+
+func (a *Agent) RequestStatusReport(reason string) {
+	log.Printf("[status] immediate report requested: %s", reason)
+	select {
+	case a.statusReportRequested <- reason:
+	default:
+		log.Printf("[status] immediate report already queued, dropping reason: %s", reason)
+	}
+}
+
+func (a *Agent) reportStatus(reason string) {
+	report := a.BuildStatusReport(true)
+	if err := a.Client.ReportStatus(report); err != nil {
+		log.Printf("[status] failed to report (%s): %v", reason, err)
+		return
+	}
+	log.Printf("[status] reported (%s)", reason)
 }
 
 func (a *Agent) WorkQueueLoop(ctx context.Context) {

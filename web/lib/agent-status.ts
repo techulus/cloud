@@ -1,16 +1,16 @@
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
-	deployments,
+	type AgentHealth,
+	type ContainerHealth,
 	deploymentPorts,
-	servers,
-	services,
-	rollouts,
+	deployments,
 	type HealthStats,
 	type NetworkHealth,
-	type ContainerHealth,
-	type AgentHealth,
+	rollouts,
+	servers,
+	services,
 } from "@/db/schema";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { inngest } from "@/lib/inngest/client";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 
