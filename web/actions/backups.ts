@@ -1,29 +1,37 @@
 "use server";
 
 import { desc, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { volumeBackups, servers } from "@/db/schema";
 import { revalidatePath } from "next/cache";
-import { deleteFromS3 } from "@/lib/s3";
+import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
+import { servers, volumeBackups } from "@/db/schema";
+import { triggerBackup } from "@/lib/backups/trigger-backup";
 import { inngest } from "@/lib/inngest/client";
+import { deleteFromS3 } from "@/lib/s3";
 
 export async function createBackup(
 	serviceId: string,
 	volumeId: string,
 	backupTypeOverride?: "volume" | "database",
 ) {
+	const result = await triggerBackup({
+		serviceId,
+		volumeId,
+		backupTypeOverride,
+	});
+
 	await inngest.send({
-		name: "backup/trigger",
+		name: "backup/started",
 		data: {
+			backupId: result.backupId,
 			serviceId,
 			volumeId,
-			backupTypeOverride,
+			serverId: result.serverId,
 		},
 	});
 
 	revalidatePath(`/dashboard/projects`);
-	return { success: true };
+	return { success: true, backupId: result.backupId };
 }
 
 export async function listBackups(serviceId: string) {
@@ -66,23 +74,31 @@ export async function restoreBackup(
 
 export async function deleteBackup(backupId: string) {
 	const backup = await db
-		.select({ storagePath: volumeBackups.storagePath })
+		.select({
+			status: volumeBackups.status,
+			storagePath: volumeBackups.storagePath,
+		})
 		.from(volumeBackups)
 		.where(eq(volumeBackups.id, backupId))
 		.then((r) => r[0]);
 
-	if (backup?.storagePath) {
+	await db.delete(volumeBackups).where(eq(volumeBackups.id, backupId));
+	revalidatePath(`/dashboard/projects`);
+
+	if (backup?.status === "completed" && backup.storagePath) {
 		const storageConfig = await getBackupStorageConfig();
 		if (storageConfig) {
 			try {
 				await deleteFromS3(storageConfig.bucket, backup.storagePath);
 			} catch (err) {
-				console.error("[deleteBackup] failed to delete from S3:", err);
+				console.error("[deleteBackup] failed to delete from S3:", {
+					backupId,
+					storagePath: backup.storagePath,
+					err,
+				});
 			}
 		}
 	}
 
-	await db.delete(volumeBackups).where(eq(volumeBackups.id, backupId));
-	revalidatePath(`/dashboard/projects`);
 	return { success: true };
 }

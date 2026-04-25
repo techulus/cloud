@@ -1,16 +1,10 @@
-import { db } from "@/db";
-import {
-	services,
-	serviceVolumes,
-	volumeBackups,
-	deployments,
-} from "@/db/schema";
-import { eq, and, lt, desc } from "drizzle-orm";
-import { getBackupStorageConfig } from "@/db/queries";
-import { enqueueWork } from "@/lib/work-queue";
-import { randomUUID } from "node:crypto";
-import { DEFAULT_BACKUP_RETENTION_DAYS } from "@/lib/settings-keys";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { deleteBackup } from "@/actions/backups";
+import { db } from "@/db";
+import { getBackupStorageConfig } from "@/db/queries";
+import { services, serviceVolumes, volumeBackups } from "@/db/schema";
+import { triggerBackup } from "@/lib/backups/trigger-backup";
+import { DEFAULT_BACKUP_RETENTION_DAYS } from "@/lib/settings-keys";
 
 function shouldRunSchedule(
 	schedule: string,
@@ -84,31 +78,6 @@ export async function runScheduledBackups() {
 				continue;
 			}
 
-			const deployment = await db
-				.select({
-					serverId: deployments.serverId,
-					containerId: deployments.containerId,
-				})
-				.from(deployments)
-				.where(
-					and(
-						eq(deployments.serviceId, service.id),
-						eq(deployments.status, "running"),
-					),
-				)
-				.then((r) => r[0]);
-
-			if (!deployment?.serverId) {
-				continue;
-			}
-
-			if (!deployment.containerId) {
-				console.error(
-					`[backup-scheduler] deployment for ${service.name} is missing container ID`,
-				);
-				continue;
-			}
-
 			for (const volume of volumes) {
 				const lastBackup = await db
 					.select({ createdAt: volumeBackups.createdAt })
@@ -132,33 +101,9 @@ export async function runScheduledBackups() {
 					continue;
 				}
 
-				const backupId = randomUUID();
-				const storagePath = `backups/${service.id}/${volume.name}/${backupId}.tar.gz`;
-
-				await db.insert(volumeBackups).values({
-					id: backupId,
+				await triggerBackup({
+					serviceId: service.id,
 					volumeId: volume.id,
-					volumeName: volume.name,
-					serviceId: service.id,
-					serverId: deployment.serverId,
-					status: "pending",
-					storagePath,
-				});
-
-				await enqueueWork(deployment.serverId, "backup_volume", {
-					backupId,
-					serviceId: service.id,
-					containerId: deployment.containerId,
-					volumeName: volume.name,
-					storagePath,
-					storageConfig: {
-						provider: storageConfig.provider,
-						bucket: storageConfig.bucket,
-						region: storageConfig.region,
-						endpoint: storageConfig.endpoint,
-						accessKey: storageConfig.accessKey,
-						secretKey: storageConfig.secretKey,
-					},
 				});
 
 				console.log(

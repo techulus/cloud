@@ -1,24 +1,23 @@
 import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
 import {
+	backupWorkflow,
+	buildTriggerWorkflow,
+	buildWorkflow,
 	certificateRenewal,
 	challengeCleanup,
+	migrationWorkflow,
 	oldBackupsCleanup,
+	onBackupFailed,
 	onDeploymentFailed,
+	onRestoreFailed,
+	restoreTriggerWorkflow,
+	restoreWorkflow,
 	rolloutWorkflow,
 	scheduledBackupsCheck,
 	scheduledDeploymentsCheck,
 	staleItemsCleanup,
 	staleServerCheck,
-	migrationWorkflow,
-	backupWorkflow,
-	onBackupFailed,
-	restoreWorkflow,
-	onRestoreFailed,
-	buildWorkflow,
-	buildTriggerWorkflow,
-	backupTriggerWorkflow,
-	restoreTriggerWorkflow,
 } from "@/lib/inngest/functions";
 
 export const { GET, POST, PUT } = serve({
@@ -40,7 +39,6 @@ export const { GET, POST, PUT } = serve({
 		onRestoreFailed,
 		buildWorkflow,
 		buildTriggerWorkflow,
-		backupTriggerWorkflow,
 		restoreTriggerWorkflow,
 	],
 });
