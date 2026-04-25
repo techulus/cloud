@@ -40,9 +40,15 @@ export type ResourceLimitsConfig = {
 	memoryMb?: number | null;
 };
 
+export type PlacementConfig = {
+	autoPlace: boolean;
+	replicas: number;
+};
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	hostname?: string;
+	placement?: PlacementConfig;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	startCommand?: string | null;
@@ -71,6 +77,8 @@ export function buildCurrentConfig(
 		startCommand: string | null;
 		resourceCpuLimit: number | null;
 		resourceMemoryLimitMb: number | null;
+		autoPlace: boolean;
+		replicas: number;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: { port: number; isPublic: boolean; domain: string | null }[],
@@ -86,6 +94,12 @@ export function buildCurrentConfig(
 			image: service.image,
 		},
 		hostname: service.hostname ?? undefined,
+		placement: {
+			autoPlace: service.autoPlace,
+			replicas: service.autoPlace
+				? service.replicas
+				: replicas.reduce((sum, r) => sum + r.count, 0),
+		},
 		replicas: replicas.map((r) => ({
 			serverId: r.serverId,
 			serverName: r.serverName,
@@ -138,12 +152,20 @@ export function diffConfigs(
 				to: current.source.image,
 			});
 		}
-		for (const replica of current.replicas) {
+		if (current.placement?.autoPlace) {
 			changes.push({
-				field: `${replica.serverName} replicas`,
+				field: "Replicas",
 				from: "0",
-				to: String(replica.count),
+				to: String(current.placement.replicas),
 			});
+		} else {
+			for (const replica of current.replicas) {
+				changes.push({
+					field: `${replica.serverName} replicas`,
+					from: "0",
+					to: String(replica.count),
+				});
+			}
 		}
 		if (current.healthCheck) {
 			changes.push({
@@ -214,37 +236,71 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedReplicasMap = new Map(
-		(deployed.replicas || []).map((r) => [r.serverId, r]),
-	);
-	const currentReplicasMap = new Map(
-		(current.replicas || []).map((r) => [r.serverId, r]),
+	const deployedTotalReplicas = (deployed.replicas || []).reduce(
+		(sum, r) => sum + r.count,
+		0,
 	);
 
-	for (const [serverId, currentReplica] of currentReplicasMap) {
-		const deployedReplica = deployedReplicasMap.get(serverId);
-		if (!deployedReplica) {
+	if (current.placement?.autoPlace) {
+		if (deployed.placement && !deployed.placement.autoPlace) {
 			changes.push({
-				field: `${currentReplica.serverName} replicas`,
-				from: "0",
-				to: String(currentReplica.count),
-			});
-		} else if (deployedReplica.count !== currentReplica.count) {
-			changes.push({
-				field: `${currentReplica.serverName} replicas`,
-				from: String(deployedReplica.count),
-				to: String(currentReplica.count),
+				field: "Placement",
+				from: "Manual",
+				to: "Auto-placement",
 			});
 		}
-	}
 
-	for (const [serverId, deployedReplica] of deployedReplicasMap) {
-		if (!currentReplicasMap.has(serverId)) {
+		const deployedReplicaCount =
+			deployed.placement?.replicas ?? deployedTotalReplicas;
+
+		if (deployedReplicaCount !== current.placement.replicas) {
 			changes.push({
-				field: `${deployedReplica.serverName} replicas`,
-				from: String(deployedReplica.count),
-				to: "0 (removed)",
+				field: "Replicas",
+				from: String(deployedReplicaCount),
+				to: String(current.placement.replicas),
 			});
+		}
+	} else {
+		if (deployed.placement?.autoPlace) {
+			changes.push({
+				field: "Placement",
+				from: "Auto-placement",
+				to: "Manual",
+			});
+		}
+
+		const deployedReplicasMap = new Map(
+			(deployed.replicas || []).map((r) => [r.serverId, r]),
+		);
+		const currentReplicasMap = new Map(
+			(current.replicas || []).map((r) => [r.serverId, r]),
+		);
+
+		for (const [serverId, currentReplica] of currentReplicasMap) {
+			const deployedReplica = deployedReplicasMap.get(serverId);
+			if (!deployedReplica) {
+				changes.push({
+					field: `${currentReplica.serverName} replicas`,
+					from: "0",
+					to: String(currentReplica.count),
+				});
+			} else if (deployedReplica.count !== currentReplica.count) {
+				changes.push({
+					field: `${currentReplica.serverName} replicas`,
+					from: String(deployedReplica.count),
+					to: String(currentReplica.count),
+				});
+			}
+		}
+
+		for (const [serverId, deployedReplica] of deployedReplicasMap) {
+			if (!currentReplicasMap.has(serverId)) {
+				changes.push({
+					field: `${deployedReplica.serverName} replicas`,
+					from: String(deployedReplica.count),
+					to: "0 (removed)",
+				});
+			}
 		}
 	}
 

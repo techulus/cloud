@@ -5,7 +5,10 @@ import { eq, and, inArray } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 
 const MAX_TIMEOUT = 30000;
-const POLL_INTERVAL = 2000;
+// Short interval keeps deploy wake latency low for now, but increases empty
+// polling load. Replace with Postgres LISTEN/NOTIFY or another wake mechanism
+// before scaling this broadly.
+const POLL_INTERVAL = 500;
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));

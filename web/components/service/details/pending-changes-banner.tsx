@@ -1,14 +1,15 @@
 "use client";
 
-import { memo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, Rocket } from "lucide-react";
-import { deployService } from "@/actions/projects";
+import { useRouter } from "next/navigation";
+import { memo, useState } from "react";
+import { useSWRConfig } from "swr";
 import { triggerBuild } from "@/actions/builds";
+import { deployService } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import type { ConfigChange } from "@/lib/service-config";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import type { ConfigChange } from "@/lib/service-config";
 
 interface PendingChangesBannerProps {
 	service: Service;
@@ -28,6 +29,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 	barMode,
 }: PendingChangesBannerProps) {
 	const router = useRouter();
+	const { mutate } = useSWRConfig();
 	const [isDeploying, setIsDeploying] = useState(false);
 
 	const totalReplicas = service.autoPlace
@@ -52,6 +54,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 				);
 			} else {
 				await deployService(service.id);
+				await mutate(`/api/services/${service.id}/rollouts`);
 			}
 			onUpdate();
 		} finally {
@@ -83,7 +86,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 									</p>
 									{hasChanges ? (
 										<div className="mt-2 space-y-1.5">
-											{changes.map((change, i) => (
+											{changes.map((change) => (
 												<div
 													key={change.field}
 													className="flex items-center gap-2 text-sm"

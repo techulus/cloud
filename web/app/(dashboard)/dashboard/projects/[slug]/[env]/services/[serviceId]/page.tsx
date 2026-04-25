@@ -1,23 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
 import {
+	AlertTriangleIcon,
 	ChevronDownIcon,
+	PlayIcon,
 	RefreshCwIcon,
 	RotateCcwIcon,
-	PlayIcon,
 	StopCircleIcon,
 	Trash2Icon,
-	AlertTriangleIcon,
 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import {
 	deleteDeployments,
 	deployService,
 	restartService,
 	stopService,
 } from "@/actions/projects";
-import { useService } from "@/components/service/service-layout-client";
 import { DeploymentCanvas } from "@/components/service/details/deployment-canvas";
 import {
 	DeploymentProgress,
@@ -25,15 +25,7 @@ import {
 } from "@/components/service/details/deployment-progress";
 import { PendingChangesBanner } from "@/components/service/details/pending-changes-banner";
 import { RolloutHistory } from "@/components/service/details/rollout-history";
-import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useService } from "@/components/service/service-layout-client";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -45,12 +37,22 @@ import {
 	AlertDialogMedia,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type ConfirmAction = "redeploy" | "stop" | "delete" | null;
 
 export default function DeploymentsPage() {
 	const { service, pendingChanges, projectSlug, envName, onUpdate } =
 		useService();
+	const { mutate: mutateCache } = useSWRConfig();
 	const [isLoading, setIsLoading] = useState<string | null>(null);
 	const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
 
@@ -67,6 +69,9 @@ export default function DeploymentsPage() {
 			await action();
 			if (successMessage) {
 				toast.success(successMessage);
+			}
+			if (actionName === "redeploy" || actionName === "start") {
+				await mutateCache(`/api/services/${service.id}/rollouts`);
 			}
 			onUpdate();
 		} catch (error) {

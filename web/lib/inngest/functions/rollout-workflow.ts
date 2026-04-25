@@ -1,21 +1,21 @@
 import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, rollouts } from "@/db/schema";
 import { getService } from "@/db/queries";
-import { inngest } from "../client";
-import { handleRolloutFailure } from "./rollout-utils";
+import { deployments, rollouts } from "@/db/schema";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
+import { inngest } from "../client";
 import {
 	calculateServicePlacements,
-	validateServers,
-	prepareRollingUpdate,
+	checkForRollingUpdate,
 	cleanupExistingDeployments,
 	cleanupTerminalDeployments,
-	issueCertificatesForService,
 	createDeploymentRecords,
+	issueCertificatesForService,
+	prepareRollingUpdate,
 	saveDeployedConfig,
-	checkForRollingUpdate,
+	validateServers,
 } from "./rollout-helpers";
+import { handleRolloutFailure } from "./rollout-utils";
 
 export const rolloutWorkflow = inngest.createFunction(
 	{
@@ -195,6 +195,9 @@ export const rolloutWorkflow = inngest.createFunction(
 		});
 
 		await step.run("start-health-check", async () => {
+			const service = await getService(serviceId);
+			const hasHealthCheck = service?.healthCheckCmd != null;
+
 			await db
 				.update(rollouts)
 				.set({ currentStage: "health_check" })
@@ -203,12 +206,34 @@ export const rolloutWorkflow = inngest.createFunction(
 				rolloutId,
 				serviceId,
 				"health_check",
-				"Waiting for health checks",
+				hasHealthCheck ? "Waiting for health checks" : "Starting container",
 			);
 		});
 
+		const pendingHealthDeploymentIds = await step.run(
+			"get-pending-health-deployments",
+			async () => {
+				if (deploymentIds.length === 0) {
+					return [];
+				}
+
+				const alreadyHealthy = await db
+					.select({ id: deployments.id })
+					.from(deployments)
+					.where(
+						and(
+							inArray(deployments.id, deploymentIds),
+							inArray(deployments.status, ["healthy", "running"]),
+						),
+					);
+
+				const alreadyHealthyIds = new Set(alreadyHealthy.map((d) => d.id));
+				return deploymentIds.filter((id) => !alreadyHealthyIds.has(id));
+			},
+		);
+
 		const healthResults = await Promise.all(
-			deploymentIds.map((deploymentId) =>
+			pendingHealthDeploymentIds.map((deploymentId) =>
 				step.waitForEvent(`wait-healthy-${deploymentId}`, {
 					event: "deployment/healthy",
 					timeout: "10m",
@@ -219,7 +244,7 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const timedOutIndex = healthResults.indexOf(null);
 		if (timedOutIndex !== -1) {
-			const failedDeploymentId = deploymentIds[timedOutIndex];
+			const failedDeploymentId = pendingHealthDeploymentIds[timedOutIndex];
 			await step.run("log-health-timeout", async () => {
 				await ingestRolloutLog(
 					rolloutId,
