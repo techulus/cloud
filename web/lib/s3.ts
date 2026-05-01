@@ -1,5 +1,7 @@
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getBackupStorageConfig } from "@/db/queries";
+
+const DEFAULT_S3_DELETE_TIMEOUT_MS = 15000;
 
 let cachedClient: S3Client | null = null;
 let cachedConfigHash: string | null = null;
@@ -39,16 +41,23 @@ export async function getS3Client(): Promise<S3Client | null> {
 	return cachedClient;
 }
 
-export async function deleteFromS3(bucket: string, key: string): Promise<void> {
+export async function deleteFromS3(
+	bucket: string,
+	key: string,
+	timeoutMs = DEFAULT_S3_DELETE_TIMEOUT_MS,
+): Promise<void> {
 	const client = await getS3Client();
 	if (!client) {
 		throw new Error("S3 client not configured");
 	}
+
+	const abortSignal = AbortSignal.timeout(timeoutMs);
 
 	await client.send(
 		new DeleteObjectCommand({
 			Bucket: bucket,
 			Key: key,
 		}),
+		{ abortSignal },
 	);
 }

@@ -1,3 +1,6 @@
+export { backupWorkflow, onBackupFailed } from "./backup-workflow";
+export { buildTriggerWorkflow } from "./build-trigger-workflow";
+export { buildWorkflow } from "./build-workflow";
 export {
 	certificateRenewal,
 	challengeCleanup,
@@ -7,12 +10,8 @@ export {
 	staleItemsCleanup,
 	staleServerCheck,
 } from "./crons";
-export { onDeploymentFailed } from "./on-deployment-failed";
-export { rolloutWorkflow } from "./rollout-workflow";
 export { migrationWorkflow } from "./migration-workflow";
-export { backupWorkflow, onBackupFailed } from "./backup-workflow";
-export { restoreWorkflow, onRestoreFailed } from "./restore-workflow";
-export { buildWorkflow } from "./build-workflow";
-export { buildTriggerWorkflow } from "./build-trigger-workflow";
-export { backupTriggerWorkflow } from "./backup-trigger-workflow";
+export { onDeploymentFailed } from "./on-deployment-failed";
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
+export { onRestoreFailed, restoreWorkflow } from "./restore-workflow";
+export { rolloutWorkflow } from "./rollout-workflow";

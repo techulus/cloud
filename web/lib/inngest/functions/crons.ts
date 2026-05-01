@@ -45,7 +45,7 @@ export const certificateRenewal = inngest.createFunction(
 
 export const challengeCleanup = inngest.createFunction(
 	{ id: "cron-challenge-cleanup", singleton: { mode: "skip" } },
-	{ cron: "*/10 * * * *" },
+	{ cron: "0 * * * *" },
 	async ({ step }) => {
 		await step.run("cleanup-challenges", async () => {
 			await cleanupExpiredChallenges();
@@ -77,7 +77,7 @@ export const oldBackupsCleanup = inngest.createFunction(
 
 export const staleItemsCleanup = inngest.createFunction(
 	{ id: "cron-stale-items-cleanup", singleton: { mode: "skip" } },
-	{ cron: "*/5 * * * *" },
+	{ cron: "*/15 * * * *" },
 	async ({ step }) => {
 		await step.run("cleanup-stale-items", async () => {
 			console.log("[cron] cleaning up stale items");

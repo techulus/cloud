@@ -1,11 +1,4 @@
 export type BackupEvents = {
-	"backup/trigger": {
-		data: {
-			serviceId: string;
-			volumeId: string;
-			backupTypeOverride?: "volume" | "database";
-		};
-	};
 	"backup/started": {
 		data: {
 			backupId: string;
