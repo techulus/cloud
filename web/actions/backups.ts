@@ -7,6 +7,7 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { servers, volumeBackups } from "@/db/schema";
 import { triggerBackup } from "@/lib/backups/trigger-backup";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 import { deleteFromS3 } from "@/lib/s3";
 
 export async function createBackup(
@@ -20,15 +21,14 @@ export async function createBackup(
 		backupTypeOverride,
 	});
 
-	await inngest.send({
-		name: "backup/started",
-		data: {
+	await inngest.send(
+		inngestEvents.backupStarted.create({
 			backupId: result.backupId,
 			serviceId,
 			volumeId,
 			serverId: result.serverId,
-		},
-	});
+		}),
+	);
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true, backupId: result.backupId };
@@ -59,14 +59,13 @@ export async function restoreBackup(
 	backupId: string,
 	targetServerId?: string,
 ) {
-	await inngest.send({
-		name: "restore/trigger",
-		data: {
+	await inngest.send(
+		inngestEvents.restoreTrigger.create({
 			serviceId,
 			backupId,
 			targetServerId,
-		},
-	});
+		}),
+	);
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };

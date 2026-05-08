@@ -4,6 +4,7 @@ import { volumeBackups } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 import { revalidatePath } from "next/cache";
 
 export async function POST(request: NextRequest) {
@@ -50,26 +51,24 @@ export async function POST(request: NextRequest) {
 
 	revalidatePath("/dashboard/projects");
 
-	await inngest.send({
-		name: "backup/failed",
-		data: {
+	await inngest.send(
+		inngestEvents.backupFailed.create({
 			backupId,
 			volumeId: backup.volumeId,
 			serviceId: backup.serviceId,
 			error: error || "Unknown error",
 			isMigrationBackup: backup.isMigrationBackup ?? false,
-		},
-	});
+		}),
+	);
 
 	if (backup.isMigrationBackup) {
-		await inngest.send({
-			name: "migration/backup-failed",
-			data: {
+		await inngest.send(
+			inngestEvents.migrationBackupFailed.create({
 				backupId,
 				serviceId: backup.serviceId,
 				error: error || "Unknown error",
-			},
-		});
+			}),
+		);
 	}
 
 	return NextResponse.json({ ok: true });

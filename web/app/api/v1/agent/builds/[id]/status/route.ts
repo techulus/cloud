@@ -14,6 +14,7 @@ import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { sendBuildFailureAlert } from "@/lib/email";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
@@ -30,10 +31,7 @@ type BuildCompletedEventData = {
 };
 
 async function sendBuildCompletedEvent(data: BuildCompletedEventData) {
-	await inngest.send({
-		name: "build/completed",
-		data,
-	});
+	await inngest.send(inngestEvents.buildCompleted.create(data));
 }
 
 export async function POST(

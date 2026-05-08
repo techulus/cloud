@@ -12,6 +12,7 @@ import {
 	services,
 } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 type ContainerStatus = {
@@ -194,14 +195,13 @@ export async function applyStatusReport(
 
 				if (!hasHealthCheck) {
 					if (deployment.rolloutId) {
-						await inngest.send({
-							name: "deployment/healthy",
-							data: {
+						await inngest.send(
+							inngestEvents.deploymentHealthy.create({
 								deploymentId: deployment.id,
 								rolloutId: deployment.rolloutId,
 								serviceId: deployment.serviceId,
-							},
-						});
+							}),
+						);
 					}
 
 					if (service?.migrationStatus === "deploying_target") {
@@ -266,27 +266,25 @@ export async function applyStatusReport(
 					.where(eq(deployments.id, deployment.id));
 
 				if (deployment.rolloutId) {
-					await inngest.send({
-						name: "deployment/healthy",
-						data: {
+					await inngest.send(
+						inngestEvents.deploymentHealthy.create({
 							deploymentId: deployment.id,
 							rolloutId: deployment.rolloutId,
 							serviceId: deployment.serviceId,
-						},
-					});
+						}),
+					);
 				}
 
 				if (service?.migrationStatus === "deploying_target") {
 					console.log(
 						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
 					);
-					await inngest.send({
-						name: "migration/deployment-healthy",
-						data: {
+					await inngest.send(
+						inngestEvents.migrationDeploymentHealthy.create({
 							deploymentId: deployment.id,
 							serviceId: deployment.serviceId,
-						},
-					});
+						}),
+					);
 				}
 				continue;
 			}
@@ -329,14 +327,13 @@ export async function applyStatusReport(
 					"health_check",
 					`Deployment ${deployment.id} is healthy`,
 				);
-				await inngest.send({
-					name: "deployment/healthy",
-					data: {
+				await inngest.send(
+					inngestEvents.deploymentHealthy.create({
 						deploymentId: deployment.id,
 						rolloutId: deployment.rolloutId,
 						serviceId: deployment.serviceId,
-					},
-				});
+					}),
+				);
 			}
 
 			const deployedService = await db
@@ -349,13 +346,12 @@ export async function applyStatusReport(
 				console.log(
 					`[migration] deployment ${deployment.id} healthy, sending event`,
 				);
-				await inngest.send({
-					name: "migration/deployment-healthy",
-					data: {
+				await inngest.send(
+					inngestEvents.migrationDeploymentHealthy.create({
 						deploymentId: deployment.id,
 						serviceId: deployment.serviceId,
-					},
-				});
+					}),
+				);
 			}
 		}
 
@@ -374,15 +370,14 @@ export async function applyStatusReport(
 					"health_check",
 					`Deployment ${deployment.id} failed health check`,
 				);
-				await inngest.send({
-					name: "deployment/failed",
-					data: {
+				await inngest.send(
+					inngestEvents.deploymentFailed.create({
 						deploymentId: deployment.id,
 						rolloutId: deployment.rolloutId,
 						serviceId: deployment.serviceId,
 						reason: "health_check_failed",
-					},
-				});
+					}),
+				);
 			}
 		}
 	}
@@ -405,13 +400,12 @@ export async function applyStatusReport(
 				"dns_sync",
 				`DNS synced on server ${serverId}`,
 			);
-			await inngest.send({
-				name: "server/dns-synced",
-				data: {
+			await inngest.send(
+				inngestEvents.serverDnsSynced.create({
 					serverId,
 					rolloutId: rollout.id,
-				},
-			});
+				}),
+			);
 		}
 	}
 }

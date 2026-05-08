@@ -4,6 +4,7 @@ import { volumeBackups, services, deployments } from "@/db/schema";
 import { getBackupStorageConfig } from "@/db/queries";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 
 function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
 	if (storagePath.endsWith(".tar.gz")) return "volume";
@@ -17,8 +18,8 @@ function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
 export const restoreTriggerWorkflow = inngest.createFunction(
 	{
 		id: "restore-trigger-workflow",
+		triggers: [inngestEvents.restoreTrigger],
 	},
-	{ event: "restore/trigger" },
 	async ({ event, step }) => {
 		const { serviceId, backupId, targetServerId } = event.data;
 
@@ -101,14 +102,13 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 		});
 
 		await step.run("send-restore-started", async () => {
-			await inngest.send({
-				name: "restore/started",
-				data: {
+			await inngest.send(
+				inngestEvents.restoreStarted.create({
 					backupId,
 					serviceId,
 					serverId,
-				},
-			});
+				}),
+			);
 		});
 
 		return { status: "triggered", backupId };

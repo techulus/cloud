@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { builds } from "@/db/schema";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import {
 	selectBuildServerForPlatform,
 	getTargetPlatformsForService,
@@ -11,9 +12,9 @@ import { enqueueWork } from "@/lib/work-queue";
 export const buildTriggerWorkflow = inngest.createFunction(
 	{
 		id: "build-trigger-workflow",
+		triggers: [inngestEvents.buildTrigger],
 		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
 	},
-	{ event: "build/trigger" },
 	async ({ event, step }) => {
 		const {
 			serviceId,
@@ -62,14 +63,13 @@ export const buildTriggerWorkflow = inngest.createFunction(
 		);
 
 		await step.run("send-build-started", async () => {
-			await inngest.send({
-				name: "build/started",
-				data: {
+			await inngest.send(
+				inngestEvents.buildStarted.create({
 					buildId: buildIds[0],
 					serviceId,
 					buildGroupId,
-				},
-			});
+				}),
+			);
 		});
 
 		return { status: "triggered", buildIds, buildGroupId };

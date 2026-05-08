@@ -12,15 +12,18 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { detectDatabaseType } from "@/lib/database-utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import { deployService } from "@/actions/projects";
 
 export const migrationWorkflow = inngest.createFunction(
 	{
 		id: "migration-workflow",
-		cancelOn: [{ event: "migration/cancelled", match: "data.serviceId" }],
+		triggers: [inngestEvents.migrationStarted],
+		cancelOn: [
+			{ event: inngestEvents.migrationCancelled, match: "data.serviceId" },
+		],
 	},
-	{ event: "migration/started" },
-	async ({ event, step }) => {
+	async ({ event, step, group }) => {
 		const {
 			serviceId,
 			targetServerId,
@@ -123,25 +126,27 @@ export const migrationWorkflow = inngest.createFunction(
 		});
 
 		const backupResults = await Promise.all(
-			backupIds.map((backupId) => {
-				const completedPromise = step
-					.waitForEvent(`wait-backup-${backupId}`, {
-						event: "migration/backup-completed",
-						timeout: "30m",
-						if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-					})
-					.then((result) => ({ status: "completed" as const, result }));
+			backupIds.map((backupId) =>
+				group.parallel(() => {
+					const completedPromise = step
+						.waitForEvent(`wait-backup-${backupId}`, {
+							event: inngestEvents.migrationBackupCompleted,
+							timeout: "30m",
+							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+						})
+						.then((result) => ({ status: "completed" as const, result }));
 
-				const failedPromise = step
-					.waitForEvent(`wait-backup-failed-${backupId}`, {
-						event: "migration/backup-failed",
-						timeout: "30m",
-						if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-					})
-					.then((result) => ({ status: "failed" as const, result }));
+					const failedPromise = step
+						.waitForEvent(`wait-backup-failed-${backupId}`, {
+							event: inngestEvents.migrationBackupFailed,
+							timeout: "30m",
+							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+						})
+						.then((result) => ({ status: "failed" as const, result }));
 
-				return Promise.race([completedPromise, failedPromise]);
-			}),
+					return Promise.race([completedPromise, failedPromise]);
+				}),
+			),
 		);
 
 		const backupTimedOut = backupResults.some((r) => r.result === null);
@@ -234,25 +239,27 @@ export const migrationWorkflow = inngest.createFunction(
 			});
 
 			const restoreResults = await Promise.all(
-				backupIds.map((backupId) => {
-					const completedPromise = step
-						.waitForEvent(`wait-restore-${backupId}`, {
-							event: "migration/restore-completed",
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "completed" as const, result }));
+				backupIds.map((backupId) =>
+					group.parallel(() => {
+						const completedPromise = step
+							.waitForEvent(`wait-restore-${backupId}`, {
+								event: inngestEvents.migrationRestoreCompleted,
+								timeout: "30m",
+								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+							})
+							.then((result) => ({ status: "completed" as const, result }));
 
-					const failedPromise = step
-						.waitForEvent(`wait-restore-failed-${backupId}`, {
-							event: "migration/restore-failed",
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "failed" as const, result }));
+						const failedPromise = step
+							.waitForEvent(`wait-restore-failed-${backupId}`, {
+								event: inngestEvents.migrationRestoreFailed,
+								timeout: "30m",
+								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+							})
+							.then((result) => ({ status: "failed" as const, result }));
 
-					return Promise.race([completedPromise, failedPromise]);
-				}),
+						return Promise.race([completedPromise, failedPromise]);
+					}),
+				),
 			);
 
 			const restoreTimedOut = restoreResults.some((r) => r.result === null);
@@ -314,7 +321,7 @@ export const migrationWorkflow = inngest.createFunction(
 			const deploymentHealthy = await step.waitForEvent(
 				"wait-deployment-healthy",
 				{
-					event: "deployment/healthy",
+					event: inngestEvents.deploymentHealthy,
 					timeout: "10m",
 					if: `async.data.serviceId == "${serviceId}"`,
 				},
@@ -402,25 +409,27 @@ export const migrationWorkflow = inngest.createFunction(
 			});
 
 			const restoreResults = await Promise.all(
-				backupIds.map((backupId) => {
-					const completedPromise = step
-						.waitForEvent(`wait-restore-${backupId}`, {
-							event: "migration/restore-completed",
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "completed" as const, result }));
+				backupIds.map((backupId) =>
+					group.parallel(() => {
+						const completedPromise = step
+							.waitForEvent(`wait-restore-${backupId}`, {
+								event: inngestEvents.migrationRestoreCompleted,
+								timeout: "30m",
+								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+							})
+							.then((result) => ({ status: "completed" as const, result }));
 
-					const failedPromise = step
-						.waitForEvent(`wait-restore-failed-${backupId}`, {
-							event: "migration/restore-failed",
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "failed" as const, result }));
+						const failedPromise = step
+							.waitForEvent(`wait-restore-failed-${backupId}`, {
+								event: inngestEvents.migrationRestoreFailed,
+								timeout: "30m",
+								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+							})
+							.then((result) => ({ status: "failed" as const, result }));
 
-					return Promise.race([completedPromise, failedPromise]);
-				}),
+						return Promise.race([completedPromise, failedPromise]);
+					}),
+				),
 			);
 
 			const restoreTimedOut = restoreResults.some((r) => r.result === null);

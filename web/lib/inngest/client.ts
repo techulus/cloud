@@ -1,7 +1,9 @@
-import { EventSchemas, Inngest } from "inngest";
-import type { Events } from "./events";
+import { Inngest } from "inngest";
 
 export const inngest = new Inngest({
 	id: "techulus-cloud",
-	schemas: new EventSchemas().fromRecord<Events>(),
+	baseUrl: process.env.INNGEST_BASE_URL,
+	eventKey: process.env.INNGEST_EVENT_KEY,
+	signingKey: process.env.INNGEST_SIGNING_KEY,
+	checkpointing: false,
 });

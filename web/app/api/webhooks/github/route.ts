@@ -13,6 +13,7 @@ import {
 	updateGitHubDeploymentStatus,
 } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 type InstallationPayload = {
 	action: "created" | "deleted" | "suspend" | "unsuspend";
@@ -191,9 +192,8 @@ async function handlePushEvent(payload: PushPayload) {
 		console.error("[webhook:push] failed to create GitHub deployment:", error);
 	}
 
-	await inngest.send({
-		name: "build/trigger",
-		data: {
+	await inngest.send(
+		inngestEvents.buildTrigger.create({
 			serviceId: githubRepo.serviceId,
 			trigger: "push",
 			githubRepoId: githubRepo.id,
@@ -202,8 +202,8 @@ async function handlePushEvent(payload: PushPayload) {
 			branch,
 			author: head_commit.author.username || head_commit.author.name,
 			githubDeploymentId,
-		},
-	});
+		}),
+	);
 
 	return NextResponse.json({ ok: true });
 }

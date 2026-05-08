@@ -4,6 +4,7 @@ import { getService } from "@/db/queries";
 import { deployments, rollouts } from "@/db/schema";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import {
 	calculateServicePlacements,
 	checkForRollingUpdate,
@@ -20,10 +21,12 @@ import { handleRolloutFailure } from "./rollout-utils";
 export const rolloutWorkflow = inngest.createFunction(
 	{
 		id: "rollout-workflow",
+		triggers: [inngestEvents.rolloutCreated],
 		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
-		cancelOn: [{ event: "rollout/cancelled", match: "data.rolloutId" }],
+		cancelOn: [
+			{ event: inngestEvents.rolloutCancelled, match: "data.rolloutId" },
+		],
 	},
-	{ event: "rollout/created" },
 	async ({ event, step }) => {
 		const { rolloutId, serviceId } = event.data;
 
@@ -235,7 +238,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		const healthResults = await Promise.all(
 			pendingHealthDeploymentIds.map((deploymentId) =>
 				step.waitForEvent(`wait-healthy-${deploymentId}`, {
-					event: "deployment/healthy",
+					event: inngestEvents.deploymentHealthy,
 					timeout: "10m",
 					if: `async.data.deploymentId == "${deploymentId}"`,
 				}),
@@ -309,7 +312,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		const dnsResults = await Promise.all(
 			serverIds.map((serverId) =>
 				step.waitForEvent(`wait-dns-${serverId}`, {
-					event: "server/dns-synced",
+					event: inngestEvents.serverDnsSynced,
 					timeout: "5m",
 					if: `async.data.serverId == "${serverId}" && async.data.rolloutId == "${rolloutId}"`,
 				}),

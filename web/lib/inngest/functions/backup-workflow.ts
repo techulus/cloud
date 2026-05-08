@@ -2,32 +2,35 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 
 export const backupWorkflow = inngest.createFunction(
 	{
 		id: "backup-workflow",
+		triggers: [inngestEvents.backupStarted],
 	},
-	{ event: "backup/started" },
-	async ({ event, step }) => {
+	async ({ event, step, group }) => {
 		const { backupId } = event.data;
 
-		const completedPromise = step
-			.waitForEvent("wait-backup-completed", {
-				event: "backup/completed",
-				timeout: "30m",
-				if: `async.data.backupId == "${backupId}"`,
-			})
-			.then((result) => ({ status: "completed" as const, result }));
+		const outcome = await group.parallel(() => {
+			const completedPromise = step
+				.waitForEvent("wait-backup-completed", {
+					event: inngestEvents.backupCompleted,
+					timeout: "30m",
+					if: `async.data.backupId == "${backupId}"`,
+				})
+				.then((result) => ({ status: "completed" as const, result }));
 
-		const failedPromise = step
-			.waitForEvent("wait-backup-failed", {
-				event: "backup/failed",
-				timeout: "30m",
-				if: `async.data.backupId == "${backupId}"`,
-			})
-			.then((result) => ({ status: "failed" as const, result }));
+			const failedPromise = step
+				.waitForEvent("wait-backup-failed", {
+					event: inngestEvents.backupFailed,
+					timeout: "30m",
+					if: `async.data.backupId == "${backupId}"`,
+				})
+				.then((result) => ({ status: "failed" as const, result }));
 
-		const outcome = await Promise.race([completedPromise, failedPromise]);
+			return Promise.race([completedPromise, failedPromise]);
+		});
 
 		if (!outcome.result) {
 			await step.run("handle-backup-timeout", async () => {
@@ -58,8 +61,8 @@ export const backupWorkflow = inngest.createFunction(
 export const onBackupFailed = inngest.createFunction(
 	{
 		id: "on-backup-failed",
+		triggers: [inngestEvents.backupFailed],
 	},
-	{ event: "backup/failed" },
 	async ({ event }) => {
 		const { backupId, error } = event.data;
 		return { status: "failed", backupId, error };
