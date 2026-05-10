@@ -1,7 +1,7 @@
 FROM node:24-slim AS deps
 WORKDIR /app
-RUN corepack enable pnpm
-COPY package.json pnpm-lock.yaml ./
+RUN corepack enable pnpm && corepack prepare pnpm@11 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 FROM node:24-slim AS builder
