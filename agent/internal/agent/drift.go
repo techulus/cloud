@@ -266,16 +266,21 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 }
 
 func normalizeImage(image string) string {
-	parts := strings.Split(image, "@")
-	image = parts[0]
+	digest := ""
+	if digestIndex := strings.Index(image, "@"); digestIndex != -1 {
+		digest = image[digestIndex:]
+		image = image[:digestIndex]
+	}
 
 	image = strings.TrimPrefix(image, "docker.io/library/")
 	image = strings.TrimPrefix(image, "docker.io/")
 
-	if !strings.Contains(image, ":") {
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if digest == "" && lastColon <= lastSlash {
 		image = image + ":latest"
 	}
-	return image
+	return image + digest
 }
 
 func (a *Agent) reconcileOne(actual *ActualState) error {

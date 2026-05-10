@@ -1,5 +1,9 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import {
+	imageIsUnqualified,
+	imageUsesMutableReference,
+} from "@/lib/docker-image";
 import { formatZodErrors } from "@/lib/utils";
 
 const composeHealthcheckSchema = z.object({
@@ -318,6 +322,10 @@ function parseHealthcheck(
 	};
 }
 
+function volumeMentionsDockerSocket(volume: string): boolean {
+	return volume.split(":").some((part) => part === "/var/run/docker.sock");
+}
+
 function quoteIfNeeded(arg: string): string {
 	if (arg.includes(" ") || arg.includes('"') || arg.includes("'")) {
 		return `"${arg.replace(/"/g, '\\"')}"`;
@@ -435,6 +443,24 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			});
 		}
 
+		if (imageIsUnqualified(serviceConfig.image)) {
+			warnings.push({
+				service: serviceName,
+				field: "image",
+				message:
+					"Image uses Docker Hub shorthand. Prefer a fully qualified registry path for production.",
+			});
+		}
+
+		if (imageUsesMutableReference(serviceConfig.image)) {
+			warnings.push({
+				service: serviceName,
+				field: "image",
+				message:
+					"Image uses a mutable tag or implicit latest. Pin a version tag or digest for production deploys.",
+			});
+		}
+
 		if (serviceConfig.depends_on) {
 			warnings.push({
 				service: serviceName,
@@ -478,7 +504,7 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 				service: serviceName,
 				field: "restart",
 				message:
-					"Restart policy ignored. Platform manages restarts automatically.",
+					"Restart policy ignored. The platform manages lifecycle, health, and restart behavior automatically.",
 			});
 		}
 
@@ -488,20 +514,28 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 			if (result.error) {
 				errors.push({ service: serviceName, message: result.error });
 			} else if (result.port) {
+				const port = result.port;
 				if (
 					!parsedPorts.some(
-						(p) =>
-							p.port === result.port!.port &&
-							p.protocol === result.port!.protocol,
+						(p) => p.port === port.port && p.protocol === port.protocol,
 					)
 				) {
-					parsedPorts.push(result.port);
+					parsedPorts.push(port);
 				}
 			}
 		}
 
 		const parsedVolumes: ParsedVolume[] = [];
 		for (const volumeDef of serviceConfig.volumes || []) {
+			if (volumeMentionsDockerSocket(volumeDef)) {
+				warnings.push({
+					service: serviceName,
+					field: "volumes",
+					message:
+						"Docker socket mount ignored. Mounting /var/run/docker.sock grants host-level Docker control.",
+				});
+			}
+
 			const result = parseVolume(volumeDef, serviceName, definedVolumes);
 			if (result.error) {
 				errors.push({ service: serviceName, message: result.error });
@@ -512,8 +546,9 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 					message: result.warning,
 				});
 			} else if (result.volume) {
-				if (!parsedVolumes.some((v) => v.name === result.volume!.name)) {
-					parsedVolumes.push(result.volume);
+				const volume = result.volume;
+				if (!parsedVolumes.some((v) => v.name === volume.name)) {
+					parsedVolumes.push(volume);
 				}
 			}
 		}

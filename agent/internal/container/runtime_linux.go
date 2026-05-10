@@ -106,6 +106,8 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--cap-add", "SETGID",
 		"--cap-add", "NET_BIND_SERVICE",
 		"--cap-add", "NET_RAW",
+		"--log-opt", "max-size=10m",
+		"--log-opt", "max-file=3",
 	}
 
 	args = append(args,
@@ -494,7 +496,7 @@ func writeDockerConfig(registryURL, username, password string) error {
 }
 
 func ImagePrune() {
-	exec.Command("podman", "image", "prune", "-a", "-f").Run()
+	exec.Command("podman", "image", "prune", "-a", "-f", "--filter", "until=168h").Run()
 }
 
 type podmanContainer struct {

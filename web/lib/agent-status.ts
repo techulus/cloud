@@ -14,6 +14,10 @@ import {
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
+import { enqueueWork } from "@/lib/work-queue";
+
+const AUTOHEAL_UNHEALTHY_REPORTS = 3;
+const AUTOHEAL_MAX_RESTARTS = 3;
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -225,6 +229,9 @@ export async function applyStatusReport(
 		}
 
 		const updateFields: Record<string, unknown> = { healthStatus };
+		let autohealRestartPayload: Record<string, unknown> | null = null;
+		let autohealFailed = false;
+
 		if (deployment.containerId !== container.containerId) {
 			updateFields.containerId = container.containerId;
 		}
@@ -301,10 +308,68 @@ export async function applyStatusReport(
 			);
 		}
 
+		const canAutoheal =
+			container.status === "running" &&
+			(deployment.status === "running" || deployment.status === "healthy");
+		const healthRecovered =
+			healthStatus === "healthy" || healthStatus === "none";
+
+		if (canAutoheal && healthStatus === "unhealthy") {
+			const unhealthyReportCount = (deployment.unhealthyReportCount ?? 0) + 1;
+			updateFields.unhealthyReportCount = unhealthyReportCount;
+
+			if (unhealthyReportCount >= AUTOHEAL_UNHEALTHY_REPORTS) {
+				const restartCount = deployment.autohealRestartCount ?? 0;
+
+				if (restartCount >= AUTOHEAL_MAX_RESTARTS) {
+					console.log(
+						`[autoheal] deployment ${deployment.id} exceeded restart limit`,
+					);
+					updateFields.status = "failed";
+					updateFields.failedStage = "autoheal";
+					autohealFailed = true;
+				} else {
+					console.log(
+						`[autoheal] restarting unhealthy deployment ${deployment.id} (${restartCount + 1}/${AUTOHEAL_MAX_RESTARTS})`,
+					);
+					updateFields.unhealthyReportCount = 0;
+					updateFields.autohealRestartCount = restartCount + 1;
+					autohealRestartPayload = {
+						deploymentId: deployment.id,
+						containerId: container.containerId,
+						reason: "autoheal_unhealthy",
+					};
+				}
+			}
+		} else if (healthRecovered) {
+			updateFields.unhealthyReportCount = 0;
+		}
+
 		await db
 			.update(deployments)
 			.set(updateFields)
 			.where(eq(deployments.id, deployment.id));
+
+		if (autohealRestartPayload) {
+			await enqueueWork(serverId, "restart", autohealRestartPayload);
+		}
+
+		if (autohealFailed && deployment.rolloutId) {
+			await ingestRolloutLog(
+				deployment.rolloutId,
+				deployment.serviceId,
+				"autoheal",
+				`Deployment ${deployment.id} exceeded autoheal restart limit`,
+			);
+			await inngest.send(
+				inngestEvents.deploymentFailed.create({
+					deploymentId: deployment.id,
+					rolloutId: deployment.rolloutId,
+					serviceId: deployment.serviceId,
+					reason: "autoheal_restart_limit",
+				}),
+			);
+		}
 
 		if (
 			deployment.status === "starting" &&

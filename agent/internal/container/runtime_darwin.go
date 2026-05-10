@@ -108,6 +108,9 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--cap-add", "SETGID",
 		"--cap-add", "NET_BIND_SERVICE",
 		"--cap-add", "NET_RAW",
+		"--log-driver", "local",
+		"--log-opt", "max-size=10m",
+		"--log-opt", "max-file=3",
 	}
 
 	args = append(args,
@@ -494,15 +497,15 @@ func writeDockerConfig(registryURL, username, password string) error {
 }
 
 func ImagePrune() {
-	exec.Command("docker", "image", "prune", "-a", "-f").Run()
+	exec.Command("docker", "image", "prune", "-a", "-f", "--filter", "until=168h").Run()
 }
 
 type dockerContainer struct {
-	ID      string `json:"ID"`
-	Names   string `json:"Names"`
-	Image   string `json:"Image"`
-	State   string `json:"State"`
-	Labels  string `json:"Labels"`
+	ID     string `json:"ID"`
+	Names  string `json:"Names"`
+	Image  string `json:"Image"`
+	State  string `json:"State"`
+	Labels string `json:"Labels"`
 }
 
 func List() ([]Container, error) {

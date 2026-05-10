@@ -18,8 +18,12 @@ cp .env.example .env
 Edit `.env` with your values, then:
 
 ```bash
-docker compose -f compose.production.yml up -d --build
+docker compose -f compose.production.yml up -d --build --remove-orphans
 ```
+
+Production hosts should cap Docker container logs in `/etc/docker/daemon.json`.
+For release deployments, prefer versioned or digest-pinned image references over
+mutable tags such as `latest` or `tip`.
 
 ## Services
 
@@ -82,6 +86,6 @@ Escape `$` as `$$` in the `.env` file.
 ```bash
 docker compose -f compose.production.yml ps
 docker compose -f compose.production.yml logs -f
-docker compose -f compose.production.yml down
-docker compose -f compose.production.yml up -d --build
+docker compose -f compose.production.yml down --remove-orphans
+docker compose -f compose.production.yml up -d --build --remove-orphans
 ```

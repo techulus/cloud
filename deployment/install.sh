@@ -13,6 +13,8 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 ENV_FILE=""
+DOCKER_LOGGING_CONFIGURED=false
+DOCKER_ALREADY_INSTALLED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -174,6 +176,7 @@ install_docker() {
     log_header "Docker Installation"
 
     if command -v docker &>/dev/null; then
+        DOCKER_ALREADY_INSTALLED=true
         log_success "Docker is already installed: $(docker --version)"
     else
         log_info "Docker not found, installing..."
@@ -186,8 +189,15 @@ install_docker() {
         log_success "Docker installed successfully"
     fi
 
+    configure_docker_logging
+
     systemctl enable docker >/dev/null 2>&1
-    systemctl start docker
+    if [[ "$DOCKER_LOGGING_CONFIGURED" == "true" && "$DOCKER_ALREADY_INSTALLED" == "true" ]]; then
+        log_info "Restarting Docker to apply log rotation..."
+        systemctl restart docker
+    else
+        systemctl start docker
+    fi
 
     if docker compose version &>/dev/null; then
         log_success "Docker Compose plugin: $(docker compose version --short)"
@@ -195,6 +205,30 @@ install_docker() {
         log_error "Docker Compose plugin not available"
         exit 1
     fi
+}
+
+configure_docker_logging() {
+    local daemon_config="/etc/docker/daemon.json"
+
+    if [[ -f "$daemon_config" ]]; then
+        log_warn "Docker daemon config already exists at ${daemon_config}; leaving it unchanged."
+        log_warn "Recommended log rotation: log-driver=json-file with max-size=10m and max-file=3."
+        return
+    fi
+
+    log_info "Configuring Docker json-file log rotation..."
+    install -m 0755 -d /etc/docker
+    cat > "$daemon_config" <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+    DOCKER_LOGGING_CONFIGURED=true
+    log_success "Docker log rotation configured"
 }
 
 download_compose_files() {
@@ -367,7 +401,7 @@ build_and_start() {
     cd "$DEPLOY_DIR"
 
     log_info "Pulling and starting services using ${COMPOSE_FILE}..."
-    docker compose -f "$COMPOSE_FILE" up -d --pull always
+    docker compose -f "$COMPOSE_FILE" up -d --pull always --remove-orphans
 
     echo ""
     log_header "Deployment Complete"
@@ -388,7 +422,7 @@ build_and_start() {
     echo ""
     echo -e "${YELLOW}${BOLD}IMPORTANT:${NC} Signup is enabled. After creating your account, disable it:${NC}"
     echo -e "  1. Edit ${DEPLOY_DIR}/.env and set ${BOLD}ALLOW_SIGNUP=false${NC}"
-    echo -e "  2. Run: ${BOLD}cd ${DEPLOY_DIR} && docker compose -f ${COMPOSE_FILE} up -d${NC}"
+    echo -e "  2. Run: ${BOLD}cd ${DEPLOY_DIR} && docker compose -f ${COMPOSE_FILE} up -d --remove-orphans${NC}"
     echo ""
 
     docker compose -f "$COMPOSE_FILE" ps
