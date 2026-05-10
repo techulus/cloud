@@ -102,7 +102,7 @@ services:
       - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
       - "traefik.http.services.registry.loadbalancer.server.port=5000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/v2/ || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/debug/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -147,7 +147,7 @@ services:
       - "--sdk-url"
       - "http://web:3000/api/inngest"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8288/ || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
       interval: 30s
       timeout: 10s
       retries: 3
