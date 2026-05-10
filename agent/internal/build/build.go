@@ -20,16 +20,18 @@ import (
 )
 
 type Config struct {
-	BuildID         string
-	CloneURL        string
-	CommitSha       string
-	Branch          string
-	ImageURI        string
-	ServiceID       string
-	ProjectID       string
-	RootDir         string
-	Secrets         map[string]string
-	TargetPlatforms []string
+	BuildID           string
+	CloneURL          string
+	CommitSha         string
+	Branch            string
+	ImageRepository   string
+	ImageURI          string
+	ResolvedCommitSha string
+	ServiceID         string
+	ProjectID         string
+	RootDir           string
+	Secrets           map[string]string
+	TargetPlatforms   []string
 }
 
 type LogSender interface {
@@ -66,6 +68,11 @@ func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func
 
 	if err := b.clone(ctx, config, buildDir); err != nil {
 		return fmt.Errorf("clone failed: %w", err)
+	}
+
+	if config.CommitSha == "HEAD" && config.ImageRepository != "" && config.ResolvedCommitSha != "" {
+		config.ImageURI = fmt.Sprintf("%s:%s", config.ImageRepository, config.ResolvedCommitSha)
+		b.sendLog(config, fmt.Sprintf("Resolved image tag %s", config.ImageURI))
 	}
 
 	if checkCancelled() {
@@ -165,7 +172,28 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	}
 
 	b.sendLog(config, "Clone completed")
+	resolvedCommitSha, err := b.resolveCommitSha(ctx, config, buildDir)
+	if err != nil {
+		return err
+	}
+	config.ResolvedCommitSha = resolvedCommitSha
+	b.sendLog(config, fmt.Sprintf("Resolved commit %s", truncateStr(resolvedCommitSha, 8)))
 	return nil
+}
+
+func (b *Builder) resolveCommitSha(ctx context.Context, config *Config, buildDir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "HEAD")
+	output, err := b.runCommand(cmd, config)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve commit sha: %s: %w", output, err)
+	}
+
+	resolvedCommitSha := strings.TrimSpace(output)
+	if resolvedCommitSha == "" {
+		return "", fmt.Errorf("resolved commit sha is empty")
+	}
+
+	return resolvedCommitSha, nil
 }
 
 func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir string) error {

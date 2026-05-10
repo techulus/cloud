@@ -18,6 +18,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { cancelBuild, retryBuild } from "@/actions/builds";
+import { LogViewer } from "@/components/logs/log-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +30,6 @@ import {
 import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
-import { LogViewer } from "@/components/logs/log-viewer";
 
 type BuildWithDates = Omit<
 	Build,
@@ -310,7 +310,7 @@ export function BuildDetails({
 					<XCircle className="size-4" />
 					<AlertTitle>Build Failed</AlertTitle>
 					<AlertDescription>
-						<pre className="whitespace-pre-wrap font-mono text-xs mt-1">
+						<pre className="mt-1 max-w-full overflow-x-auto break-words font-mono text-xs whitespace-pre-wrap">
 							{build.error}
 						</pre>
 					</AlertDescription>

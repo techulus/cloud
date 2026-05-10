@@ -1,20 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import {
-	builds,
-	githubRepos,
-	githubInstallations,
-	services,
-	projects,
-	secrets,
-} from "@/db/schema";
-import { eq, and } from "drizzle-orm";
-import { verifyAgentRequest } from "@/lib/agent-auth";
-import { getInstallationToken, buildCloneUrl } from "@/lib/github";
 import { getSetting } from "@/db/queries";
 import {
-	SETTING_KEYS,
+	builds,
+	githubInstallations,
+	githubRepos,
+	projects,
+	secrets,
+	services,
+} from "@/db/schema";
+import { verifyAgentRequest } from "@/lib/agent-auth";
+import { buildCloneUrl, getInstallationToken } from "@/lib/github";
+import {
 	DEFAULT_BUILD_TIMEOUT_MINUTES,
+	SETTING_KEYS,
 } from "@/lib/settings-keys";
 
 export async function GET(
@@ -75,8 +75,9 @@ export async function GET(
 			{ status: 500 },
 		);
 	}
+	const imageRepository = `${registryHost}/${project.id}/${service.id}`;
 	const commitSha = build.commitSha === "HEAD" ? "latest" : build.commitSha;
-	const imageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
+	const imageUri = `${imageRepository}:${commitSha}`;
 
 	let cloneUrl: string;
 
@@ -131,7 +132,7 @@ export async function GET(
 	} else if (service.githubRepoUrl) {
 		cloneUrl = service.githubRepoUrl;
 		if (!cloneUrl.endsWith(".git")) {
-			cloneUrl = cloneUrl + ".git";
+			cloneUrl = `${cloneUrl}.git`;
 		}
 	} else {
 		return NextResponse.json(
@@ -168,6 +169,7 @@ export async function GET(
 			projectId: project.id,
 		},
 		cloneUrl,
+		imageRepository,
 		imageUri,
 		rootDir: service.githubRootDir || "",
 		secrets: secretsMap,

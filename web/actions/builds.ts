@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
@@ -93,22 +93,14 @@ export async function triggerBuild(
 		.where(eq(githubRepos.serviceId, serviceId));
 
 	if (githubRepo) {
-		const [latestBuild] = await db
-			.select()
-			.from(builds)
-			.where(eq(builds.serviceId, serviceId))
-			.orderBy(desc(builds.createdAt))
-			.limit(1);
-
 		await inngest.send(
 			inngestEvents.buildTrigger.create({
 				serviceId,
 				trigger,
 				githubRepoId: githubRepo.id,
-				commitSha: latestBuild?.commitSha || "HEAD",
-				commitMessage: latestBuild?.commitMessage || triggerMessage,
-				branch: latestBuild?.branch || githubRepo.deployBranch || "main",
-				author: latestBuild?.author ?? undefined,
+				commitSha: "HEAD",
+				commitMessage: triggerMessage,
+				branch: githubRepo.deployBranch || githubRepo.defaultBranch || "main",
 			}),
 		);
 

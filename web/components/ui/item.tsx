@@ -1,10 +1,9 @@
-import * as React from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
-
-import { cn } from "@/lib/utils";
+import type * as React from "react";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
 	return (
@@ -117,7 +116,7 @@ function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
 		<div
 			data-slot="item-content"
 			className={cn(
-				"gap-1 group-data-[size=xs]/item:gap-0 flex flex-1 flex-col [&+[data-slot=item-content]]:flex-none",
+				"gap-1 group-data-[size=xs]/item:gap-0 flex min-w-0 flex-1 flex-col [&+[data-slot=item-content]]:flex-none",
 				className,
 			)}
 			{...props}
@@ -130,7 +129,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
 		<div
 			data-slot="item-title"
 			className={cn(
-				"gap-2 text-sm leading-snug font-medium underline-offset-4 line-clamp-1 flex w-fit items-center",
+				"gap-2 text-sm leading-snug font-medium underline-offset-4 line-clamp-1 flex max-w-full min-w-0 items-center",
 				className,
 			)}
 			{...props}
@@ -148,7 +147,7 @@ function ItemDescription<T extends React.ElementType = "p">({
 		<Component
 			data-slot="item-description"
 			className={cn(
-				"text-muted-foreground text-left text-sm leading-normal group-data-[size=xs]/item:text-xs [&>a:hover]:text-primary line-clamp-2 font-normal [&>a]:underline [&>a]:underline-offset-4",
+				"text-muted-foreground text-left text-sm leading-normal group-data-[size=xs]/item:text-xs [&>a:hover]:text-primary line-clamp-2 min-w-0 font-normal [&>a]:underline [&>a]:underline-offset-4",
 				className,
 			)}
 			{...props}
