@@ -23,6 +23,11 @@ services:
       - "5000:5000"
     volumes:
       - registry-data:/var/lib/registry
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/debug/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   victoria-logs:
@@ -55,6 +60,12 @@ services:
       - "8288:8288"
       - "8289:8289"
     command: inngest dev -u http://host.docker.internal:3000/api/inngest
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
