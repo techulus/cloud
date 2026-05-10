@@ -86,9 +86,9 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 									</p>
 									{hasChanges ? (
 										<div className="mt-2 space-y-1.5">
-											{changes.map((change) => (
+											{changes.map((change, index) => (
 												<div
-													key={change.field}
+													key={`${change.field}:${change.from}:${change.to}:${index}`}
 													className="flex items-center gap-2 text-sm"
 												>
 													<span className="font-medium shrink-0 text-muted-foreground">
