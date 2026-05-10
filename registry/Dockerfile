@@ -1,11 +1,11 @@
 FROM registry:2
 
-RUN apk add --no-cache apache2-utils
+RUN apk add --no-cache apache2-utils curl
 
 COPY config.yml /etc/docker/registry/config.yml
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 5000
+EXPOSE 5000 5001
 
 ENTRYPOINT ["/entrypoint.sh"]
