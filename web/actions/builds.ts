@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 export async function cancelBuild(buildId: string) {
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
@@ -28,13 +29,12 @@ export async function cancelBuild(buildId: string) {
 		.set({ status: "cancelled", completedAt: new Date() })
 		.where(eq(builds.id, buildId));
 
-	await inngest.send({
-		name: "build/cancelled",
-		data: {
+	await inngest.send(
+		inngestEvents.buildCancelled.create({
 			buildId,
 			buildGroupId: build.buildGroupId,
-		},
-	});
+		}),
+	);
 
 	return { success: true };
 }
@@ -50,9 +50,8 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
-	await inngest.send({
-		name: "build/trigger",
-		data: {
+	await inngest.send(
+		inngestEvents.buildTrigger.create({
 			serviceId: build.serviceId,
 			trigger: "manual",
 			githubRepoId: build.githubRepoId ?? undefined,
@@ -60,8 +59,8 @@ export async function retryBuild(buildId: string) {
 			commitMessage: build.commitMessage ?? "Retry build",
 			branch: build.branch,
 			author: build.author ?? undefined,
-		},
-	});
+		}),
+	);
 
 	return { success: true };
 }
@@ -101,9 +100,8 @@ export async function triggerBuild(
 			.orderBy(desc(builds.createdAt))
 			.limit(1);
 
-		await inngest.send({
-			name: "build/trigger",
-			data: {
+		await inngest.send(
+			inngestEvents.buildTrigger.create({
 				serviceId,
 				trigger,
 				githubRepoId: githubRepo.id,
@@ -111,8 +109,8 @@ export async function triggerBuild(
 				commitMessage: latestBuild?.commitMessage || triggerMessage,
 				branch: latestBuild?.branch || githubRepo.deployBranch || "main",
 				author: latestBuild?.author ?? undefined,
-			},
-		});
+			}),
+		);
 
 		return { success: true };
 	}
@@ -121,16 +119,15 @@ export async function triggerBuild(
 		throw new Error("No GitHub repository linked to this service");
 	}
 
-	await inngest.send({
-		name: "build/trigger",
-		data: {
+	await inngest.send(
+		inngestEvents.buildTrigger.create({
 			serviceId,
 			trigger,
 			commitSha: "HEAD",
 			commitMessage: triggerMessage,
 			branch: service.githubBranch || "main",
-		},
-	});
+		}),
+	);
 
 	return { success: true };
 }

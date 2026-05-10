@@ -39,6 +39,7 @@ import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
 import { startMigration } from "./migrations";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -624,13 +625,12 @@ export async function deployService(serviceId: string) {
 		currentStage: "queued",
 	});
 
-	await inngest.send({
-		name: "rollout/created",
-		data: {
+	await inngest.send(
+		inngestEvents.rolloutCreated.create({
 			rolloutId,
 			serviceId,
-		},
-	});
+		}),
+	);
 
 	return { rolloutId };
 }
@@ -978,10 +978,11 @@ export async function abortRollout(serviceId: string) {
 		return { success: false, error: "No in-progress rollout found" };
 	}
 
-	await inngest.send({
-		name: "rollout/cancelled",
-		data: { rolloutId: inProgressRollout.id },
-	});
+	await inngest.send(
+		inngestEvents.rolloutCancelled.create({
+			rolloutId: inProgressRollout.id,
+		}),
+	);
 
 	await db
 		.update(deployments)

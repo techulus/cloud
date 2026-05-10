@@ -39,14 +39,23 @@ cp .env.example .env
 Edit `.env` with your values (see below), then start the stack:
 
 ```bash
-docker compose -f compose.production.yml up -d --pull always
+docker compose -f compose.production.yml up -d --pull always --remove-orphans
 ```
 
 To use the bundled PostgreSQL instead of an external database:
 
 ```bash
-docker compose -f compose.postgres.yml up -d --pull always
+docker compose -f compose.postgres.yml up -d --pull always --remove-orphans
 ```
+
+Production hosts should also cap Docker container logs. The installer creates
+`/etc/docker/daemon.json` with `json-file` rotation on fresh hosts. If Docker is
+already configured, keep your existing daemon settings and add equivalent log
+rotation manually.
+
+The Compose files include container health checks for visibility. Plain Docker
+Compose reports unhealthy containers but does not restart them automatically, so
+use the common commands below when investigating a self-hosted service.
 
 ## Environment Variables
 
@@ -135,8 +144,12 @@ docker compose -f compose.production.yml ps
 docker compose -f compose.production.yml logs -f
 
 # Stop all services
-docker compose -f compose.production.yml down
+docker compose -f compose.production.yml down --remove-orphans
 
-# Update to latest version
-docker compose -f compose.production.yml up -d --pull always
+# Update to the configured image references
+docker compose -f compose.production.yml up -d --pull always --remove-orphans
 ```
+
+Use versioned or digest-pinned image references for production updates when
+possible. Mutable tags such as `latest` and `tip` are convenient, but they can
+move between pulls.

@@ -12,7 +12,12 @@ import {
 	services,
 } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
+import { enqueueWork } from "@/lib/work-queue";
+
+const AUTOHEAL_UNHEALTHY_REPORTS = 3;
+const AUTOHEAL_MAX_RESTARTS = 3;
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -194,14 +199,13 @@ export async function applyStatusReport(
 
 				if (!hasHealthCheck) {
 					if (deployment.rolloutId) {
-						await inngest.send({
-							name: "deployment/healthy",
-							data: {
+						await inngest.send(
+							inngestEvents.deploymentHealthy.create({
 								deploymentId: deployment.id,
 								rolloutId: deployment.rolloutId,
 								serviceId: deployment.serviceId,
-							},
-						});
+							}),
+						);
 					}
 
 					if (service?.migrationStatus === "deploying_target") {
@@ -225,6 +229,9 @@ export async function applyStatusReport(
 		}
 
 		const updateFields: Record<string, unknown> = { healthStatus };
+		let autohealRestartPayload: Record<string, unknown> | null = null;
+		let autohealFailed = false;
+
 		if (deployment.containerId !== container.containerId) {
 			updateFields.containerId = container.containerId;
 		}
@@ -266,27 +273,25 @@ export async function applyStatusReport(
 					.where(eq(deployments.id, deployment.id));
 
 				if (deployment.rolloutId) {
-					await inngest.send({
-						name: "deployment/healthy",
-						data: {
+					await inngest.send(
+						inngestEvents.deploymentHealthy.create({
 							deploymentId: deployment.id,
 							rolloutId: deployment.rolloutId,
 							serviceId: deployment.serviceId,
-						},
-					});
+						}),
+					);
 				}
 
 				if (service?.migrationStatus === "deploying_target") {
 					console.log(
 						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
 					);
-					await inngest.send({
-						name: "migration/deployment-healthy",
-						data: {
+					await inngest.send(
+						inngestEvents.migrationDeploymentHealthy.create({
 							deploymentId: deployment.id,
 							serviceId: deployment.serviceId,
-						},
-					});
+						}),
+					);
 				}
 				continue;
 			}
@@ -303,10 +308,68 @@ export async function applyStatusReport(
 			);
 		}
 
+		const canAutoheal =
+			container.status === "running" &&
+			(deployment.status === "running" || deployment.status === "healthy");
+		const healthRecovered =
+			healthStatus === "healthy" || healthStatus === "none";
+
+		if (canAutoheal && healthStatus === "unhealthy") {
+			const unhealthyReportCount = (deployment.unhealthyReportCount ?? 0) + 1;
+			updateFields.unhealthyReportCount = unhealthyReportCount;
+
+			if (unhealthyReportCount >= AUTOHEAL_UNHEALTHY_REPORTS) {
+				const restartCount = deployment.autohealRestartCount ?? 0;
+
+				if (restartCount >= AUTOHEAL_MAX_RESTARTS) {
+					console.log(
+						`[autoheal] deployment ${deployment.id} exceeded restart limit`,
+					);
+					updateFields.status = "failed";
+					updateFields.failedStage = "autoheal";
+					autohealFailed = true;
+				} else {
+					console.log(
+						`[autoheal] restarting unhealthy deployment ${deployment.id} (${restartCount + 1}/${AUTOHEAL_MAX_RESTARTS})`,
+					);
+					updateFields.unhealthyReportCount = 0;
+					updateFields.autohealRestartCount = restartCount + 1;
+					autohealRestartPayload = {
+						deploymentId: deployment.id,
+						containerId: container.containerId,
+						reason: "autoheal_unhealthy",
+					};
+				}
+			}
+		} else if (healthRecovered) {
+			updateFields.unhealthyReportCount = 0;
+		}
+
 		await db
 			.update(deployments)
 			.set(updateFields)
 			.where(eq(deployments.id, deployment.id));
+
+		if (autohealRestartPayload) {
+			await enqueueWork(serverId, "restart", autohealRestartPayload);
+		}
+
+		if (autohealFailed && deployment.rolloutId) {
+			await ingestRolloutLog(
+				deployment.rolloutId,
+				deployment.serviceId,
+				"autoheal",
+				`Deployment ${deployment.id} exceeded autoheal restart limit`,
+			);
+			await inngest.send(
+				inngestEvents.deploymentFailed.create({
+					deploymentId: deployment.id,
+					rolloutId: deployment.rolloutId,
+					serviceId: deployment.serviceId,
+					reason: "autoheal_restart_limit",
+				}),
+			);
+		}
 
 		if (
 			deployment.status === "starting" &&
@@ -329,14 +392,13 @@ export async function applyStatusReport(
 					"health_check",
 					`Deployment ${deployment.id} is healthy`,
 				);
-				await inngest.send({
-					name: "deployment/healthy",
-					data: {
+				await inngest.send(
+					inngestEvents.deploymentHealthy.create({
 						deploymentId: deployment.id,
 						rolloutId: deployment.rolloutId,
 						serviceId: deployment.serviceId,
-					},
-				});
+					}),
+				);
 			}
 
 			const deployedService = await db
@@ -349,13 +411,12 @@ export async function applyStatusReport(
 				console.log(
 					`[migration] deployment ${deployment.id} healthy, sending event`,
 				);
-				await inngest.send({
-					name: "migration/deployment-healthy",
-					data: {
+				await inngest.send(
+					inngestEvents.migrationDeploymentHealthy.create({
 						deploymentId: deployment.id,
 						serviceId: deployment.serviceId,
-					},
-				});
+					}),
+				);
 			}
 		}
 
@@ -374,15 +435,14 @@ export async function applyStatusReport(
 					"health_check",
 					`Deployment ${deployment.id} failed health check`,
 				);
-				await inngest.send({
-					name: "deployment/failed",
-					data: {
+				await inngest.send(
+					inngestEvents.deploymentFailed.create({
 						deploymentId: deployment.id,
 						rolloutId: deployment.rolloutId,
 						serviceId: deployment.serviceId,
 						reason: "health_check_failed",
-					},
-				});
+					}),
+				);
 			}
 		}
 	}
@@ -405,13 +465,12 @@ export async function applyStatusReport(
 				"dns_sync",
 				`DNS synced on server ${serverId}`,
 			);
-			await inngest.send({
-				name: "server/dns-synced",
-				data: {
+			await inngest.send(
+				inngestEvents.serverDnsSynced.create({
 					serverId,
 					rolloutId: rollout.id,
-				},
-			});
+				}),
+			);
 		}
 	}
 }

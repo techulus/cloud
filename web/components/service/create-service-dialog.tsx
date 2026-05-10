@@ -1,26 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { Box, Github, Plus, Upload } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useSWRConfig } from "swr";
 import { createService, validateDockerImage } from "@/actions/projects";
+import { GitHubRepoSelector } from "@/components/github/github-repo-selector";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
-import { GitHubRepoSelector } from "@/components/github/github-repo-selector";
-import { Box, Github, Plus, Upload } from "lucide-react";
-import Link from "next/link";
+import { imageNeedsProductionPinning } from "@/lib/docker-image";
 
 type SelectedRepo = {
 	id?: number;
@@ -184,9 +185,15 @@ export function CreateDockerServiceDialog({
 								setImage(e.target.value);
 								setError(null);
 							}}
-							placeholder="nginx:latest"
+							placeholder="nginx:1.27"
 						/>
 						{error && <p className="text-sm text-red-500">{error}</p>}
+						{imageNeedsProductionPinning(image.trim()) && (
+							<p className="text-xs text-amber-600">
+								Use a version tag or digest for production. Unqualified images
+								default to latest.
+							</p>
+						)}
 						<p className="text-xs text-muted-foreground">
 							Supported: Docker Hub, GitHub Container Registry (ghcr.io), or any
 							public registry

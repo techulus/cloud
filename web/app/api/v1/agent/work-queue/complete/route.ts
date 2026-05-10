@@ -4,6 +4,7 @@ import { workQueue } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -58,24 +59,22 @@ export async function POST(request: NextRequest) {
 
 			if (data.status === "completed") {
 				if (payload.serviceId && payload.finalImageUri) {
-					await inngest.send({
-						name: "manifest/completed",
-						data: {
+					await inngest.send(
+						inngestEvents.manifestCompleted.create({
 							serviceId: payload.serviceId,
 							buildGroupId: payload.buildGroupId || "",
 							imageUri: payload.finalImageUri,
-						},
-					});
+						}),
+					);
 				}
 			} else if (data.status === "failed" && payload.serviceId) {
-				await inngest.send({
-					name: "manifest/failed",
-					data: {
+				await inngest.send(
+					inngestEvents.manifestFailed.create({
 						serviceId: payload.serviceId,
 						buildGroupId: payload.buildGroupId || "",
 						error: data.error || "Manifest creation failed",
-					},
-				});
+					}),
+				);
 			}
 		} catch (error) {
 			console.error(`[work-queue] failed to parse payload:`, error);

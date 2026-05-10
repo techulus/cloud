@@ -1,34 +1,34 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-	FileText,
-	AlertTriangle,
 	AlertCircle,
-	Box,
-	HardDrive,
-	Check,
-	ChevronRight,
-	ChevronLeft,
+	AlertTriangle,
 	ArrowLeft,
+	Box,
+	Check,
+	ChevronLeft,
+	ChevronRight,
+	FileText,
+	HardDrive,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
-	parseComposeFile,
 	importCompose,
+	parseComposeFile,
 	type ServiceOverride,
 } from "@/actions/compose";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import type {
 	ParsedService,
-	ParseWarning,
 	ParseError,
+	ParseWarning,
 } from "@/lib/compose-parser";
 
 type Step = "upload" | "preview" | "configure" | "importing" | "complete";
@@ -230,7 +230,7 @@ export function ImportComposeForm({
 								placeholder={`version: "3.8"
 services:
   web:
-    image: nginx:latest
+    image: nginx:1.27
     ports:
       - "80:80"`}
 								className="font-mono text-sm min-h-[300px]"

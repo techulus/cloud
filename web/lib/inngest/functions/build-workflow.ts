@@ -2,21 +2,24 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, services, projects, serviceReplicas } from "@/db/schema";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import { deployService } from "@/actions/projects";
 
 export const buildWorkflow = inngest.createFunction(
 	{
 		id: "build-workflow",
+		triggers: [inngestEvents.buildStarted],
 		concurrency: [{ limit: 1, key: "event.data.serviceId" }],
-		cancelOn: [{ event: "build/cancelled", match: "data.buildGroupId" }],
+		cancelOn: [
+			{ event: inngestEvents.buildCancelled, match: "data.buildGroupId" },
+		],
 	},
-	{ event: "build/started" },
 	async ({ event, step }) => {
 		const { buildId, serviceId, buildGroupId } = event.data;
 
 		if (!buildGroupId) {
 			const result = await step.waitForEvent("wait-single-build", {
-				event: "build/completed",
+				event: inngestEvents.buildCompleted,
 				timeout: "60m",
 				if: `async.data.buildId == "${buildId}"`,
 			});
@@ -40,7 +43,7 @@ export const buildWorkflow = inngest.createFunction(
 			}
 
 			const manifestResult = await step.waitForEvent("wait-manifest", {
-				event: "manifest/completed",
+				event: inngestEvents.manifestCompleted,
 				timeout: "10m",
 				if: `async.data.serviceId == "${serviceId}"`,
 			});
@@ -85,7 +88,7 @@ export const buildWorkflow = inngest.createFunction(
 		const buildResults = await Promise.all(
 			groupBuilds.map((build) =>
 				step.waitForEvent(`wait-build-${build.id}`, {
-					event: "build/completed",
+					event: inngestEvents.buildCompleted,
 					timeout: "60m",
 					if: `async.data.buildId == "${build.id}"`,
 				}),
@@ -118,7 +121,7 @@ export const buildWorkflow = inngest.createFunction(
 		}
 
 		const manifestResult = await step.waitForEvent("wait-group-manifest", {
-			event: "manifest/completed",
+			event: inngestEvents.manifestCompleted,
 			timeout: "10m",
 			if: `async.data.buildGroupId == "${buildGroupId}"`,
 		});

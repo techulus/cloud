@@ -7,6 +7,7 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { detectDatabaseType } from "@/lib/database-utils";
 import { revalidatePath } from "next/cache";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 
 export async function startMigration(
 	serviceId: string,
@@ -86,9 +87,8 @@ export async function startMigration(
 		})
 		.where(eq(services.id, serviceId));
 
-	await inngest.send({
-		name: "migration/started",
-		data: {
+	await inngest.send(
+		inngestEvents.migrationStarted.create({
 			serviceId,
 			targetServerId,
 			sourceServerId: deployment.serverId,
@@ -96,18 +96,15 @@ export async function startMigration(
 			sourceContainerId: deployment.containerId,
 			volumes: volumes.map((v) => ({ id: v.id, name: v.name })),
 			isDatabase,
-		},
-	});
+		}),
+	);
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };
 }
 
 export async function cancelMigration(serviceId: string) {
-	await inngest.send({
-		name: "migration/cancelled",
-		data: { serviceId },
-	});
+	await inngest.send(inngestEvents.migrationCancelled.create({ serviceId }));
 
 	await db
 		.update(services)

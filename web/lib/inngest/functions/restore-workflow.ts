@@ -1,30 +1,33 @@
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 
 export const restoreWorkflow = inngest.createFunction(
 	{
 		id: "restore-workflow",
+		triggers: [inngestEvents.restoreStarted],
 	},
-	{ event: "restore/started" },
-	async ({ event, step }) => {
+	async ({ event, step, group }) => {
 		const { backupId } = event.data;
 
-		const completedPromise = step
-			.waitForEvent("wait-restore-completed", {
-				event: "restore/completed",
-				timeout: "30m",
-				if: `async.data.backupId == "${backupId}"`,
-			})
-			.then((result) => ({ status: "completed" as const, result }));
+		const outcome = await group.parallel(() => {
+			const completedPromise = step
+				.waitForEvent("wait-restore-completed", {
+					event: inngestEvents.restoreCompleted,
+					timeout: "30m",
+					if: `async.data.backupId == "${backupId}"`,
+				})
+				.then((result) => ({ status: "completed" as const, result }));
 
-		const failedPromise = step
-			.waitForEvent("wait-restore-failed", {
-				event: "restore/failed",
-				timeout: "30m",
-				if: `async.data.backupId == "${backupId}"`,
-			})
-			.then((result) => ({ status: "failed" as const, result }));
+			const failedPromise = step
+				.waitForEvent("wait-restore-failed", {
+					event: inngestEvents.restoreFailed,
+					timeout: "30m",
+					if: `async.data.backupId == "${backupId}"`,
+				})
+				.then((result) => ({ status: "failed" as const, result }));
 
-		const outcome = await Promise.race([completedPromise, failedPromise]);
+			return Promise.race([completedPromise, failedPromise]);
+		});
 
 		if (!outcome.result) {
 			return { status: "failed", reason: "timeout", backupId };
@@ -45,8 +48,8 @@ export const restoreWorkflow = inngest.createFunction(
 export const onRestoreFailed = inngest.createFunction(
 	{
 		id: "on-restore-failed",
+		triggers: [inngestEvents.restoreFailed],
 	},
-	{ event: "restore/failed" },
 	async ({ event, step }) => {
 		const { backupId, error } = event.data;
 		return { status: "failed", backupId, error };

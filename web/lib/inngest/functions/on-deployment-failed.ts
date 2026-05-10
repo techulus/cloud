@@ -2,12 +2,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { rollouts } from "@/db/schema";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import { handleRolloutFailure } from "./rollout-utils";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 export const onDeploymentFailed = inngest.createFunction(
-	{ id: "on-deployment-failed" },
-	{ event: "deployment/failed" },
+	{ id: "on-deployment-failed", triggers: [inngestEvents.deploymentFailed] },
 	async ({ event, step }) => {
 		const { rolloutId, serviceId, reason } = event.data;
 
@@ -28,10 +28,10 @@ export const onDeploymentFailed = inngest.createFunction(
 			`Rollout failed: ${reason}`,
 		);
 
-		await step.sendEvent("cancel-rollout", {
-			name: "rollout/cancelled",
-			data: { rolloutId },
-		});
+		await step.sendEvent(
+			"cancel-rollout",
+			inngestEvents.rolloutCancelled.create({ rolloutId }),
+		);
 
 		await step.run("handle-failure", async () => {
 			await handleRolloutFailure(rolloutId, serviceId, reason, true);

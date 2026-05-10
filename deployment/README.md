@@ -8,8 +8,16 @@ Docker Compose setup with Traefik for SSL termination via Let's Encrypt.
 cp .env.example .env
 # Edit .env with your values
 
-docker compose -f compose.production.yml up -d --pull always
+docker compose -f compose.production.yml up -d --pull always --remove-orphans
 ```
+
+For production hosts, cap Docker logs in `/etc/docker/daemon.json` or use the
+installer, which writes bounded `json-file` log settings on fresh Docker hosts.
+Prefer versioned or digest-pinned image references over mutable tags when you
+operate a long-lived deployment.
+
+Health checks in these Compose files are for visibility. Plain Compose reports
+unhealthy containers but does not restart them automatically.
 
 ## Services
 
@@ -56,5 +64,5 @@ Schema is synced automatically on container startup via `drizzle-kit push`. This
 ```bash
 docker compose -f compose.production.yml ps
 docker compose -f compose.production.yml logs -f
-docker compose -f compose.production.yml down
+docker compose -f compose.production.yml down --remove-orphans
 ```

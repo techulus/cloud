@@ -456,6 +456,12 @@ export const deployments = pgTable(
 		healthStatus: text("health_status", {
 			enum: ["none", "starting", "healthy", "unhealthy"],
 		}),
+		unhealthyReportCount: integer("unhealthy_report_count")
+			.notNull()
+			.default(0),
+		autohealRestartCount: integer("autoheal_restart_count")
+			.notNull()
+			.default(0),
 		rolloutId: text("rollout_id"),
 		previousDeploymentId: text("previous_deployment_id"),
 		failedStage: text("failed_stage"),

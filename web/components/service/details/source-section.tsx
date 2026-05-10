@@ -1,11 +1,11 @@
 "use client";
 
+import { Box, GitBranch, Github, Loader2 } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
-import { Box, GitBranch, Github, Loader2 } from "lucide-react";
 import {
-	updateServiceGithubRepo,
 	updateServiceConfig,
+	updateServiceGithubRepo,
 	validateDockerImage,
 } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { imageNeedsProductionPinning } from "@/lib/docker-image";
 
 function parseImageInfo(image: string): {
 	registry: string;
@@ -270,7 +271,7 @@ export const SourceSection = memo(function SourceSection({
 							<Label htmlFor="docker-image">Docker Image</Label>
 							<Input
 								id="docker-image"
-								placeholder="nginx:latest"
+								placeholder="nginx:1.27"
 								value={image}
 								onChange={(e) => {
 									setImage(e.target.value);
@@ -279,6 +280,12 @@ export const SourceSection = memo(function SourceSection({
 							/>
 							{imageError && (
 								<p className="text-sm text-red-500">{imageError}</p>
+							)}
+							{imageNeedsProductionPinning(image.trim()) && (
+								<p className="text-xs text-amber-600">
+									Use a version tag or digest for production. Unqualified images
+									default to latest.
+								</p>
 							)}
 							<p className="text-xs text-muted-foreground">
 								Supported: Docker Hub, GitHub Container Registry (ghcr.io), or

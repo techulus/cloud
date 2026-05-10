@@ -357,7 +357,7 @@ service:
   name: ${folderName}
   source:
     type: image
-    image: nginx:latest
+    image: nginx:1.27
   replicas:
     count: 1
   ports:

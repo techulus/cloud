@@ -4,6 +4,7 @@ import { volumeBackups } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
 import { revalidatePath } from "next/cache";
 
 export async function POST(request: NextRequest) {
@@ -46,46 +47,42 @@ export async function POST(request: NextRequest) {
 	revalidatePath("/dashboard/projects");
 
 	if (success) {
-		await inngest.send({
-			name: "restore/completed",
-			data: {
+		await inngest.send(
+			inngestEvents.restoreCompleted.create({
 				backupId,
 				volumeId: backup.volumeId,
 				serviceId: backup.serviceId,
 				isMigrationRestore: isMigration,
-			},
-		});
+			}),
+		);
 
 		if (isMigration) {
-			await inngest.send({
-				name: "migration/restore-completed",
-				data: {
+			await inngest.send(
+				inngestEvents.migrationRestoreCompleted.create({
 					backupId,
 					serviceId: backup.serviceId,
-				},
-			});
+				}),
+			);
 		}
 	} else {
-		await inngest.send({
-			name: "restore/failed",
-			data: {
+		await inngest.send(
+			inngestEvents.restoreFailed.create({
 				backupId,
 				volumeId: backup.volumeId,
 				serviceId: backup.serviceId,
 				error: error || "Restore failed",
 				isMigrationRestore: isMigration,
-			},
-		});
+			}),
+		);
 
 		if (isMigration) {
-			await inngest.send({
-				name: "migration/restore-failed",
-				data: {
+			await inngest.send(
+				inngestEvents.migrationRestoreFailed.create({
 					backupId,
 					serviceId: backup.serviceId,
 					error: error || "Restore failed",
-				},
-			});
+				}),
+			);
 		}
 	}
 
