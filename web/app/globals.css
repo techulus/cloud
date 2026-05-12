@@ -74,6 +74,19 @@
 	--color-destructive-foreground: var(--destructive-foreground);
 }
 
+@theme {
+	--animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+	@keyframes shimmer {
+		0% {
+			transform: translateX(0);
+		}
+		100% {
+			transform: translateX(300%);
+		}
+	}
+}
+
 @layer theme {
 	:root {
 		font-feature-settings:

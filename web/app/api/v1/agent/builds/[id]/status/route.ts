@@ -1,24 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import {
 	builds,
-	services,
+	githubRepos,
 	projects,
 	serviceReplicas,
-	githubRepos,
+	services,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { deployService } from "@/actions/projects";
-import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { sendBuildFailureAlert } from "@/lib/email";
-import { enqueueWork } from "@/lib/work-queue";
+import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
 	error?: string;
+	resolvedCommitSha?: string;
 };
 
 type BuildCompletedEventData = {
@@ -82,6 +83,15 @@ export async function POST(
 
 	if (update.error) {
 		updateData.error = update.error;
+	}
+
+	const effectiveCommitSha =
+		build.commitSha === "HEAD" && update.resolvedCommitSha
+			? update.resolvedCommitSha
+			: build.commitSha;
+
+	if (build.commitSha === "HEAD" && update.resolvedCommitSha) {
+		updateData.commitSha = update.resolvedCommitSha;
 	}
 
 	await db.update(builds).set(updateData).where(eq(builds.id, buildId));
@@ -168,7 +178,7 @@ export async function POST(
 
 	if (update.status === "completed") {
 		console.log(
-			`[build:status] build ${buildId.slice(0, 8)} completed, targetPlatform=${build.targetPlatform}, serviceId=${build.serviceId}, commitSha=${build.commitSha?.slice(0, 8)}`,
+			`[build:status] build ${buildId.slice(0, 8)} completed, targetPlatform=${build.targetPlatform}, serviceId=${build.serviceId}, commitSha=${effectiveCommitSha.slice(0, 8)}`,
 		);
 
 		const service = await db
@@ -198,7 +208,8 @@ export async function POST(
 				{ status: 500 },
 			);
 		}
-		const commitSha = build.commitSha === "HEAD" ? "latest" : build.commitSha;
+		const commitSha =
+			effectiveCommitSha === "HEAD" ? "latest" : effectiveCommitSha;
 		const baseImageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
 
 		if (build.targetPlatform) {
@@ -265,7 +276,7 @@ export async function POST(
 
 			if (allCompleted && groupBuilds.length > 0) {
 				console.log(
-					`[build:complete] all ${groupBuilds.length} platform builds completed for ${build.serviceId}@${build.commitSha.slice(0, 8)}`,
+					`[build:complete] all ${groupBuilds.length} platform builds completed for ${build.serviceId}@${commitSha.slice(0, 8)}`,
 				);
 
 				const images = groupBuilds.map((b) => {

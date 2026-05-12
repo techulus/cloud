@@ -5,6 +5,8 @@ description: "Persistent storage for stateful services."
 
 Volumes provide persistent storage that survives container restarts and redeployments.
 
+> **Stateful storage warning:** Volumes are stored on a single server's local filesystem. Techulus Cloud does not currently provide replicated volumes, automatic storage failover, or high availability for stateful services. If the server hosting a volume is lost, data can only be recovered from completed backups. We do not recommend running production databases on Techulus Cloud until HA storage and failover are implemented, unless you accept this risk and maintain an external recovery plan.
+
 ## Adding Volumes
 
 Each volume has a name and a container path:
@@ -14,7 +16,7 @@ Each volume has a name and a container path:
 | Name | Unique identifier for the volume |
 | Container path | Where the volume is mounted inside the container (e.g., `/var/lib/postgresql/data`) |
 
-When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica. When the last volume is removed, the service reverts to stateless.
+When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica so the container always mounts the same local data path. When the last volume is removed, the service reverts to stateless.
 
 ## Volume Backups
 
@@ -44,4 +46,6 @@ You can restore a volume from any completed backup. The restore process download
 
 - Services with volumes are locked to a single server — they cannot be auto-placed across multiple nodes.
 - Replica count is fixed at 1 for stateful services.
-- Volume data lives on the host filesystem. If the server is lost, data is only recoverable from backups.
+- Volume data lives on the host filesystem and is not replicated to other servers.
+- If the server is lost, data is only recoverable from completed backups.
+- Backups are point-in-time recovery, not high availability or automatic failover.

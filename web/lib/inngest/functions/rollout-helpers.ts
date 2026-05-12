@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import {
 	deploymentPorts,
 	deployments,
@@ -11,12 +12,14 @@ import {
 	services,
 	serviceVolumes,
 } from "@/db/schema";
-import { calculateSpreadPlacement } from "@/lib/placement";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
+import {
+	calculateResourceAwarePlacement,
+	replaceServiceReplicaPlacements,
+} from "@/lib/placement";
+import { buildCurrentConfig } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
-import { buildCurrentConfig } from "@/lib/service-config";
-import { getService } from "@/db/queries";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
@@ -96,20 +99,12 @@ export async function calculateServicePlacements(
 			throw new Error("Maximum 10 replicas allowed");
 		}
 
-		const calculatedPlacements = await calculateSpreadPlacement(totalReplicas);
+		const calculatedPlacements = await calculateResourceAwarePlacement(
+			service,
+			totalReplicas,
+		);
 
-		await db
-			.delete(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, service.id));
-
-		for (const placement of calculatedPlacements) {
-			await db.insert(serviceReplicas).values({
-				id: randomUUID(),
-				serviceId: service.id,
-				serverId: placement.serverId,
-				count: placement.count,
-			});
-		}
+		await replaceServiceReplicaPlacements(service.id, calculatedPlacements);
 
 		placements = calculatedPlacements.map((p) => ({
 			serverId: p.serverId,
@@ -331,7 +326,10 @@ export async function createDeploymentRecords(
 	for (const placement of placements) {
 		if (placement.replicas <= 0) continue;
 
-		const server = serverMap.get(placement.serverId)!;
+		const server = serverMap.get(placement.serverId);
+		if (!server) {
+			throw new Error(`Server ${placement.serverId} not found`);
+		}
 
 		for (let i = 0; i < placement.replicas; i++) {
 			replicaIndex++;

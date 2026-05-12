@@ -1,9 +1,11 @@
 ---
 title: "TCP/UDP Proxy"
-description: "Expose non-HTTP services like databases and game servers."
+description: "Expose non-HTTP services like game servers and custom protocols."
 ---
 
-Not every service speaks HTTP. Techulus Cloud supports exposing raw TCP and UDP ports through proxy nodes for services like databases, game servers, or custom protocols.
+Not every service speaks HTTP. Techulus Cloud supports exposing raw TCP and UDP ports through proxy nodes for services like game servers or custom protocols.
+
+> **Database exposure warning:** Database ports should usually remain private on the WireGuard network. Public database access increases security risk, and Techulus Cloud does not currently provide HA storage or automatic failover for production databases.
 
 ## Configuration
 
@@ -20,7 +22,7 @@ Traffic is routed from the proxy node's external port through the WireGuard mesh
 
 ## TLS Passthrough
 
-For TCP services that handle their own TLS (e.g., a database with native SSL), enable **TLS passthrough**. This forwards the encrypted connection directly to the container without Traefik terminating TLS.
+For TCP services that handle their own TLS, enable **TLS passthrough**. This forwards the encrypted connection directly to the container without Traefik terminating TLS.
 
 ## Firewall
 

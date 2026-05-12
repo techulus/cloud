@@ -1,19 +1,20 @@
+import { CronExpressionParser } from "cron-parser";
+import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { triggerBuild } from "@/actions/builds";
+import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import {
 	deployments,
 	rollouts,
 	servers,
 	services,
-	serviceReplicas,
 	workQueue,
 } from "@/db/schema";
-import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
-import { CronExpressionParser } from "cron-parser";
-import { calculateSpreadPlacement } from "@/lib/placement";
-import { deployService } from "@/actions/projects";
-import { triggerBuild } from "@/actions/builds";
-import { sendServerOfflineAlert, sendDeploymentMovedAlert } from "@/lib/email";
+import { sendDeploymentMovedAlert, sendServerOfflineAlert } from "@/lib/email";
+import {
+	calculateResourceAwarePlacement,
+	replaceServiceReplicaPlacements,
+} from "@/lib/placement";
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
@@ -32,6 +33,8 @@ export async function triggerRecoveryForOfflineServers(
 			autoPlace: services.autoPlace,
 			stateful: services.stateful,
 			replicas: services.replicas,
+			resourceCpuLimit: services.resourceCpuLimit,
+			resourceMemoryLimitMb: services.resourceMemoryLimitMb,
 		})
 		.from(deployments)
 		.innerJoin(services, eq(deployments.serviceId, services.id))
@@ -65,23 +68,17 @@ export async function triggerRecoveryForOfflineServers(
 
 			console.log(`[scheduler] recovering service ${serviceId}`);
 
-			const newPlacements = await calculateSpreadPlacement(
+			const newPlacements = await calculateResourceAwarePlacement(
+				{
+					id: service.serviceId,
+					resourceCpuLimit: service.resourceCpuLimit,
+					resourceMemoryLimitMb: service.resourceMemoryLimitMb,
+				},
 				service.replicas,
 				offlineServerIds,
 			);
 
-			await db
-				.delete(serviceReplicas)
-				.where(eq(serviceReplicas.serviceId, serviceId));
-
-			for (const placement of newPlacements) {
-				await db.insert(serviceReplicas).values({
-					id: randomUUID(),
-					serviceId,
-					serverId: placement.serverId,
-					count: placement.count,
-				});
-			}
+			await replaceServiceReplicaPlacements(serviceId, newPlacements);
 
 			await deployService(serviceId);
 

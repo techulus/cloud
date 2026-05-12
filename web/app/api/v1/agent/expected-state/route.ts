@@ -1,19 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { and, eq, inArray } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
-	deployments,
 	deploymentPorts,
-	services,
-	servicePorts,
-	serviceVolumes,
+	deployments,
 	secrets,
 	servers,
+	servicePorts,
+	services,
+	serviceVolumes,
 } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { getAllCertificatesForDomains } from "@/lib/acme-manager";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { slugify } from "@/lib/utils";
 import { getWireGuardPeers } from "@/lib/wireguard";
-import { getAllCertificatesForDomains } from "@/lib/acme-manager";
 
 const EXPECTED_STATUSES = [
 	"pending",
@@ -25,8 +25,8 @@ const EXPECTED_STATUSES = [
 	"unknown",
 ] as const;
 
-const ROUTABLE_STATUSES = ["healthy", "running", "unknown"] as const;
-const DNS_STATUSES = ["healthy", "running", "unknown"] as const;
+const ROUTABLE_STATUSES = ["healthy", "running"] as const;
+const DNS_STATUSES = ["healthy", "running"] as const;
 
 export async function GET(request: NextRequest) {
 	const auth = await verifyAgentRequest(request);

@@ -138,7 +138,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 	log.Printf("[build] starting build %s for commit %s (timeout: %d minutes)", Truncate(payload.BuildID, 8), Truncate(buildDetails.Build.CommitSha, 8), timeoutMinutes)
 
-	if err := a.Client.UpdateBuildStatus(payload.BuildID, "cloning", ""); err != nil {
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "cloning", "", ""); err != nil {
 		log.Printf("[build] failed to update status to cloning: %v", err)
 	}
 
@@ -165,6 +165,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		CloneURL:        buildDetails.CloneURL,
 		CommitSha:       buildDetails.Build.CommitSha,
 		Branch:          buildDetails.Build.Branch,
+		ImageRepository: buildDetails.ImageRepository,
 		ImageURI:        buildDetails.ImageURI,
 		ServiceID:       buildDetails.Build.ServiceID,
 		ProjectID:       buildDetails.Build.ProjectID,
@@ -174,7 +175,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 
 	onStatusChange := func(status string) {
-		if err := a.Client.UpdateBuildStatus(payload.BuildID, status, ""); err != nil {
+		if err := a.Client.UpdateBuildStatus(payload.BuildID, status, "", buildConfig.ResolvedCommitSha); err != nil {
 			log.Printf("[build] failed to update status to %s: %v", status, err)
 		}
 	}
@@ -184,14 +185,14 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	err = a.Builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
 		log.Printf("[build] build %s failed: %v", Truncate(payload.BuildID, 8), err)
-		if updateErr := a.Client.UpdateBuildStatus(payload.BuildID, "failed", err.Error()); updateErr != nil {
+		if updateErr := a.Client.UpdateBuildStatus(payload.BuildID, "failed", err.Error(), buildConfig.ResolvedCommitSha); updateErr != nil {
 			log.Printf("[build] failed to update status to failed: %v", updateErr)
 		}
 		return err
 	}
 
 	log.Printf("[build] build %s completed successfully", Truncate(payload.BuildID, 8))
-	if err := a.Client.UpdateBuildStatus(payload.BuildID, "completed", ""); err != nil {
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "completed", "", buildConfig.ResolvedCommitSha); err != nil {
 		log.Printf("[build] failed to update status to completed: %v", err)
 	}
 

@@ -22,11 +22,11 @@ All communication between nodes happens over an encrypted **WireGuard mesh netwo
 - **Build from source** — push code and build with Railpack or your own Dockerfile. Or deploy pre-built images.
 - **GitHub auto-deploy** — connect a repo and deploy on every push.
 - **Automatic HTTPS** — TLS certificates are provisioned and renewed automatically via Let's Encrypt.
-- **Persistent volumes** — attach named volumes for stateful workloads with scheduled backups to S3-compatible storage.
+- **Persistent volumes** — attach named local volumes for stateful workloads with scheduled backups to S3-compatible storage. Replicated storage and HA failover are not yet supported.
 - **Service discovery** — containers resolve each other by name using `.internal` domains.
 - **Multi-environment** — run production, staging, and dev within the same project.
 - **GeoDNS** — route users to the nearest proxy node with automatic failover.
-- **TCP/UDP proxy** — expose non-HTTP services like databases or game servers.
+- **TCP/UDP proxy** — expose non-HTTP services like game servers or custom protocols.
 
 ## Next Steps
 

@@ -267,6 +267,7 @@ type BuildDetails struct {
 		ProjectID     string `json:"projectId"`
 	} `json:"build"`
 	CloneURL        string            `json:"cloneUrl"`
+	ImageRepository string            `json:"imageRepository"`
 	ImageURI        string            `json:"imageUri"`
 	RootDir         string            `json:"rootDir"`
 	Secrets         map[string]string `json:"secrets"`
@@ -301,12 +302,15 @@ func (c *Client) GetBuild(buildID string) (*BuildDetails, error) {
 	return &result, nil
 }
 
-func (c *Client) UpdateBuildStatus(buildID, status, errorMsg string) error {
+func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha string) error {
 	payload := map[string]string{
 		"status": status,
 	}
 	if errorMsg != "" {
 		payload["error"] = errorMsg
+	}
+	if resolvedCommitSha != "" {
+		payload["resolvedCommitSha"] = resolvedCommitSha
 	}
 
 	body, err := json.Marshal(payload)

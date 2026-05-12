@@ -285,7 +285,7 @@ export function BuildsViewer({
 									)}
 								</ItemDescription>
 								{build.error && (
-									<pre className="mt-1 text-xs text-red-500 bg-red-500/10 rounded p-2 whitespace-pre-wrap font-mono">
+									<pre className="mt-1 max-w-full overflow-x-auto break-words rounded bg-red-500/10 p-2 font-mono text-xs text-red-500 whitespace-pre-wrap">
 										{build.error}
 									</pre>
 								)}
