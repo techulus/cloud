@@ -5,6 +5,8 @@ description: "Automated database backups to S3-compatible storage."
 
 Techulus Cloud can automatically back up databases running in your containers to S3-compatible storage. Backups are triggered on a schedule or manually from the web UI.
 
+> **Backups are not high availability:** Backups provide point-in-time disaster recovery only. If a server hosting a stateful service is lost, any writes after the last successful backup may be lost, and recovery requires restoring data before the service can run elsewhere. Backups do not provide replicated storage or automatic failover.
+
 ## Supported Databases
 
 The agent detects the database type from the container image name and runs the appropriate dump command:

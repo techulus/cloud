@@ -17,7 +17,9 @@ When auto-placement is disabled, you manually configure how many replicas run on
 
 ## Server Pinning
 
-Stateful services (those with [volumes](/services/volumes)) are automatically pinned to a single server. This ensures the container always has access to its persistent data.
+Stateful services (those with [volumes](/services/volumes)) are automatically pinned to a single server. This ensures the container always mounts the same local data path and avoids accidentally starting on a server that does not have the volume.
+
+Pinning does not provide high availability. Volume data is not replicated across servers, and if the pinned server is lost, the service must be recovered from completed backups.
 
 You can also manually lock any service to a specific server by setting the locked server. This is useful for workloads that need to run on a particular machine.
 
@@ -25,4 +27,5 @@ You can also manually lock any service to a specific server by setting the locke
 
 - Stateful services are limited to 1 replica.
 - Stateful services cannot use auto-placement — they are always pinned to their locked server.
+- Stateful services do not automatically fail over to another server.
 - Maximum 10 replicas per service.
