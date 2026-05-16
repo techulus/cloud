@@ -38,6 +38,7 @@ import { getEnvironment, getProject, getService } from "@/db/queries";
 import { allocatePort } from "@/lib/port-allocation";
 import cronstrue from "cronstrue";
 import { startMigration } from "./migrations";
+import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
@@ -372,6 +373,10 @@ type CreateServiceInput = {
 	environmentId: string;
 	name: string;
 	image: string;
+	resourceLimits?: {
+		cpuCores: number | null;
+		memoryMb: number | null;
+	};
 	github?: {
 		repoUrl: string;
 		branch: string;
@@ -383,6 +388,7 @@ type CreateServiceInput = {
 
 export async function createService(input: CreateServiceInput) {
 	const { projectId, environmentId, name, image, github } = input;
+	const resourceLimits = input.resourceLimits ?? DEFAULT_RESOURCE_LIMITS;
 	const env = await getEnvironment(environmentId);
 	if (!env) {
 		throw new Error("Environment not found");
@@ -428,6 +434,8 @@ export async function createService(input: CreateServiceInput) {
 		replicas: 1,
 		stateful: false,
 		autoPlace: true,
+		resourceCpuLimit: resourceLimits.cpuCores,
+		resourceMemoryLimitMb: resourceLimits.memoryMb,
 	});
 
 	if (github?.installationId && github?.repoId) {

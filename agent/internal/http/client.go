@@ -257,6 +257,18 @@ type StatusReport struct {
 	AgentHealth     *AgentHealth            `json:"agentHealth,omitempty"`
 }
 
+type CompletedWorkItem struct {
+	ID      string `json:"id"`
+	Attempt int    `json:"attempt"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
+}
+
+type ActiveWorkItem struct {
+	ID      string `json:"id"`
+	Attempt int    `json:"attempt"`
+}
+
 type BuildDetails struct {
 	Build struct {
 		ID            string `json:"id"`
@@ -344,52 +356,41 @@ type WorkQueueItem struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
 	Payload string `json:"payload"`
+	Attempt int    `json:"attempt"`
 }
 
-func (c *Client) GetWorkQueue(timeout time.Duration) ([]WorkQueueItem, error) {
-	url := fmt.Sprintf("%s/api/v1/agent/work-queue?timeout=%d", c.baseURL, timeout.Milliseconds())
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	c.signRequest(req, "")
-
-	resp, err := c.longClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch work queue: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("work queue request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Items []WorkQueueItem `json:"items"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode work queue: %w", err)
-	}
-
-	return result.Items, nil
+type RejectedWorkItemResult struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
 }
 
-func (c *Client) ReportStatus(report *StatusReport) error {
+type StatusResponse struct {
+	OK                      bool                     `json:"ok"`
+	AcceptedWorkItemResults []string                 `json:"acceptedWorkItemResults"`
+	RejectedWorkItemResults []RejectedWorkItemResult `json:"rejectedWorkItemResults"`
+	RejectedActiveWorkItems []RejectedWorkItemResult `json:"rejectedActiveWorkItems"`
+	WorkItems               []WorkQueueItem          `json:"workItems"`
+}
+
+func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkItem, active []ActiveWorkItem) (*StatusResponse, error) {
 	payload := map[string]interface{}{
 		"statusReport": report,
+	}
+	if len(completed) > 0 {
+		payload["completedWorkItems"] = completed
+	}
+	if len(active) > 0 {
+		payload["activeWorkItems"] = active
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal status report: %w", err)
+		return nil, fmt.Errorf("failed to marshal status report: %w", err)
 	}
 
 	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/status", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -397,52 +398,21 @@ func (c *Client) ReportStatus(report *StatusReport) error {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to report status: %w", err)
+		return nil, fmt.Errorf("failed to report status: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status report failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("status report failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return nil
-}
-
-func (c *Client) CompleteWorkItem(id, status, errorMsg string) error {
-	payload := map[string]string{
-		"id":     id,
-		"status": status,
-	}
-	if errorMsg != "" {
-		payload["error"] = errorMsg
+	var statusResponse StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode status response: %w", err)
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal work item update: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/work-queue/complete", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to complete work item: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("work item update failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return &statusResponse, nil
 }
 
 func (c *Client) GetBuildStatus(buildID string) (string, error) {

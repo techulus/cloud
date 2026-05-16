@@ -1,5 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
-import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { triggerBuild } from "@/actions/builds";
 import { deployService } from "@/actions/projects";
 import { db } from "@/db";
@@ -15,6 +15,10 @@ import {
 	calculateResourceAwarePlacement,
 	replaceServiceReplicaPlacements,
 } from "@/lib/placement";
+import {
+	WORK_QUEUE_LEASE_DURATION_MS,
+	WORK_QUEUE_MAX_ATTEMPTS,
+} from "@/lib/work-queue";
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
@@ -235,6 +239,9 @@ const OLD_ITEM_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
 
 export async function cleanupStaleItems(): Promise<void> {
 	const staleThreshold = new Date(Date.now() - STALE_ITEM_THRESHOLD_MS);
+	const workItemLeaseThreshold = new Date(
+		Date.now() - WORK_QUEUE_LEASE_DURATION_MS,
+	);
 	const oldThreshold = new Date(Date.now() - OLD_ITEM_THRESHOLD_MS);
 
 	const staleRollouts = await db
@@ -258,13 +265,16 @@ export async function cleanupStaleItems(): Promise<void> {
 		);
 	}
 
+	// Pending work is intentionally retained so commands can run when an agent
+	// reconnects. Only exhausted processing attempts are failed here.
 	const staleWorkItems = await db
 		.update(workQueue)
 		.set({ status: "failed" })
 		.where(
 			and(
-				inArray(workQueue.status, ["pending", "processing"]),
-				lt(workQueue.createdAt, staleThreshold),
+				eq(workQueue.status, "processing"),
+				lt(workQueue.startedAt, workItemLeaseThreshold),
+				sql`${workQueue.attempts} >= ${WORK_QUEUE_MAX_ATTEMPTS}`,
 			),
 		)
 		.returning({ id: workQueue.id });

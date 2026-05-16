@@ -40,7 +40,6 @@ func (a *Agent) Run(ctx context.Context) {
 	}
 
 	go a.StatusReportLoop(ctx)
-	go a.WorkQueueLoop(ctx)
 
 	a.Tick()
 
@@ -74,17 +73,25 @@ func (a *Agent) Run(ctx context.Context) {
 func (a *Agent) StatusReportLoop(ctx context.Context) {
 	a.reportStatus("startup")
 
-	ticker := time.NewTicker(WorkQueueStatusInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(nextStatusReportDelay())
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			a.reportStatus("periodic")
+			timer.Reset(nextStatusReportDelay())
 		case reason := <-a.statusReportRequested:
 			a.reportStatus(reason)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(nextStatusReportDelay())
 		}
 	}
 }
@@ -100,21 +107,19 @@ func (a *Agent) RequestStatusReport(reason string) {
 
 func (a *Agent) reportStatus(reason string) {
 	report := a.BuildStatusReport(true)
-	if err := a.Client.ReportStatus(report); err != nil {
+	completed, active := a.SnapshotWorkStatus()
+	response, err := a.Client.ReportStatus(report, completed, active)
+	if err != nil {
 		log.Printf("[status] failed to report (%s): %v", reason, err)
 		return
 	}
+	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
+	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
+	a.AcceptLeasedWorkItems(response.WorkItems)
 	log.Printf("[status] reported (%s)", reason)
 }
 
-func (a *Agent) WorkQueueLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		a.ProcessWorkQueue()
-	}
+func nextStatusReportDelay() time.Duration {
+	jitter := time.Duration(time.Now().UnixNano() % int64(5*time.Second))
+	return StatusReportInterval + jitter
 }

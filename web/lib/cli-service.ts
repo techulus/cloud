@@ -19,6 +19,7 @@ import {
 	getManifestServiceName,
 } from "@/lib/cli-manifest";
 import { slugify } from "@/lib/utils";
+import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import {
 	createEnvironment,
 	createProject,
@@ -37,6 +38,18 @@ export type ManifestChange = {
 	from: string;
 	to: string;
 };
+
+function getManifestResourceLimits(manifest: TechulusManifest) {
+	const resources = manifest.service.resources;
+	if (resources === undefined) {
+		return DEFAULT_RESOURCE_LIMITS;
+	}
+
+	return {
+		cpuCores: resources.cpuCores ?? null,
+		memoryMb: resources.memoryMb ?? null,
+	};
+}
 
 export type ManifestApplyResult = {
 	project: { id: string; name: string; slug: string };
@@ -527,8 +540,9 @@ async function syncResources(
 	manifest: TechulusManifest,
 	changes: ManifestChange[],
 ) {
-	const desiredCpu = manifest.service.resources?.cpuCores ?? null;
-	const desiredMemory = manifest.service.resources?.memoryMb ?? null;
+	const desiredResources = getManifestResourceLimits(manifest);
+	const desiredCpu = desiredResources.cpuCores;
+	const desiredMemory = desiredResources.memoryMb;
 
 	if (
 		currentService.resourceCpuLimit === desiredCpu &&
