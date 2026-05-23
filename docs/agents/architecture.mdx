@@ -1,6 +1,6 @@
 ---
 title: "Architecture"
-description: "State machine, drift detection, build pipeline, and work queue."
+description: "State machine, drift detection, build pipeline, and leased commands."
 ---
 
 ## State Machine
@@ -59,9 +59,14 @@ Agents can build container images directly from GitHub sources:
 
 Build logs stream to VictoriaLogs in real time.
 
-## Work Queue
+## Leased Commands
 
-Agents also process queue items for operations that cannot be modeled purely as expected state:
+Agents report status to the control plane on a short interval. The status response
+can include one command for operations that cannot be modeled purely as expected
+state. The command's attempt number acts as a generation guard: the agent reports
+the result with that attempt, and stale completions from older attempts are
+ignored. If an agent crashes or stops renewing the command through status
+reports, the command can be retried up to the fixed attempt limit.
 
 | Type | Description |
 | --- | --- |

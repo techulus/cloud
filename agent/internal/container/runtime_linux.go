@@ -102,6 +102,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		"--cap-add", "CHOWN",
 		"--cap-add", "DAC_OVERRIDE",
 		"--cap-add", "FOWNER",
+		"--cap-add", "SETPCAP",
 		"--cap-add", "SETUID",
 		"--cap-add", "SETGID",
 		"--cap-add", "NET_BIND_SERVICE",

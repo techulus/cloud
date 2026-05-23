@@ -92,6 +92,17 @@ use the common commands below when investigating a self-hosted service.
 | `INNGEST_SIGNING_KEY` | Request verification key (prefix with `signkey-prod-`) |
 | `INNGEST_EVENT_KEY` | Event API key |
 
+### Control Plane Replicas
+
+| Variable | Description |
+| --- | --- |
+| `WEB_REPLICAS` | Number of control plane web containers to run (default: `1`) |
+
+When `WEB_REPLICAS` is greater than `1`, Traefik discovers the replicated web
+containers through Docker and load balances requests for `<ROOT_DOMAIN>` across
+them. Startup schema sync still runs from each web container, so simultaneous
+replica starts may run `drizzle-kit push` concurrently during upgrades.
+
 ### GitHub Integration (Optional)
 
 | Variable | Description |

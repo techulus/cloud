@@ -20,6 +20,8 @@ The following Compose fields are parsed and applied:
 | `deploy.resources.limits` | CPU and memory limits |
 | `command` | Start command override |
 
+When a Compose service does not define `deploy.resources.limits`, Techulus Cloud applies the default Large preset: 2 CPU cores and 1024 MB memory.
+
 ## How It Works
 
 1. Paste or upload your `docker-compose.yml` in the project settings.

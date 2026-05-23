@@ -65,6 +65,9 @@ type Agent struct {
 	statusReportRequested       chan string
 	refreshMutex                sync.Mutex
 	pendingExpectedStateRefresh bool
+	workMutex                   sync.Mutex
+	activeWorkItem              *agenthttp.WorkQueueItem
+	pendingWorkResults          []agenthttp.CompletedWorkItem
 	Client                      *agenthttp.Client
 	Reconciler                  *reconcile.Reconciler
 	Config                      *Config

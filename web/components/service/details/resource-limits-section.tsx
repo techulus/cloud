@@ -11,6 +11,7 @@ import {
 import { Gauge } from "lucide-react";
 import { updateServiceResourceLimits } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 
 type Preset = {
 	label: string;
@@ -22,7 +23,11 @@ const PRESETS: Record<string, Preset> = {
 	none: { label: "No limit", cpuCores: null, memoryMb: null },
 	small: { label: "Small (0.5 CPU, 256MB)", cpuCores: 0.5, memoryMb: 256 },
 	medium: { label: "Medium (1 CPU, 512MB)", cpuCores: 1, memoryMb: 512 },
-	large: { label: "Large (2 CPU, 1024MB)", cpuCores: 2, memoryMb: 1024 },
+	large: {
+		label: "Large (2 CPU, 1024MB)",
+		cpuCores: DEFAULT_RESOURCE_LIMITS.cpuCores,
+		memoryMb: DEFAULT_RESOURCE_LIMITS.memoryMb,
+	},
 	xlarge: { label: "X-Large (4 CPU, 2048MB)", cpuCores: 4, memoryMb: 2048 },
 	custom: { label: "Custom", cpuCores: null, memoryMb: null },
 };

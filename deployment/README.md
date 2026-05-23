@@ -53,6 +53,19 @@ INNGEST_SIGNING_KEY=signkey-prod-<your-signing-key>
 INNGEST_EVENT_KEY=<your-event-key>
 ```
 
+### Web Replicas
+
+Set `WEB_REPLICAS` in `.env` to run multiple control plane web containers:
+
+```env
+WEB_REPLICAS=2
+```
+
+Traefik discovers the replicated `web` containers through the Docker provider
+and load balances requests for `${ROOT_DOMAIN}` across them. The startup schema
+sync remains in the web container entrypoint, so keep in mind that simultaneous
+replica starts may run `drizzle-kit push` concurrently during upgrades.
+
 ## Database Migrations
 
 Schema is synced automatically on container startup via `drizzle-kit push`. This approach auto-confirms non-destructive changes (adding tables, columns, indexes) but will **not** auto-apply destructive changes like dropping columns or tables — those require manual intervention.
