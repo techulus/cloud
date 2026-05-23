@@ -51,6 +51,7 @@ services:
 
   web:
     image: ghcr.io/techulus/cloud/web:tip
+    scale: ${WEB_REPLICAS:-1}
     env_file:
       - ./.env
     environment:
