@@ -16,7 +16,11 @@ export async function handleRolloutFailure(
 
 	await db
 		.update(rollouts)
-		.set({ status: "rolled_back", completedAt: new Date() })
+		.set({
+			status: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+			currentStage: reason,
+			completedAt: new Date(),
+		})
 		.where(eq(rollouts.id, rolloutId));
 
 	if (rolloutDeployments.length === 0) {

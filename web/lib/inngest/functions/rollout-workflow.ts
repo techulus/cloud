@@ -18,6 +18,36 @@ import {
 } from "./rollout-helpers";
 import { handleRolloutFailure } from "./rollout-utils";
 
+const PREFLIGHT_FAILURE_MESSAGES = [
+	"At least one replica is required",
+	"Maximum 10 replicas allowed",
+	"No healthy servers available for placement",
+	"No servers selected for deployment",
+	"Stateful services can only have exactly 1 replica",
+	"Stateful services must be deployed to exactly one server",
+	"Migration already in progress",
+];
+
+const PREFLIGHT_FAILURE_PREFIXES = ["Server "];
+
+function getPreflightFailureReason(error: unknown) {
+	if (!(error instanceof Error)) return null;
+
+	if (PREFLIGHT_FAILURE_MESSAGES.includes(error.message)) {
+		return error.message;
+	}
+
+	if (
+		PREFLIGHT_FAILURE_PREFIXES.some((prefix) =>
+			error.message.startsWith(prefix),
+		)
+	) {
+		return error.message;
+	}
+
+	return null;
+}
+
 export const rolloutWorkflow = inngest.createFunction(
 	{
 		id: "rollout-workflow",
@@ -50,13 +80,12 @@ export const rolloutWorkflow = inngest.createFunction(
 			);
 		});
 
-		const { placements, totalReplicas } = await step.run(
-			"calculate-placements",
-			async () => {
-				const service = await getService(serviceId);
-				if (!service) {
-					throw new Error("Service not found");
-				}
+		const placementResult = await step.run("calculate-placements", async () => {
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+			try {
 				const result = await calculateServicePlacements(service);
 				await ingestRolloutLog(
 					rolloutId,
@@ -64,21 +93,71 @@ export const rolloutWorkflow = inngest.createFunction(
 					"preparing",
 					`Calculated placements: ${result.totalReplicas} replica(s)`,
 				);
-				return result;
-			},
-		);
+				return { success: true as const, ...result };
+			} catch (error) {
+				const reason = getPreflightFailureReason(error);
+				if (!reason) {
+					throw error;
+				}
 
-		const serverIds = await step.run("validate-servers", async () => {
-			const serverMap = await validateServers(placements);
-			const ids = [...serverMap.keys()];
-			await ingestRolloutLog(
-				rolloutId,
-				serviceId,
-				"preparing",
-				`Validated ${ids.length} server(s)`,
-			);
-			return ids;
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					`Placement failed: ${reason}`,
+				);
+				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				return { success: false as const, reason };
+			}
 		});
+
+		if (!placementResult.success) {
+			return {
+				status: "failed",
+				rolloutId,
+				reason: placementResult.reason,
+			};
+		}
+
+		const { placements, totalReplicas } = placementResult;
+
+		const serverValidation = await step.run("validate-servers", async () => {
+			try {
+				const serverMap = await validateServers(placements);
+				const ids = [...serverMap.keys()];
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					`Validated ${ids.length} server(s)`,
+				);
+				return { success: true as const, serverIds: ids };
+			} catch (error) {
+				const reason = getPreflightFailureReason(error);
+				if (!reason) {
+					throw error;
+				}
+
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"preparing",
+					`Placement failed: ${reason}`,
+				);
+				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				return { success: false as const, reason };
+			}
+		});
+
+		if (!serverValidation.success) {
+			return {
+				status: "failed",
+				rolloutId,
+				reason: serverValidation.reason,
+			};
+		}
+
+		const { serverIds } = serverValidation;
 
 		await step.run("cleanup-terminal-deployments", async () => {
 			await cleanupTerminalDeployments(serviceId);

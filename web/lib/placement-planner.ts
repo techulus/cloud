@@ -6,9 +6,6 @@ export type PlacementServerSnapshot = {
 	id: string;
 	status: string;
 	wireguardIp: string | null;
-	resourcesCpu: number | null;
-	resourcesMemory: number | null;
-	resourcesDisk: number | null;
 	healthStats?: {
 		cpuUsagePercent: number;
 		memoryUsagePercent: number;
@@ -27,24 +24,18 @@ export type PlacementServerSnapshot = {
 export type ReplicaAllocationSnapshot = {
 	serverId: string;
 	serviceId: string;
-	resourceCpuLimit: number | null;
-	resourceMemoryLimitMb: number | null;
 	count: number;
 };
 
 export type PlacementPlanInput = {
 	serviceId: string;
 	totalReplicas: number;
-	resourceCpuLimit: number | null;
-	resourceMemoryLimitMb: number | null;
 	servers: PlacementServerSnapshot[];
 	existingReplicas: ReplicaAllocationSnapshot[];
 	excludeServerIds?: string[];
 };
 
 type ProjectedServerLoad = {
-	cpu: number;
-	memoryMb: number;
 	existingReplicas: number;
 	assignedServiceReplicas: number;
 };
@@ -56,7 +47,6 @@ type CandidateScore = {
 };
 
 const EPSILON = 0.000001;
-const DOMINANT_UTILIZATION_WEIGHT = 100;
 const LIVE_CPU_PRESSURE_WEIGHT = 20;
 const LIVE_MEMORY_PRESSURE_WEIGHT = 20;
 const LIVE_DISK_PRESSURE_WEIGHT = 15;
@@ -67,8 +57,6 @@ const UNRESPONSIVE_RUNTIME_PENALTY = 100;
 export function calculateResourceAwarePlacementFromSnapshot({
 	serviceId,
 	totalReplicas,
-	resourceCpuLimit,
-	resourceMemoryLimitMb,
 	servers,
 	existingReplicas,
 	excludeServerIds,
@@ -97,36 +85,20 @@ export function calculateResourceAwarePlacementFromSnapshot({
 	const assignments: string[] = [];
 
 	for (let replicaIndex = 0; replicaIndex < totalReplicas; replicaIndex++) {
-		const fittingCandidates = eligibleServers.filter((server) =>
-			canFit(server, getProjectedLoad(projectedLoad, server.id), {
-				resourceCpuLimit,
-				resourceMemoryLimitMb,
-			}),
-		);
-
-		if (fittingCandidates.length === 0) {
-			throw new Error(
-				"No eligible servers have enough resources for placement",
-			);
-		}
-
-		const unassignedCandidates = fittingCandidates.filter(
+		// Resource limits are runtime caps, not reserved capacity, so placement
+		// ranks eligible servers without treating those limits as guaranteed load.
+		const unassignedCandidates = eligibleServers.filter(
 			(server) =>
 				getProjectedLoad(projectedLoad, server.id).assignedServiceReplicas ===
 				0,
 		);
 		const candidates =
-			unassignedCandidates.length > 0
-				? unassignedCandidates
-				: fittingCandidates;
+			unassignedCandidates.length > 0 ? unassignedCandidates : eligibleServers;
 
 		const rankedCandidates = candidates
 			.map((server) => ({
 				server,
-				score: scoreServer(server, getProjectedLoad(projectedLoad, server.id), {
-					resourceCpuLimit,
-					resourceMemoryLimitMb,
-				}),
+				score: scoreServer(server, getProjectedLoad(projectedLoad, server.id)),
 				hashScore: rendezvousHashScore(serviceId, replicaIndex, server.id),
 			}))
 			.sort(compareCandidates);
@@ -135,8 +107,6 @@ export function calculateResourceAwarePlacementFromSnapshot({
 		assignments.push(selected.id);
 
 		const selectedLoad = getProjectedLoad(projectedLoad, selected.id);
-		selectedLoad.cpu += resourceCpuLimit ?? 0;
-		selectedLoad.memoryMb += resourceMemoryLimitMb ?? 0;
 		selectedLoad.existingReplicas += 1;
 		selectedLoad.assignedServiceReplicas += 1;
 	}
@@ -154,8 +124,6 @@ function buildInitialProjectedLoad(
 
 	for (const server of servers) {
 		projectedLoad.set(server.id, {
-			cpu: 0,
-			memoryMb: 0,
 			existingReplicas: 0,
 			assignedServiceReplicas: 0,
 		});
@@ -171,8 +139,6 @@ function buildInitialProjectedLoad(
 
 		const count = Math.max(0, replica.count);
 		const load = getProjectedLoad(projectedLoad, replica.serverId);
-		load.cpu += (replica.resourceCpuLimit ?? 0) * count;
-		load.memoryMb += (replica.resourceMemoryLimitMb ?? 0) * count;
 		load.existingReplicas += count;
 	}
 
@@ -190,65 +156,10 @@ function getProjectedLoad(
 	return load;
 }
 
-function canFit(
-	server: PlacementServerSnapshot,
-	load: ProjectedServerLoad,
-	request: Pick<
-		PlacementPlanInput,
-		"resourceCpuLimit" | "resourceMemoryLimitMb"
-	>,
-) {
-	const cpuCapacity = server.resourcesCpu;
-	const memoryCapacity = server.resourcesMemory;
-	const hasKnownCpuCapacity = cpuCapacity !== null && cpuCapacity > 0;
-	const hasKnownMemoryCapacity = memoryCapacity !== null && memoryCapacity > 0;
-
-	if (
-		request.resourceCpuLimit !== null &&
-		hasKnownCpuCapacity &&
-		load.cpu + request.resourceCpuLimit > cpuCapacity + EPSILON
-	) {
-		return false;
-	}
-
-	if (
-		request.resourceMemoryLimitMb !== null &&
-		hasKnownMemoryCapacity &&
-		load.memoryMb + request.resourceMemoryLimitMb > memoryCapacity + EPSILON
-	) {
-		return false;
-	}
-
-	return true;
-}
-
 function scoreServer(
 	server: PlacementServerSnapshot,
 	load: ProjectedServerLoad,
-	request: Pick<
-		PlacementPlanInput,
-		"resourceCpuLimit" | "resourceMemoryLimitMb"
-	>,
 ) {
-	const projectedCpu =
-		load.cpu +
-		(request.resourceCpuLimit === null ? 0 : request.resourceCpuLimit);
-	const projectedMemoryMb =
-		load.memoryMb +
-		(request.resourceMemoryLimitMb === null
-			? 0
-			: request.resourceMemoryLimitMb);
-
-	const cpuCapacity = server.resourcesCpu;
-	const memoryCapacity = server.resourcesMemory;
-	const cpuUtilization =
-		cpuCapacity !== null && cpuCapacity > 0 ? projectedCpu / cpuCapacity : 0;
-	const memoryUtilization =
-		memoryCapacity !== null && memoryCapacity > 0
-			? projectedMemoryMb / memoryCapacity
-			: 0;
-	const dominantUtilization = Math.max(cpuUtilization, memoryUtilization);
-
 	const liveCpuPressure = percentToRatio(server.healthStats?.cpuUsagePercent);
 	const liveMemoryPressure = percentToRatio(
 		server.healthStats?.memoryUsagePercent,
@@ -262,7 +173,6 @@ function scoreServer(
 		(server.containerHealth?.runningContainers ?? 0) * RUNNING_CONTAINER_WEIGHT;
 
 	return (
-		dominantUtilization * DOMINANT_UTILIZATION_WEIGHT +
 		liveCpuPressure * LIVE_CPU_PRESSURE_WEIGHT +
 		liveMemoryPressure * LIVE_MEMORY_PRESSURE_WEIGHT +
 		liveDiskPressure * LIVE_DISK_PRESSURE_WEIGHT +
