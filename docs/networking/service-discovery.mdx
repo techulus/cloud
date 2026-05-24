@@ -25,10 +25,10 @@ No manual configuration is needed. Services can reference each other by name imm
 
 ## Example
 
-If you have a `postgres` service and a `web` service, the web service can connect to the database using:
+If you have an `api` service and a `web` service, the web service can connect to the API using:
 
 ```
-postgres://user:pass@postgres.internal:5432/mydb
+http://api.internal:3000
 ```
 
-For production databases, prefer an external managed database or another HA database setup. Techulus Cloud stateful volumes are single-server local storage and do not currently provide replicated storage or automatic failover.
+For production databases, use an external managed database or another HA database setup. Techulus Cloud stateful volumes are single-server local storage and do not currently provide replicated storage or automatic failover.

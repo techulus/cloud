@@ -1,19 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { volumeBackups, services, deployments } from "@/db/schema";
 import { getBackupStorageConfig } from "@/db/queries";
+import { deployments, volumeBackups } from "@/db/schema";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
-
-function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
-	if (storagePath.endsWith(".tar.gz")) return "volume";
-	if (storagePath.endsWith(".dump")) return "database";
-	if (storagePath.endsWith(".sql")) return "database";
-	if (storagePath.endsWith(".archive.gz")) return "database";
-	if (storagePath.endsWith(".rdb")) return "database";
-	return "volume";
-}
 
 export const restoreTriggerWorkflow = inngest.createFunction(
 	{
@@ -47,14 +38,8 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 				throw new Error("Backup data is incomplete");
 			}
 
-			const service = await db
-				.select()
-				.from(services)
-				.where(eq(services.id, serviceId))
-				.then((r) => r[0]);
-
-			if (!service) {
-				throw new Error("Service not found");
+			if (!backup.storagePath.endsWith(".tar.gz")) {
+				throw new Error("Only generic volume backups can be restored");
 			}
 
 			const deployment = await db
@@ -76,17 +61,17 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 			}
 
 			const resolvedServerId = targetServerId ?? deployment.serverId;
-			const backupType = detectBackupTypeFromPath(backup.storagePath);
 
 			await enqueueWork(resolvedServerId, "restore_volume", {
 				backupId,
 				serviceId,
-				containerId: deployment.containerId,
+				containerId:
+					resolvedServerId === deployment.serverId
+						? deployment.containerId
+						: undefined,
 				volumeName: backup.volumeName,
 				storagePath: backup.storagePath,
 				expectedChecksum: backup.checksum,
-				backupType,
-				serviceImage: service.image,
 				isMigrationRestore: false,
 				storageConfig: {
 					provider: storageConfig.provider,

@@ -35,4 +35,4 @@ Each service in the compose file becomes a separate Techulus Cloud service withi
 
 If a service in the compose file defines volumes, it is automatically marked as stateful. Stateful services are limited to 1 replica and pinned to a single server.
 
-Imported stateful services use single-server local storage. Techulus Cloud does not currently provide replicated volumes or automatic failover for these services. Avoid importing production databases unless you accept the single-node storage risk and have an external backup and recovery plan.
+Imported stateful services use single-server local storage. Techulus Cloud does not currently provide replicated volumes or automatic failover for these services. Do not import production databases into Techulus Cloud local volumes; use an external managed or HA database instead.

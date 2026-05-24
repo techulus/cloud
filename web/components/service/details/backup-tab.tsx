@@ -1,10 +1,20 @@
 "use client";
 
+import {
+	Archive,
+	CheckCircle,
+	Clock,
+	Download,
+	Loader2,
+	RefreshCcw,
+	Trash2,
+	XCircle,
+} from "lucide-react";
 import { memo, useState } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
-import { formatDateTime } from "@/lib/date";
-import { Button } from "@/components/ui/button";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import { createBackup, deleteBackup, restoreBackup } from "@/actions/backups";
+import { updateServiceBackupSettings } from "@/actions/projects";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -15,25 +25,14 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import {
-	Archive,
-	Download,
-	Trash2,
-	RefreshCcw,
-	Clock,
-	CheckCircle,
-	XCircle,
-	Loader2,
-} from "lucide-react";
-import { createBackup, restoreBackup, deleteBackup } from "@/actions/backups";
-import { toast } from "sonner";
-import { detectDatabaseType } from "@/lib/database-utils";
-import { updateServiceBackupSettings } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { formatDateTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type BackupItem = {
@@ -91,8 +90,6 @@ export const BackupTab = memo(function BackupTab({
 	const [error, setError] = useState<string | null>(null);
 
 	const volumes = service.volumes || [];
-	const detectedDbType = detectDatabaseType(service.image);
-	const isDatabaseService = detectedDbType !== null;
 
 	const hasChanges =
 		backupEnabled !== (service.backupEnabled ?? false) ||
@@ -213,13 +210,6 @@ export const BackupTab = memo(function BackupTab({
 									<NativeSelectOption value="weekly">Weekly</NativeSelectOption>
 								</NativeSelect>
 							</div>
-
-							{isDatabaseService && (
-								<p className="text-xs text-muted-foreground">
-									Database detected ({detectedDbType}). Scheduled backups will
-									use native database tools for portable backups.
-								</p>
-							)}
 						</div>
 					)}
 

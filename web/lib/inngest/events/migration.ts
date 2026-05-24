@@ -7,7 +7,6 @@ export type MigrationEvents = {
 			sourceDeploymentId: string;
 			sourceContainerId: string;
 			volumes: { id: string; name: string }[];
-			isDatabase: boolean;
 		};
 	};
 	"migration/cancelled": {

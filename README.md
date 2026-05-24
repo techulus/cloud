@@ -56,6 +56,5 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed documentation.
 
 ## TODO
 
-- Managed Databases: Deploy standalone databases (PostgreSQL, MySQL, Redis, etc.) with automated configuration
 - Notifications: Alert channels for deployment events and system alerts
 - Templates: Pre-configured templates for popular applications

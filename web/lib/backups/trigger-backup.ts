@@ -8,29 +8,16 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
-import { detectDatabaseType } from "@/lib/database-utils";
 import { enqueueWork } from "@/lib/work-queue";
 
 type TriggerBackupInput = {
 	serviceId: string;
 	volumeId: string;
-	backupTypeOverride?: "volume" | "database";
 };
-
-function getDbBackupExtension(image: string): string {
-	const imageLower = image.toLowerCase();
-	if (imageLower.includes("postgres")) return ".dump";
-	if (imageLower.includes("mysql")) return ".sql";
-	if (imageLower.includes("mariadb")) return ".sql";
-	if (imageLower.includes("mongo")) return ".archive.gz";
-	if (imageLower.includes("redis")) return ".rdb";
-	return ".backup";
-}
 
 export async function triggerBackup({
 	serviceId,
 	volumeId,
-	backupTypeOverride,
 }: TriggerBackupInput) {
 	const storageConfig = await getBackupStorageConfig();
 	if (!storageConfig) {
@@ -80,13 +67,8 @@ export async function triggerBackup({
 		throw new Error("Deployment is missing container ID");
 	}
 
-	const backupType =
-		backupTypeOverride ??
-		(detectDatabaseType(service.image) ? "database" : "volume");
 	const backupId = randomUUID();
-	const fileExtension =
-		backupType === "database" ? getDbBackupExtension(service.image) : ".tar.gz";
-	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}${fileExtension}`;
+	const storagePath = `backups/${serviceId}/${volume.name}/${backupId}.tar.gz`;
 
 	await db.insert(volumeBackups).values({
 		id: backupId,
@@ -104,8 +86,6 @@ export async function triggerBackup({
 		containerId: deployment.containerId,
 		volumeName: volume.name,
 		storagePath,
-		backupType,
-		serviceImage: service.image,
 		storageConfig: {
 			provider: storageConfig.provider,
 			bucket: storageConfig.bucket,

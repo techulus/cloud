@@ -1,11 +1,10 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { services, serviceVolumes, deployments } from "@/db/schema";
-import { getBackupStorageConfig } from "@/db/queries";
-import { detectDatabaseType } from "@/lib/database-utils";
 import { revalidatePath } from "next/cache";
+import { db } from "@/db";
+import { getBackupStorageConfig } from "@/db/queries";
+import { deployments, services, serviceVolumes } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
@@ -74,9 +73,6 @@ export async function startMigration(
 		throw new Error("Service is already running on the target server");
 	}
 
-	const dbType = detectDatabaseType(service.image);
-	const isDatabase = Boolean(dbType);
-
 	await db
 		.update(services)
 		.set({
@@ -95,7 +91,6 @@ export async function startMigration(
 			sourceDeploymentId: deployment.id,
 			sourceContainerId: deployment.containerId,
 			volumes: volumes.map((v) => ({ id: v.id, name: v.name })),
-			isDatabase,
 		}),
 	);
 
