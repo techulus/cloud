@@ -62,13 +62,13 @@ WEB_REPLICAS=2
 ```
 
 Traefik discovers the replicated `web` containers through the Docker provider
-and load balances requests for `${ROOT_DOMAIN}` across them. The startup schema
-sync remains in the web container entrypoint, so keep in mind that simultaneous
-replica starts may run `drizzle-kit push` concurrently during upgrades.
+and load balances requests for `${ROOT_DOMAIN}` across them. Schema sync runs
+once from the dedicated `migrate` service before the replicated `web` containers
+start, so scaling `WEB_REPLICAS` does not run migrations from every replica.
 
 ## Database Migrations
 
-Schema is synced automatically on container startup via `drizzle-kit push`. This approach auto-confirms non-destructive changes (adding tables, columns, indexes) but will **not** auto-apply destructive changes like dropping columns or tables — those require manual intervention.
+Schema is synced automatically by the one-shot `migrate` service via `drizzle-kit push`. This approach auto-confirms non-destructive changes (adding tables, columns, indexes) but will **not** auto-apply destructive changes like dropping columns or tables — those require manual intervention. If schema sync fails, `web` startup is blocked; inspect the failure with `docker compose -f compose.production.yml logs migrate`.
 
 **Future plan:** Once the schema stabilizes, switch to `drizzle-kit generate` + `drizzle-orm migrate()` with pre-generated SQL migration files. This will eliminate the esbuild/drizzle-kit dependency from the production image.
 

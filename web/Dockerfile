@@ -30,4 +30,4 @@ COPY --from=builder /app/db ./db
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=drizzle /drizzle/node_modules ./node_modules
 EXPOSE 3000
-CMD ["sh", "-c", "echo y | npx drizzle-kit push && node server.js"]
+CMD ["node", "server.js"]
