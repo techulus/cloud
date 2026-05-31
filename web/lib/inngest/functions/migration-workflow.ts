@@ -1,19 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { deployService } from "@/actions/projects";
 import { db } from "@/db";
+import { getBackupStorageConfig } from "@/db/queries";
 import {
-	services,
-	serviceVolumes,
-	volumeBackups,
 	deployments,
 	serviceReplicas,
+	services,
+	volumeBackups,
 } from "@/db/schema";
-import { getBackupStorageConfig } from "@/db/queries";
-import { detectDatabaseType } from "@/lib/database-utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
-import { deployService } from "@/actions/projects";
 
 export const migrationWorkflow = inngest.createFunction(
 	{
@@ -31,7 +29,6 @@ export const migrationWorkflow = inngest.createFunction(
 			sourceDeploymentId,
 			sourceContainerId,
 			volumes,
-			isDatabase,
 		} = event.data;
 
 		const storageConfig = await step.run("validate-storage", async () => {
@@ -42,7 +39,7 @@ export const migrationWorkflow = inngest.createFunction(
 			return config;
 		});
 
-		const service = await step.run("get-service", async () => {
+		await step.run("get-service", async () => {
 			const svc = await db
 				.select()
 				.from(services)
@@ -52,27 +49,24 @@ export const migrationWorkflow = inngest.createFunction(
 			if (!svc) {
 				throw new Error("Service not found");
 			}
-			return svc;
 		});
 
-		if (!isDatabase) {
-			await step.run("stop-source-volume", async () => {
-				await db
-					.update(services)
-					.set({ migrationStatus: "stopping" })
-					.where(eq(services.id, serviceId));
+		await step.run("stop-source-volume", async () => {
+			await db
+				.update(services)
+				.set({ migrationStatus: "stopping" })
+				.where(eq(services.id, serviceId));
 
-				await enqueueWork(sourceServerId, "stop", {
-					deploymentId: sourceDeploymentId,
-					containerId: sourceContainerId,
-				});
-
-				await db
-					.update(deployments)
-					.set({ status: "stopped" })
-					.where(eq(deployments.id, sourceDeploymentId));
+			await enqueueWork(sourceServerId, "stop", {
+				deploymentId: sourceDeploymentId,
+				containerId: sourceContainerId,
 			});
-		}
+
+			await db
+				.update(deployments)
+				.set({ status: "stopped" })
+				.where(eq(deployments.id, sourceDeploymentId));
+		});
 
 		const backupIds = await step.run("start-backups", async () => {
 			await db
@@ -80,17 +74,12 @@ export const migrationWorkflow = inngest.createFunction(
 				.set({ migrationStatus: "backing_up" })
 				.where(eq(services.id, serviceId));
 
-			const dbType = detectDatabaseType(service.image);
-			const backupType = dbType ? "database" : "volume";
-			const fileExtension = dbType
-				? getDbBackupExtension(service.image)
-				: ".tar.gz";
 			const ids: string[] = [];
 
 			for (const volume of volumes) {
 				const backupId = randomUUID();
 				ids.push(backupId);
-				const storagePath = `migrations/${serviceId}/${volume.name}/${backupId}${fileExtension}`;
+				const storagePath = `migrations/${serviceId}/${volume.name}/${backupId}.tar.gz`;
 
 				await db.insert(volumeBackups).values({
 					id: backupId,
@@ -106,11 +95,9 @@ export const migrationWorkflow = inngest.createFunction(
 				await enqueueWork(sourceServerId, "backup_volume", {
 					backupId,
 					serviceId,
-					containerId: isDatabase ? sourceContainerId : undefined,
+					containerId: sourceContainerId,
 					volumeName: volume.name,
 					storagePath,
-					backupType,
-					serviceImage: service.image,
 					storageConfig: {
 						provider: storageConfig.provider,
 						bucket: storageConfig.bucket,
@@ -177,119 +164,96 @@ export const migrationWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "backup_failed" };
 		}
 
-		if (isDatabase) {
-			await step.run("stop-source-db", async () => {
+		await step.run("restore-volumes", async () => {
+			await db
+				.update(services)
+				.set({ migrationStatus: "restoring" })
+				.where(eq(services.id, serviceId));
+
+			const backups = await db
+				.select()
+				.from(volumeBackups)
+				.where(
+					and(
+						eq(volumeBackups.serviceId, serviceId),
+						eq(volumeBackups.isMigrationBackup, true),
+						eq(volumeBackups.status, "completed"),
+					),
+				);
+
+			for (const backup of backups) {
+				if (!backup.storagePath || !backup.checksum) continue;
+
+				await enqueueWork(targetServerId, "restore_volume", {
+					backupId: backup.id,
+					serviceId,
+					volumeName: backup.volumeName,
+					storagePath: backup.storagePath,
+					expectedChecksum: backup.checksum,
+					isMigrationRestore: true,
+					storageConfig: {
+						provider: storageConfig.provider,
+						bucket: storageConfig.bucket,
+						region: storageConfig.region,
+						endpoint: storageConfig.endpoint,
+						accessKey: storageConfig.accessKey,
+						secretKey: storageConfig.secretKey,
+					},
+				});
+			}
+		});
+
+		const restoreResults = await Promise.all(
+			backupIds.map((backupId) =>
+				group.parallel(() => {
+					const completedPromise = step
+						.waitForEvent(`wait-restore-${backupId}`, {
+							event: inngestEvents.migrationRestoreCompleted,
+							timeout: "30m",
+							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+						})
+						.then((result) => ({ status: "completed" as const, result }));
+
+					const failedPromise = step
+						.waitForEvent(`wait-restore-failed-${backupId}`, {
+							event: inngestEvents.migrationRestoreFailed,
+							timeout: "30m",
+							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+						})
+						.then((result) => ({ status: "failed" as const, result }));
+
+					return Promise.race([completedPromise, failedPromise]);
+				}),
+			),
+		);
+
+		const restoreTimedOut = restoreResults.some((r) => r.result === null);
+		if (restoreTimedOut) {
+			await step.run("handle-restore-timeout", async () => {
 				await db
 					.update(services)
-					.set({ migrationStatus: "stopping" })
+					.set({
+						migrationStatus: "failed",
+						migrationError: "Restore timed out",
+					})
 					.where(eq(services.id, serviceId));
-
-				await enqueueWork(sourceServerId, "stop", {
-					deploymentId: sourceDeploymentId,
-					containerId: sourceContainerId,
-				});
-
-				await db
-					.update(deployments)
-					.set({ status: "stopped" })
-					.where(eq(deployments.id, sourceDeploymentId));
 			});
+			return { status: "failed", reason: "restore_timeout" };
 		}
 
-		if (!isDatabase) {
-			await step.run("restore-volumes", async () => {
+		const restoreFailure = restoreResults.find((r) => r.status === "failed");
+		if (restoreFailure) {
+			await step.run("handle-restore-failure", async () => {
 				await db
 					.update(services)
-					.set({ migrationStatus: "restoring" })
+					.set({
+						migrationStatus: "failed",
+						migrationError:
+							restoreFailure.result?.data.error || "Restore failed",
+					})
 					.where(eq(services.id, serviceId));
-
-				const backups = await db
-					.select()
-					.from(volumeBackups)
-					.where(
-						and(
-							eq(volumeBackups.serviceId, serviceId),
-							eq(volumeBackups.isMigrationBackup, true),
-							eq(volumeBackups.status, "completed"),
-						),
-					);
-
-				for (const backup of backups) {
-					if (!backup.storagePath || !backup.checksum) continue;
-
-					await enqueueWork(targetServerId, "restore_volume", {
-						backupId: backup.id,
-						serviceId,
-						volumeName: backup.volumeName,
-						storagePath: backup.storagePath,
-						expectedChecksum: backup.checksum,
-						backupType: "volume",
-						serviceImage: service.image,
-						isMigrationRestore: true,
-						storageConfig: {
-							provider: storageConfig.provider,
-							bucket: storageConfig.bucket,
-							region: storageConfig.region,
-							endpoint: storageConfig.endpoint,
-							accessKey: storageConfig.accessKey,
-							secretKey: storageConfig.secretKey,
-						},
-					});
-				}
 			});
-
-			const restoreResults = await Promise.all(
-				backupIds.map((backupId) =>
-					group.parallel(() => {
-						const completedPromise = step
-							.waitForEvent(`wait-restore-${backupId}`, {
-								event: inngestEvents.migrationRestoreCompleted,
-								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-							})
-							.then((result) => ({ status: "completed" as const, result }));
-
-						const failedPromise = step
-							.waitForEvent(`wait-restore-failed-${backupId}`, {
-								event: inngestEvents.migrationRestoreFailed,
-								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-							})
-							.then((result) => ({ status: "failed" as const, result }));
-
-						return Promise.race([completedPromise, failedPromise]);
-					}),
-				),
-			);
-
-			const restoreTimedOut = restoreResults.some((r) => r.result === null);
-			if (restoreTimedOut) {
-				await step.run("handle-restore-timeout", async () => {
-					await db
-						.update(services)
-						.set({
-							migrationStatus: "failed",
-							migrationError: "Restore timed out",
-						})
-						.where(eq(services.id, serviceId));
-				});
-				return { status: "failed", reason: "restore_timeout" };
-			}
-
-			const restoreFailure = restoreResults.find((r) => r.status === "failed");
-			if (restoreFailure) {
-				await step.run("handle-restore-failure", async () => {
-					await db
-						.update(services)
-						.set({
-							migrationStatus: "failed",
-							migrationError:
-								restoreFailure.result?.data.error || "Restore failed",
-						})
-						.where(eq(services.id, serviceId));
-				});
-				return { status: "failed", reason: "restore_failed" };
-			}
+			return { status: "failed", reason: "restore_failed" };
 		}
 
 		await step.run("deploy-target", async () => {
@@ -317,151 +281,6 @@ export const migrationWorkflow = inngest.createFunction(
 			await deployService(serviceId);
 		});
 
-		if (isDatabase) {
-			const deploymentHealthy = await step.waitForEvent(
-				"wait-deployment-healthy",
-				{
-					event: inngestEvents.deploymentHealthy,
-					timeout: "10m",
-					if: `async.data.serviceId == "${serviceId}"`,
-				},
-			);
-
-			if (!deploymentHealthy) {
-				await step.run("handle-deployment-timeout", async () => {
-					await db
-						.update(services)
-						.set({
-							migrationStatus: "failed",
-							migrationError: "Deployment health check timed out",
-						})
-						.where(eq(services.id, serviceId));
-				});
-				return { status: "failed", reason: "deployment_timeout" };
-			}
-
-			const targetContainerId = await step.run(
-				"get-target-container",
-				async () => {
-					const deployment = await db
-						.select({ containerId: deployments.containerId })
-						.from(deployments)
-						.where(
-							and(
-								eq(deployments.serviceId, serviceId),
-								eq(deployments.serverId, targetServerId),
-							),
-						)
-						.orderBy(desc(deployments.createdAt))
-						.limit(1)
-						.then((r) => r[0]);
-
-					if (!deployment?.containerId) {
-						throw new Error("Target container not found");
-					}
-
-					return deployment.containerId;
-				},
-			);
-
-			await step.run("restore-database", async () => {
-				await db
-					.update(services)
-					.set({ migrationStatus: "restoring" })
-					.where(eq(services.id, serviceId));
-
-				const backups = await db
-					.select()
-					.from(volumeBackups)
-					.where(
-						and(
-							eq(volumeBackups.serviceId, serviceId),
-							eq(volumeBackups.isMigrationBackup, true),
-							eq(volumeBackups.status, "completed"),
-						),
-					);
-
-				for (const backup of backups) {
-					if (!backup.storagePath || !backup.checksum) continue;
-
-					const backupType = detectBackupTypeFromPath(backup.storagePath);
-
-					await enqueueWork(targetServerId, "restore_volume", {
-						backupId: backup.id,
-						serviceId,
-						containerId: targetContainerId,
-						volumeName: backup.volumeName,
-						storagePath: backup.storagePath,
-						expectedChecksum: backup.checksum,
-						backupType,
-						serviceImage: service.image,
-						isMigrationRestore: true,
-						storageConfig: {
-							provider: storageConfig.provider,
-							bucket: storageConfig.bucket,
-							region: storageConfig.region,
-							endpoint: storageConfig.endpoint,
-							accessKey: storageConfig.accessKey,
-							secretKey: storageConfig.secretKey,
-						},
-					});
-				}
-			});
-
-			const restoreResults = await Promise.all(
-				backupIds.map((backupId) =>
-					group.parallel(() => {
-						const completedPromise = step
-							.waitForEvent(`wait-restore-${backupId}`, {
-								event: inngestEvents.migrationRestoreCompleted,
-								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-							})
-							.then((result) => ({ status: "completed" as const, result }));
-
-						const failedPromise = step
-							.waitForEvent(`wait-restore-failed-${backupId}`, {
-								event: inngestEvents.migrationRestoreFailed,
-								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-							})
-							.then((result) => ({ status: "failed" as const, result }));
-
-						return Promise.race([completedPromise, failedPromise]);
-					}),
-				),
-			);
-
-			const restoreTimedOut = restoreResults.some((r) => r.result === null);
-			if (restoreTimedOut) {
-				await step.run("handle-db-restore-timeout", async () => {
-					await db
-						.update(services)
-						.set({
-							migrationStatus: "failed",
-							migrationError: "Database restore timed out",
-						})
-						.where(eq(services.id, serviceId));
-				});
-				return { status: "failed", reason: "restore_timeout" };
-			}
-
-			const restoreFailure = restoreResults.find((r) => r.status === "failed");
-			if (restoreFailure) {
-				await step.run("handle-db-restore-failure", async () => {
-					await db
-						.update(services)
-						.set({
-							migrationStatus: "failed",
-							migrationError:
-								restoreFailure.result?.data.error || "Database restore failed",
-						})
-						.where(eq(services.id, serviceId));
-				});
-				return { status: "failed", reason: "restore_failed" };
-			}
-		}
-
 		await step.run("complete-migration", async () => {
 			await db
 				.update(services)
@@ -477,22 +296,3 @@ export const migrationWorkflow = inngest.createFunction(
 		return { status: "completed", serviceId };
 	},
 );
-
-function getDbBackupExtension(image: string): string {
-	const imageLower = image.toLowerCase();
-	if (imageLower.includes("postgres")) return ".dump";
-	if (imageLower.includes("mysql")) return ".sql";
-	if (imageLower.includes("mariadb")) return ".sql";
-	if (imageLower.includes("mongo")) return ".archive.gz";
-	if (imageLower.includes("redis")) return ".rdb";
-	return ".backup";
-}
-
-function detectBackupTypeFromPath(storagePath: string): "volume" | "database" {
-	if (storagePath.endsWith(".tar.gz")) return "volume";
-	if (storagePath.endsWith(".dump")) return "database";
-	if (storagePath.endsWith(".sql")) return "database";
-	if (storagePath.endsWith(".archive.gz")) return "database";
-	if (storagePath.endsWith(".rdb")) return "database";
-	return "volume";
-}

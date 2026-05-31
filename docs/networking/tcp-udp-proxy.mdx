@@ -5,7 +5,7 @@ description: "Expose non-HTTP services like game servers and custom protocols."
 
 Not every service speaks HTTP. Techulus Cloud supports exposing raw TCP and UDP ports through proxy nodes for services like game servers or custom protocols.
 
-> **Database exposure warning:** Database ports should usually remain private on the WireGuard network. Public database access increases security risk, and Techulus Cloud does not currently provide HA storage or automatic failover for production databases.
+> **Database exposure warning:** Do not expose database ports publicly through the TCP/UDP proxy. Public database access increases security risk, and Techulus Cloud does not provide HA storage or automatic failover for production databases.
 
 ## Configuration
 

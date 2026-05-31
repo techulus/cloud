@@ -51,6 +51,25 @@ services:
       retries: 3
     restart: unless-stopped
 
+  migrate:
+    image: ghcr.io/techulus/cloud/web:tip
+    env_file:
+      - ./.env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
+      - APP_URL=https://${ROOT_DOMAIN}
+      - VICTORIA_LOGS_URL=https://${VL_USERNAME}:${VL_PASSWORD}@logs.${ROOT_DOMAIN}
+      - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
+      - REGISTRY_URL=registry:5000
+      - REGISTRY_HOST=registry.${ROOT_DOMAIN}
+      - INNGEST_BASE_URL=http://inngest:8288
+      - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
+      - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
+      - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
+    command: ["sh", "-c", "echo y | npx drizzle-kit push"]
+    restart: on-failure
+
   web:
     image: ghcr.io/techulus/cloud/web:tip
     scale: ${WEB_REPLICAS:-1}
@@ -69,9 +88,12 @@ services:
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
     depends_on:
-      - victoria-logs
-      - registry
-      - inngest
+      migrate:
+        condition: service_completed_successfully
+      victoria-logs:
+        condition: service_started
+      registry:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.web.rule=Host(`${ROOT_DOMAIN}`)"
@@ -149,6 +171,9 @@ services:
       - "start"
       - "--sdk-url"
       - "http://web:3000/api/inngest"
+    depends_on:
+      web:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
       interval: 30s

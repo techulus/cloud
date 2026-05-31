@@ -1,25 +1,17 @@
 ---
 title: "Backups"
-description: "Automated database backups to S3-compatible storage."
+description: "Automated volume backups to S3-compatible storage."
 ---
 
-Techulus Cloud can automatically back up databases running in your containers to S3-compatible storage. Backups are triggered on a schedule or manually from the web UI.
+Techulus Cloud can automatically back up service volumes to S3-compatible storage. Backups are triggered on a schedule or manually from the web UI.
 
 > **Backups are not high availability:** Backups provide point-in-time disaster recovery only. If a server hosting a stateful service is lost, any writes after the last successful backup may be lost, and recovery requires restoring data before the service can run elsewhere. Backups do not provide replicated storage or automatic failover.
 
-## Supported Databases
+## How It Works
 
-The agent detects the database type from the container image name and runs the appropriate dump command:
+The agent stops the running container, archives the volume directory as a `.tar.gz` file, uploads the archive to S3-compatible storage, then starts the container again if it was running.
 
-| Database | Dump Command |
-| --- | --- |
-| PostgreSQL | `pg_dump -Fc` |
-| MySQL | `mysqldump` |
-| MariaDB | `mysqldump` |
-| MongoDB | `mongodump --archive --gzip` |
-| Redis | `redis-cli BGSAVE` |
-
-Backups are compressed and uploaded as `.tar.gz` archives.
+Backups are volume snapshots. Techulus Cloud does not run database-native dump tools, and running production databases on local single-node volumes is not recommended.
 
 ## Configuration
 

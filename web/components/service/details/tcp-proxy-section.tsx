@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, memo } from "react";
+import { Check, Copy, Lock, Network, Plus, X } from "lucide-react";
+import { memo, useState } from "react";
+import { updateServiceConfig } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Network, X, Plus, Copy, Check, Lock } from "lucide-react";
-import { updateServiceConfig } from "@/actions/projects";
+import { Switch } from "@/components/ui/switch";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const TCPProxySection = memo(function TCPProxySection({
@@ -108,8 +108,7 @@ export const TCPProxySection = memo(function TCPProxySection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<p className="text-sm text-muted-foreground">
-					Expose TCP/UDP ports directly through the proxy for databases and
-					other non-HTTP services.
+					Expose TCP/UDP ports directly through the proxy for non-HTTP services.
 				</p>
 
 				{tcpUdpPorts.length > 0 && (
@@ -208,14 +207,20 @@ export const TCPProxySection = memo(function TCPProxySection({
 						</Button>
 					</div>
 					{protocol === "tcp" && (
-						<label className="flex items-center gap-2 text-sm">
+						<div className="flex items-center gap-2 text-sm">
 							<Switch
+								id={`${service.id}-tls-passthrough`}
 								checked={tlsPassthrough}
 								onCheckedChange={setTlsPassthrough}
 								size="sm"
 							/>
-							<span className="text-muted-foreground">TLS Passthrough</span>
-						</label>
+							<label
+								htmlFor={`${service.id}-tls-passthrough`}
+								className="text-muted-foreground"
+							>
+								TLS Passthrough
+							</label>
+						</div>
 					)}
 					<Button
 						size="sm"

@@ -5,7 +5,7 @@ description: "Persistent storage for stateful services."
 
 Volumes provide persistent storage that survives container restarts and redeployments.
 
-> **Stateful storage warning:** Volumes are stored on a single server's local filesystem. Techulus Cloud does not currently provide replicated volumes, automatic storage failover, or high availability for stateful services. If the server hosting a volume is lost, data can only be recovered from completed backups. We do not recommend running production databases on Techulus Cloud until HA storage and failover are implemented, unless you accept this risk and maintain an external recovery plan.
+> **Stateful storage warning:** Volumes are stored on a single server's local filesystem. Techulus Cloud does not currently provide replicated volumes, automatic storage failover, or high availability for stateful services. If the server hosting a volume is lost, data can only be recovered from completed backups. Do not use Techulus Cloud local volumes for production databases.
 
 ## Adding Volumes
 
@@ -14,7 +14,7 @@ Each volume has a name and a container path:
 | Field | Description |
 | --- | --- |
 | Name | Unique identifier for the volume |
-| Container path | Where the volume is mounted inside the container (e.g., `/var/lib/postgresql/data`) |
+| Container path | Where the volume is mounted inside the container (e.g., `/data`) |
 
 When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica so the container always mounts the same local data path. When the last volume is removed, the service reverts to stateless.
 
@@ -27,7 +27,7 @@ Volumes can be backed up to S3-compatible storage on a schedule or on demand.
 | Backup enabled | Toggle automatic backups |
 | Backup schedule | Cron expression for backup frequency |
 
-Backups are compressed as `.tar.gz` archives and uploaded to the configured [backup storage](/infrastructure/backups). Each backup tracks its size, checksum, and completion status.
+Backups stop the running container, compress the volume as a `.tar.gz` archive, upload it to the configured [backup storage](/infrastructure/backups), then start the container again if it was running. Each backup tracks its size, checksum, and completion status.
 
 Backup statuses:
 

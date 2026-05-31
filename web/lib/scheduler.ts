@@ -37,8 +37,6 @@ export async function triggerRecoveryForOfflineServers(
 			autoPlace: services.autoPlace,
 			stateful: services.stateful,
 			replicas: services.replicas,
-			resourceCpuLimit: services.resourceCpuLimit,
-			resourceMemoryLimitMb: services.resourceMemoryLimitMb,
 		})
 		.from(deployments)
 		.innerJoin(services, eq(deployments.serviceId, services.id))
@@ -73,11 +71,7 @@ export async function triggerRecoveryForOfflineServers(
 			console.log(`[scheduler] recovering service ${serviceId}`);
 
 			const newPlacements = await calculateResourceAwarePlacement(
-				{
-					id: service.serviceId,
-					resourceCpuLimit: service.resourceCpuLimit,
-					resourceMemoryLimitMb: service.resourceMemoryLimitMb,
-				},
+				{ id: service.serviceId },
 				service.replicas,
 				offlineServerIds,
 			);

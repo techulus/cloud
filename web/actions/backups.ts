@@ -10,15 +10,10 @@ import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { deleteFromS3 } from "@/lib/s3";
 
-export async function createBackup(
-	serviceId: string,
-	volumeId: string,
-	backupTypeOverride?: "volume" | "database",
-) {
+export async function createBackup(serviceId: string, volumeId: string) {
 	const result = await triggerBackup({
 		serviceId,
 		volumeId,
-		backupTypeOverride,
 	});
 
 	await inngest.send(

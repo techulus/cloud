@@ -37,6 +37,8 @@ You can set CPU and memory limits per service:
 
 New services default to the Large preset: 2 CPU cores and 1024 MB memory. You can change the preset or choose No limit to let the container use whatever resources are available on the host.
 
+Resource limits are runtime caps, not reserved capacity. Placement uses current server health and replica distribution, but it does not require the sum of configured limits to fit as guaranteed minimum allocation.
+
 ## Health Checks
 
 Health checks verify that a container is ready to receive traffic. When configured, the platform waits for the health check to pass before routing traffic to a new deployment.
