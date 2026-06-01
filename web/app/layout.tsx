@@ -10,9 +10,10 @@ const inter = localFont({
 	weight: "100 900",
 });
 
-const lilex = localFont({
-	src: "./fonts/Lilex.woff2",
-	variable: "--font-lilex",
+const ioskeleyMono = localFont({
+	src: "./fonts/IoskeleyMono-Regular.woff2",
+	variable: "--font-ioskeley-mono",
+	weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -35,7 +36,7 @@ export default function RootLayout({
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<body
-				className={`${inter.variable} ${lilex.variable} font-sans antialiased`}
+				className={`${inter.variable} ${ioskeleyMono.variable} font-sans antialiased`}
 			>
 				<ThemeProvider>
 					<NuqsAdapter>{children}</NuqsAdapter>
