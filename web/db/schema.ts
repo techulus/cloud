@@ -182,14 +182,6 @@ type ServerMeta = {
 	hostname?: string;
 };
 
-export type HealthStats = {
-	cpuUsagePercent: number;
-	memoryUsagePercent: number;
-	memoryUsedMb: number;
-	diskUsagePercent: number;
-	diskUsedGb: number;
-};
-
 export type NetworkPeer = {
 	id: string;
 	lastSeenSecs: number;
@@ -232,7 +224,6 @@ export const servers = pgTable("servers", {
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),
 	meta: jsonb("meta").$type<ServerMeta>(),
-	healthStats: jsonb("health_stats").$type<HealthStats>(),
 	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
 	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
 	agentHealth: jsonb("agent_health").$type<AgentHealth>(),

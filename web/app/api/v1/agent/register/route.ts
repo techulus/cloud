@@ -1,10 +1,10 @@
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { eq, and, isNull, gt } from "drizzle-orm";
-import { assignSubnet } from "@/lib/wireguard";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
+import { assignSubnet } from "@/lib/wireguard";
 
 const TOKEN_EXPIRY_HOURS = 24;
 
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
 			wireguardIp,
 			encryptionKey: process.env.ENCRYPTION_KEY,
 			loggingEndpoint: process.env.VICTORIA_LOGS_URL ?? null,
+			metricsEndpoint: process.env.VICTORIA_METRICS_URL ?? null,
 			registryUrl: process.env.REGISTRY_URL ?? null,
 			registryUsername: process.env.REGISTRY_USERNAME ?? null,
 			registryPassword: process.env.REGISTRY_PASSWORD ?? null,

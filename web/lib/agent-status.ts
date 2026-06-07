@@ -5,7 +5,6 @@ import {
 	type ContainerHealth,
 	deploymentPorts,
 	deployments,
-	type HealthStats,
 	type NetworkHealth,
 	rollouts,
 	servers,
@@ -37,7 +36,6 @@ export type StatusReport = {
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
 	dnsInSync?: boolean;
-	healthStats?: HealthStats;
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
@@ -74,9 +72,6 @@ export async function applyStatusReport(
 		updateData.meta = report.meta;
 	}
 
-	if (report.healthStats) {
-		updateData.healthStats = report.healthStats;
-	}
 	if (report.networkHealth) {
 		updateData.networkHealth = report.networkHealth;
 	}

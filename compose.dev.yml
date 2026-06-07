@@ -41,6 +41,17 @@ services:
       - "-retentionPeriod=7d"
     restart: unless-stopped
 
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoria-metrics-data:/vmdata
+    command:
+      - "-storageDataPath=/vmdata"
+      - "-retentionPeriod=${VM_RETENTION:-30d}"
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     ports:
@@ -71,5 +82,6 @@ services:
 volumes:
   registry-data:
   victoria-logs-data:
+  victoria-metrics-data:
   postgres_data:
   minio_data:

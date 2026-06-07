@@ -9,6 +9,10 @@ import {
 	type PlacementServerSnapshot,
 } from "@/lib/placement-planner";
 import { SETTING_KEYS } from "@/lib/settings-keys";
+import {
+	type NodeMetricsSnapshot,
+	queryNodeMetricsSnapshots,
+} from "@/lib/victoria-metrics";
 
 export type { PlacementResult };
 
@@ -24,7 +28,6 @@ export async function calculateResourceAwarePlacement(
 					id: servers.id,
 					status: servers.status,
 					wireguardIp: servers.wireguardIp,
-					healthStats: servers.healthStats,
 					containerHealth: servers.containerHealth,
 				})
 				.from(servers)
@@ -41,10 +44,36 @@ export async function calculateResourceAwarePlacement(
 			getExcludedFromWorkloadPlacement(),
 		]);
 
+	const metricsByServer = await queryNodeMetricsSnapshots(
+		candidateServers.map((server) => server.id),
+	).catch((error) => {
+		console.error("[placement] failed to query metrics:", error);
+		return new Map<string, NodeMetricsSnapshot>();
+	});
+	const serversWithMetrics = candidateServers.map((server) => {
+		const metrics = metricsByServer.get(server.id);
+		return {
+			...server,
+			healthStats: metrics
+				? {
+						cpuUsagePercent: metrics.cpuUsagePercent ?? 0,
+						memoryUsagePercent: metrics.memoryUsagePercent ?? 0,
+						memoryUsedMb: Math.round(
+							(metrics.memoryUsedBytes ?? 0) / 1024 / 1024,
+						),
+						diskUsagePercent: metrics.diskUsagePercent ?? 0,
+						diskUsedGb: Math.round(
+							(metrics.diskUsedBytes ?? 0) / 1024 / 1024 / 1024,
+						),
+					}
+				: null,
+		};
+	});
+
 	return calculateResourceAwarePlacementFromSnapshot({
 		serviceId: service.id,
 		totalReplicas,
-		servers: candidateServers satisfies PlacementServerSnapshot[],
+		servers: serversWithMetrics satisfies PlacementServerSnapshot[],
 		existingReplicas: allocatedReplicas,
 		excludeServerIds: [...(excludeServerIds ?? []), ...excludedFromWorkload],
 	});

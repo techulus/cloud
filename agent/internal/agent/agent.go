@@ -6,6 +6,7 @@ import (
 
 	"techulus/cloud-agent/internal/build"
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/health"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
 	"techulus/cloud-agent/internal/reconcile"
@@ -42,6 +43,7 @@ type Config struct {
 	EncryptionKey    string `json:"encryptionKey"`
 	IsProxy          bool   `json:"isProxy"`
 	LoggingEndpoint  string `json:"loggingEndpoint,omitempty"`
+	MetricsEndpoint  string `json:"metricsEndpoint,omitempty"`
 	RegistryURL      string `json:"registryUrl,omitempty"`
 	RegistryUsername string `json:"registryUsername,omitempty"`
 	RegistryPassword string `json:"registryPassword,omitempty"`
@@ -78,6 +80,7 @@ type Agent struct {
 	processingStart             time.Time
 	LogCollector                *logs.Collector
 	TraefikLogCollector         *logs.TraefikCollector
+	MetricsSender               MetricsSender
 	Builder                     *build.Builder
 	isBuilding                  bool
 	buildMutex                  sync.Mutex
@@ -94,6 +97,7 @@ func NewAgent(
 	publicIP, privateIP, dataDir string,
 	logCollector *logs.Collector,
 	traefikLogCollector *logs.TraefikCollector,
+	metricsSender MetricsSender,
 	builder *build.Builder,
 	isProxy bool,
 	disableDNS bool,
@@ -110,10 +114,15 @@ func NewAgent(
 		DataDir:               dataDir,
 		LogCollector:          logCollector,
 		TraefikLogCollector:   traefikLogCollector,
+		MetricsSender:         metricsSender,
 		Builder:               builder,
 		IsProxy:               isProxy,
 		DisableDNS:            disableDNS,
 	}
+}
+
+type MetricsSender interface {
+	SendSystemStats(stats *health.SystemStats, collectedAt time.Time) error
 }
 
 func (a *Agent) GetState() AgentState {

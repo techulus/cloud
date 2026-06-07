@@ -38,6 +38,7 @@ type RegisterResponse struct {
 	WireGuardIP      string  `json:"wireguardIp"`
 	EncryptionKey    string  `json:"encryptionKey"`
 	LoggingEndpoint  *string `json:"loggingEndpoint"`
+	MetricsEndpoint  *string `json:"metricsEndpoint"`
 	RegistryURL      *string `json:"registryUrl"`
 	RegistryUsername *string `json:"registryUsername"`
 	RegistryPassword *string `json:"registryPassword"`
