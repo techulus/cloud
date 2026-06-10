@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
+import { metricSnapshotToHealthStats } from "@/db/queries";
 import { servers, serviceReplicas, settings } from "@/db/schema";
 import type { Service } from "@/db/types";
 import {
@@ -54,19 +55,7 @@ export async function calculateResourceAwarePlacement(
 		const metrics = metricsByServer.get(server.id);
 		return {
 			...server,
-			healthStats: metrics
-				? {
-						cpuUsagePercent: metrics.cpuUsagePercent ?? 0,
-						memoryUsagePercent: metrics.memoryUsagePercent ?? 0,
-						memoryUsedMb: Math.round(
-							(metrics.memoryUsedBytes ?? 0) / 1024 / 1024,
-						),
-						diskUsagePercent: metrics.diskUsagePercent ?? 0,
-						diskUsedGb: Math.round(
-							(metrics.diskUsedBytes ?? 0) / 1024 / 1024 / 1024,
-						),
-					}
-				: null,
+			healthStats: metricSnapshotToHealthStats(metrics),
 		};
 	});
 

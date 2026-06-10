@@ -8,11 +8,11 @@ import type {
 	projects,
 	rollouts,
 	secrets,
-	serviceReplicas,
+	servers,
 	servicePorts,
+	serviceReplicas,
 	services,
 	serviceVolumes,
-	servers,
 	volumeBackups,
 	workQueue,
 } from "./schema";
@@ -38,6 +38,14 @@ export type DeploymentStatus = NonNullable<Deployment["status"]>;
 export type HealthStatus = Deployment["healthStatus"];
 export type RolloutStatus = NonNullable<Rollout["status"]>;
 export type BuildStatus = NonNullable<Build["status"]>;
+
+export type HealthStats = {
+	cpuUsagePercent: number;
+	memoryUsagePercent: number;
+	memoryUsedMb: number;
+	diskUsagePercent: number;
+	diskUsedGb: number;
+};
 
 export type ServiceWithDetails = Service & {
 	ports: ServicePort[];
