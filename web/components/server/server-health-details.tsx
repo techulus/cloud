@@ -13,16 +13,8 @@ import { HealthIndicator } from "@/components/cluster/health-indicator";
 import { ResourceBar } from "@/components/cluster/resource-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import type { Server } from "@/db/types";
+import type { HealthStats, Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
-
-type HealthStats = {
-	cpuUsagePercent: number;
-	memoryUsagePercent: number;
-	memoryUsedMb: number;
-	diskUsagePercent: number;
-	diskUsedGb: number;
-};
 
 type ServerHealthData = {
 	healthStats: HealthStats | null;

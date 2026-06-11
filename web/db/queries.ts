@@ -12,6 +12,7 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
+import type { HealthStats } from "@/db/types";
 import type {
 	EmailAlertsConfig,
 	SmtpConfig,
@@ -22,14 +23,6 @@ import {
 	type NodeMetricsSnapshot,
 	queryNodeMetricsSnapshots,
 } from "@/lib/victoria-metrics";
-
-type HealthStats = {
-	cpuUsagePercent: number;
-	memoryUsagePercent: number;
-	memoryUsedMb: number;
-	diskUsagePercent: number;
-	diskUsedGb: number;
-};
 
 export async function listProjects() {
 	const projectList = await db
