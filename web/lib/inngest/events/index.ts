@@ -1,22 +1,25 @@
 import { eventType, staticSchema } from "inngest";
 
-export type { RolloutEvents } from "./rollout";
-export type { MigrationEvents } from "./migration";
 export type { BackupEvents } from "./backup";
-export type { RestoreEvents } from "./restore";
 export type { BuildEvents } from "./build";
+export type { MigrationEvents } from "./migration";
+export type { RestoreEvents } from "./restore";
+export type { RolloutEvents } from "./rollout";
+export type { ServiceDeletionEvents } from "./service-deletion";
 
-import type { RolloutEvents } from "./rollout";
-import type { MigrationEvents } from "./migration";
 import type { BackupEvents } from "./backup";
-import type { RestoreEvents } from "./restore";
 import type { BuildEvents } from "./build";
+import type { MigrationEvents } from "./migration";
+import type { RestoreEvents } from "./restore";
+import type { RolloutEvents } from "./rollout";
+import type { ServiceDeletionEvents } from "./service-deletion";
 
 export type Events = RolloutEvents &
 	MigrationEvents &
 	BackupEvents &
 	RestoreEvents &
-	BuildEvents;
+	BuildEvents &
+	ServiceDeletionEvents;
 
 type EventName = keyof Events & string;
 type EventData<TName extends EventName> = Events[TName]["data"];
@@ -47,6 +50,9 @@ export const inngestEvents = {
 	restoreStarted: defineEvent("restore/started"),
 	restoreCompleted: defineEvent("restore/completed"),
 	restoreFailed: defineEvent("restore/failed"),
+
+	serviceDeletionStarted: defineEvent("service-deletion/started"),
+	serviceRestoreStarted: defineEvent("service-restore/started"),
 
 	buildTrigger: defineEvent("build/trigger"),
 	buildStarted: defineEvent("build/started"),

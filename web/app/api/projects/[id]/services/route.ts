@@ -1,21 +1,21 @@
 export const dynamic = "force-dynamic";
 
-import { auth } from "@/lib/auth";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import {
-	services,
+	builds,
+	deploymentPorts,
+	deployments,
+	rollouts,
+	secrets,
+	servers,
 	servicePorts,
 	serviceReplicas,
+	services,
 	serviceVolumes,
-	deployments,
-	deploymentPorts,
-	servers,
-	secrets,
-	rollouts,
-	builds,
 } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { auth } from "@/lib/auth";
 
 export async function GET(
 	request: Request,
@@ -41,8 +41,9 @@ export async function GET(
 				? and(
 						eq(services.projectId, projectId),
 						eq(services.environmentId, environmentId),
+						isNull(services.deletedAt),
 					)
-				: eq(services.projectId, projectId),
+				: and(eq(services.projectId, projectId), isNull(services.deletedAt)),
 		)
 		.orderBy(services.createdAt);
 

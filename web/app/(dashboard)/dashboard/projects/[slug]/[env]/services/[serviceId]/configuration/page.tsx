@@ -1,21 +1,22 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { deleteService } from "@/actions/projects";
-import { useService } from "@/components/service/service-layout-client";
-import { SourceSection } from "@/components/service/details/source-section";
-import { ReplicasSection } from "@/components/service/details/replicas-section";
-import { VolumesSection } from "@/components/service/details/volumes-section";
-import { SecretsSection } from "@/components/service/details/secrets-section";
-import { PortsSection } from "@/components/service/details/ports-section";
-import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
+import { PortsSection } from "@/components/service/details/ports-section";
+import { ReplicasSection } from "@/components/service/details/replicas-section";
 import { ResourceLimitsSection } from "@/components/service/details/resource-limits-section";
-import { StartCommandSection } from "@/components/service/details/start-command-section";
 import { ScheduleSection } from "@/components/service/details/schedule-section";
+import { SecretsSection } from "@/components/service/details/secrets-section";
+import { SourceSection } from "@/components/service/details/source-section";
+import { StartCommandSection } from "@/components/service/details/start-command-section";
+import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
+import { VolumesSection } from "@/components/service/details/volumes-section";
+import { useService } from "@/components/service/service-layout-client";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -29,7 +30,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Trash2 } from "lucide-react";
 
 export default function ConfigurationPage() {
 	const router = useRouter();
@@ -47,6 +47,9 @@ export default function ConfigurationPage() {
 		try {
 			await deleteService(service.id);
 			await globalMutate(`/api/projects/${service.projectId}/services`);
+			toast.success(
+				service.stateful ? "Delete workflow started" : "Service deleted",
+			);
 			router.push(`/dashboard/projects/${projectSlug}/${envName}`);
 		} finally {
 			setIsDeleting(false);
@@ -89,8 +92,9 @@ export default function ConfigurationPage() {
 						<ItemContent>
 							<ItemTitle>Delete this service</ItemTitle>
 							<p className="text-sm text-muted-foreground">
-								Once deleted, this service and all its deployments will be
-								permanently removed.
+								{service.stateful
+									? "Stateful services are backed up and retained for 7 days before permanent purge."
+									: "Once deleted, this service and all its deployments will be permanently removed."}
 							</p>
 						</ItemContent>
 						<AlertDialog>
@@ -101,8 +105,9 @@ export default function ConfigurationPage() {
 								<AlertDialogHeader>
 									<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
 									<AlertDialogDescription>
-										This action cannot be undone. This will permanently delete
-										the service and all its deployments.
+										{service.stateful
+											? "This starts a backup-first delete workflow. The service will be restorable from Deleted services until its retention window expires."
+											: "This action cannot be undone. This will permanently delete the service and all its deployments."}
 									</AlertDialogDescription>
 								</AlertDialogHeader>
 								<AlertDialogFooter>

@@ -1,9 +1,5 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import useSWR from "swr";
 import {
 	ArrowLeftRight,
 	Box,
@@ -13,30 +9,15 @@ import {
 	Lock,
 	Network,
 	Settings,
+	Trash2,
 	Upload,
 } from "lucide-react";
-import type { Environment, ServiceWithDetails } from "@/db/types";
-import { fetcher } from "@/lib/fetcher";
-import { cn } from "@/lib/utils";
-import {
-	AddServiceMenu,
-	CreateDockerServiceDialog,
-	CreateGitHubServiceDialog,
-} from "./create-service-dialog";
-import { Button } from "@/components/ui/button";
-import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import useSWR from "swr";
 import { buttonVariants } from "@/components/ui/button";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@/components/ui/native-select";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyMedia,
-	EmptyTitle,
-} from "@/components/ui/empty";
+import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -47,6 +28,25 @@ import {
 	ContextMenuSubTrigger,
 	ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
+import type { Environment, ServiceWithDetails } from "@/db/types";
+import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
+import {
+	AddServiceMenu,
+	CreateDockerServiceDialog,
+	CreateGitHubServiceDialog,
+} from "./create-service-dialog";
 
 function ServiceCardSkeleton() {
 	return (
@@ -105,6 +105,16 @@ function EnvironmentSelector({
 					</NativeSelectOption>
 				))}
 			</NativeSelect>
+			<Link
+				href={`/dashboard/projects/${projectSlug}/${selectedEnvName}/deleted`}
+				className={cn(
+					buttonVariants({ variant: "outline", size: "sm" }),
+					"gap-2",
+				)}
+			>
+				<Trash2 className="h-4 w-4" />
+				<span className="hidden md:inline">Deleted</span>
+			</Link>
 			<Link
 				href={`/dashboard/projects/${projectSlug}/settings`}
 				className={cn(
