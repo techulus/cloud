@@ -31,6 +31,10 @@ import {
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import {
+	calculateResourceAwarePlacement,
+	replaceServiceReplicaPlacements,
+} from "@/lib/placement";
 import { allocatePort } from "@/lib/port-allocation";
 import {
 	containerPathSchema,
@@ -45,6 +49,7 @@ import type {
 } from "@/lib/service-config";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
+import { deleteBackup } from "./backups";
 import { startMigration } from "./migrations";
 
 function isValidImageReferencePart(reference: string): boolean {
@@ -508,6 +513,15 @@ async function hardDeleteService(serviceId: string) {
 		}
 	}
 
+	const backups = await db
+		.select({ id: volumeBackups.id })
+		.from(volumeBackups)
+		.where(eq(volumeBackups.serviceId, serviceId));
+
+	for (const backup of backups) {
+		await deleteBackup(backup.id, { revalidate: false });
+	}
+
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
@@ -595,12 +609,24 @@ export async function deleteService(serviceId: string) {
 		.set({ deletionStatus: "backing_up", deletionError: null })
 		.where(eq(services.id, serviceId));
 
-	await inngest.send(
-		inngestEvents.serviceDeletionStarted.create({
-			serviceId,
-			reusableBackupIds,
-		}),
-	);
+	try {
+		await inngest.send(
+			inngestEvents.serviceDeletionStarted.create({
+				serviceId,
+				reusableBackupIds,
+			}),
+		);
+	} catch (error) {
+		await db
+			.update(services)
+			.set({
+				deletionStatus: "failed",
+				deletionError:
+					error instanceof Error ? error.message : "Deletion workflow failed",
+			})
+			.where(eq(services.id, serviceId));
+		throw error;
+	}
 
 	revalidatePath("/dashboard/projects");
 	return { success: true, softDeleteStarted: true };
@@ -662,86 +688,64 @@ export async function restoreDeletedService(serviceId: string) {
 		backupIds.push(backup.id);
 	}
 
+	let targetServerId: string | null = null;
+
 	if (service.stateful) {
 		const existingReplicas = await db
-			.select({ id: serviceReplicas.id })
+			.select({
+				id: serviceReplicas.id,
+				serverId: serviceReplicas.serverId,
+				count: serviceReplicas.count,
+				serverStatus: servers.status,
+			})
 			.from(serviceReplicas)
+			.leftJoin(servers, eq(serviceReplicas.serverId, servers.id))
 			.where(eq(serviceReplicas.serviceId, serviceId));
 
-		if (existingReplicas.length === 0) {
-			const targetServer = await db
-				.select({ id: servers.id })
-				.from(servers)
-				.where(eq(servers.status, "online"))
-				.limit(1)
-				.then((r) => r[0]);
+		const activeReplica = existingReplicas.find((r) => r.count > 0);
 
-			if (!targetServer) {
+		if (activeReplica?.serverStatus === "online") {
+			targetServerId = activeReplica.serverId;
+		} else {
+			const placements = await calculateResourceAwarePlacement(service, 1);
+			const targetPlacement = placements[0];
+			if (!targetPlacement) {
 				throw new Error("Cannot restore because no online server is available");
 			}
 
-			await db.insert(serviceReplicas).values({
-				id: randomUUID(),
-				serviceId,
-				serverId: targetServer.id,
-				count: 1,
-			});
+			targetServerId = targetPlacement.serverId;
+			await replaceServiceReplicaPlacements(serviceId, placements);
 		}
 	}
 
 	await db
 		.update(services)
 		.set({
-			deletedAt: null,
-			purgeAfter: null,
-			hostname: service.originalHostname,
-			originalHostname: null,
 			deletionStatus: "restoring",
 			deletionError: null,
+			lockedServerId: targetServerId ?? service.lockedServerId,
 		})
 		.where(eq(services.id, serviceId));
 
-	let deployResult: Awaited<ReturnType<typeof deployService>>;
 	try {
-		deployResult = await deployService(serviceId);
+		await inngest.send(
+			inngestEvents.serviceRestoreStarted.create({
+				serviceId,
+				targetServerId,
+				backupIds,
+			}),
+		);
 	} catch (error) {
 		await db
 			.update(services)
 			.set({
-				deletedAt: service.deletedAt,
-				purgeAfter: service.purgeAfter,
-				hostname: null,
-				originalHostname: service.originalHostname,
 				deletionStatus: "failed",
 				deletionError:
-					error instanceof Error ? error.message : "Restore deployment failed",
+					error instanceof Error ? error.message : "Restore workflow failed",
 			})
 			.where(eq(services.id, serviceId));
 		throw error;
 	}
-
-	if (!("rolloutId" in deployResult) || !deployResult.rolloutId) {
-		await db
-			.update(services)
-			.set({
-				deletedAt: service.deletedAt,
-				purgeAfter: service.purgeAfter,
-				hostname: null,
-				originalHostname: service.originalHostname,
-				deletionStatus: "failed",
-				deletionError: "Restore could not start a deployment",
-			})
-			.where(eq(services.id, serviceId));
-		throw new Error("Restore could not start a deployment");
-	}
-
-	await inngest.send(
-		inngestEvents.serviceRestoreStarted.create({
-			serviceId,
-			rolloutId: deployResult.rolloutId,
-			backupIds,
-		}),
-	);
 
 	revalidatePath("/dashboard/projects");
 	return { success: true };

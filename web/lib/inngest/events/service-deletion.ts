@@ -8,7 +8,7 @@ export type ServiceDeletionEvents = {
 	"service-restore/started": {
 		data: {
 			serviceId: string;
-			rolloutId: string;
+			targetServerId: string | null;
 			backupIds: string[];
 		};
 	};
