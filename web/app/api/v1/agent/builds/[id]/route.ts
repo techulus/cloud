@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
@@ -51,10 +51,18 @@ export async function GET(
 	const service = await db
 		.select()
 		.from(services)
-		.where(eq(services.id, build.serviceId))
+		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)))
 		.then((r) => r[0]);
 
 	if (!service) {
+		await db
+			.update(builds)
+			.set({
+				status: "failed",
+				error: "Service not found",
+				completedAt: new Date(),
+			})
+			.where(eq(builds.id, buildId));
 		return NextResponse.json({ error: "Service not found" }, { status: 404 });
 	}
 

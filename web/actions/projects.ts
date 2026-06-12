@@ -1,17 +1,17 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { z, ZodError } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
-import {
-	nameSchema,
-	replicaCountSchema,
-	volumeNameSchema,
-	containerPathSchema,
-	githubRepoUrlSchema,
-} from "@/lib/schemas";
-import { getZodErrorMessage } from "@/lib/utils";
+import cronstrue from "cronstrue";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { ZodError, z } from "zod";
 import { db } from "@/db";
+import {
+	getBackupStorageConfig,
+	getEnvironment,
+	getProject,
+	getService,
+} from "@/db/queries";
 import {
 	deploymentPorts,
 	deployments,
@@ -25,22 +25,32 @@ import {
 	serviceReplicas,
 	services,
 	serviceVolumes,
+	volumeBackups,
 	workQueue,
 } from "@/db/schema";
-import { revalidatePath } from "next/cache";
-import { enqueueWork } from "@/lib/work-queue";
-import {
-	type HealthCheckConfig as ServiceHealthCheckConfig,
-	type PortConfig,
-} from "@/lib/service-config";
-import { slugify } from "@/lib/utils";
-import { getEnvironment, getProject, getService } from "@/db/queries";
-import { allocatePort } from "@/lib/port-allocation";
-import cronstrue from "cronstrue";
-import { startMigration } from "./migrations";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import {
+	calculateResourceAwarePlacement,
+	replaceServiceReplicaPlacements,
+} from "@/lib/placement";
+import { allocatePort } from "@/lib/port-allocation";
+import {
+	containerPathSchema,
+	githubRepoUrlSchema,
+	nameSchema,
+	replicaCountSchema,
+	volumeNameSchema,
+} from "@/lib/schemas";
+import type {
+	PortConfig,
+	HealthCheckConfig as ServiceHealthCheckConfig,
+} from "@/lib/service-config";
+import { getZodErrorMessage, slugify } from "@/lib/utils";
+import { enqueueWork } from "@/lib/work-queue";
+import { deleteBackup } from "./backups";
+import { startMigration } from "./migrations";
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -278,8 +288,24 @@ export async function deleteProject(id: string) {
 		}
 	}
 
+	await deleteBackupsForServices(projectServices.map((service) => service.id));
 	await db.delete(projects).where(eq(projects.id, id));
 	return { success: true };
+}
+
+async function deleteBackupsForServices(serviceIds: string[]) {
+	if (serviceIds.length === 0) {
+		return;
+	}
+
+	const backups = await db
+		.select({ id: volumeBackups.id })
+		.from(volumeBackups)
+		.where(inArray(volumeBackups.serviceId, serviceIds));
+
+	for (const backup of backups) {
+		await deleteBackup(backup.id, { revalidate: false });
+	}
 }
 
 export async function updateProjectName(projectId: string, name: string) {
@@ -364,6 +390,12 @@ export async function deleteEnvironment(environmentId: string) {
 		throw new Error("Cannot delete the production environment");
 	}
 
+	const envServices = await db
+		.select({ id: services.id })
+		.from(services)
+		.where(eq(services.environmentId, environmentId));
+
+	await deleteBackupsForServices(envServices.map((service) => service.id));
 	await db.delete(environments).where(eq(environments.id, environmentId));
 	return { success: true };
 }
@@ -455,8 +487,12 @@ export async function createService(input: CreateServiceInput) {
 	return { id, name, image: finalImage, sourceType };
 }
 
-export async function deleteService(serviceId: string) {
-	const service = await getService(serviceId);
+async function hardDeleteService(serviceId: string) {
+	const service = await db
+		.select()
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.then((r) => r[0]);
 	if (!service) {
 		throw new Error("Service not found");
 	}
@@ -467,7 +503,10 @@ export async function deleteService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	for (const dep of allDeployments) {
-		if (dep.status === "running" && dep.containerId) {
+		if (
+			(dep.status === "running" || dep.status === "healthy") &&
+			dep.containerId
+		) {
 			await db
 				.update(deployments)
 				.set({ status: "stopping" })
@@ -499,9 +538,241 @@ export async function deleteService(serviceId: string) {
 		}
 	}
 
+	const backups = await db
+		.select({ id: volumeBackups.id })
+		.from(volumeBackups)
+		.where(eq(volumeBackups.serviceId, serviceId));
+
+	for (const backup of backups) {
+		await deleteBackup(backup.id, { revalidate: false });
+	}
+
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
+	return { success: true };
+}
+
+export async function deleteService(serviceId: string) {
+	const service = await getService(serviceId);
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
+	if (!service.stateful) {
+		return hardDeleteService(serviceId);
+	}
+
+	const volumes = await db
+		.select()
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
+	if (volumes.length === 0) {
+		return hardDeleteService(serviceId);
+	}
+
+	const storageConfig = await getBackupStorageConfig();
+	if (!storageConfig) {
+		throw new Error(
+			"Backup storage must be configured before deleting a stateful service",
+		);
+	}
+
+	if (service.deletionStatus && service.deletionStatus !== "failed") {
+		throw new Error("Deletion is already in progress for this service");
+	}
+
+	const runningDeployment = await db
+		.select({
+			id: deployments.id,
+			serverId: deployments.serverId,
+			containerId: deployments.containerId,
+		})
+		.from(deployments)
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				inArray(deployments.status, ["running", "healthy"]),
+			),
+		)
+		.then((r) => r[0]);
+
+	const reusableBackupIds: string[] = [];
+
+	if (!runningDeployment || !runningDeployment.containerId) {
+		for (const volume of volumes) {
+			const latestBackup = await db
+				.select({ id: volumeBackups.id })
+				.from(volumeBackups)
+				.where(
+					and(
+						eq(volumeBackups.volumeId, volume.id),
+						eq(volumeBackups.status, "completed"),
+					),
+				)
+				.orderBy(desc(volumeBackups.createdAt))
+				.limit(1)
+				.then((r) => r[0]);
+
+			if (!latestBackup) {
+				throw new Error(
+					"Stateful service must be running long enough to create a recoverable backup before deletion",
+				);
+			}
+
+			await db
+				.update(volumeBackups)
+				.set({ isDeletionBackup: true })
+				.where(eq(volumeBackups.id, latestBackup.id));
+			reusableBackupIds.push(latestBackup.id);
+		}
+	}
+
+	await db
+		.update(services)
+		.set({ deletionStatus: "backing_up", deletionError: null })
+		.where(eq(services.id, serviceId));
+
+	try {
+		await inngest.send(
+			inngestEvents.serviceDeletionStarted.create({
+				serviceId,
+				reusableBackupIds,
+			}),
+		);
+	} catch (error) {
+		await db
+			.update(services)
+			.set({
+				deletionStatus: "failed",
+				deletionError:
+					error instanceof Error ? error.message : "Deletion workflow failed",
+			})
+			.where(eq(services.id, serviceId));
+		throw error;
+	}
+
+	revalidatePath("/dashboard/projects");
+	return { success: true, softDeleteStarted: true };
+}
+
+export async function restoreDeletedService(serviceId: string) {
+	const service = await db
+		.select()
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.then((r) => r[0]);
+
+	if (!service || !service.deletedAt) {
+		throw new Error("Deleted service not found");
+	}
+
+	if (service.deletionStatus && service.deletionStatus !== "failed") {
+		throw new Error("A deletion or restore operation is already in progress");
+	}
+
+	if (service.originalHostname) {
+		const existingHostname = await db
+			.select({ id: services.id })
+			.from(services)
+			.where(eq(services.hostname, service.originalHostname));
+
+		if (existingHostname.some((s) => s.id !== serviceId)) {
+			throw new Error(
+				"Cannot restore because another service is using the original hostname",
+			);
+		}
+	}
+
+	const volumes = await db
+		.select({ id: serviceVolumes.id })
+		.from(serviceVolumes)
+		.where(eq(serviceVolumes.serviceId, serviceId));
+
+	const backupIds: string[] = [];
+	for (const volume of volumes) {
+		const backup = await db
+			.select({ id: volumeBackups.id })
+			.from(volumeBackups)
+			.where(
+				and(
+					eq(volumeBackups.volumeId, volume.id),
+					eq(volumeBackups.isDeletionBackup, true),
+					eq(volumeBackups.status, "completed"),
+				),
+			)
+			.orderBy(desc(volumeBackups.createdAt))
+			.limit(1)
+			.then((r) => r[0]);
+
+		if (!backup) {
+			throw new Error("Cannot restore because a retained backup is missing");
+		}
+
+		backupIds.push(backup.id);
+	}
+
+	let targetServerId: string | null = null;
+
+	if (service.stateful) {
+		const existingReplicas = await db
+			.select({
+				id: serviceReplicas.id,
+				serverId: serviceReplicas.serverId,
+				count: serviceReplicas.count,
+				serverStatus: servers.status,
+			})
+			.from(serviceReplicas)
+			.leftJoin(servers, eq(serviceReplicas.serverId, servers.id))
+			.where(eq(serviceReplicas.serviceId, serviceId));
+
+		const activeReplica = existingReplicas.find((r) => r.count > 0);
+
+		if (activeReplica?.serverStatus === "online") {
+			targetServerId = activeReplica.serverId;
+		} else {
+			const placements = await calculateResourceAwarePlacement(service, 1);
+			const targetPlacement = placements[0];
+			if (!targetPlacement) {
+				throw new Error("Cannot restore because no online server is available");
+			}
+
+			targetServerId = targetPlacement.serverId;
+			await replaceServiceReplicaPlacements(serviceId, placements);
+		}
+	}
+
+	await db
+		.update(services)
+		.set({
+			deletionStatus: "restoring",
+			deletionError: null,
+			lockedServerId: targetServerId ?? service.lockedServerId,
+		})
+		.where(eq(services.id, serviceId));
+
+	try {
+		await inngest.send(
+			inngestEvents.serviceRestoreStarted.create({
+				serviceId,
+				targetServerId,
+				backupIds,
+			}),
+		);
+	} catch (error) {
+		await db
+			.update(services)
+			.set({
+				deletionStatus: "failed",
+				deletionError:
+					error instanceof Error ? error.message : "Restore workflow failed",
+			})
+			.where(eq(services.id, serviceId));
+		throw error;
+	}
+
+	revalidatePath("/dashboard/projects");
 	return { success: true };
 }
 

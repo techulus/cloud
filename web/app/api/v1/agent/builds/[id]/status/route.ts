@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { deployService } from "@/actions/projects";
 import { db } from "@/db";
@@ -184,10 +184,14 @@ export async function POST(
 		const service = await db
 			.select()
 			.from(services)
-			.where(eq(services.id, build.serviceId))
+			.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)))
 			.then((r) => r[0]);
 
 		if (!service) {
+			await db
+				.update(builds)
+				.set({ error: "Service not found" })
+				.where(eq(builds.id, buildId));
 			return NextResponse.json({ error: "Service not found" }, { status: 404 });
 		}
 
@@ -243,7 +247,9 @@ export async function POST(
 				await db
 					.update(services)
 					.set({ image: baseImageUri })
-					.where(eq(services.id, build.serviceId));
+					.where(
+						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
+					);
 
 				await sendBuildCompletedEvent({
 					buildId,
@@ -305,7 +311,9 @@ export async function POST(
 				await db
 					.update(services)
 					.set({ image: baseImageUri })
-					.where(eq(services.id, build.serviceId));
+					.where(
+						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
+					);
 			}
 
 			await sendBuildCompletedEvent({
@@ -328,7 +336,9 @@ export async function POST(
 			await db
 				.update(services)
 				.set({ image: baseImageUri })
-				.where(eq(services.id, build.serviceId));
+				.where(
+					and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
+				);
 
 			const replicas = await db
 				.select()

@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
@@ -46,6 +46,15 @@ export async function retryBuild(buildId: string) {
 		throw new Error("Build not found");
 	}
 
+	const [service] = await db
+		.select({ id: services.id })
+		.from(services)
+		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)));
+
+	if (!service) {
+		throw new Error("Service not found");
+	}
+
 	if (build.status !== "failed" && build.status !== "cancelled") {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
@@ -72,7 +81,7 @@ export async function triggerBuild(
 	const [service] = await db
 		.select()
 		.from(services)
-		.where(eq(services.id, serviceId));
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
 
 	if (!service) {
 		throw new Error("Service not found");

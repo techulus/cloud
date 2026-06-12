@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -35,7 +35,9 @@ export async function listProjects() {
 			const serviceCount = await db
 				.select({ count: services.id })
 				.from(services)
-				.where(eq(services.projectId, project.id));
+				.where(
+					and(eq(services.projectId, project.id), isNull(services.deletedAt)),
+				);
 			return {
 				...project,
 				serviceCount: serviceCount.length,
@@ -63,13 +65,43 @@ export async function listServices(projectId: string) {
 	return db
 		.select()
 		.from(services)
-		.where(eq(services.projectId, projectId))
+		.where(and(eq(services.projectId, projectId), isNull(services.deletedAt)))
 		.orderBy(services.createdAt);
 }
 
 export async function getService(id: string) {
-	const results = await db.select().from(services).where(eq(services.id, id));
+	const results = await db
+		.select()
+		.from(services)
+		.where(and(eq(services.id, id), isNull(services.deletedAt)));
 	return results[0] || null;
+}
+
+export async function getDeletedService(id: string) {
+	const results = await db
+		.select()
+		.from(services)
+		.where(and(eq(services.id, id), isNotNull(services.deletedAt)));
+	return results[0] || null;
+}
+
+export async function listDeletedServices(
+	projectId: string,
+	environmentId?: string,
+) {
+	return db
+		.select()
+		.from(services)
+		.where(
+			environmentId
+				? and(
+						eq(services.projectId, projectId),
+						eq(services.environmentId, environmentId),
+						isNotNull(services.deletedAt),
+					)
+				: and(eq(services.projectId, projectId), isNotNull(services.deletedAt)),
+		)
+		.orderBy(services.deletedAt);
 }
 
 export async function getOnlineServers() {

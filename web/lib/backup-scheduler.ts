@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { deleteBackup } from "@/actions/backups";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
@@ -61,7 +61,7 @@ export async function runScheduledBackups() {
 			backupSchedule: services.backupSchedule,
 		})
 		.from(services)
-		.where(eq(services.backupEnabled, true));
+		.where(and(eq(services.backupEnabled, true), isNull(services.deletedAt)));
 
 	for (const service of servicesWithBackup) {
 		if (!service.backupSchedule) {
@@ -134,6 +134,7 @@ export async function cleanupOldBackups() {
 			and(
 				lt(volumeBackups.createdAt, cutoffDate),
 				eq(volumeBackups.isMigrationBackup, false),
+				eq(volumeBackups.isDeletionBackup, false),
 			),
 		);
 
@@ -146,6 +147,6 @@ export async function cleanupOldBackups() {
 	);
 
 	for (const backup of oldBackups) {
-		await deleteBackup(backup.id);
+		await deleteBackup(backup.id, { revalidate: false });
 	}
 }
