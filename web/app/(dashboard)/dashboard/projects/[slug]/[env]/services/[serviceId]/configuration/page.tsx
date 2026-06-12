@@ -31,11 +31,31 @@ import {
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 
+const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
+
+function formatBackupDate(value: Date | string | null | undefined) {
+	if (!value) return "an unknown time";
+	return new Date(value).toLocaleString();
+}
+
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
 	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
 	const [isDeleting, setIsDeleting] = useState(false);
+	const hasActiveDeploymentForBackup = service.deployments.some(
+		(deployment) =>
+			ACTIVE_DELETE_BACKUP_STATUSES.includes(
+				deployment.status as (typeof ACTIVE_DELETE_BACKUP_STATUSES)[number],
+			) && !!deployment.containerId,
+	);
+	const hasVolumes = (service.volumes?.length ?? 0) > 0;
+	const willReuseCompletedBackups =
+		service.stateful && hasVolumes && !hasActiveDeploymentForBackup;
+	const hasCompletedBackupForEveryVolume =
+		service.deletionBackupFallback &&
+		service.deletionBackupFallback.backedUpVolumeCount ===
+			service.deletionBackupFallback.volumeCount;
 
 	const handleConfigSave = useCallback(() => {
 		onUpdate();
@@ -105,9 +125,45 @@ export default function ConfigurationPage() {
 								<AlertDialogHeader>
 									<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
 									<AlertDialogDescription>
-										{service.stateful
-											? "This starts a backup-first delete workflow. The service will be restorable from Deleted services until its retention window expires."
-											: "This action cannot be undone. This will permanently delete the service and all its deployments."}
+										{service.stateful ? (
+											<>
+												This starts a backup-first delete workflow. The service
+												will be restorable from Deleted services until its
+												retention window expires.
+												{willReuseCompletedBackups &&
+													hasCompletedBackupForEveryVolume && (
+														<>
+															<br />
+															<br />
+															<span className="font-medium text-foreground">
+																This service is not currently running.
+															</span>{" "}
+															Restore will use the latest completed backups for
+															its volumes. The oldest selected backup is from{" "}
+															{formatBackupDate(
+																service.deletionBackupFallback
+																	?.oldestLatestBackupAt,
+															)}
+															; changes after that backup will not be restored.
+														</>
+													)}
+												{willReuseCompletedBackups &&
+													!hasCompletedBackupForEveryVolume && (
+														<>
+															<br />
+															<br />
+															<span className="font-medium text-destructive">
+																No completed backup is available for every
+																volume.
+															</span>{" "}
+															Delete will fail unless the service is running so
+															a fresh deletion backup can be created.
+														</>
+													)}
+											</>
+										) : (
+											"This action cannot be undone. This will permanently delete the service and all its deployments."
+										)}
 									</AlertDialogDescription>
 								</AlertDialogHeader>
 								<AlertDialogFooter>

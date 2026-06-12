@@ -63,4 +63,10 @@ export type ServiceWithDetails = Service & {
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;
+	deletionBackupFallback?: {
+		volumeCount: number;
+		backedUpVolumeCount: number;
+		oldestLatestBackupAt: Date | string | null;
+		newestLatestBackupAt: Date | string | null;
+	} | null;
 };

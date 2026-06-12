@@ -43,9 +43,11 @@ export function DeletedServicesPanel({
 }) {
 	const router = useRouter();
 	const [restoreId, setRestoreId] = useState<string | null>(null);
+	const [openRestoreId, setOpenRestoreId] = useState<string | null>(null);
 
 	const handleRestore = async (serviceId: string) => {
 		setRestoreId(serviceId);
+		setOpenRestoreId(null);
 		try {
 			await restoreDeletedService(serviceId);
 			toast.success("Restore started");
@@ -73,63 +75,76 @@ export function DeletedServicesPanel({
 
 	return (
 		<div className="divide-y rounded-lg border">
-			{services.map((service) => (
-				<div
-					key={service.id}
-					className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-				>
-					<div className="min-w-0">
-						<div className="flex items-center gap-2">
-							<h2 className="truncate font-medium">{service.name}</h2>
-							{service.deletionStatus && (
-								<span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-									{service.deletionStatus}
-								</span>
+			{services.map((service) => {
+				const restoreDisabled =
+					restoreId === service.id ||
+					(!!service.deletionStatus && service.deletionStatus !== "failed");
+				const restoreLabel =
+					restoreId === service.id || service.deletionStatus === "restoring"
+						? "Restoring..."
+						: "Restore";
+
+				return (
+					<div
+						key={service.id}
+						className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+					>
+						<div className="min-w-0">
+							<div className="flex items-center gap-2">
+								<h2 className="truncate font-medium">{service.name}</h2>
+								{service.deletionStatus && (
+									<span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+										{service.deletionStatus}
+									</span>
+								)}
+							</div>
+							<p className="truncate text-sm text-muted-foreground">
+								{service.image}
+							</p>
+							<p className="mt-1 text-xs text-muted-foreground">
+								Deleted {formatDate(service.deletedAt)}. Purges{" "}
+								{formatDate(service.purgeAfter)}.
+							</p>
+							{service.deletionError && (
+								<p className="mt-1 text-xs text-destructive">
+									{service.deletionError}
+								</p>
 							)}
 						</div>
-						<p className="truncate text-sm text-muted-foreground">
-							{service.image}
-						</p>
-						<p className="mt-1 text-xs text-muted-foreground">
-							Deleted {formatDate(service.deletedAt)}. Purges{" "}
-							{formatDate(service.purgeAfter)}.
-						</p>
-						{service.deletionError && (
-							<p className="mt-1 text-xs text-destructive">
-								{service.deletionError}
-							</p>
-						)}
-					</div>
-					<AlertDialog>
-						<AlertDialogTrigger
-							render={
-								<Button variant="outline" disabled={restoreId === service.id} />
+						<AlertDialog
+							open={openRestoreId === service.id}
+							onOpenChange={(open) =>
+								setOpenRestoreId(open ? service.id : null)
 							}
 						>
-							<RotateCcw className="h-4 w-4" />
-							{restoreId === service.id ? "Restoring..." : "Restore"}
-						</AlertDialogTrigger>
-						<AlertDialogContent>
-							<AlertDialogHeader>
-								<AlertDialogTitle>Restore {service.name}?</AlertDialogTitle>
-								<AlertDialogDescription>
-									This will recreate the service deployment and restore its
-									retained volumes from the deletion backup.
-								</AlertDialogDescription>
-							</AlertDialogHeader>
-							<AlertDialogFooter>
-								<AlertDialogCancel>Cancel</AlertDialogCancel>
-								<AlertDialogAction
-									onClick={() => handleRestore(service.id)}
-									disabled={restoreId === service.id}
-								>
-									Restore
-								</AlertDialogAction>
-							</AlertDialogFooter>
-						</AlertDialogContent>
-					</AlertDialog>
-				</div>
-			))}
+							<AlertDialogTrigger
+								render={<Button variant="outline" disabled={restoreDisabled} />}
+							>
+								<RotateCcw className="h-4 w-4" />
+								{restoreLabel}
+							</AlertDialogTrigger>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>Restore {service.name}?</AlertDialogTitle>
+									<AlertDialogDescription>
+										This will recreate the service deployment and restore its
+										retained volumes from the deletion backup.
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>Cancel</AlertDialogCancel>
+									<AlertDialogAction
+										onClick={() => handleRestore(service.id)}
+										disabled={restoreDisabled}
+									>
+										Restore
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					</div>
+				);
+			})}
 		</div>
 	);
 }

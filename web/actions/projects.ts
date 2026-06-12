@@ -288,8 +288,24 @@ export async function deleteProject(id: string) {
 		}
 	}
 
+	await deleteBackupsForServices(projectServices.map((service) => service.id));
 	await db.delete(projects).where(eq(projects.id, id));
 	return { success: true };
+}
+
+async function deleteBackupsForServices(serviceIds: string[]) {
+	if (serviceIds.length === 0) {
+		return;
+	}
+
+	const backups = await db
+		.select({ id: volumeBackups.id })
+		.from(volumeBackups)
+		.where(inArray(volumeBackups.serviceId, serviceIds));
+
+	for (const backup of backups) {
+		await deleteBackup(backup.id, { revalidate: false });
+	}
 }
 
 export async function updateProjectName(projectId: string, name: string) {
@@ -374,6 +390,12 @@ export async function deleteEnvironment(environmentId: string) {
 		throw new Error("Cannot delete the production environment");
 	}
 
+	const envServices = await db
+		.select({ id: services.id })
+		.from(services)
+		.where(eq(services.environmentId, environmentId));
+
+	await deleteBackupsForServices(envServices.map((service) => service.id));
 	await db.delete(environments).where(eq(environments.id, environmentId));
 	return { success: true };
 }

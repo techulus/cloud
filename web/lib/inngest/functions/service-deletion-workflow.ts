@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import { cron } from "inngest";
 import { deleteBackup } from "@/actions/backups";
 import { deployService } from "@/actions/projects";
@@ -221,7 +221,9 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(eq(deployments.serviceId, serviceId));
 
 				const cleanupServerId =
-					setup.service.lockedServerId ?? setup.runningDeployment?.serverId;
+					setup.service.lockedServerId ??
+					setup.runningDeployment?.serverId ??
+					allDeployments.find((deployment) => deployment.serverId)?.serverId;
 				if (cleanupServerId && setup.volumes.length > 0) {
 					await enqueueWork(cleanupServerId, "cleanup_volumes", { serviceId });
 				}
@@ -457,6 +459,16 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			await step.run("mark-restore-complete", async () => {
 				await db
+					.update(volumeBackups)
+					.set({ isDeletionBackup: false })
+					.where(
+						and(
+							eq(volumeBackups.serviceId, serviceId),
+							eq(volumeBackups.isDeletionBackup, true),
+						),
+					);
+
+				await db
 					.update(services)
 					.set({ deletionStatus: null, deletionError: null })
 					.where(eq(services.id, serviceId));
@@ -490,6 +502,7 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 					and(
 						isNotNull(services.deletedAt),
 						isNotNull(services.purgeAfter),
+						isNull(services.deletionStatus),
 						lte(services.purgeAfter, new Date()),
 					),
 				);
