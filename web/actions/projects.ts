@@ -481,7 +481,10 @@ async function hardDeleteService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	for (const dep of allDeployments) {
-		if (dep.status === "running" && dep.containerId) {
+		if (
+			(dep.status === "running" || dep.status === "healthy") &&
+			dep.containerId
+		) {
 			await db
 				.update(deployments)
 				.set({ status: "stopping" })
@@ -568,7 +571,7 @@ export async function deleteService(serviceId: string) {
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
+				inArray(deployments.status, ["running", "healthy"]),
 			),
 		)
 		.then((r) => r[0]);

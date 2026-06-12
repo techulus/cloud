@@ -6,6 +6,7 @@ import {
 	buildWorkflow,
 	certificateRenewal,
 	challengeCleanup,
+	expiredDeletedServicesPurge,
 	migrationWorkflow,
 	oldBackupsCleanup,
 	onBackupFailed,
@@ -16,6 +17,8 @@ import {
 	rolloutWorkflow,
 	scheduledBackupsCheck,
 	scheduledDeploymentsCheck,
+	serviceDeletionWorkflow,
+	serviceRestoreWorkflow,
 	staleItemsCleanup,
 	staleServerCheck,
 } from "@/lib/inngest/functions";
@@ -40,5 +43,8 @@ export const { GET, POST, PUT } = serve({
 		buildWorkflow,
 		buildTriggerWorkflow,
 		restoreTriggerWorkflow,
+		serviceDeletionWorkflow,
+		serviceRestoreWorkflow,
+		expiredDeletedServicesPurge,
 	],
 });

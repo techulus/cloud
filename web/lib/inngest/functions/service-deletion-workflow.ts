@@ -80,7 +80,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							eq(deployments.status, "running"),
+							inArray(deployments.status, ["running", "healthy"]),
 						),
 					)
 					.then((r) => r[0]);
@@ -97,9 +97,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					async () => {
 						const deployment = setup.runningDeployment;
 						if (!deployment?.containerId) {
-							throw new Error(
-								"No running deployment found for deletion backup",
-							);
+							throw new Error("No active deployment found for deletion backup");
 						}
 
 						const ids: string[] = [];
@@ -197,7 +195,11 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(eq(deployments.serviceId, serviceId));
 
 				for (const deployment of allDeployments) {
-					if (deployment.status === "running" && deployment.containerId) {
+					if (
+						(deployment.status === "running" ||
+							deployment.status === "healthy") &&
+						deployment.containerId
+					) {
 						await db
 							.update(deployments)
 							.set({ status: "stopping" })
