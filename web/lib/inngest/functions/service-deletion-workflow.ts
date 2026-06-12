@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { cron } from "inngest";
 import { deleteBackup } from "@/actions/backups";
 import { deployService } from "@/actions/projects";
@@ -502,7 +502,10 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 					and(
 						isNotNull(services.deletedAt),
 						isNotNull(services.purgeAfter),
-						isNull(services.deletionStatus),
+						or(
+							isNull(services.deletionStatus),
+							eq(services.deletionStatus, "failed"),
+						),
 						lte(services.purgeAfter, new Date()),
 					),
 				);
