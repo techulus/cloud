@@ -79,6 +79,8 @@ services:
       - APP_URL=https://${ROOT_DOMAIN}
       - VICTORIA_LOGS_URL=https://${VL_USERNAME}:${VL_PASSWORD}@logs.${ROOT_DOMAIN}
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
+      - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
+      - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
       - REGISTRY_URL=registry:5000
       - REGISTRY_HOST=registry.${ROOT_DOMAIN}
       - INNGEST_BASE_URL=http://inngest:8288
@@ -102,6 +104,8 @@ services:
       - APP_URL=https://${ROOT_DOMAIN}
       - VICTORIA_LOGS_URL=https://${VL_USERNAME}:${VL_PASSWORD}@logs.${ROOT_DOMAIN}
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
+      - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
+      - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
       - REGISTRY_URL=registry:5000
       - REGISTRY_HOST=registry.${ROOT_DOMAIN}
       - INNGEST_BASE_URL=http://inngest:8288
@@ -112,6 +116,8 @@ services:
       migrate:
         condition: service_completed_successfully
       victoria-logs:
+        condition: service_started
+      victoria-metrics:
         condition: service_started
       registry:
         condition: service_started
@@ -178,6 +184,30 @@ services:
       retries: 3
     restart: unless-stopped
 
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    env_file:
+      - ./.env
+    volumes:
+      - victoria-metrics-data:/vmdata
+    command:
+      - "-storageDataPath=/vmdata"
+      - "-retentionPeriod=${VM_RETENTION:-30d}"
+      - "-httpAuth.username=${VM_USERNAME}"
+      - "-httpAuth.password=${VM_PASSWORD}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.metrics.rule=Host(`metrics.${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.metrics.entrypoints=websecure"
+      - "traefik.http.routers.metrics.tls.certresolver=letsencrypt"
+      - "traefik.http.services.metrics.loadbalancer.server.port=8428"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8428/health || wget -q --spider http://127.0.0.1:8428/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   inngest:
     image: inngest/inngest:latest
     env_file:
@@ -196,11 +226,11 @@ services:
       web:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      test: ["CMD", "inngest", "alpha", "doctor", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 40s
     restart: unless-stopped
 
 volumes:
@@ -208,4 +238,5 @@ volumes:
   postgres-data:
   registry-data:
   victoria-logs-data:
+  victoria-metrics-data:
   inngest-data:

@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
@@ -240,7 +242,7 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		return reportFailure(fmt.Errorf("failed to create volume parent directory: %w", err))
 	}
 
-	if err := os.Rename(tempExtractPath, volumePath); err != nil {
+	if err := moveDir(tempExtractPath, volumePath); err != nil {
 		startContainerWithRetry()
 		return reportFailure(fmt.Errorf("failed to move restored data to volume path: %w", err))
 	}
@@ -254,6 +256,96 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 	}
 
 	return nil
+}
+
+func moveDir(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		return err
+	}
+
+	return os.RemoveAll(src)
+}
+
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source is not a directory: %s", src)
+	}
+
+	if err := os.MkdirAll(dst, info.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		entryInfo, err := os.Lstat(srcPath)
+		if err != nil {
+			return err
+		}
+
+		if entryInfo.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.Symlink(linkTarget, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type in restore archive: %s", srcPath)
+		}
+
+		if err := copyFile(srcPath, dstPath, entryInfo.Mode()); err != nil {
+			return err
+		}
+	}
+
+	return os.Chmod(dst, info.Mode())
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func createS3Client(cfg StorageConfig) (*s3.Client, error) {

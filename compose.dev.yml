@@ -41,6 +41,17 @@ services:
       - "-retentionPeriod=7d"
     restart: unless-stopped
 
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoria-metrics-data:/vmdata
+    command:
+      - "-storageDataPath=/vmdata"
+      - "-retentionPeriod=${VM_RETENTION:-30d}"
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     ports:
@@ -61,15 +72,16 @@ services:
       - "8289:8289"
     command: inngest dev -u http://host.docker.internal:3000/api/inngest
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      test: ["CMD", "inngest", "alpha", "doctor", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 40s
     restart: unless-stopped
 
 volumes:
   registry-data:
   victoria-logs-data:
+  victoria-metrics-data:
   postgres_data:
   minio_data:

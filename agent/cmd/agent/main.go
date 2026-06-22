@@ -20,6 +20,7 @@ import (
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
+	"techulus/cloud-agent/internal/metrics"
 	"techulus/cloud-agent/internal/network"
 	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/reconcile"
@@ -34,17 +35,19 @@ var (
 
 func main() {
 	var (
-		controlPlaneURL  string
-		token            string
-		isProxy          bool
-		logsEndpointFlag string
-		disableDNS       bool
+		controlPlaneURL     string
+		token               string
+		isProxy             bool
+		logsEndpointFlag    string
+		metricsEndpointFlag string
+		disableDNS          bool
 	)
 
 	flag.StringVar(&controlPlaneURL, "url", "", "Control plane URL (required)")
 	flag.StringVar(&token, "token", "", "Registration token (required for first run)")
 	flag.BoolVar(&isProxy, "proxy", false, "Run as proxy node (handles TLS and public traffic)")
 	flag.StringVar(&logsEndpointFlag, "logs-endpoint", "", "Override logs endpoint URL (optional)")
+	flag.StringVar(&metricsEndpointFlag, "metrics-endpoint", "", "Override metrics endpoint URL (optional)")
 	flag.BoolVar(&disableDNS, "no-dns", false, "Disable local DNS server")
 	flag.Parse()
 
@@ -53,6 +56,7 @@ func main() {
 	}
 
 	var logsEndpoint string
+	var metricsEndpoint string
 
 	if isProxy && runtime.GOOS != "linux" {
 		log.Fatal("--proxy flag is only supported on Linux")
@@ -112,6 +116,11 @@ func main() {
 		} else if config.LoggingEndpoint != "" {
 			logsEndpoint = config.LoggingEndpoint
 		}
+		if metricsEndpointFlag != "" {
+			metricsEndpoint = metricsEndpointFlag
+		} else if config.MetricsEndpoint != "" {
+			metricsEndpoint = config.MetricsEndpoint
+		}
 
 		if err = container.EnsureNetwork(config.SubnetID); err != nil {
 			log.Printf("Warning: Failed to ensure container network: %v", err)
@@ -162,6 +171,11 @@ func main() {
 			respLoggingEndpoint = *resp.LoggingEndpoint
 		}
 
+		var respMetricsEndpoint string
+		if resp.MetricsEndpoint != nil {
+			respMetricsEndpoint = *resp.MetricsEndpoint
+		}
+
 		var registryURL, registryUsername, registryPassword string
 		if resp.RegistryURL != nil {
 			registryURL = *resp.RegistryURL
@@ -180,6 +194,7 @@ func main() {
 			EncryptionKey:    resp.EncryptionKey,
 			IsProxy:          isProxy,
 			LoggingEndpoint:  respLoggingEndpoint,
+			MetricsEndpoint:  respMetricsEndpoint,
 			RegistryURL:      registryURL,
 			RegistryUsername: registryUsername,
 			RegistryPassword: registryPassword,
@@ -190,6 +205,11 @@ func main() {
 			logsEndpoint = logsEndpointFlag
 		} else if respLoggingEndpoint != "" {
 			logsEndpoint = respLoggingEndpoint
+		}
+		if metricsEndpointFlag != "" {
+			metricsEndpoint = metricsEndpointFlag
+		} else if respMetricsEndpoint != "" {
+			metricsEndpoint = respMetricsEndpoint
 		}
 
 		if err = configuration.Save(config); err != nil {
@@ -251,6 +271,7 @@ func main() {
 	var traefikLogCollector *logs.TraefikCollector
 	var logsSender *logs.VictoriaLogsSender
 	var agentLogWriter *logs.AgentLogWriter
+	var metricsSender agent.MetricsSender
 
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
@@ -263,6 +284,11 @@ func main() {
 		agentLogWriter = logs.NewAgentLogWriter(config.ServerID, logsSender)
 		log.SetOutput(agentLogWriter)
 		log.Println("[agent-logs] Agent log collection enabled")
+	}
+
+	if metricsEndpoint != "" {
+		log.Println("[metrics] metrics collection enabled, endpoint:", metricsEndpoint)
+		metricsSender = metrics.NewVictoriaMetricsSender(metricsEndpoint, config.ServerID)
 	}
 
 	var builder *build.Builder
@@ -294,7 +320,7 @@ func main() {
 	privateIP := network.PrivateIP()
 	log.Printf("Agent v%s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
 
-	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, builder, config.IsProxy, disableDNS)
+	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, builder, config.IsProxy, disableDNS)
 	agentInstance.Run(ctx)
 
 	if agentLogFlusherDone != nil {

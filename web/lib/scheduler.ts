@@ -1,5 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
-import { and, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { triggerBuild } from "@/actions/builds";
 import { deployService } from "@/actions/projects";
 import { db } from "@/db";
@@ -46,6 +46,7 @@ export async function triggerRecoveryForOfflineServers(
 				inArray(deployments.status, activeStatuses),
 				eq(services.autoPlace, true),
 				eq(services.stateful, false),
+				isNull(services.deletedAt),
 			),
 		);
 
@@ -161,7 +162,9 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 			lastScheduledDeploymentRunAt: services.lastScheduledDeploymentRunAt,
 		})
 		.from(services)
-		.where(isNotNull(services.deploymentSchedule));
+		.where(
+			and(isNotNull(services.deploymentSchedule), isNull(services.deletedAt)),
+		);
 
 	if (scheduledServices.length === 0) return;
 

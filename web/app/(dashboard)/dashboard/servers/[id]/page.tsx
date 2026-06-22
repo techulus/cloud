@@ -1,5 +1,11 @@
 import { notFound } from "next/navigation";
-import { getServerDetails } from "@/db/queries";
+import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
+import { LogViewer } from "@/components/logs/log-viewer";
+import { AgentUpdateNudge } from "@/components/server/agent-update-nudge";
+import { ServerDangerZone } from "@/components/server/server-danger-zone";
+import { ServerHeader } from "@/components/server/server-header";
+import { ServerHealthDetails } from "@/components/server/server-health-details";
+import { ServerServices } from "@/components/server/server-services";
 import {
 	Card,
 	CardContent,
@@ -7,15 +13,10 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
-import { LogViewer } from "@/components/logs/log-viewer";
 import { Label } from "@/components/ui/label";
-import { ServerDangerZone } from "@/components/server/server-danger-zone";
-import { ServerHeader } from "@/components/server/server-header";
-import { ServerHealthDetails } from "@/components/server/server-health-details";
-import { ServerServices } from "@/components/server/server-services";
-import { AgentUpdateNudge } from "@/components/server/agent-update-nudge";
+import { getServerDetails, metricSnapshotToHealthStats } from "@/db/queries";
 import { formatRelativeTime } from "@/lib/date";
+import { queryNodeMetricsSnapshot } from "@/lib/victoria-metrics";
 
 async function getLatestAgentVersion(): Promise<string | null> {
 	try {
@@ -39,9 +40,10 @@ export default async function ServerDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
-	const [server, latestVersion] = await Promise.all([
+	const [server, latestVersion, metricsSnapshot] = await Promise.all([
 		getServerDetails(id),
 		getLatestAgentVersion(),
+		queryNodeMetricsSnapshot(id).catch(() => null),
 	]);
 
 	if (!server) {
@@ -172,7 +174,7 @@ export default async function ServerDetailPage({
 				<ServerHealthDetails
 					serverId={id}
 					initialData={{
-						healthStats: server.healthStats,
+						healthStats: metricSnapshotToHealthStats(metricsSnapshot),
 						networkHealth: server.networkHealth,
 						containerHealth: server.containerHealth,
 						agentHealth: server.agentHealth,

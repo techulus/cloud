@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { HealthStats } from "@/db/types";
 
 export type PlacementResult = { serverId: string; count: number }[];
 
@@ -6,13 +7,7 @@ export type PlacementServerSnapshot = {
 	id: string;
 	status: string;
 	wireguardIp: string | null;
-	healthStats?: {
-		cpuUsagePercent: number;
-		memoryUsagePercent: number;
-		memoryUsedMb: number;
-		diskUsagePercent: number;
-		diskUsedGb: number;
-	} | null;
+	healthStats?: HealthStats | null;
 	containerHealth?: {
 		runtimeResponsive: boolean;
 		runningContainers: number;

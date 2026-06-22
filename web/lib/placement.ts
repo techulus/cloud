@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
+import { metricSnapshotToHealthStats } from "@/db/queries";
 import { servers, serviceReplicas, settings } from "@/db/schema";
 import type { Service } from "@/db/types";
 import {
@@ -9,6 +10,10 @@ import {
 	type PlacementServerSnapshot,
 } from "@/lib/placement-planner";
 import { SETTING_KEYS } from "@/lib/settings-keys";
+import {
+	type NodeMetricsSnapshot,
+	queryNodeMetricsSnapshots,
+} from "@/lib/victoria-metrics";
 
 export type { PlacementResult };
 
@@ -24,7 +29,6 @@ export async function calculateResourceAwarePlacement(
 					id: servers.id,
 					status: servers.status,
 					wireguardIp: servers.wireguardIp,
-					healthStats: servers.healthStats,
 					containerHealth: servers.containerHealth,
 				})
 				.from(servers)
@@ -41,10 +45,24 @@ export async function calculateResourceAwarePlacement(
 			getExcludedFromWorkloadPlacement(),
 		]);
 
+	const metricsByServer = await queryNodeMetricsSnapshots(
+		candidateServers.map((server) => server.id),
+	).catch((error) => {
+		console.error("[placement] failed to query metrics:", error);
+		return new Map<string, NodeMetricsSnapshot>();
+	});
+	const serversWithMetrics = candidateServers.map((server) => {
+		const metrics = metricsByServer.get(server.id);
+		return {
+			...server,
+			healthStats: metricSnapshotToHealthStats(metrics),
+		};
+	});
+
 	return calculateResourceAwarePlacementFromSnapshot({
 		serviceId: service.id,
 		totalReplicas,
-		servers: candidateServers satisfies PlacementServerSnapshot[],
+		servers: serversWithMetrics satisfies PlacementServerSnapshot[],
 		existingReplicas: allocatedReplicas,
 		excludeServerIds: [...(excludeServerIds ?? []), ...excludedFromWorkload],
 	});

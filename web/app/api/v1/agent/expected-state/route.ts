@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 		const service = await db
 			.select()
 			.from(services)
-			.where(eq(services.id, dep.serviceId))
+			.where(and(eq(services.id, dep.serviceId), isNull(services.deletedAt)))
 			.then((r) => r[0]);
 
 		if (!service) continue;
@@ -134,7 +134,10 @@ export async function GET(request: NextRequest) {
 		});
 	}
 
-	const allServices = await db.select().from(services);
+	const allServices = await db
+		.select()
+		.from(services)
+		.where(isNull(services.deletedAt));
 	const dnsRecords = [];
 
 	for (const service of allServices) {

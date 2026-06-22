@@ -9,15 +9,15 @@ import {
 	Network,
 } from "lucide-react";
 import useSWR from "swr";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ResourceBar } from "@/components/cluster/resource-bar";
 import { HealthIndicator } from "@/components/cluster/health-indicator";
+import { ResourceBar } from "@/components/cluster/resource-bar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import type { HealthStats, Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
-import type { Server } from "@/db/types";
 
 type ServerHealthData = {
-	healthStats: Server["healthStats"];
+	healthStats: HealthStats | null;
 	networkHealth: Server["networkHealth"];
 	containerHealth: Server["containerHealth"];
 	agentHealth: Server["agentHealth"];

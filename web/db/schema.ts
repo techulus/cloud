@@ -182,14 +182,6 @@ type ServerMeta = {
 	hostname?: string;
 };
 
-export type HealthStats = {
-	cpuUsagePercent: number;
-	memoryUsagePercent: number;
-	memoryUsedMb: number;
-	diskUsagePercent: number;
-	diskUsedGb: number;
-};
-
 export type NetworkPeer = {
 	id: string;
 	lastSeenSecs: number;
@@ -232,7 +224,6 @@ export const servers = pgTable("servers", {
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),
 	meta: jsonb("meta").$type<ServerMeta>(),
-	healthStats: jsonb("health_stats").$type<HealthStats>(),
 	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
 	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
 	agentHealth: jsonb("agent_health").$type<AgentHealth>(),
@@ -311,6 +302,13 @@ export const services = pgTable("services", {
 	}),
 	backupEnabled: boolean("backup_enabled").default(false),
 	backupSchedule: text("backup_schedule"),
+	deletedAt: timestamp("deleted_at", { withTimezone: true }),
+	purgeAfter: timestamp("purge_after", { withTimezone: true }),
+	originalHostname: text("original_hostname"),
+	deletionStatus: text("deletion_status", {
+		enum: ["backing_up", "deleting", "restoring", "failed"],
+	}),
+	deletionError: text("deletion_error"),
 	migrationStatus: text("migration_status", {
 		enum: [
 			"stopping",
@@ -397,6 +395,7 @@ export const volumeBackups = pgTable(
 		checksum: text("checksum"),
 		errorMessage: text("error_message"),
 		isMigrationBackup: boolean("is_migration_backup").default(false),
+		isDeletionBackup: boolean("is_deletion_backup").default(false),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

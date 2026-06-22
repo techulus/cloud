@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { and, eq, isNull } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
 	builds,
@@ -6,11 +7,10 @@ import {
 	githubRepos,
 	services,
 } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
 import {
-	verifyWebhookSignature,
 	createGitHubDeployment,
 	updateGitHubDeploymentStatus,
+	verifyWebhookSignature,
 } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
@@ -140,7 +140,9 @@ async function handlePushEvent(payload: PushPayload) {
 	const service = await db
 		.select()
 		.from(services)
-		.where(eq(services.id, githubRepo.serviceId))
+		.where(
+			and(eq(services.id, githubRepo.serviceId), isNull(services.deletedAt)),
+		)
 		.then((r) => r[0]);
 
 	if (!service) {

@@ -1,21 +1,26 @@
 export const dynamic = "force-dynamic";
 
-import { auth } from "@/lib/auth";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import {
-	services,
+	builds,
+	deploymentPorts,
+	deployments,
+	rollouts,
+	secrets,
+	servers,
 	servicePorts,
 	serviceReplicas,
+	services,
 	serviceVolumes,
-	deployments,
-	deploymentPorts,
-	servers,
-	secrets,
-	rollouts,
-	builds,
+	volumeBackups,
 } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+
+function getBackupTime(value: Date | string | null) {
+	return value ? new Date(value).getTime() : 0;
+}
 
 export async function GET(
 	request: Request,
@@ -41,8 +46,9 @@ export async function GET(
 				? and(
 						eq(services.projectId, projectId),
 						eq(services.environmentId, environmentId),
+						isNull(services.deletedAt),
 					)
-				: eq(services.projectId, projectId),
+				: and(eq(services.projectId, projectId), isNull(services.deletedAt)),
 		)
 		.orderBy(services.createdAt);
 
@@ -140,6 +146,55 @@ export async function GET(
 				}),
 			);
 
+			let deletionBackupFallback = null;
+			if (service.stateful && volumes.length > 0) {
+				const completedBackups = await db
+					.select({
+						volumeId: volumeBackups.volumeId,
+						createdAt: volumeBackups.createdAt,
+						completedAt: volumeBackups.completedAt,
+					})
+					.from(volumeBackups)
+					.where(
+						and(
+							eq(volumeBackups.serviceId, service.id),
+							eq(volumeBackups.status, "completed"),
+						),
+					)
+					.orderBy(desc(volumeBackups.createdAt));
+
+				const latestByVolume = new Map<string, Date | string>();
+				for (const backup of completedBackups) {
+					if (!latestByVolume.has(backup.volumeId)) {
+						latestByVolume.set(
+							backup.volumeId,
+							backup.completedAt ?? backup.createdAt,
+						);
+					}
+				}
+
+				const latestBackupTimes = volumes
+					.map((volume) => latestByVolume.get(volume.id) ?? null)
+					.filter((value): value is Date | string => value !== null);
+
+				deletionBackupFallback = {
+					volumeCount: volumes.length,
+					backedUpVolumeCount: latestBackupTimes.length,
+					oldestLatestBackupAt:
+						latestBackupTimes.length > 0
+							? latestBackupTimes.reduce((oldest, value) =>
+									getBackupTime(value) < getBackupTime(oldest) ? value : oldest,
+								)
+							: null,
+					newestLatestBackupAt:
+						latestBackupTimes.length > 0
+							? latestBackupTimes.reduce((newest, value) =>
+									getBackupTime(value) > getBackupTime(newest) ? value : newest,
+								)
+							: null,
+				};
+			}
+
 			return {
 				...service,
 				ports,
@@ -150,6 +205,7 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
+				deletionBackupFallback,
 			};
 		}),
 	);

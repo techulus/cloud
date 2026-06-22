@@ -1,9 +1,9 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
+import { deployService } from "@/actions/projects";
 import { db } from "@/db";
-import { builds, services, projects, serviceReplicas } from "@/db/schema";
+import { builds, serviceReplicas, services } from "@/db/schema";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
-import { deployService } from "@/actions/projects";
 
 export const buildWorkflow = inngest.createFunction(
 	{
@@ -61,11 +61,12 @@ export const buildWorkflow = inngest.createFunction(
 				const service = await db
 					.select()
 					.from(services)
-					.where(eq(services.id, serviceId))
+					.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 					.then((r) => r[0]);
 
 				return (
-					replicas.length > 0 || (service?.autoPlace && service?.replicas > 0)
+					!!service &&
+					(replicas.length > 0 || (service.autoPlace && service.replicas > 0))
 				);
 			});
 
@@ -139,11 +140,12 @@ export const buildWorkflow = inngest.createFunction(
 			const service = await db
 				.select()
 				.from(services)
-				.where(eq(services.id, serviceId))
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 				.then((r) => r[0]);
 
 			return (
-				replicas.length > 0 || (service?.autoPlace && service?.replicas > 0)
+				!!service &&
+				(replicas.length > 0 || (service.autoPlace && service.replicas > 0))
 			);
 		});
 

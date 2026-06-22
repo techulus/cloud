@@ -251,7 +251,6 @@ type StatusReport struct {
 	Meta            map[string]string       `json:"meta,omitempty"`
 	Containers      []ContainerStatus       `json:"containers"`
 	DnsInSync       bool                    `json:"dnsInSync,omitempty"`
-	HealthStats     *health.SystemStats     `json:"healthStats,omitempty"`
 	NetworkHealth   *health.NetworkHealth   `json:"networkHealth,omitempty"`
 	ContainerHealth *health.ContainerHealth `json:"containerHealth,omitempty"`
 	AgentHealth     *AgentHealth            `json:"agentHealth,omitempty"`

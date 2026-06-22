@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -12,12 +12,17 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
+import type { HealthStats } from "@/db/types";
 import type {
+	EmailAlertsConfig,
 	SmtpConfig,
 	SmtpEncryption,
-	EmailAlertsConfig,
 } from "@/lib/settings-keys";
 import { DEFAULT_SMTP_PORT, DEFAULT_SMTP_TIMEOUT } from "@/lib/settings-keys";
+import {
+	type NodeMetricsSnapshot,
+	queryNodeMetricsSnapshots,
+} from "@/lib/victoria-metrics";
 
 export async function listProjects() {
 	const projectList = await db
@@ -30,7 +35,9 @@ export async function listProjects() {
 			const serviceCount = await db
 				.select({ count: services.id })
 				.from(services)
-				.where(eq(services.projectId, project.id));
+				.where(
+					and(eq(services.projectId, project.id), isNull(services.deletedAt)),
+				);
 			return {
 				...project,
 				serviceCount: serviceCount.length,
@@ -58,13 +65,43 @@ export async function listServices(projectId: string) {
 	return db
 		.select()
 		.from(services)
-		.where(eq(services.projectId, projectId))
+		.where(and(eq(services.projectId, projectId), isNull(services.deletedAt)))
 		.orderBy(services.createdAt);
 }
 
 export async function getService(id: string) {
-	const results = await db.select().from(services).where(eq(services.id, id));
+	const results = await db
+		.select()
+		.from(services)
+		.where(and(eq(services.id, id), isNull(services.deletedAt)));
 	return results[0] || null;
+}
+
+export async function getDeletedService(id: string) {
+	const results = await db
+		.select()
+		.from(services)
+		.where(and(eq(services.id, id), isNotNull(services.deletedAt)));
+	return results[0] || null;
+}
+
+export async function listDeletedServices(
+	projectId: string,
+	environmentId?: string,
+) {
+	return db
+		.select()
+		.from(services)
+		.where(
+			environmentId
+				? and(
+						eq(services.projectId, projectId),
+						eq(services.environmentId, environmentId),
+						isNotNull(services.deletedAt),
+					)
+				: and(eq(services.projectId, projectId), isNotNull(services.deletedAt)),
+		)
+		.orderBy(services.deletedAt);
 }
 
 export async function getOnlineServers() {
@@ -161,7 +198,6 @@ export async function getServerDetails(id: string) {
 			meta: servers.meta,
 			createdAt: servers.createdAt,
 			agentToken: servers.agentToken,
-			healthStats: servers.healthStats,
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
@@ -169,7 +205,8 @@ export async function getServerDetails(id: string) {
 		.from(servers)
 		.where(eq(servers.id, id));
 
-	return serverResults[0] || null;
+	const server = serverResults[0];
+	return server ? { ...server, healthStats: null } : null;
 }
 
 export async function getClusterHealth() {
@@ -178,7 +215,6 @@ export async function getClusterHealth() {
 			id: servers.id,
 			name: servers.name,
 			status: servers.status,
-			healthStats: servers.healthStats,
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
@@ -186,22 +222,35 @@ export async function getClusterHealth() {
 		.from(servers);
 
 	const onlineServers = allServers.filter((s) => s.status === "online");
-	const serversWithHealth = onlineServers.filter((s) => s.healthStats);
+	const metricsByServer = await queryNodeMetricsSnapshots(
+		onlineServers.map((server) => server.id),
+	).catch((error) => {
+		console.error("[cluster-health] failed to query metrics:", error);
+		return new Map<string, NodeMetricsSnapshot>();
+	});
+
+	const serversWithHealth = allServers.map((server) => ({
+		...server,
+		healthStats: metricSnapshotToHealthStats(metricsByServer.get(server.id)),
+	}));
+	const serversWithCurrentMetrics = serversWithHealth.filter(
+		(server) => server.status === "online" && server.healthStats,
+	);
 
 	let avgCpuUsage = 0;
 	let avgMemoryUsage = 0;
 
-	if (serversWithHealth.length > 0) {
-		const cpuSum = serversWithHealth.reduce(
+	if (serversWithCurrentMetrics.length > 0) {
+		const cpuSum = serversWithCurrentMetrics.reduce(
 			(sum, s) => sum + (s.healthStats?.cpuUsagePercent ?? 0),
 			0,
 		);
-		const memSum = serversWithHealth.reduce(
+		const memSum = serversWithCurrentMetrics.reduce(
 			(sum, s) => sum + (s.healthStats?.memoryUsagePercent ?? 0),
 			0,
 		);
-		avgCpuUsage = cpuSum / serversWithHealth.length;
-		avgMemoryUsage = memSum / serversWithHealth.length;
+		avgCpuUsage = cpuSum / serversWithCurrentMetrics.length;
+		avgMemoryUsage = memSum / serversWithCurrentMetrics.length;
 	}
 
 	const networkHealthy = onlineServers.filter(
@@ -220,7 +269,39 @@ export async function getClusterHealth() {
 			networkHealthy,
 			containerHealthy,
 		},
-		servers: allServers,
+		servers: serversWithHealth,
+	};
+}
+
+export function metricSnapshotToHealthStats(
+	snapshot:
+		| {
+				cpuUsagePercent: number | null;
+				memoryUsagePercent: number | null;
+				memoryUsedBytes: number | null;
+				diskUsagePercent: number | null;
+				diskUsedBytes: number | null;
+		  }
+		| null
+		| undefined,
+): HealthStats | null {
+	if (!snapshot) return null;
+	if (
+		snapshot.cpuUsagePercent === null &&
+		snapshot.memoryUsagePercent === null &&
+		snapshot.memoryUsedBytes === null &&
+		snapshot.diskUsagePercent === null &&
+		snapshot.diskUsedBytes === null
+	) {
+		return null;
+	}
+
+	return {
+		cpuUsagePercent: snapshot.cpuUsagePercent ?? 0,
+		memoryUsagePercent: snapshot.memoryUsagePercent ?? 0,
+		memoryUsedMb: Math.round((snapshot.memoryUsedBytes ?? 0) / 1024 / 1024),
+		diskUsagePercent: snapshot.diskUsagePercent ?? 0,
+		diskUsedGb: Math.round((snapshot.diskUsedBytes ?? 0) / 1024 / 1024 / 1024),
 	};
 }
 

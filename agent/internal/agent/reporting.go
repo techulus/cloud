@@ -39,7 +39,15 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 
 	healthCollectMu.Lock()
 	if time.Since(lastHealthCollect) >= 60*time.Second {
-		report.HealthStats = health.CollectSystemStats()
+		collectedAt := time.Now()
+		systemStats := health.CollectSystemStats()
+		if a.MetricsSender != nil {
+			go func() {
+				if err := a.MetricsSender.SendSystemStats(systemStats, collectedAt); err != nil {
+					log.Printf("[metrics] failed to send system stats: %v", err)
+				}
+			}()
+		}
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
 		report.AgentHealth = &agenthttp.AgentHealth{
@@ -48,8 +56,8 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		}
 		lastHealthCollect = time.Now()
 		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
-			report.HealthStats.CpuUsagePercent, report.HealthStats.MemoryUsagePercent,
-			report.HealthStats.DiskUsagePercent, report.NetworkHealth.TunnelUp,
+			systemStats.CpuUsagePercent, systemStats.MemoryUsagePercent,
+			systemStats.DiskUsagePercent, report.NetworkHealth.TunnelUp,
 			report.ContainerHealth.RunningContainers)
 	}
 	healthCollectMu.Unlock()

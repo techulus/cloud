@@ -8,11 +8,11 @@ import type {
 	projects,
 	rollouts,
 	secrets,
-	serviceReplicas,
+	servers,
 	servicePorts,
+	serviceReplicas,
 	services,
 	serviceVolumes,
-	servers,
 	volumeBackups,
 	workQueue,
 } from "./schema";
@@ -39,6 +39,14 @@ export type HealthStatus = Deployment["healthStatus"];
 export type RolloutStatus = NonNullable<Rollout["status"]>;
 export type BuildStatus = NonNullable<Build["status"]>;
 
+export type HealthStats = {
+	cpuUsagePercent: number;
+	memoryUsagePercent: number;
+	memoryUsedMb: number;
+	diskUsagePercent: number;
+	diskUsedGb: number;
+};
+
 export type ServiceWithDetails = Service & {
 	ports: ServicePort[];
 	configuredReplicas: Array<ServiceReplica & { serverName: string }>;
@@ -55,4 +63,10 @@ export type ServiceWithDetails = Service & {
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;
+	deletionBackupFallback?: {
+		volumeCount: number;
+		backedUpVolumeCount: number;
+		oldestLatestBackupAt: Date | string | null;
+		newestLatestBackupAt: Date | string | null;
+	} | null;
 };

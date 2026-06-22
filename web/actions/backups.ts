@@ -66,7 +66,10 @@ export async function restoreBackup(
 	return { success: true };
 }
 
-export async function deleteBackup(backupId: string) {
+export async function deleteBackup(
+	backupId: string,
+	options: { revalidate?: boolean } = {},
+) {
 	const backup = await db
 		.select({
 			status: volumeBackups.status,
@@ -77,7 +80,9 @@ export async function deleteBackup(backupId: string) {
 		.then((r) => r[0]);
 
 	await db.delete(volumeBackups).where(eq(volumeBackups.id, backupId));
-	revalidatePath(`/dashboard/projects`);
+	if (options.revalidate ?? true) {
+		revalidatePath(`/dashboard/projects`);
+	}
 
 	if (backup?.status === "completed" && backup.storagePath) {
 		const storageConfig = await getBackupStorageConfig();
