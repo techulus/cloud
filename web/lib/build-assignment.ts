@@ -1,7 +1,7 @@
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { servers, services, serviceReplicas } from "@/db/schema";
-import { eq, and, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { getSetting } from "@/db/queries";
+import { servers, serviceReplicas, services } from "@/db/schema";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 export async function selectBuildServerForPlatform(
@@ -86,48 +86,20 @@ export async function getTargetPlatformsForService(
 
 	let targetPlatforms: string[] = [];
 
-	if (service.autoPlace) {
-		const excludedFromWorkload = await getSetting<string[]>(
-			SETTING_KEYS.SERVERS_EXCLUDED_FROM_WORKLOAD_PLACEMENT,
-		);
+	const replicas = await db
+		.select({ meta: servers.meta })
+		.from(serviceReplicas)
+		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+		.where(eq(serviceReplicas.serviceId, service.id));
 
-		const eligibleServers = await db
-			.select({ meta: servers.meta })
-			.from(servers)
-			.where(
-				excludedFromWorkload && excludedFromWorkload.length > 0
-					? and(
-							eq(servers.status, "online"),
-							isNotNull(servers.wireguardIp),
-							notInArray(servers.id, excludedFromWorkload),
-						)
-					: and(eq(servers.status, "online"), isNotNull(servers.wireguardIp)),
-			);
-
-		targetPlatforms = [
-			...new Set(
-				eligibleServers
-					.map((s) => s.meta?.arch)
-					.filter((arch): arch is string => !!arch)
-					.map((arch) => `linux/${arch}`),
-			),
-		];
-	} else {
-		const replicas = await db
-			.select({ meta: servers.meta })
-			.from(serviceReplicas)
-			.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-			.where(eq(serviceReplicas.serviceId, service.id));
-
-		targetPlatforms = [
-			...new Set(
-				replicas
-					.map((r) => r.meta?.arch)
-					.filter((arch): arch is string => !!arch)
-					.map((arch) => `linux/${arch}`),
-			),
-		];
-	}
+	targetPlatforms = [
+		...new Set(
+			replicas
+				.map((r) => r.meta?.arch)
+				.filter((arch): arch is string => !!arch)
+				.map((arch) => `linux/${arch}`),
+		),
+	];
 
 	if (targetPlatforms.length === 0) {
 		targetPlatforms.push("linux/amd64", "linux/arm64");

@@ -32,9 +32,10 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 	const { mutate } = useSWRConfig();
 	const [isDeploying, setIsDeploying] = useState(false);
 
-	const totalReplicas = service.autoPlace
-		? service.replicas
-		: service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
+	const totalReplicas = service.configuredReplicas.reduce(
+		(sum, r) => sum + r.count,
+		0,
+	);
 	const hasNoDeployments = service.deployments.length === 0;
 	const isGithubWithNoDeployments =
 		service.sourceType === "github" && hasNoDeployments;

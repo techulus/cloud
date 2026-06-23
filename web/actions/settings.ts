@@ -1,28 +1,19 @@
 "use server";
 
-import { setSetting } from "@/db/queries";
 import { revalidatePath } from "next/cache";
 import isEmail from "validator/es/lib/isEmail";
+import { ZodError } from "zod";
+import { setSetting } from "@/db/queries";
+import { buildTimeoutSchema } from "@/lib/schemas";
 import {
-	SETTING_KEYS,
 	type EmailAlertsConfig,
 	emailAlertsConfigSchema,
+	SETTING_KEYS,
 } from "@/lib/settings-keys";
-import { ZodError } from "zod";
 import { getZodErrorMessage } from "@/lib/utils";
-import { buildTimeoutSchema } from "@/lib/schemas";
 
 export async function updateBuildServers(serverIds: string[]) {
 	await setSetting(SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS, serverIds);
-	revalidatePath("/dashboard/settings");
-	return { success: true };
-}
-
-export async function updateExcludedServers(serverIds: string[]) {
-	await setSetting(
-		SETTING_KEYS.SERVERS_EXCLUDED_FROM_WORKLOAD_PLACEMENT,
-		serverIds,
-	);
 	revalidatePath("/dashboard/settings");
 	return { success: true };
 }

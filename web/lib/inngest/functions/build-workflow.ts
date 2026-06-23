@@ -64,10 +64,7 @@ export const buildWorkflow = inngest.createFunction(
 					.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 					.then((r) => r[0]);
 
-				return (
-					!!service &&
-					(replicas.length > 0 || (service.autoPlace && service.replicas > 0))
-				);
+				return !!service && replicas.some((replica) => replica.count > 0);
 			});
 
 			if (shouldDeploy) {
@@ -143,10 +140,7 @@ export const buildWorkflow = inngest.createFunction(
 				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 				.then((r) => r[0]);
 
-			return (
-				!!service &&
-				(replicas.length > 0 || (service.autoPlace && service.replicas > 0))
-			);
+			return !!service && replicas.some((replica) => replica.count > 0);
 		});
 
 		if (shouldDeploy) {

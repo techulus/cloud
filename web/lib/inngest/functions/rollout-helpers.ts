@@ -13,10 +13,6 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
-import {
-	calculateResourceAwarePlacement,
-	replaceServiceReplicaPlacements,
-} from "@/lib/placement";
 import { buildCurrentConfig } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
@@ -88,32 +84,6 @@ export async function calculateServicePlacements(
 	totalReplicas: number;
 	migrationNeeded?: { targetServerId: string };
 }> {
-	let placements: Placement[];
-
-	if (service.autoPlace && !service.stateful) {
-		const totalReplicas = service.replicas;
-		if (totalReplicas < 1) {
-			throw new Error("At least one replica is required");
-		}
-		if (totalReplicas > 10) {
-			throw new Error("Maximum 10 replicas allowed");
-		}
-
-		const calculatedPlacements = await calculateResourceAwarePlacement(
-			service,
-			totalReplicas,
-		);
-
-		await replaceServiceReplicaPlacements(service.id, calculatedPlacements);
-
-		placements = calculatedPlacements.map((p) => ({
-			serverId: p.serverId,
-			replicas: p.count,
-		}));
-
-		return { placements, totalReplicas };
-	}
-
 	const configuredReplicas = await db
 		.select({
 			serverId: serviceReplicas.serverId,
@@ -122,7 +92,7 @@ export async function calculateServicePlacements(
 		.from(serviceReplicas)
 		.where(eq(serviceReplicas.serviceId, service.id));
 
-	placements = configuredReplicas.filter((p) => p.replicas > 0);
+	const placements = configuredReplicas.filter((p) => p.replicas > 0);
 
 	const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
 	if (totalReplicas < 1) {

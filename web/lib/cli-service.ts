@@ -1,4 +1,11 @@
 import { and, desc, eq, ne } from "drizzle-orm";
+import {
+	deployService,
+	updateServiceConfig,
+	updateServiceResourceLimits,
+	updateServiceStartCommand,
+	validateDockerImage,
+} from "@/actions/projects";
 import { db } from "@/db";
 import {
 	deployments,
@@ -6,32 +13,19 @@ import {
 	projects,
 	rollouts,
 	servicePorts,
-	serviceVolumes,
+	serviceReplicas,
 	services,
+	serviceVolumes,
 } from "@/db/schema";
-import {
-	techulusManifestSchema,
-	type TechulusManifest,
-} from "@/lib/cli-manifest";
 import {
 	getManifestEnvironmentName,
 	getManifestProjectSlug,
 	getManifestServiceName,
+	type TechulusManifest,
+	techulusManifestSchema,
 } from "@/lib/cli-manifest";
-import { slugify } from "@/lib/utils";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
-import {
-	createEnvironment,
-	createProject,
-	createService,
-	deployService,
-	updateServiceAutoPlace,
-	updateServiceConfig,
-	updateServiceReplicas,
-	updateServiceResourceLimits,
-	updateServiceStartCommand,
-	validateDockerImage,
-} from "@/actions/projects";
+import { slugify } from "@/lib/utils";
 
 export type ManifestChange = {
 	field: string;
@@ -103,12 +97,7 @@ type ManifestIdentity = {
 
 type ServiceCompatibilityRecord = Pick<
 	typeof services.$inferSelect,
-	| "sourceType"
-	| "stateful"
-	| "autoPlace"
-	| "replicas"
-	| "resourceCpuLimit"
-	| "resourceMemoryLimitMb"
+	"sourceType" | "stateful" | "resourceCpuLimit" | "resourceMemoryLimitMb"
 >;
 
 type PortCompatibilityRecord = Pick<
@@ -125,9 +114,7 @@ type LinkValidationService = Pick<
 	| "hostname"
 	| "image"
 	| "sourceType"
-	| "replicas"
 	| "stateful"
-	| "autoPlace"
 	| "healthCheckCmd"
 	| "healthCheckInterval"
 	| "healthCheckTimeout"
@@ -146,14 +133,24 @@ type LinkValidationPort = Pick<
 type ServiceLinkValidation = {
 	service: LinkValidationService;
 	ports: LinkValidationPort[];
+	placementReplicaCount: number;
 	unsupportedReason: string | null;
 };
 
-function formatPort(port: { port: number; isPublic: boolean; domain: string | null }) {
-	return port.isPublic ? `${port.port} -> ${port.domain}` : `${port.port} (internal)`;
+function formatPort(port: {
+	port: number;
+	isPublic: boolean;
+	domain: string | null;
+}) {
+	return port.isPublic
+		? `${port.port} -> ${port.domain}`
+		: `${port.port} (internal)`;
 }
 
-function formatNullable(value: string | number | null | undefined, fallback = "(none)") {
+function formatNullable(
+	value: string | number | null | undefined,
+	fallback = "(none)",
+) {
 	if (value === null || value === undefined || value === "") {
 		return fallback;
 	}
@@ -201,7 +198,10 @@ async function findEnvironmentByManifest(
 	return findEnvironmentByName(projectId, environmentName);
 }
 
-async function findEnvironmentByName(projectId: string, environmentName: string) {
+async function findEnvironmentByName(
+	projectId: string,
+	environmentName: string,
+) {
 	const [environment] = await db
 		.select()
 		.from(environments)
@@ -249,6 +249,7 @@ function getUnsupportedReason(
 	service: ServiceCompatibilityRecord,
 	ports: PortCompatibilityRecord[],
 	volumeCount: number,
+	placementReplicaCount: number,
 ) {
 	if (service.sourceType !== "image") {
 		return "CLI v1 only supports image-backed services. This service uses an unsupported source.";
@@ -256,10 +257,6 @@ function getUnsupportedReason(
 
 	if (service.stateful || volumeCount > 0) {
 		return "CLI v1 does not support stateful services or volumes. Manage this service from the web UI.";
-	}
-
-	if (!service.autoPlace) {
-		return "CLI v1 only supports auto-placement. Manage this service from the web UI.";
 	}
 
 	if (ports.some((port) => port.protocol !== "http")) {
@@ -270,8 +267,12 @@ function getUnsupportedReason(
 		return "CLI v1 requires every public HTTP port to have a domain.";
 	}
 
-	if (service.replicas < 1 || service.replicas > 10) {
-		return "CLI v1 only supports replica counts between 1 and 10.";
+	if (placementReplicaCount < 1) {
+		return "CLI v1 requires manual server placement to be configured in the web UI before deploy.";
+	}
+
+	if (placementReplicaCount > 10) {
+		return "CLI v1 only supports manually placed replica counts between 1 and 10.";
 	}
 
 	const hasCpu = service.resourceCpuLimit !== null;
@@ -296,9 +297,7 @@ async function getServiceLinkValidation(
 			hostname: services.hostname,
 			image: services.image,
 			sourceType: services.sourceType,
-			replicas: services.replicas,
 			stateful: services.stateful,
-			autoPlace: services.autoPlace,
 			healthCheckCmd: services.healthCheckCmd,
 			healthCheckInterval: services.healthCheckInterval,
 			healthCheckTimeout: services.healthCheckTimeout,
@@ -316,7 +315,7 @@ async function getServiceLinkValidation(
 		return null;
 	}
 
-	const [ports, volumes] = await Promise.all([
+	const [ports, volumes, replicas] = await Promise.all([
 		db
 			.select({
 				serviceId: servicePorts.serviceId,
@@ -332,12 +331,26 @@ async function getServiceLinkValidation(
 			.select({ id: serviceVolumes.id })
 			.from(serviceVolumes)
 			.where(eq(serviceVolumes.serviceId, serviceId)),
+		db
+			.select({ count: serviceReplicas.count })
+			.from(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId)),
 	]);
+	const placementReplicaCount = replicas.reduce(
+		(sum, replica) => sum + replica.count,
+		0,
+	);
 
 	return {
 		service,
 		ports,
-		unsupportedReason: getUnsupportedReason(service, ports, volumes.length),
+		placementReplicaCount,
+		unsupportedReason: getUnsupportedReason(
+			service,
+			ports,
+			volumes.length,
+			placementReplicaCount,
+		),
 	};
 }
 
@@ -438,7 +451,7 @@ async function syncPorts(
 		.map((port) => ({
 			port: port.port,
 			isPublic: port.public,
-			domain: port.public ? port.domain ?? null : null,
+			domain: port.public ? (port.domain ?? null) : null,
 			protocol: "http" as const,
 		}));
 
@@ -453,7 +466,9 @@ async function syncPorts(
 		},
 	});
 
-	for (const port of currentPorts.filter((item) => portsToRemove.includes(item.id))) {
+	for (const port of currentPorts.filter((item) =>
+		portsToRemove.includes(item.id),
+	)) {
 		changes.push({
 			field: `Port ${port.port}`,
 			from: formatPort(port),
@@ -465,7 +480,9 @@ async function syncPorts(
 		changes.push({
 			field: `Port ${port.port}`,
 			from: "(none)",
-			to: port.isPublic ? `${port.port} -> ${port.domain}` : `${port.port} (internal)`,
+			to: port.isPublic
+				? `${port.port} -> ${port.domain}`
+				: `${port.port} (internal)`,
 		});
 	}
 }
@@ -570,27 +587,6 @@ async function syncResources(
 	);
 }
 
-async function syncReplicas(
-	serviceId: string,
-	currentService: Pick<LinkValidationService, "autoPlace" | "replicas">,
-	desiredReplicas: number,
-	changes: ManifestChange[],
-) {
-	if (!currentService.autoPlace) {
-		throw new Error(
-			"CLI v1 only supports auto-placement. This service uses manual placement.",
-		);
-	}
-
-	if (currentService.replicas === desiredReplicas) {
-		return;
-	}
-
-	await updateServiceAutoPlace(serviceId, true);
-	await updateServiceReplicas(serviceId, desiredReplicas);
-	recordChange(changes, "Replicas", currentService.replicas, desiredReplicas);
-}
-
 async function assertSupportedExistingService(serviceId: string) {
 	const validation = await getServiceLinkValidation(serviceId);
 	if (!validation) {
@@ -601,62 +597,56 @@ async function assertSupportedExistingService(serviceId: string) {
 		throw new Error(validation.unsupportedReason);
 	}
 
-	return validation.service;
+	return validation;
+}
+
+function assertManifestReplicaCount(
+	placementReplicaCount: number,
+	desiredReplicaCount: number,
+) {
+	if (placementReplicaCount !== desiredReplicaCount) {
+		throw new Error(
+			`CLI v1 cannot change server placement. Update placement in the web UI so it has ${desiredReplicaCount} replica${desiredReplicaCount === 1 ? "" : "s"}, or update replicas.count to match the current manual placement of ${placementReplicaCount}.`,
+		);
+	}
 }
 
 export async function applyManifest(
 	manifest: TechulusManifest,
 ): Promise<ManifestApplyResult> {
-	let serviceCreated = false;
-	let project = await findProjectByManifest(manifest);
+	const project = await findProjectByManifest(manifest);
 	if (!project) {
-		await createProject(manifest.project.trim());
-		project = await findProjectByManifest(manifest);
-	}
-	if (!project) {
-		throw new Error("Failed to create project");
-	}
-
-	let environment = await findEnvironmentByManifest(project.id, manifest);
-	if (!environment) {
-		await createEnvironment(project.id, manifest.environment.trim());
-		environment = await findEnvironmentByManifest(project.id, manifest);
-	}
-	if (!environment) {
-		throw new Error("Failed to create environment");
-	}
-
-	let service = await findServiceByManifest(project.id, environment.id, manifest);
-	const changes: ManifestChange[] = [];
-
-	if (!service) {
-		serviceCreated = true;
-		const validation = await validateDockerImage(manifest.service.source.image);
-		if (!validation.valid) {
-			throw new Error(validation.error || "Invalid image");
-		}
-
-		await createService({
-			projectId: project.id,
-			environmentId: environment.id,
-			name: getManifestServiceName(manifest),
-			image: manifest.service.source.image,
-		});
-		service = await findServiceByManifest(project.id, environment.id, manifest);
-		if (!service) {
-			throw new Error("Failed to create service");
-		}
-
-		recordChange(changes, "Image", null, manifest.service.source.image);
-		recordChange(
-			changes,
-			"Replicas",
-			null,
-			manifest.service.replicas.count,
+		throw new Error(
+			"Project not found. Create the service and select server placement in the web UI before using CLI v1.",
 		);
 	}
 
-	const currentService = await assertSupportedExistingService(service.id);
+	const environment = await findEnvironmentByManifest(project.id, manifest);
+	if (!environment) {
+		throw new Error(
+			"Environment not found. Create the service and select server placement in the web UI before using CLI v1.",
+		);
+	}
+
+	const service = await findServiceByManifest(
+		project.id,
+		environment.id,
+		manifest,
+	);
+	const changes: ManifestChange[] = [];
+
+	if (!service) {
+		throw new Error(
+			"CLI v1 cannot create services because server placement must be selected in the web UI.",
+		);
+	}
+
+	const validation = await assertSupportedExistingService(service.id);
+	const currentService = validation.service;
+	assertManifestReplicaCount(
+		validation.placementReplicaCount,
+		manifest.service.replicas.count,
+	);
 
 	await syncHostname(
 		service.id,
@@ -679,15 +669,11 @@ export async function applyManifest(
 		changes,
 	);
 	await syncResources(service.id, currentService, manifest, changes);
-	await syncReplicas(
-		service.id,
-		currentService,
-		manifest.service.replicas.count,
-		changes,
-	);
-
 	const refreshedProject = await findProjectByManifest(manifest);
-	const refreshedEnvironment = await findEnvironmentByManifest(project.id, manifest);
+	const refreshedEnvironment = await findEnvironmentByManifest(
+		project.id,
+		manifest,
+	);
 
 	if (!refreshedProject || !refreshedEnvironment) {
 		throw new Error("Failed to reload manifest resources after apply");
@@ -697,7 +683,7 @@ export async function applyManifest(
 		project: refreshedProject,
 		environment: refreshedEnvironment,
 		serviceId: service.id,
-		action: serviceCreated ? "created" : changes.length === 0 ? "noop" : "updated",
+		action: changes.length === 0 ? "noop" : "updated",
 		changes,
 	};
 }
@@ -713,10 +699,20 @@ export async function deployManifest(manifest: TechulusManifest) {
 		throw new Error("Environment not found");
 	}
 
-	const service = await findServiceByManifest(project.id, environment.id, manifest);
+	const service = await findServiceByManifest(
+		project.id,
+		environment.id,
+		manifest,
+	);
 	if (!service) {
 		throw new Error("Service not found");
 	}
+
+	const validation = await assertSupportedExistingService(service.id);
+	assertManifestReplicaCount(
+		validation.placementReplicaCount,
+		manifest.service.replicas.count,
+	);
 
 	const result = await deployService(service.id);
 
@@ -783,6 +779,14 @@ export async function getManifestStatus(identity: ManifestIdentity) {
 		})
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, service.id));
+	const replicas = await db
+		.select({ count: serviceReplicas.count })
+		.from(serviceReplicas)
+		.where(eq(serviceReplicas.serviceId, service.id));
+	const placementReplicaCount = replicas.reduce(
+		(sum, replica) => sum + replica.count,
+		0,
+	);
 
 	return {
 		service: {
@@ -790,7 +794,7 @@ export async function getManifestStatus(identity: ManifestIdentity) {
 			name: service.name,
 			image: service.image,
 			hostname: service.hostname,
-			replicas: service.replicas,
+			replicas: placementReplicaCount,
 			sourceType: service.sourceType,
 		},
 		ports,
@@ -800,51 +804,63 @@ export async function getManifestStatus(identity: ManifestIdentity) {
 }
 
 export async function listLinkTargets(): Promise<LinkTargetsResult> {
-	const [projectRows, environmentRows, serviceRows, portRows, volumeRows] =
-		await Promise.all([
-			db
-				.select({
-					id: projects.id,
-					name: projects.name,
-					slug: projects.slug,
-				})
-				.from(projects)
-				.orderBy(projects.createdAt),
-			db
-				.select({
-					id: environments.id,
-					projectId: environments.projectId,
-					name: environments.name,
-				})
-				.from(environments)
-				.orderBy(environments.createdAt),
-			db
-				.select({
-					id: services.id,
-					name: services.name,
-					projectId: services.projectId,
-					environmentId: services.environmentId,
-					sourceType: services.sourceType,
-					stateful: services.stateful,
-					autoPlace: services.autoPlace,
-					replicas: services.replicas,
-					resourceCpuLimit: services.resourceCpuLimit,
-					resourceMemoryLimitMb: services.resourceMemoryLimitMb,
-				})
-				.from(services)
-				.orderBy(services.createdAt),
-			db
-				.select({
-					serviceId: servicePorts.serviceId,
-					protocol: servicePorts.protocol,
-					isPublic: servicePorts.isPublic,
-					domain: servicePorts.domain,
-				})
-				.from(servicePorts),
-			db.select({ serviceId: serviceVolumes.serviceId })
-				.from(serviceVolumes)
-				.orderBy(serviceVolumes.id),
-		]);
+	const [
+		projectRows,
+		environmentRows,
+		serviceRows,
+		portRows,
+		volumeRows,
+		replicaRows,
+	] = await Promise.all([
+		db
+			.select({
+				id: projects.id,
+				name: projects.name,
+				slug: projects.slug,
+			})
+			.from(projects)
+			.orderBy(projects.createdAt),
+		db
+			.select({
+				id: environments.id,
+				projectId: environments.projectId,
+				name: environments.name,
+			})
+			.from(environments)
+			.orderBy(environments.createdAt),
+		db
+			.select({
+				id: services.id,
+				name: services.name,
+				projectId: services.projectId,
+				environmentId: services.environmentId,
+				sourceType: services.sourceType,
+				stateful: services.stateful,
+				resourceCpuLimit: services.resourceCpuLimit,
+				resourceMemoryLimitMb: services.resourceMemoryLimitMb,
+			})
+			.from(services)
+			.orderBy(services.createdAt),
+		db
+			.select({
+				serviceId: servicePorts.serviceId,
+				protocol: servicePorts.protocol,
+				isPublic: servicePorts.isPublic,
+				domain: servicePorts.domain,
+			})
+			.from(servicePorts),
+		db
+			.select({ serviceId: serviceVolumes.serviceId })
+			.from(serviceVolumes)
+			.orderBy(serviceVolumes.id),
+		db
+			.select({
+				serviceId: serviceReplicas.serviceId,
+				count: serviceReplicas.count,
+			})
+			.from(serviceReplicas)
+			.orderBy(serviceReplicas.id),
+	]);
 
 	const projectNameById = new Map(
 		projectRows.map((project) => [project.id, project.name]),
@@ -867,6 +883,13 @@ export async function listLinkTargets(): Promise<LinkTargetsResult> {
 			(volumeCountByServiceId.get(volume.serviceId) ?? 0) + 1,
 		);
 	}
+	const replicaCountByServiceId = new Map<string, number>();
+	for (const replica of replicaRows) {
+		replicaCountByServiceId.set(
+			replica.serviceId,
+			(replicaCountByServiceId.get(replica.serviceId) ?? 0) + replica.count,
+		);
+	}
 
 	const servicesByEnvironmentId = new Map<string, LinkServiceTarget[]>();
 	for (const service of serviceRows) {
@@ -882,6 +905,7 @@ export async function listLinkTargets(): Promise<LinkTargetsResult> {
 			service,
 			ports,
 			volumeCountByServiceId.get(service.id) ?? 0,
+			replicaCountByServiceId.get(service.id) ?? 0,
 		);
 
 		current.push({
@@ -967,7 +991,7 @@ export async function exportManifestForLinkedService(
 				...(port.isPublic && port.domain ? { domain: port.domain } : {}),
 			})),
 			replicas: {
-				count: validation.service.replicas,
+				count: validation.placementReplicaCount,
 			},
 			...(validation.service.healthCheckCmd
 				? {
