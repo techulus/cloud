@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { deployments, services, serviceVolumes } from "@/db/schema";
+import { requireAuth } from "@/lib/auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
@@ -12,6 +13,7 @@ export async function startMigration(
 	serviceId: string,
 	targetServerId: string,
 ) {
+	await requireAuth();
 	const storageConfig = await getBackupStorageConfig();
 	if (!storageConfig) {
 		throw new Error(
@@ -99,6 +101,7 @@ export async function startMigration(
 }
 
 export async function cancelMigration(serviceId: string) {
+	await requireAuth();
 	await inngest.send(inngestEvents.migrationCancelled.create({ serviceId }));
 
 	await db
@@ -116,6 +119,7 @@ export async function cancelMigration(serviceId: string) {
 }
 
 export async function getMigrationStatus(serviceId: string) {
+	await requireAuth();
 	const service = await db
 		.select({
 			migrationStatus: services.migrationStatus,

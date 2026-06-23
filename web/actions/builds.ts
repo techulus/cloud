@@ -3,10 +3,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
+import { requireAuth } from "@/lib/auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
 export async function cancelBuild(buildId: string) {
+	await requireAuth();
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
@@ -40,6 +42,7 @@ export async function cancelBuild(buildId: string) {
 }
 
 export async function retryBuild(buildId: string) {
+	await requireAuth();
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
@@ -78,6 +81,7 @@ export async function triggerBuild(
 	serviceId: string,
 	trigger: "manual" | "scheduled" = "manual",
 ) {
+	await requireAuth();
 	const [service] = await db
 		.select()
 		.from(services)

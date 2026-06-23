@@ -1,11 +1,11 @@
-import { type NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { db } from "@/db";
-import { githubInstallations } from "@/db/schema";
-import { randomUUID, createPrivateKey } from "node:crypto";
+import { createPrivateKey, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
+import { headers } from "next/headers";
+import { type NextRequest, NextResponse } from "next/server";
+import { db } from "@/db";
+import { githubInstallations } from "@/db/schema";
+import { auth } from "@/lib/auth";
 
 async function getInstallationDetails(installationId: number): Promise<{
 	account: { login: string; type: "User" | "Organization" };
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 	if (!session) {
 		const loginUrl = new URL("/auth/login", request.url);
 		loginUrl.searchParams.set("redirect", request.url);
-		return NextResponse.redirect(loginUrl);
+		return NextResponse.redirect(loginUrl, 303);
 	}
 
 	const searchParams = request.nextUrl.searchParams;
@@ -74,9 +74,64 @@ export async function GET(request: NextRequest) {
 
 	const installationId = parseInt(installationIdParam, 10);
 
-	if (isNaN(installationId)) {
+	if (Number.isNaN(installationId)) {
 		return NextResponse.redirect(
 			new URL("/dashboard?error=invalid_installation_id", request.url),
+		);
+	}
+
+	if (setupAction !== "install" && setupAction !== "update") {
+		return NextResponse.redirect(
+			new URL(`/dashboard?github_connected=true`, request.url),
+		);
+	}
+
+	return new NextResponse(
+		`<!doctype html>
+<html>
+<body>
+<form method="post" action="/api/github/setup">
+<input type="hidden" name="installation_id" value="${installationId}" />
+<input type="hidden" name="setup_action" value="${setupAction}" />
+<noscript><button type="submit">Continue GitHub setup</button></noscript>
+</form>
+<script>document.forms[0].submit()</script>
+</body>
+</html>`,
+		{
+			headers: { "content-type": "text/html; charset=utf-8" },
+		},
+	);
+}
+
+export async function POST(request: NextRequest) {
+	const session = await auth.api.getSession({
+		headers: await headers(),
+	});
+
+	if (!session) {
+		const loginUrl = new URL("/auth/login", request.url);
+		loginUrl.searchParams.set("redirect", request.url);
+		return NextResponse.redirect(loginUrl, 303);
+	}
+
+	const formData = await request.formData();
+	const installationIdParam = formData.get("installation_id");
+	const setupAction = formData.get("setup_action");
+
+	if (typeof installationIdParam !== "string") {
+		return NextResponse.redirect(
+			new URL("/dashboard?error=missing_installation_id", request.url),
+			303,
+		);
+	}
+
+	const installationId = parseInt(installationIdParam, 10);
+
+	if (Number.isNaN(installationId)) {
+		return NextResponse.redirect(
+			new URL("/dashboard?error=invalid_installation_id", request.url),
+			303,
 		);
 	}
 
@@ -90,6 +145,7 @@ export async function GET(request: NextRequest) {
 		if (existingInstallation) {
 			return NextResponse.redirect(
 				new URL(`/dashboard?github_connected=true`, request.url),
+				303,
 			);
 		}
 
@@ -98,6 +154,7 @@ export async function GET(request: NextRequest) {
 		if (!installation) {
 			return NextResponse.redirect(
 				new URL("/dashboard?error=github_fetch_failed", request.url),
+				303,
 			);
 		}
 
@@ -116,5 +173,6 @@ export async function GET(request: NextRequest) {
 
 	return NextResponse.redirect(
 		new URL(`/dashboard?github_connected=true`, request.url),
+		303,
 	);
 }

@@ -127,9 +127,9 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		a.buildMutex.Unlock()
 	}()
 
-	buildDetails, err := a.Client.GetBuild(payload.BuildID)
+	buildDetails, err := a.Client.ClaimBuild(payload.BuildID)
 	if err != nil {
-		return fmt.Errorf("failed to get build details: %w", err)
+		return fmt.Errorf("failed to claim build: %w", err)
 	}
 
 	timeoutMinutes := buildDetails.TimeoutMinutes

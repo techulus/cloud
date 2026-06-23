@@ -1,17 +1,17 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { services } from "@/db/schema";
-import { parseComposeYaml, type ParsedService } from "@/lib/compose-parser";
+import { requireAuth } from "@/lib/auth";
+import { parseComposeYaml } from "@/lib/compose-parser";
 import {
+	addServiceVolume,
 	createService,
-	validateDockerImage,
 	updateServiceHealthCheck,
 	updateServiceResourceLimits,
 	updateServiceStartCommand,
-	addServiceVolume,
+	validateDockerImage,
 } from "./projects";
 import { createSecretsBatch } from "./secrets";
 
@@ -39,12 +39,14 @@ export type ImportComposeResult = {
 };
 
 export async function parseComposeFile(yaml: string) {
+	await requireAuth();
 	return parseComposeYaml(yaml);
 }
 
 export async function importCompose(
 	input: ImportComposeInput,
 ): Promise<ImportComposeResult> {
+	await requireAuth();
 	const { projectId, environmentId, yaml, serviceOverrides = {} } = input;
 
 	const parseResult = parseComposeYaml(yaml);
