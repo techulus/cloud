@@ -2,7 +2,7 @@
 
 import { Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useReducer } from "react";
+import { useReducer } from "react";
 import { toast } from "sonner";
 import { updateEmailAlertsConfig } from "@/actions/settings";
 import { Button } from "@/components/ui/button";
@@ -45,8 +45,8 @@ const ALERT_SETTINGS: AlertSetting[] = [
 	},
 	{
 		field: "deploymentMovedAlert",
-		label: "Deployment Moved Alert",
-		description: "Receive an email when a service is automatically redeployed",
+		label: "Manual Recovery Alert",
+		description: "Receive an email when offline replicas need manual recovery",
 	},
 ];
 
@@ -112,18 +112,14 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 		}
 	};
 
-	const hasAlertsChanges = useMemo(() => {
-		return ALERT_SETTINGS.some(
-			(setting) =>
-				state[setting.field] !== (initialAlertsConfig?.[setting.field] ?? true),
-		);
-	}, [
-		state.serverOfflineAlert,
-		state.buildFailure,
-		state.deploymentFailure,
-		state.deploymentMovedAlert,
-		initialAlertsConfig,
-	]);
+	const hasAlertsChanges =
+		state.serverOfflineAlert !==
+			(initialAlertsConfig?.serverOfflineAlert ?? true) ||
+		state.buildFailure !== (initialAlertsConfig?.buildFailure ?? true) ||
+		state.deploymentFailure !==
+			(initialAlertsConfig?.deploymentFailure ?? true) ||
+		state.deploymentMovedAlert !==
+			(initialAlertsConfig?.deploymentMovedAlert ?? true);
 
 	return (
 		<div className="space-y-6">

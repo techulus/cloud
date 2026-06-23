@@ -232,8 +232,7 @@ export async function POST(
 					.from(serviceReplicas)
 					.where(eq(serviceReplicas.serviceId, build.serviceId));
 
-				const shouldDeploy =
-					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+				const shouldDeploy = replicas.some((replica) => replica.count > 0);
 
 				console.log(
 					`[build:complete] enqueueing create_manifest for single-target build ${baseImageUri} to server ${serverId.slice(0, 8)}`,
@@ -295,8 +294,7 @@ export async function POST(
 					.from(serviceReplicas)
 					.where(eq(serviceReplicas.serviceId, build.serviceId));
 
-				const shouldDeploy =
-					replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+				const shouldDeploy = replicas.some((replica) => replica.count > 0);
 
 				console.log(
 					`[build:complete] enqueueing create_manifest for ${baseImageUri} to server ${serverId.slice(0, 8)}`,
@@ -345,8 +343,7 @@ export async function POST(
 				.from(serviceReplicas)
 				.where(eq(serviceReplicas.serviceId, build.serviceId));
 
-			const shouldDeploy =
-				replicas.length > 0 || (service.autoPlace && service.replicas > 0);
+			const shouldDeploy = replicas.some((replica) => replica.count > 0);
 
 			if (shouldDeploy) {
 				console.log(

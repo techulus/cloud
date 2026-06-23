@@ -1,46 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { Clock, Hammer, Info, Network, Server, Shield } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
-	Hammer,
-	Server,
-	Ban,
-	Clock,
-	Shield,
-	Network,
-	Info,
-} from "lucide-react";
+	updateAcmeEmail,
+	updateBuildServers,
+	updateBuildTimeout,
+	updateProxyDomain,
+} from "@/actions/settings";
+import { EmailSettings } from "@/components/settings/email-settings";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
-import {
-	updateBuildServers,
-	updateExcludedServers,
-	updateBuildTimeout,
-	updateAcmeEmail,
-	updateProxyDomain,
-} from "@/actions/settings";
+import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Server as ServerType } from "@/db/types";
 import type { EmailAlertsConfig } from "@/lib/settings-keys";
-
-import { EmailSettings } from "@/components/settings/email-settings";
 
 type Props = {
 	servers: ServerType[];
 	initialSettings: {
 		buildServerIds: string[];
-		excludedServerIds: string[];
 		buildTimeoutMinutes: number;
 		acmeEmail: string | null;
 		proxyDomain: string | null;
@@ -59,14 +48,10 @@ export function GlobalSettings({
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
 	);
-	const [excludedServerIds, setExcludedServerIds] = useState<Set<string>>(
-		new Set(initialSettings.excludedServerIds),
-	);
 	const [buildTimeoutMinutes, setBuildTimeoutMinutes] = useState(
 		String(initialSettings.buildTimeoutMinutes),
 	);
 	const [isSavingBuild, setIsSavingBuild] = useState(false);
-	const [isSavingExcluded, setIsSavingExcluded] = useState(false);
 	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
 
 	const [acmeEmail, setAcmeEmail] = useState(initialSettings.acmeEmail ?? "");
@@ -78,18 +63,6 @@ export function GlobalSettings({
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
-			const next = new Set(prev);
-			if (next.has(serverId)) {
-				next.delete(serverId);
-			} else {
-				next.add(serverId);
-			}
-			return next;
-		});
-	};
-
-	const toggleExcludedServer = (serverId: string) => {
-		setExcludedServerIds((prev) => {
 			const next = new Set(prev);
 			if (next.has(serverId)) {
 				next.delete(serverId);
@@ -112,21 +85,6 @@ export function GlobalSettings({
 			);
 		} finally {
 			setIsSavingBuild(false);
-		}
-	};
-
-	const handleSaveExcludedServers = async () => {
-		setIsSavingExcluded(true);
-		try {
-			await updateExcludedServers(Array.from(excludedServerIds));
-			toast.success("Excluded servers updated");
-			router.refresh();
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to update settings",
-			);
-		} finally {
-			setIsSavingExcluded(false);
 		}
 	};
 
@@ -181,10 +139,6 @@ export function GlobalSettings({
 		buildServerIds.size !== initialSettings.buildServerIds.length ||
 		!initialSettings.buildServerIds.every((id) => buildServerIds.has(id));
 
-	const excludedServersChanged =
-		excludedServerIds.size !== initialSettings.excludedServerIds.length ||
-		!initialSettings.excludedServerIds.every((id) => excludedServerIds.has(id));
-
 	const buildTimeoutChanged =
 		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
 
@@ -211,9 +165,6 @@ export function GlobalSettings({
 			<TabsList className="w-full justify-start overflow-x-auto">
 				<TabsTrigger value="build" className="px-4 shrink-0">
 					Build
-				</TabsTrigger>
-				<TabsTrigger value="deployment" className="px-4 shrink-0">
-					Deployment
 				</TabsTrigger>
 				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
@@ -325,70 +276,6 @@ export function GlobalSettings({
 									size="sm"
 								>
 									{isSavingTimeout ? "Saving..." : "Save"}
-								</Button>
-							</div>
-						)}
-					</div>
-				</div>
-			</TabsContent>
-
-			<TabsContent value="deployment" className="space-y-6 pt-4">
-				<div className="rounded-lg border">
-					<Item className="border-0 border-b rounded-none">
-						<ItemMedia variant="icon">
-							<Ban className="size-5 text-muted-foreground" />
-						</ItemMedia>
-						<ItemContent>
-							<ItemTitle>Excluded from Workloads</ItemTitle>
-						</ItemContent>
-					</Item>
-					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
-							Select servers to exclude from workload placement. These servers
-							will not receive any new deployments.
-						</p>
-						<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-							{servers.map((server) => (
-								<button
-									type="button"
-									key={server.id}
-									onClick={() => toggleExcludedServer(server.id)}
-									className={`flex items-center gap-4 p-3 rounded-md text-left transition-colors ${
-										excludedServerIds.has(server.id)
-											? "bg-destructive text-destructive-foreground"
-											: "bg-muted hover:bg-muted/80"
-									}`}
-								>
-									<div className="flex-1 min-w-0">
-										<p className="font-medium truncate">{server.name}</p>
-										<p
-											className={`text-xs font-mono ${
-												excludedServerIds.has(server.id)
-													? "text-destructive-foreground/70"
-													: "text-muted-foreground"
-											}`}
-										>
-											{server.wireguardIp || server.publicIp || "No IP"}
-										</p>
-									</div>
-								</button>
-							))}
-						</div>
-						<div className="flex items-center justify-between text-sm">
-							<span>
-								{excludedServerIds.size === 0
-									? "No servers excluded"
-									: `${excludedServerIds.size} server${excludedServerIds.size !== 1 ? "s" : ""} excluded`}
-							</span>
-						</div>
-						{excludedServersChanged && (
-							<div className="pt-3 border-t">
-								<Button
-									onClick={handleSaveExcludedServers}
-									disabled={isSavingExcluded}
-									size="sm"
-								>
-									{isSavingExcluded ? "Saving..." : "Save"}
 								</Button>
 							</div>
 						)}

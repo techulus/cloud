@@ -140,9 +140,10 @@ export function getBarState(
 		}
 	}
 
-	const totalReplicas = service.autoPlace
-		? service.replicas
-		: service.configuredReplicas.reduce((sum, r) => sum + r.count, 0);
+	const totalReplicas = service.configuredReplicas.reduce(
+		(sum, r) => sum + r.count,
+		0,
+	);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
 

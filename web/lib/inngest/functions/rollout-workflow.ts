@@ -21,7 +21,6 @@ import { handleRolloutFailure } from "./rollout-utils";
 const PREFLIGHT_FAILURE_MESSAGES = [
 	"At least one replica is required",
 	"Maximum 10 replicas allowed",
-	"No healthy servers available for placement",
 	"No servers selected for deployment",
 	"Stateful services can only have exactly 1 replica",
 	"Stateful services must be deployed to exactly one server",
@@ -80,7 +79,7 @@ export const rolloutWorkflow = inngest.createFunction(
 			);
 		});
 
-		const placementResult = await step.run("calculate-placements", async () => {
+		const placementResult = await step.run("load-placements", async () => {
 			const service = await getService(serviceId);
 			if (!service) {
 				throw new Error("Service not found");
@@ -91,7 +90,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					rolloutId,
 					serviceId,
 					"preparing",
-					`Calculated placements: ${result.totalReplicas} replica(s)`,
+					`Loaded placements: ${result.totalReplicas} replica(s)`,
 				);
 				return { success: true as const, ...result };
 			} catch (error) {
@@ -104,7 +103,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					rolloutId,
 					serviceId,
 					"preparing",
-					`Placement failed: ${reason}`,
+					`Placement validation failed: ${reason}`,
 				);
 				await handleRolloutFailure(rolloutId, serviceId, reason, false);
 				return { success: false as const, reason };

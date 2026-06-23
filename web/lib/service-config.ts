@@ -41,7 +41,6 @@ export type ResourceLimitsConfig = {
 };
 
 export type PlacementConfig = {
-	autoPlace: boolean;
 	replicas: number;
 };
 
@@ -77,7 +76,6 @@ export function buildCurrentConfig(
 		startCommand: string | null;
 		resourceCpuLimit: number | null;
 		resourceMemoryLimitMb: number | null;
-		autoPlace: boolean;
 		replicas: number;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
@@ -95,10 +93,7 @@ export function buildCurrentConfig(
 		},
 		hostname: service.hostname ?? undefined,
 		placement: {
-			autoPlace: service.autoPlace,
-			replicas: service.autoPlace
-				? service.replicas
-				: replicas.reduce((sum, r) => sum + r.count, 0),
+			replicas: replicas.reduce((sum, r) => sum + r.count, 0),
 		},
 		replicas: replicas.map((r) => ({
 			serverId: r.serverId,
@@ -152,20 +147,12 @@ export function diffConfigs(
 				to: current.source.image,
 			});
 		}
-		if (current.placement?.autoPlace) {
+		for (const replica of current.replicas) {
 			changes.push({
-				field: "Replicas",
+				field: `${replica.serverName} replicas`,
 				from: "0",
-				to: String(current.placement.replicas),
+				to: String(replica.count),
 			});
-		} else {
-			for (const replica of current.replicas) {
-				changes.push({
-					field: `${replica.serverName} replicas`,
-					from: "0",
-					to: String(replica.count),
-				});
-			}
 		}
 		if (current.healthCheck) {
 			changes.push({
@@ -236,71 +223,37 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedTotalReplicas = (deployed.replicas || []).reduce(
-		(sum, r) => sum + r.count,
-		0,
+	const deployedReplicasMap = new Map(
+		(deployed.replicas || []).map((r) => [r.serverId, r]),
+	);
+	const currentReplicasMap = new Map(
+		(current.replicas || []).map((r) => [r.serverId, r]),
 	);
 
-	if (current.placement?.autoPlace) {
-		if (deployed.placement && !deployed.placement.autoPlace) {
+	for (const [serverId, currentReplica] of currentReplicasMap) {
+		const deployedReplica = deployedReplicasMap.get(serverId);
+		if (!deployedReplica) {
 			changes.push({
-				field: "Placement",
-				from: "Manual",
-				to: "Auto-placement",
+				field: `${currentReplica.serverName} replicas`,
+				from: "0",
+				to: String(currentReplica.count),
+			});
+		} else if (deployedReplica.count !== currentReplica.count) {
+			changes.push({
+				field: `${currentReplica.serverName} replicas`,
+				from: String(deployedReplica.count),
+				to: String(currentReplica.count),
 			});
 		}
+	}
 
-		const deployedReplicaCount =
-			deployed.placement?.replicas ?? deployedTotalReplicas;
-
-		if (deployedReplicaCount !== current.placement.replicas) {
+	for (const [serverId, deployedReplica] of deployedReplicasMap) {
+		if (!currentReplicasMap.has(serverId)) {
 			changes.push({
-				field: "Replicas",
-				from: String(deployedReplicaCount),
-				to: String(current.placement.replicas),
+				field: `${deployedReplica.serverName} replicas`,
+				from: String(deployedReplica.count),
+				to: "0 (removed)",
 			});
-		}
-	} else {
-		if (deployed.placement?.autoPlace) {
-			changes.push({
-				field: "Placement",
-				from: "Auto-placement",
-				to: "Manual",
-			});
-		}
-
-		const deployedReplicasMap = new Map(
-			(deployed.replicas || []).map((r) => [r.serverId, r]),
-		);
-		const currentReplicasMap = new Map(
-			(current.replicas || []).map((r) => [r.serverId, r]),
-		);
-
-		for (const [serverId, currentReplica] of currentReplicasMap) {
-			const deployedReplica = deployedReplicasMap.get(serverId);
-			if (!deployedReplica) {
-				changes.push({
-					field: `${currentReplica.serverName} replicas`,
-					from: "0",
-					to: String(currentReplica.count),
-				});
-			} else if (deployedReplica.count !== currentReplica.count) {
-				changes.push({
-					field: `${currentReplica.serverName} replicas`,
-					from: String(deployedReplica.count),
-					to: String(currentReplica.count),
-				});
-			}
-		}
-
-		for (const [serverId, deployedReplica] of deployedReplicasMap) {
-			if (!currentReplicasMap.has(serverId)) {
-				changes.push({
-					field: `${deployedReplica.serverName} replicas`,
-					from: String(deployedReplica.count),
-					to: "0 (removed)",
-				});
-			}
 		}
 	}
 
