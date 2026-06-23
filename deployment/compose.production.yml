@@ -69,7 +69,7 @@ services:
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
-    command: ["sh", "-c", "echo y | npx drizzle-kit push"]
+    command: ["npx", "drizzle-kit", "push", "--force"]
     restart: on-failure
 
   web:
