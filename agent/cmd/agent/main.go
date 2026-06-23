@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -32,6 +33,21 @@ var (
 	httpClient *api.Client
 	dataDir    string = paths.DataDir
 )
+
+func sanitizedEndpoint(endpoint string) string {
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil || parsedURL.User == nil {
+		return endpoint
+	}
+
+	if _, hasPassword := parsedURL.User.Password(); hasPassword {
+		parsedURL.User = url.UserPassword("xxxxx", "xxxxx")
+	} else {
+		parsedURL.User = url.User("xxxxx")
+	}
+
+	return parsedURL.String()
+}
 
 func main() {
 	var (
@@ -274,7 +290,7 @@ func main() {
 	var metricsSender agent.MetricsSender
 
 	if logsEndpoint != "" {
-		log.Println("[logs] log collection enabled, endpoint:", logsEndpoint)
+		log.Println("[logs] log collection enabled, endpoint:", sanitizedEndpoint(logsEndpoint))
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint, config.ServerID)
 		logCollector = logs.NewCollector(logsSender, dataDir)
 		if isProxy {
@@ -287,7 +303,7 @@ func main() {
 	}
 
 	if metricsEndpoint != "" {
-		log.Println("[metrics] metrics collection enabled, endpoint:", metricsEndpoint)
+		log.Println("[metrics] metrics collection enabled, endpoint:", sanitizedEndpoint(metricsEndpoint))
 		metricsSender = metrics.NewVictoriaMetricsSender(metricsEndpoint, config.ServerID)
 	}
 
