@@ -17,7 +17,7 @@ import {
 	SETTING_KEYS,
 } from "@/lib/settings-keys";
 
-export async function GET(
+export async function POST(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
