@@ -1,14 +1,14 @@
-import nodemailer from "nodemailer";
-import type { Transporter } from "nodemailer";
-import type { SmtpConfig } from "@/lib/settings-keys";
 import { render } from "@react-email/render";
-import type { ReactElement } from "react";
-import { getSmtpConfig, getEmailAlertsConfig } from "@/db/queries";
-import { Alert } from "./templates/alert";
-import { db } from "@/db";
-import { services, projects, servers, environments } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import type { Transporter } from "nodemailer";
+import nodemailer from "nodemailer";
+import type { ReactElement } from "react";
+import { db } from "@/db";
+import { getEmailAlertsConfig, getSmtpConfig } from "@/db/queries";
+import { environments, projects, servers, services } from "@/db/schema";
 import { formatDateTime } from "@/lib/date";
+import type { SmtpConfig } from "@/lib/settings-keys";
+import { Alert } from "./templates/alert";
 
 export function getAppBaseUrl(): string | undefined {
 	return process.env.APP_URL;
@@ -136,7 +136,7 @@ export async function sendServerOfflineAlert(
 			heading: "Server Offline Alert",
 			description: `The server "${options.serverName}" has gone offline and is no longer responding to health checks.`,
 			details,
-			note: "Auto-placed stateless services running on this server will be automatically recovered and redeployed to healthy servers.",
+			note: "Services with replicas placed on this server require manual recovery or placement changes.",
 			buttonText: dashboardUrl ? "View Dashboard" : undefined,
 			buttonUrl: dashboardUrl,
 			baseUrl,
@@ -144,13 +144,16 @@ export async function sendServerOfflineAlert(
 	});
 }
 
-type DeploymentMovedAlertOptions = {
-	serviceId: string;
-	reason: string;
+type ManualRecoveryRequiredAlertOptions = {
+	serverId: string;
+	serverName: string;
+	serverIp?: string;
+	impactedReplicas: number;
+	serviceNames: string[];
 };
 
-export async function sendDeploymentMovedAlert(
-	options: DeploymentMovedAlertOptions,
+export async function sendManualRecoveryRequiredAlert(
+	options: ManualRecoveryRequiredAlertOptions,
 ): Promise<void> {
 	const alertsConfig = await getEmailAlertsConfig();
 
@@ -158,43 +161,34 @@ export async function sendDeploymentMovedAlert(
 		return;
 	}
 
-	const [result] = await db
-		.select({
-			serviceName: services.name,
-			projectName: projects.name,
-			projectSlug: projects.slug,
-			envName: environments.name,
-		})
-		.from(services)
-		.innerJoin(projects, eq(projects.id, services.projectId))
-		.innerJoin(environments, eq(environments.id, services.environmentId))
-		.where(eq(services.id, options.serviceId));
-
-	if (!result) {
-		return;
-	}
-
 	const baseUrl = getAppBaseUrl();
-	const serviceUrl = baseUrl
-		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}`
+	const serverUrl = baseUrl
+		? `${baseUrl}/dashboard/servers/${options.serverId}`
 		: undefined;
+	const serviceSummary =
+		options.serviceNames.length > 0
+			? options.serviceNames.slice(0, 10).join(", ")
+			: "(unknown)";
 
 	const details = [
-		{ label: "Service", value: result.serviceName },
-		{ label: "Project", value: result.projectName },
-		{ label: "Reason", value: options.reason },
-		{ label: "Moved At", value: formatDateTime(new Date()) },
+		{ label: "Server", value: options.serverName },
+		...(options.serverIp
+			? [{ label: "IP Address", value: options.serverIp }]
+			: []),
+		{ label: "Impacted Replicas", value: String(options.impactedReplicas) },
+		{ label: "Services", value: serviceSummary },
+		{ label: "Detected At", value: formatDateTime(new Date()) },
 	];
 
 	await sendAlert({
-		subject: `Service "${result.serviceName}" automatically redeployed`,
+		subject: `Manual recovery required for "${options.serverName}"`,
 		template: Alert({
-			bannerText: "DEPLOYMENT MOVED",
-			heading: "Service Automatically Redeployed",
-			description: `The service "${result.serviceName}" in project "${result.projectName}" was automatically redeployed due to server failure.`,
+			bannerText: "MANUAL RECOVERY REQUIRED",
+			heading: "Manual Recovery Required",
+			description: `${options.impactedReplicas} active replica${options.impactedReplicas === 1 ? "" : "s"} were running on "${options.serverName}" when it went offline. Automatic recovery is disabled, so placement or recovery must be handled manually.`,
 			details,
-			buttonText: serviceUrl ? "View Service" : undefined,
-			buttonUrl: serviceUrl,
+			buttonText: serverUrl ? "View Server" : undefined,
+			buttonUrl: serverUrl,
 			baseUrl,
 		}),
 	});

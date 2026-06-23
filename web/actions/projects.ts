@@ -31,16 +31,11 @@ import {
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import {
-	calculateResourceAwarePlacement,
-	replaceServiceReplicaPlacements,
-} from "@/lib/placement";
 import { allocatePort } from "@/lib/port-allocation";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
 	nameSchema,
-	replicaCountSchema,
 	volumeNameSchema,
 } from "@/lib/schemas";
 import type {
@@ -465,7 +460,6 @@ export async function createService(input: CreateServiceInput) {
 		githubRootDir,
 		replicas: 1,
 		stateful: false,
-		autoPlace: true,
 		resourceCpuLimit: resourceLimits.cpuCores,
 		resourceMemoryLimitMb: resourceLimits.memoryMb,
 	});
@@ -732,14 +726,9 @@ export async function restoreDeletedService(serviceId: string) {
 		if (activeReplica?.serverStatus === "online") {
 			targetServerId = activeReplica.serverId;
 		} else {
-			const placements = await calculateResourceAwarePlacement(service, 1);
-			const targetPlacement = placements[0];
-			if (!targetPlacement) {
-				throw new Error("Cannot restore because no online server is available");
-			}
-
-			targetServerId = targetPlacement.serverId;
-			await replaceServiceReplicaPlacements(serviceId, placements);
+			throw new Error(
+				"Cannot restore because the selected server is unavailable",
+			);
 		}
 	}
 
@@ -1352,14 +1341,14 @@ export async function addServiceVolume(
 			throw new Error("Service not found");
 		}
 
-		let totalReplicas = service.replicas;
-		if (!service.autoPlace) {
-			const configuredReplicas = await db
-				.select({ count: serviceReplicas.count })
-				.from(serviceReplicas)
-				.where(eq(serviceReplicas.serviceId, serviceId));
-			totalReplicas = configuredReplicas.reduce((sum, r) => sum + r.count, 0);
-		}
+		const configuredReplicas = await db
+			.select({ count: serviceReplicas.count })
+			.from(serviceReplicas)
+			.where(eq(serviceReplicas.serviceId, serviceId));
+		const totalReplicas = configuredReplicas.reduce(
+			(sum, r) => sum + r.count,
+			0,
+		);
 
 		if (totalReplicas > 1) {
 			throw new Error(
@@ -1391,7 +1380,7 @@ export async function addServiceVolume(
 		if (!service.stateful) {
 			await db
 				.update(services)
-				.set({ stateful: true, autoPlace: false })
+				.set({ stateful: true })
 				.where(eq(services.id, serviceId));
 		}
 
@@ -1450,72 +1439,11 @@ export async function removeServiceVolume(volumeId: string) {
 	if (remainingVolumes.length === 0 && service.stateful) {
 		await db
 			.update(services)
-			.set({ stateful: false, autoPlace: true })
+			.set({ stateful: false })
 			.where(eq(services.id, service.id));
 	}
 
 	return { success: true };
-}
-
-export async function updateServiceAutoPlace(
-	serviceId: string,
-	autoPlace: boolean,
-) {
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	if (service.stateful && autoPlace) {
-		throw new Error(
-			"Services with volumes cannot use auto-placement. Remove volumes first.",
-		);
-	}
-
-	await db
-		.update(services)
-		.set({ autoPlace })
-		.where(eq(services.id, serviceId));
-
-	if (autoPlace) {
-		await db
-			.delete(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, serviceId));
-	}
-
-	return { success: true };
-}
-
-export async function updateServiceReplicas(
-	serviceId: string,
-	replicas: number,
-) {
-	try {
-		const validatedReplicas = replicaCountSchema.parse(replicas);
-
-		const service = await getService(serviceId);
-		if (!service) {
-			throw new Error("Service not found");
-		}
-
-		if (service.stateful && validatedReplicas > 1) {
-			throw new Error(
-				"Services with volumes can only have 1 replica. Remove volumes first to scale up.",
-			);
-		}
-
-		await db
-			.update(services)
-			.set({ replicas: validatedReplicas })
-			.where(eq(services.id, serviceId));
-
-		return { success: true };
-	} catch (error) {
-		if (error instanceof ZodError) {
-			throw new Error(getZodErrorMessage(error, "Invalid replica count"));
-		}
-		throw error;
-	}
 }
 
 export async function updateServiceBackupSettings(

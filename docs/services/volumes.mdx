@@ -44,7 +44,7 @@ You can restore a volume from any completed backup. The restore process download
 
 ## Limitations
 
-- Services with volumes are locked to a single server — they cannot be auto-placed across multiple nodes.
+- Services with volumes are locked to a single server.
 - Replica count is fixed at 1 for stateful services.
 - Volume data lives on the host filesystem and is not replicated to other servers.
 - If the server is lost, data is only recoverable from completed backups.

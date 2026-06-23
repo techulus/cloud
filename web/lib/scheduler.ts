@@ -10,11 +10,10 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
-import { sendDeploymentMovedAlert, sendServerOfflineAlert } from "@/lib/email";
 import {
-	calculateResourceAwarePlacement,
-	replaceServiceReplicaPlacements,
-} from "@/lib/placement";
+	sendManualRecoveryRequiredAlert,
+	sendServerOfflineAlert,
+} from "@/lib/email";
 import {
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
@@ -27,77 +26,80 @@ export async function triggerRecoveryForOfflineServers(
 ): Promise<void> {
 	if (offlineServerIds.length === 0) return;
 
-	const activeStatuses = ["running", "healthy", "starting"] as const;
+	const activeStatuses = [
+		"pending",
+		"pulling",
+		"starting",
+		"healthy",
+		"running",
+	] as const;
 
 	const affectedDeployments = await db
 		.select({
 			deploymentId: deployments.id,
-			serviceId: deployments.serviceId,
 			serverId: deployments.serverId,
-			autoPlace: services.autoPlace,
-			stateful: services.stateful,
-			replicas: services.replicas,
+			serverName: servers.name,
+			serverPublicIp: servers.publicIp,
+			serverWireguardIp: servers.wireguardIp,
+			serviceName: services.name,
 		})
 		.from(deployments)
-		.innerJoin(services, eq(deployments.serviceId, services.id))
+		.innerJoin(servers, eq(servers.id, deployments.serverId))
+		.innerJoin(services, eq(services.id, deployments.serviceId))
 		.where(
 			and(
 				inArray(deployments.serverId, offlineServerIds),
 				inArray(deployments.status, activeStatuses),
-				eq(services.autoPlace, true),
-				eq(services.stateful, false),
 				isNull(services.deletedAt),
 			),
 		);
 
 	if (affectedDeployments.length === 0) {
 		console.log(
-			"[scheduler] no auto-placed services affected by server failure",
+			`[scheduler] ${offlineServerIds.length} server(s) went offline; no active replicas need manual recovery`,
 		);
 		return;
 	}
 
-	const serviceIds = [...new Set(affectedDeployments.map((d) => d.serviceId))];
-	console.log(
-		`[scheduler] recovering ${serviceIds.length} services affected by server failure`,
-	);
+	const affectedByServer = new Map<
+		string,
+		{
+			serverName: string;
+			serverIp?: string;
+			impactedReplicas: number;
+			serviceNames: Set<string>;
+		}
+	>();
 
-	for (const serviceId of serviceIds) {
-		try {
-			const service = affectedDeployments.find(
-				(d) => d.serviceId === serviceId,
-			);
-			if (!service) continue;
+	for (const deployment of affectedDeployments) {
+		const current = affectedByServer.get(deployment.serverId) ?? {
+			serverName: deployment.serverName,
+			serverIp:
+				deployment.serverWireguardIp || deployment.serverPublicIp || undefined,
+			impactedReplicas: 0,
+			serviceNames: new Set<string>(),
+		};
+		current.impactedReplicas += 1;
+		current.serviceNames.add(deployment.serviceName);
+		affectedByServer.set(deployment.serverId, current);
+	}
 
-			console.log(`[scheduler] recovering service ${serviceId}`);
-
-			const newPlacements = await calculateResourceAwarePlacement(
-				{ id: service.serviceId },
-				service.replicas,
-				offlineServerIds,
-			);
-
-			await replaceServiceReplicaPlacements(serviceId, newPlacements);
-
-			await deployService(serviceId);
-
-			sendDeploymentMovedAlert({
-				serviceId,
-				reason: "Server went offline",
-			}).catch((error) => {
-				console.error(
-					`[scheduler] failed to send deployment moved alert for ${serviceId}:`,
-					error,
-				);
-			});
-
-			console.log(`[scheduler] service ${serviceId} recovery triggered`);
-		} catch (error) {
+	for (const [serverId, impact] of affectedByServer) {
+		console.log(
+			`[scheduler] server ${impact.serverName} went offline with ${impact.impactedReplicas} active replica(s); manual recovery required`,
+		);
+		sendManualRecoveryRequiredAlert({
+			serverId,
+			serverName: impact.serverName,
+			serverIp: impact.serverIp,
+			impactedReplicas: impact.impactedReplicas,
+			serviceNames: [...impact.serviceNames],
+		}).catch((error) => {
 			console.error(
-				`[scheduler] failed to recover service ${serviceId}:`,
+				`[scheduler] failed to send manual recovery alert for ${impact.serverName}:`,
 				error,
 			);
-		}
+		});
 	}
 }
 
