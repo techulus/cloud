@@ -43,7 +43,7 @@ jobs:
         run: go vet ./...
 
       - name: Install staticcheck
-        run: GOBIN=$PWD/.bin go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+        run: GOBIN=$PWD/.bin go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Staticcheck
         run: ./.bin/staticcheck ./...
