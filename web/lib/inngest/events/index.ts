@@ -41,6 +41,7 @@ export const inngestEvents = {
 	migrationCancelled: defineEvent("migration/cancelled"),
 	migrationRestoreCompleted: defineEvent("migration/restore-completed"),
 	migrationRestoreFailed: defineEvent("migration/restore-failed"),
+	migrationRestoreFinished: defineEvent("migration/restore-finished"),
 
 	backupStarted: defineEvent("backup/started"),
 

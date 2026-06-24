@@ -31,6 +31,7 @@ const MIGRATION_STAGES: Record<string, string> = {
 	stopping: "Stopping service",
 	backing_up: "Creating backup",
 	restoring: "Restoring volumes",
+	deploying_target: "Starting on new server",
 	starting: "Starting on new server",
 	failed: "Migration failed",
 };

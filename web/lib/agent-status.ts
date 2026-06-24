@@ -30,6 +30,27 @@ type ContainerStatus = {
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy";
 };
 
+function isMigrationTargetStarting(status: string | null | undefined) {
+	return status === "deploying_target" || status === "starting";
+}
+
+async function completeTargetMigration(serviceId: string) {
+	await db
+		.update(services)
+		.set({
+			migrationStatus: null,
+			migrationTargetServerId: null,
+			migrationBackupId: null,
+			migrationError: null,
+		})
+		.where(
+			and(
+				eq(services.id, serviceId),
+				inArray(services.migrationStatus, ["deploying_target", "starting"]),
+			),
+		);
+}
+
 export type StatusReport = {
 	resources?: {
 		cpuCores: number;
@@ -209,17 +230,11 @@ export async function applyStatusReport(
 						);
 					}
 
-					if (service?.migrationStatus === "deploying_target") {
+					if (isMigrationTargetStarting(service?.migrationStatus)) {
 						console.log(
 							`[migration] target service ${service.id} healthy, promoting`,
 						);
-						await db
-							.update(services)
-							.set({
-								migrationStatus: null,
-								migrationTargetServerId: null,
-							})
-							.where(eq(services.id, service.id));
+						await completeTargetMigration(service.id);
 					}
 				}
 			}
@@ -285,10 +300,11 @@ export async function applyStatusReport(
 					);
 				}
 
-				if (service?.migrationStatus === "deploying_target") {
+				if (isMigrationTargetStarting(service?.migrationStatus)) {
 					console.log(
-						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
+						`[migration] deployment ${deployment.id} healthy (no health check), promoting`,
 					);
+					await completeTargetMigration(deployment.serviceId);
 				}
 				continue;
 			}
@@ -310,6 +326,9 @@ export async function applyStatusReport(
 			(deployment.status === "running" || deployment.status === "healthy");
 		const healthRecovered =
 			healthStatus === "healthy" || healthStatus === "none";
+		if (canAutoheal && healthRecovered) {
+			await completeTargetMigration(deployment.serviceId);
+		}
 
 		if (canAutoheal && healthStatus === "unhealthy") {
 			const unhealthyReportCount = (deployment.unhealthyReportCount ?? 0) + 1;
@@ -430,10 +449,11 @@ export async function applyStatusReport(
 				.where(eq(services.id, deployment.serviceId))
 				.then((r) => r[0]);
 
-			if (deployedService?.migrationStatus === "deploying_target") {
+			if (isMigrationTargetStarting(deployedService?.migrationStatus)) {
 				console.log(
-					`[migration] deployment ${deployment.id} healthy, sending event`,
+					`[migration] deployment ${deployment.id} healthy, promoting`,
 				);
+				await completeTargetMigration(deployment.serviceId);
 			}
 		}
 

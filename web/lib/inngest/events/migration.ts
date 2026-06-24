@@ -27,4 +27,12 @@ export type MigrationEvents = {
 			error: string;
 		};
 	};
+	"migration/restore-finished": {
+		data: {
+			backupId: string;
+			serviceId: string;
+			status: "completed" | "failed";
+			error?: string;
+		};
+	};
 };
