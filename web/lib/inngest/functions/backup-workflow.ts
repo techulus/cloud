@@ -12,27 +12,61 @@ export const backupWorkflow = inngest.createFunction(
 	async ({ event, step, group }) => {
 		const { backupId } = event.data;
 
-		const outcome = await group.parallel(() => {
-			const completedPromise = step
-				.waitForEvent("wait-backup-completed", {
-					event: inngestEvents.backupCompleted,
-					timeout: "30m",
-					if: `async.data.backupId == "${backupId}"`,
+		const initialBackup = await step.run("check-backup-before-wait", async () => {
+			return db
+				.select({
+					status: volumeBackups.status,
+					errorMessage: volumeBackups.errorMessage,
 				})
-				.then((result) => ({ status: "completed" as const, result }));
-
-			const failedPromise = step
-				.waitForEvent("wait-backup-failed", {
-					event: inngestEvents.backupFailed,
-					timeout: "30m",
-					if: `async.data.backupId == "${backupId}"`,
-				})
-				.then((result) => ({ status: "failed" as const, result }));
-
-			return Promise.race([completedPromise, failedPromise]);
+				.from(volumeBackups)
+				.where(eq(volumeBackups.id, backupId))
+				.then((r) => r[0]);
 		});
 
-		if (!outcome.result) {
+		if (initialBackup?.status === "completed") {
+			return { status: "completed", backupId };
+		}
+
+		if (initialBackup?.status === "failed") {
+			return {
+				status: "failed",
+				reason: initialBackup.errorMessage || "backup_failed",
+				backupId,
+			};
+		}
+
+		const wakeup = await group.parallel(() =>
+			step.waitForEvent("wait-backup-status-changed", {
+				event: inngestEvents.resourceStatusChanged,
+				timeout: "30m",
+				if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
+			}),
+		);
+
+		const backup = await step.run("check-backup-after-wait", async () => {
+			return db
+				.select({
+					status: volumeBackups.status,
+					errorMessage: volumeBackups.errorMessage,
+				})
+				.from(volumeBackups)
+				.where(eq(volumeBackups.id, backupId))
+				.then((r) => r[0]);
+		});
+
+		if (backup?.status === "completed") {
+			return { status: "completed", backupId };
+		}
+
+		if (backup?.status === "failed") {
+			return {
+				status: "failed",
+				reason: backup.errorMessage || "backup_failed",
+				backupId,
+			};
+		}
+
+		if (!wakeup) {
 			await step.run("handle-backup-timeout", async () => {
 				await db
 					.update(volumeBackups)
@@ -46,25 +80,6 @@ export const backupWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "timeout", backupId };
 		}
 
-		if (outcome.status === "failed") {
-			return {
-				status: "failed",
-				reason: outcome.result.data.error || "backup_failed",
-				backupId,
-			};
-		}
-
-		return { status: "completed", backupId };
-	},
-);
-
-export const onBackupFailed = inngest.createFunction(
-	{
-		id: "on-backup-failed",
-		triggers: [inngestEvents.backupFailed],
-	},
-	async ({ event }) => {
-		const { backupId, error } = event.data;
-		return { status: "failed", backupId, error };
+		return { status: "pending", backupId };
 	},
 );

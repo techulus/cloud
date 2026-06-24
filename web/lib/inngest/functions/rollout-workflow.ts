@@ -316,35 +316,58 @@ export const rolloutWorkflow = inngest.createFunction(
 		const healthResults = await Promise.all(
 			pendingHealthDeploymentIds.map((deploymentId) =>
 				step.waitForEvent(`wait-healthy-${deploymentId}`, {
-					event: inngestEvents.deploymentHealthy,
+					event: inngestEvents.resourceStatusChanged,
 					timeout: "10m",
-					if: `async.data.deploymentId == "${deploymentId}"`,
+					if: `async.data.type == "deployment" && async.data.id == "${deploymentId}"`,
 				}),
 			),
 		);
 
-		const timedOutIndex = healthResults.indexOf(null);
-		if (timedOutIndex !== -1) {
-			const failedDeploymentId = pendingHealthDeploymentIds[timedOutIndex];
+		const unhealthyDeployments = await step.run(
+			"check-health-after-wait",
+			async () => {
+				if (pendingHealthDeploymentIds.length === 0) {
+					return [];
+				}
+
+				const deploymentStates = await db
+					.select({ id: deployments.id, status: deployments.status })
+					.from(deployments)
+					.where(inArray(deployments.id, pendingHealthDeploymentIds));
+
+				return deploymentStates.filter(
+					(deployment) =>
+						deployment.status !== "healthy" && deployment.status !== "running",
+				);
+			},
+		);
+
+		if (unhealthyDeployments.length > 0) {
+			const failedDeploymentId = unhealthyDeployments[0].id;
+			const failedReason = healthResults.includes(null)
+				? "health_check_timeout"
+				: "health_check_failed";
 			await step.run("log-health-timeout", async () => {
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,
 					"health_check",
-					`Health check timed out for deployment ${failedDeploymentId}`,
+					failedReason === "health_check_timeout"
+						? `Health check timed out for deployment ${failedDeploymentId}`
+						: `Health check failed for deployment ${failedDeploymentId}`,
 				);
 			});
 			await step.run("handle-health-timeout", async () => {
 				await handleRolloutFailure(
 					rolloutId,
 					serviceId,
-					"health_check_timeout",
+					failedReason,
 					isRollingUpdate,
 				);
 			});
 			return {
 				status: "failed",
-				reason: "health_check_timeout",
+				reason: failedReason,
 				deploymentId: failedDeploymentId,
 			};
 		}

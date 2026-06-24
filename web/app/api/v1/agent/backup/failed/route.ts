@@ -52,24 +52,12 @@ export async function POST(request: NextRequest) {
 	revalidatePath("/dashboard/projects");
 
 	await inngest.send(
-		inngestEvents.backupFailed.create({
-			backupId,
-			volumeId: backup.volumeId,
-			serviceId: backup.serviceId,
-			error: error || "Unknown error",
-			isMigrationBackup: backup.isMigrationBackup ?? false,
+		inngestEvents.resourceStatusChanged.create({
+			type: "backup",
+			id: backupId,
+			parentType: "service",
+			parentId: backup.serviceId,
 		}),
 	);
-
-	if (backup.isMigrationBackup) {
-		await inngest.send(
-			inngestEvents.migrationBackupFailed.create({
-				backupId,
-				serviceId: backup.serviceId,
-				error: error || "Unknown error",
-			}),
-		);
-	}
-
 	return NextResponse.json({ ok: true });
 }
