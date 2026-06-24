@@ -25,17 +25,6 @@ const (
 	StateProcessing
 )
 
-func (s AgentState) String() string {
-	switch s {
-	case StateIdle:
-		return "IDLE"
-	case StateProcessing:
-		return "PROCESSING"
-	default:
-		return "UNKNOWN"
-	}
-}
-
 type Config struct {
 	ServerID         string `json:"serverId"`
 	SubnetID         int    `json:"subnetId"`

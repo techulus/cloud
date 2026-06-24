@@ -159,8 +159,7 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
 
 		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "origin", config.CommitSha, "--depth", "1")
-		output, err = b.runCommand(cmd, config)
-		if err != nil {
+		if _, err := b.runCommand(cmd, config); err != nil {
 			log.Printf("[build:%s] fetch specific sha failed (might be HEAD): %v", truncateStr(config.BuildID, 8), err)
 		}
 

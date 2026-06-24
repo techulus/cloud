@@ -1,5 +1,3 @@
-//go:build darwin
-
 package container
 
 import (
@@ -38,7 +36,7 @@ func StreamLogs(ctx context.Context, opts LogsOptions, entryCh chan<- LogEntry, 
 
 	args = append(args, opts.ContainerID)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "podman", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

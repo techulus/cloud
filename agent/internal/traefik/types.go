@@ -33,23 +33,6 @@ type TraefikUDPRoute struct {
 	ExternalPort int
 }
 
-type traefikConfig struct {
-	HTTP httpConfig `yaml:"http"`
-}
-
-type httpConfig struct {
-	Routers  map[string]router  `yaml:"routers,omitempty"`
-	Services map[string]service `yaml:"services,omitempty"`
-}
-
-type router struct {
-	Rule        string     `yaml:"rule"`
-	EntryPoints []string   `yaml:"entryPoints"`
-	Service     string     `yaml:"service"`
-	TLS         *tlsConfig `yaml:"tls,omitempty"`
-	Priority    int        `yaml:"priority,omitempty"`
-}
-
 type tlsConfig struct{}
 
 type tlsFileConfig struct {
@@ -79,9 +62,9 @@ type server struct {
 }
 
 type middleware struct {
-	RedirectScheme   *redirectScheme   `yaml:"redirectScheme,omitempty"`
-	StripPrefix      *stripPrefix      `yaml:"stripPrefix,omitempty"`
-	ReplacePathRegex *replacePathRegex `yaml:"replacePathRegex,omitempty"`
+	RedirectScheme   *redirectScheme    `yaml:"redirectScheme,omitempty"`
+	StripPrefix      *stripPrefix       `yaml:"stripPrefix,omitempty"`
+	ReplacePathRegex *replacePathRegex  `yaml:"replacePathRegex,omitempty"`
 	Headers          *headersMiddleware `yaml:"headers,omitempty"`
 }
 
@@ -101,10 +84,6 @@ type redirectScheme struct {
 
 type stripPrefix struct {
 	Prefixes []string `yaml:"prefixes"`
-}
-
-type addPrefix struct {
-	Prefix string `yaml:"prefix"`
 }
 
 type httpConfigWithMiddlewares struct {
@@ -176,22 +155,8 @@ type udpServer struct {
 	Address string `yaml:"address"`
 }
 
-type traefikFullConfig struct {
-	HTTP httpConfig `yaml:"http,omitempty"`
-	TCP  tcpConfig  `yaml:"tcp,omitempty"`
-	UDP  udpConfig  `yaml:"udp,omitempty"`
-}
-
 type traefikFullConfigWithMiddlewares struct {
 	HTTP httpConfigWithMiddlewares `yaml:"http,omitempty"`
 	TCP  tcpConfig                 `yaml:"tcp,omitempty"`
 	UDP  udpConfig                 `yaml:"udp,omitempty"`
-}
-
-type staticConfig struct {
-	EntryPoints map[string]entryPoint `yaml:"entryPoints"`
-}
-
-type entryPoint struct {
-	Address string `yaml:"address"`
 }
