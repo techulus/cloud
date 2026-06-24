@@ -1,5 +1,3 @@
-//go:build linux
-
 package paths
 
 var DataDir = "/var/lib/techulus-agent"

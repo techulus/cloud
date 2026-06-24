@@ -13,22 +13,20 @@ import (
 const DNSPort = 53
 
 type Server struct {
-	store       *RecordStore
-	udpServer   *dns.Server
-	tcpServer   *dns.Server
-	listenAddr  string
-	port        int
-	started     atomic.Bool
-	startedChan chan struct{}
-	mu          sync.Mutex
+	store      *RecordStore
+	udpServer  *dns.Server
+	tcpServer  *dns.Server
+	listenAddr string
+	port       int
+	started    atomic.Bool
+	mu         sync.Mutex
 }
 
 func NewServer(port int, listenAddr string) *Server {
 	return &Server{
-		store:       NewRecordStore(),
-		listenAddr:  listenAddr,
-		port:        port,
-		startedChan: make(chan struct{}),
+		store:      NewRecordStore(),
+		listenAddr: listenAddr,
+		port:       port,
 	}
 }
 
@@ -98,7 +96,6 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.started.Store(true)
-	close(s.startedChan)
 	log.Printf("[dns] embedded DNS server started on %s (UDP+TCP)", addr)
 
 	return nil
@@ -140,8 +137,4 @@ func (s *Server) UpdateRecords(records []DnsRecord) {
 
 func (s *Server) GetRecordsHash() string {
 	return s.store.Hash()
-}
-
-func (s *Server) WaitReady() {
-	<-s.startedChan
 }

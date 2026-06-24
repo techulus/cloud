@@ -263,7 +263,3 @@ sudo journalctl -u techulus-agent -f
 ```bash
 podman ps -a --format "table {{.Names}}\t{{.State}}\t{{.Labels}}"
 ```
-
-## macOS
-
-See [MACOS.md](./MACOS.md) for macOS-specific setup and troubleshooting.
