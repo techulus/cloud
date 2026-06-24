@@ -1,10 +1,10 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
-import { servers, volumeBackups } from "@/db/schema";
+import { volumeBackups } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import { triggerBackup } from "@/lib/backups/trigger-backup";
 import { inngest } from "@/lib/inngest/client";
@@ -29,27 +29,6 @@ export async function createBackup(serviceId: string, volumeId: string) {
 
 	revalidatePath(`/dashboard/projects`);
 	return { success: true, backupId: result.backupId };
-}
-
-export async function listBackups(serviceId: string) {
-	await requireAuth();
-	const backups = await db
-		.select({
-			id: volumeBackups.id,
-			volumeName: volumeBackups.volumeName,
-			status: volumeBackups.status,
-			sizeBytes: volumeBackups.sizeBytes,
-			createdAt: volumeBackups.createdAt,
-			completedAt: volumeBackups.completedAt,
-			errorMessage: volumeBackups.errorMessage,
-			serverName: servers.name,
-		})
-		.from(volumeBackups)
-		.leftJoin(servers, eq(volumeBackups.serverId, servers.id))
-		.where(eq(volumeBackups.serviceId, serviceId))
-		.orderBy(desc(volumeBackups.createdAt));
-
-	return backups;
 }
 
 export async function restoreBackup(

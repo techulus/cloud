@@ -13,7 +13,7 @@ type DeploymentStatusCapabilities = {
 	dns: boolean;
 };
 
-export const deploymentStatusCapabilities = {
+const deploymentStatusCapabilities = {
 	pending: { expected: true, routable: false, dns: false },
 	pulling: { expected: true, routable: false, dns: false },
 	starting: { expected: true, routable: false, dns: false },

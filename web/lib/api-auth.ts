@@ -22,7 +22,7 @@ function getAuthErrorResponse(error: unknown) {
 	);
 }
 
-export async function getRequestSession(request: Request) {
+async function getRequestSession(request: Request) {
 	return auth.api.getSession({
 		headers: request.headers,
 	});

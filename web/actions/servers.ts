@@ -51,11 +51,6 @@ export async function deleteServer(id: string) {
 	await db.delete(servers).where(eq(servers.id, id));
 }
 
-export async function approveServer(id: string) {
-	await requireAuth();
-	await db.update(servers).set({ status: "pending" }).where(eq(servers.id, id));
-}
-
 export async function updateServerName(id: string, name: string) {
 	await requireAuth();
 	try {

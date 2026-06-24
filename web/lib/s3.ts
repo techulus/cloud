@@ -14,7 +14,7 @@ function hashConfig(config: {
 	return `${config.region}-${config.endpoint}-${config.accessKey}`;
 }
 
-export async function getS3Client(): Promise<S3Client | null> {
+async function getS3Client(): Promise<S3Client | null> {
 	const config = await getBackupStorageConfig();
 	if (!config) {
 		return null;

@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import { builds, serviceReplicas, services } from "@/db/schema";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -69,7 +69,7 @@ export const buildWorkflow = inngest.createFunction(
 
 			if (shouldDeploy) {
 				await step.run("trigger-deploy", async () => {
-					await deployService(serviceId);
+					await deployServiceInternal(serviceId);
 				});
 			}
 
@@ -145,7 +145,7 @@ export const buildWorkflow = inngest.createFunction(
 
 		if (shouldDeploy) {
 			await step.run("trigger-deploy-group", async () => {
-				await deployService(serviceId);
+				await deployServiceInternal(serviceId);
 			});
 		}
 
