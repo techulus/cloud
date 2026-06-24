@@ -58,6 +58,7 @@ export function isLoggingEnabled(): boolean {
 type QueryLogsByServiceOptions = {
 	serviceId: string;
 	limit: number;
+	after?: string;
 	before?: string;
 	logType?: LogType;
 	serverId?: string;
@@ -66,7 +67,7 @@ type QueryLogsByServiceOptions = {
 export async function queryLogsByService(
 	options: QueryLogsByServiceOptions,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	const { serviceId, limit, before, logType, serverId } = options;
+	const { serviceId, limit, after, before, logType, serverId } = options;
 
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
@@ -83,6 +84,9 @@ export async function queryLogsByService(
 	}
 	if (serverId) {
 		query += ` server_id:${serverId}`;
+	}
+	if (after) {
+		query += ` _time:>${after}`;
 	}
 	if (before) {
 		query += ` _time:<${before}`;

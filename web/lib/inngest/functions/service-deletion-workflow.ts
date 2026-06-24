@@ -13,6 +13,7 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -202,7 +203,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					) {
 						await db
 							.update(deployments)
-							.set({ status: "stopping" })
+							.set(markDeploymentUndesired("stopping"))
 							.where(eq(deployments.id, deployment.id));
 
 						await enqueueWork(deployment.serverId, "stop", {

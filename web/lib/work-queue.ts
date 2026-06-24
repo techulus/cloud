@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { workQueue } from "@/db/schema";
+import { deployments, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
@@ -200,6 +200,11 @@ async function runWorkItemCompletionSideEffects(
 	item: WorkQueue,
 	result: WorkItemResult,
 ): Promise<void> {
+	if (item.type === "force_cleanup" && item.payload) {
+		await runForceCleanupCompletionSideEffects(item, result);
+		return;
+	}
+
 	if (item.type !== "create_manifest" || !item.payload) {
 		return;
 	}
@@ -232,5 +237,49 @@ async function runWorkItemCompletionSideEffects(
 		}
 	} catch (error) {
 		console.error("[work-queue] failed to run completion side effects:", error);
+	}
+}
+
+async function runForceCleanupCompletionSideEffects(
+	item: WorkQueue,
+	result: WorkItemResult,
+): Promise<void> {
+	try {
+		const payload = JSON.parse(item.payload) as {
+			reason?: string;
+			deploymentId?: string;
+		};
+
+		if (
+			payload.reason !== "autoheal_recreate" ||
+			!payload.deploymentId ||
+			result.status !== "completed"
+		) {
+			return;
+		}
+
+		await db
+			.update(deployments)
+			.set({
+				containerId: null,
+				status: "pending",
+				desired: true,
+				healthStatus: null,
+				unhealthyReportCount: 0,
+				autohealRestartCount: 0,
+				failedStage: null,
+			})
+			.where(
+				and(
+					eq(deployments.id, payload.deploymentId),
+					eq(deployments.status, "failed"),
+					eq(deployments.failedStage, "autoheal_recreate"),
+				),
+			);
+	} catch (error) {
+		console.error(
+			"[work-queue] failed to run force cleanup completion side effects:",
+			error,
+		);
 	}
 }

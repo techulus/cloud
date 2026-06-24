@@ -1,6 +1,13 @@
 "use client";
 
-import { Clock, Hammer, Info, Network, Server, Shield } from "lucide-react";
+import {
+	Clock,
+	Hammer,
+	Info,
+	Network,
+	Server,
+	Shield,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { useState } from "react";
@@ -11,6 +18,7 @@ import {
 	updateBuildTimeout,
 	updateProxyDomain,
 } from "@/actions/settings";
+import { ApiKeySettings } from "@/components/settings/api-key-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { Button } from "@/components/ui/button";
 import {
@@ -171,6 +179,9 @@ export function GlobalSettings({
 				</TabsTrigger>
 				<TabsTrigger value="email" className="px-4 shrink-0">
 					Email
+				</TabsTrigger>
+				<TabsTrigger value="api-keys" className="px-4 shrink-0">
+					API Keys
 				</TabsTrigger>
 				<TabsTrigger value="about" className="px-4 shrink-0">
 					About
@@ -365,6 +376,10 @@ export function GlobalSettings({
 				<EmailSettings
 					initialAlertsConfig={initialSettings.emailAlertsConfig}
 				/>
+			</TabsContent>
+
+			<TabsContent value="api-keys" className="space-y-6 pt-4">
+				<ApiKeySettings />
 			</TabsContent>
 
 			<TabsContent value="about" className="space-y-6 pt-4">

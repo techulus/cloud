@@ -1,9 +1,10 @@
 import { Suspense } from "react";
-import { SignInPage, SignInPageSkeleton } from "@/components/auth/sign-in-page";
+import { SignInPage } from "@/components/auth/sign-in-page";
+import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
 
 export default function Page() {
 	return (
-		<Suspense fallback={<SignInPageSkeleton />}>
+		<Suspense fallback={<DashboardPageSkeleton />}>
 			<SignInPage />
 		</Suspense>
 	);

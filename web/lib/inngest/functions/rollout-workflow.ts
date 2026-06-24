@@ -431,7 +431,7 @@ export const rolloutWorkflow = inngest.createFunction(
 			await step.run("stop-old-deployments", async () => {
 				await db
 					.update(deployments)
-					.set({ status: "stopping" })
+					.set({ status: "stopping", desired: false })
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),

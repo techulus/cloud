@@ -252,34 +252,34 @@ function getUnsupportedReason(
 	placementReplicaCount: number,
 ) {
 	if (service.sourceType !== "image") {
-		return "CLI v1 only supports image-backed services. This service uses an unsupported source.";
+		return "tc only supports image-backed services. This service uses an unsupported source.";
 	}
 
 	if (service.stateful || volumeCount > 0) {
-		return "CLI v1 does not support stateful services or volumes. Manage this service from the web UI.";
+		return "tc does not support stateful services or volumes. Manage this service from the web UI.";
 	}
 
 	if (ports.some((port) => port.protocol !== "http")) {
-		return "CLI v1 only supports HTTP ports. This service has TCP or UDP ports configured.";
+		return "tc only supports HTTP ports. This service has TCP or UDP ports configured.";
 	}
 
 	if (ports.some((port) => port.isPublic && !port.domain)) {
-		return "CLI v1 requires every public HTTP port to have a domain.";
+		return "tc requires every public HTTP port to have a domain.";
 	}
 
 	if (placementReplicaCount < 1) {
-		return "CLI v1 requires manual server placement to be configured in the web UI before deploy.";
+		return "tc requires manual server placement to be configured in the web UI before deploy.";
 	}
 
 	if (placementReplicaCount > 10) {
-		return "CLI v1 only supports manually placed replica counts between 1 and 10.";
+		return "tc only supports manually placed replica counts between 1 and 10.";
 	}
 
 	const hasCpu = service.resourceCpuLimit !== null;
 	const hasMemory = service.resourceMemoryLimitMb !== null;
 
 	if (hasCpu !== hasMemory) {
-		return "CLI v1 requires both CPU and memory limits to be set together.";
+		return "tc requires both CPU and memory limits to be set together.";
 	}
 
 	return null;
@@ -606,7 +606,7 @@ function assertManifestReplicaCount(
 ) {
 	if (placementReplicaCount !== desiredReplicaCount) {
 		throw new Error(
-			`CLI v1 cannot change server placement. Update placement in the web UI so it has ${desiredReplicaCount} replica${desiredReplicaCount === 1 ? "" : "s"}, or update replicas.count to match the current manual placement of ${placementReplicaCount}.`,
+			`tc cannot change server placement. Update placement in the web UI so it has ${desiredReplicaCount} replica${desiredReplicaCount === 1 ? "" : "s"}, or update replicas.count to match the current manual placement of ${placementReplicaCount}.`,
 		);
 	}
 }
@@ -617,14 +617,14 @@ export async function applyManifest(
 	const project = await findProjectByManifest(manifest);
 	if (!project) {
 		throw new Error(
-			"Project not found. Create the service and select server placement in the web UI before using CLI v1.",
+			"Project not found. Create the service and select server placement in the web UI before using tc.",
 		);
 	}
 
 	const environment = await findEnvironmentByManifest(project.id, manifest);
 	if (!environment) {
 		throw new Error(
-			"Environment not found. Create the service and select server placement in the web UI before using CLI v1.",
+			"Environment not found. Create the service and select server placement in the web UI before using tc.",
 		);
 	}
 
@@ -637,7 +637,7 @@ export async function applyManifest(
 
 	if (!service) {
 		throw new Error(
-			"CLI v1 cannot create services because server placement must be selected in the web UI.",
+			"tc cannot create services because server placement must be selected in the web UI.",
 		);
 	}
 
