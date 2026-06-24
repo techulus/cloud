@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -9,6 +8,7 @@ import {
 	services,
 	volumeBackups,
 } from "@/db/schema";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -327,7 +327,7 @@ export const migrationWorkflow = inngest.createFunction(
 				.set({ lockedServerId: targetServerId })
 				.where(eq(services.id, serviceId));
 
-			await deployService(serviceId);
+			await deployServiceInternal(serviceId);
 		});
 
 		await step.run("complete-migration", async () => {

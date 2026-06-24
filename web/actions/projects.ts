@@ -30,6 +30,7 @@ import {
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
@@ -47,7 +48,6 @@ import type {
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
-import { startMigration } from "./migrations";
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -860,62 +860,7 @@ export async function updateServiceGithubRepo(
 
 export async function deployService(serviceId: string) {
 	await requireAuth();
-	const service = await getService(serviceId);
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	if (service.stateful) {
-		const configuredReplicas = await db
-			.select({
-				serverId: serviceReplicas.serverId,
-				replicas: serviceReplicas.count,
-			})
-			.from(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, serviceId));
-
-		const placements = configuredReplicas.filter((p) => p.replicas > 0);
-		const totalReplicas = placements.reduce((sum, p) => sum + p.replicas, 0);
-
-		if (totalReplicas !== 1) {
-			throw new Error("Stateful services can only have exactly 1 replica");
-		}
-
-		const serverIds = placements.map((p) => p.serverId);
-		if (serverIds.length !== 1) {
-			throw new Error(
-				"Stateful services must be deployed to exactly one server",
-			);
-		}
-
-		const targetServerId = serverIds[0];
-		if (service.lockedServerId && service.lockedServerId !== targetServerId) {
-			if (service.migrationStatus) {
-				throw new Error("Migration already in progress");
-			}
-			await startMigration(serviceId, targetServerId);
-			revalidatePath(`/dashboard/projects`);
-			return { migrationStarted: true };
-		}
-	}
-
-	const rolloutId = randomUUID();
-
-	await db.insert(rollouts).values({
-		id: rolloutId,
-		serviceId,
-		status: "in_progress",
-		currentStage: "queued",
-	});
-
-	await inngest.send(
-		inngestEvents.rolloutCreated.create({
-			rolloutId,
-			serviceId,
-		}),
-	);
-
-	return { rolloutId };
+	return deployServiceInternal(serviceId);
 }
 
 export async function deleteDeployments(serviceId: string) {

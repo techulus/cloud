@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { cron } from "inngest";
 import { deleteBackup } from "@/actions/backups";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -13,6 +12,7 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -432,7 +432,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						.where(eq(services.id, serviceId));
 
 					try {
-						const result = await deployService(serviceId);
+						const result = await deployServiceInternal(serviceId);
 						if (!("rolloutId" in result) || !result.rolloutId) {
 							throw new Error("Restore could not start a deployment");
 						}

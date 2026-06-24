@@ -10,8 +10,6 @@ export const SETTING_KEYS = {
 
 export const DEFAULT_BUILD_TIMEOUT_MINUTES = 30;
 export const DEFAULT_BACKUP_RETENTION_DAYS = 7;
-export const MIN_BACKUP_RETENTION_DAYS = 7;
-export const MAX_BACKUP_RETENTION_DAYS = 30;
 
 export type BackupStorageProvider = "s3" | "r2" | "gcs" | "custom";
 
@@ -44,7 +42,7 @@ const commaSeparatedEmails = z
 		{ message: "Invalid email address in list" },
 	);
 
-export const smtpConfigSchema = z.object({
+const smtpConfigSchema = z.object({
 	enabled: z.boolean(),
 	fromName: z.string().transform((val) => val.trim()),
 	fromAddress: z

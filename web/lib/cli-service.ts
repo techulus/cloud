@@ -1,6 +1,5 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import {
-	deployService,
 	updateServiceConfig,
 	updateServiceResourceLimits,
 	updateServiceStartCommand,
@@ -25,6 +24,7 @@ import {
 	techulusManifestSchema,
 } from "@/lib/cli-manifest";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { slugify } from "@/lib/utils";
 
 export type ManifestChange = {
@@ -714,7 +714,7 @@ export async function deployManifest(manifest: TechulusManifest) {
 		manifest.service.replicas.count,
 	);
 
-	const result = await deployService(service.id);
+	const result = await deployServiceInternal(service.id);
 
 	return {
 		serviceId: service.id,
