@@ -202,7 +202,7 @@ export async function cleanupTerminalDeployments(
 
 export async function cleanupExistingDeployments(
 	serviceId: string,
-): Promise<void> {
+): Promise<{ deletedCount: number }> {
 	const existingDeployments = await db
 		.select()
 		.from(deployments)
@@ -214,35 +214,55 @@ export async function cleanupExistingDeployments(
 			.where(eq(deploymentPorts.deploymentId, dep.id));
 		await db.delete(deployments).where(eq(deployments.id, dep.id));
 	}
+
+	return { deletedCount: existingDeployments.length };
 }
+
+export type CertificateProvisioningResult = {
+	domains: string[];
+	existingDomains: string[];
+	issuedDomains: string[];
+	failedDomains: string[];
+};
 
 export async function issueCertificatesForService(
 	serviceId: string,
-): Promise<void> {
+): Promise<CertificateProvisioningResult> {
 	const servicePortsList = await db
 		.select()
 		.from(servicePorts)
 		.where(eq(servicePorts.serviceId, serviceId));
 
-	const domainsNeedingCerts = servicePortsList
-		.filter((p) => p.isPublic && p.domain)
-		.map((p) => p.domain as string);
+	const domainsNeedingCerts = Array.from(
+		new Set(
+			servicePortsList
+				.filter((p) => p.isPublic && p.domain)
+				.map((p) => (p.domain as string).trim())
+				.filter(Boolean),
+		),
+	);
 
+	const existingDomains: string[] = [];
+	const issuedDomains: string[] = [];
 	const failedDomains: string[] = [];
 
 	for (const domain of domainsNeedingCerts) {
 		const existingCert = await getCertificate(domain);
-		if (!existingCert) {
-			try {
-				await issueCertificate(domain);
-				console.log(`[deploy] issued certificate for ${domain}`);
-			} catch (error) {
-				console.error(
-					`[deploy] failed to issue certificate for ${domain}:`,
-					error,
-				);
-				failedDomains.push(domain);
-			}
+		if (existingCert) {
+			existingDomains.push(domain);
+			continue;
+		}
+
+		try {
+			await issueCertificate(domain);
+			console.log(`[deploy] issued certificate for ${domain}`);
+			issuedDomains.push(domain);
+		} catch (error) {
+			console.error(
+				`[deploy] failed to issue certificate for ${domain}:`,
+				error,
+			);
+			failedDomains.push(domain);
 		}
 	}
 
@@ -251,6 +271,13 @@ export async function issueCertificatesForService(
 			`Certificate provisioning failed for: ${failedDomains.join(", ")}`,
 		);
 	}
+
+	return {
+		domains: domainsNeedingCerts,
+		existingDomains,
+		issuedDomains,
+		failedDomains,
+	};
 }
 
 export async function createDeploymentRecords(

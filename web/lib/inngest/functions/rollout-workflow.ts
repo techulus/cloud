@@ -178,13 +178,15 @@ export const rolloutWorkflow = inngest.createFunction(
 			});
 		} else {
 			await step.run("cleanup-existing", async () => {
-				await cleanupExistingDeployments(serviceId);
-				await ingestRolloutLog(
-					rolloutId,
-					serviceId,
-					"preparing",
-					"Cleaned up existing deployments",
-				);
+				const { deletedCount } = await cleanupExistingDeployments(serviceId);
+				if (deletedCount > 0) {
+					await ingestRolloutLog(
+						rolloutId,
+						serviceId,
+						"preparing",
+						`Cleaned up ${deletedCount} existing deployment(s)`,
+					);
+				}
 			});
 		}
 
@@ -194,13 +196,15 @@ export const rolloutWorkflow = inngest.createFunction(
 				.set({ currentStage: "certificates" })
 				.where(eq(rollouts.id, rolloutId));
 			try {
-				await issueCertificatesForService(serviceId);
-				await ingestRolloutLog(
-					rolloutId,
-					serviceId,
-					"certificates",
-					"Certificates issued",
-				);
+				const result = await issueCertificatesForService(serviceId);
+				if (result.issuedDomains.length > 0) {
+					await ingestRolloutLog(
+						rolloutId,
+						serviceId,
+						"certificates",
+						`Certificates issued for ${result.issuedDomains.length} domain(s)`,
+					);
+				}
 				return { success: true as const };
 			} catch (error) {
 				const message =
@@ -452,7 +456,7 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (isRollingUpdate) {
 			await step.run("stop-old-deployments", async () => {
-				await db
+				const stoppedDeployments = await db
 					.update(deployments)
 					.set({ status: "stopping", desired: false })
 					.where(
@@ -460,13 +464,17 @@ export const rolloutWorkflow = inngest.createFunction(
 							eq(deployments.serviceId, serviceId),
 							eq(deployments.status, "draining"),
 						),
+					)
+					.returning({ id: deployments.id });
+
+				if (stoppedDeployments.length > 0) {
+					await ingestRolloutLog(
+						rolloutId,
+						serviceId,
+						"dns_sync",
+						`Stopping ${stoppedDeployments.length} old deployment(s) after DNS sync`,
 					);
-				await ingestRolloutLog(
-					rolloutId,
-					serviceId,
-					"dns_sync",
-					"Stopping old deployments after DNS sync",
-				);
+				}
 			});
 		}
 
