@@ -351,7 +351,7 @@ export async function createDeploymentRecords(
 				containerPath: v.containerPath,
 			}));
 
-			await enqueueWork(server.id, "deploy", {
+			await enqueueWork(server.id, "reconcile", {
 				reason: "rollout_deployment_created",
 				deploymentId,
 				serviceId,

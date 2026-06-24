@@ -30,6 +30,7 @@ import {
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
@@ -512,7 +513,7 @@ async function hardDeleteService(serviceId: string) {
 		) {
 			await db
 				.update(deployments)
-				.set({ status: "stopping" })
+				.set(markDeploymentUndesired("stopping"))
 				.where(eq(deployments.id, dep.id));
 
 			await enqueueWork(dep.serverId, "stop", {
@@ -1204,7 +1205,7 @@ export async function stopService(serviceId: string) {
 
 		await db
 			.update(deployments)
-			.set({ status: "stopping" })
+			.set(markDeploymentUndesired("stopping"))
 			.where(eq(deployments.id, dep.id));
 
 		await enqueueWork(dep.serverId, "stop", {
@@ -1323,7 +1324,7 @@ export async function abortRollout(serviceId: string) {
 		.where(
 			and(
 				eq(workQueue.status, "pending"),
-				eq(workQueue.type, "deploy"),
+				inArray(workQueue.type, ["deploy", "reconcile"]),
 				inArray(workQueue.serverId, [...serverContainers.keys()]),
 			),
 		);

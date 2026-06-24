@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
 
 export async function handleRolloutFailure(
@@ -53,7 +54,7 @@ export async function handleRolloutFailure(
 
 	await db
 		.update(deployments)
-		.set({ status: "rolled_back", failedStage: reason })
+		.set({ ...markDeploymentUndesired("rolled_back"), failedStage: reason })
 		.where(
 			and(
 				eq(deployments.rolloutId, rolloutId),

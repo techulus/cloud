@@ -113,8 +113,8 @@ func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
 		return a.ProcessRestart(item)
 	case "stop":
 		return a.ProcessStop(item)
-	case "deploy":
-		a.RequestReconcile("deploy work item " + Truncate(item.ID, 8))
+	case "deploy", "reconcile":
+		a.RequestReconcile("reconcile work item " + Truncate(item.ID, 8))
 		return nil
 	case "force_cleanup":
 		return a.ProcessForceCleanup(item)

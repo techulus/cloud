@@ -9,6 +9,7 @@ import {
 	services,
 	volumeBackups,
 } from "@/db/schema";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -64,7 +65,7 @@ export const migrationWorkflow = inngest.createFunction(
 
 			await db
 				.update(deployments)
-				.set({ status: "stopped" })
+				.set(markDeploymentUndesired("stopped"))
 				.where(eq(deployments.id, sourceDeploymentId));
 		});
 

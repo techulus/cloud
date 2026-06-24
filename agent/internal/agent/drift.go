@@ -15,6 +15,32 @@ import (
 	"techulus/cloud-agent/internal/wireguard"
 )
 
+type reconcileActionKind string
+
+const (
+	actionStopOrphanNoDeploymentID   reconcileActionKind = "stop_orphan_no_deployment_id"
+	actionRemoveOrphanNoDeploymentID reconcileActionKind = "remove_orphan_no_deployment_id"
+	actionStopUnexpectedContainer    reconcileActionKind = "stop_unexpected_container"
+	actionRemoveUnexpectedContainer  reconcileActionKind = "remove_unexpected_container"
+	actionDeployMissingContainer     reconcileActionKind = "deploy_missing_container"
+	actionStartContainer             reconcileActionKind = "start_container"
+	actionRedeployContainer          reconcileActionKind = "redeploy_container"
+	actionUpdateDNS                  reconcileActionKind = "update_dns"
+	actionUpdateTraefik              reconcileActionKind = "update_traefik"
+	actionUpdateCertificates         reconcileActionKind = "update_certificates"
+	actionWriteChallengeRoute        reconcileActionKind = "write_challenge_route"
+	actionUpdateWireGuard            reconcileActionKind = "update_wireguard"
+	actionStartWireGuard             reconcileActionKind = "start_wireguard"
+)
+
+type reconcileAction struct {
+	Kind         reconcileActionKind
+	Description  string
+	DeploymentID string
+	Expected     *agenthttp.ExpectedContainer
+	Actual       *container.Container
+}
+
 func (a *Agent) Tick() {
 	switch a.GetState() {
 	case StateIdle:
@@ -60,7 +86,7 @@ func (a *Agent) transitionToIdle() {
 	a.SetState(StateIdle)
 	if a.consumeExpectedStateRefresh() {
 		log.Printf("[processing] fetching latest expected state after pending refresh")
-		// A deploy wake can arrive while processing a previous snapshot. Run one
+		// A reconcile wake can arrive while processing a previous snapshot. Run one
 		// immediate idle pass after processing to pick up the latest expected state.
 		a.handleIdle()
 	}
@@ -85,11 +111,11 @@ func (a *Agent) handleIdle() {
 
 	a.updateDnsInSync(expected, actual)
 
-	changes := a.detectChanges(expected, actual)
-	if len(changes) > 0 {
-		log.Printf("[idle] drift detected, %d change(s) to apply:", len(changes))
-		for _, change := range changes {
-			log.Printf("  → %s", change)
+	actions := a.planReconcile(expected, actual)
+	if len(actions) > 0 {
+		log.Printf("[idle] drift detected, %d change(s) to apply:", len(actions))
+		for _, action := range actions {
+			log.Printf("  → %s", action.Description)
 		}
 		log.Printf("[idle] transitioning to PROCESSING")
 		a.expectedState = expected
@@ -97,7 +123,6 @@ func (a *Agent) handleIdle() {
 		a.SetState(StateProcessing)
 		return
 	}
-
 }
 
 func (a *Agent) handleProcessing() {
@@ -115,15 +140,15 @@ func (a *Agent) handleProcessing() {
 	}
 
 	a.updateDnsInSync(a.expectedState, actual)
+	actions := a.planReconcile(a.expectedState, actual)
 
-	if len(a.detectChanges(a.expectedState, actual)) == 0 {
+	if len(actions) == 0 {
 		log.Printf("[processing] state converged, transitioning to IDLE")
 		a.transitionToIdle()
 		return
 	}
 
-	err = a.reconcileOne(actual)
-	if err != nil {
+	if err := a.applyReconcileAction(actions[0]); err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
 		a.transitionToIdle()
 		return
@@ -165,8 +190,8 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	return state, nil
 }
 
-func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualState) []string {
-	var changes []string
+func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualState) []reconcileAction {
+	var actions []reconcileAction
 
 	expectedMap := make(map[string]agenthttp.ExpectedContainer)
 	for _, c := range expected.Containers {
@@ -180,32 +205,86 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		}
 	}
 
-	for _, c := range actual.Containers {
-		if c.DeploymentID == "" {
-			changes = append(changes, fmt.Sprintf("STOP orphan container %s (no deployment ID)", c.Name))
+	for i := range actual.Containers {
+		act := &actual.Containers[i]
+		if act.DeploymentID == "" {
+			if act.State == "running" {
+				actions = append(actions, reconcileAction{
+					Kind:        actionStopOrphanNoDeploymentID,
+					Description: fmt.Sprintf("STOP orphan container %s (no deployment ID)", act.Name),
+					Actual:      act,
+				})
+			} else {
+				actions = append(actions, reconcileAction{
+					Kind:        actionRemoveOrphanNoDeploymentID,
+					Description: fmt.Sprintf("REMOVE orphan container %s (no deployment ID)", act.Name),
+					Actual:      act,
+				})
+			}
 		}
 	}
 
 	for id, act := range actualMap {
 		if _, exists := expectedMap[id]; !exists {
-			changes = append(changes, fmt.Sprintf("STOP orphan container %s (deployment %s not in expected state)", act.Name, id[:8]))
+			actualContainer := act
+			if act.State == "running" {
+				actions = append(actions, reconcileAction{
+					Kind:         actionStopUnexpectedContainer,
+					Description:  fmt.Sprintf("STOP orphan container %s (deployment %s not in expected state)", act.Name, id[:8]),
+					DeploymentID: id,
+					Actual:       &actualContainer,
+				})
+			} else {
+				actions = append(actions, reconcileAction{
+					Kind:         actionRemoveUnexpectedContainer,
+					Description:  fmt.Sprintf("REMOVE orphan container %s (deployment %s not in expected state)", act.Name, id[:8]),
+					DeploymentID: id,
+					Actual:       &actualContainer,
+				})
+			}
 		}
 	}
 
 	for id, exp := range expectedMap {
 		if _, exists := actualMap[id]; !exists {
-			changes = append(changes, fmt.Sprintf("DEPLOY %s (%s)", exp.Name, exp.Image))
+			expectedContainer := exp
+			actions = append(actions, reconcileAction{
+				Kind:         actionDeployMissingContainer,
+				Description:  fmt.Sprintf("DEPLOY %s (%s)", exp.Name, exp.Image),
+				DeploymentID: id,
+				Expected:     &expectedContainer,
+			})
 		}
 	}
 
 	for id, exp := range expectedMap {
 		if act, exists := actualMap[id]; exists {
+			expectedContainer := exp
+			actualContainer := act
 			if act.State == "created" || act.State == "exited" {
-				changes = append(changes, fmt.Sprintf("START %s (state: %s)", exp.Name, act.State))
+				actions = append(actions, reconcileAction{
+					Kind:         actionStartContainer,
+					Description:  fmt.Sprintf("START %s (state: %s)", exp.Name, act.State),
+					DeploymentID: id,
+					Expected:     &expectedContainer,
+					Actual:       &actualContainer,
+				})
 			} else if act.State != "running" {
-				changes = append(changes, fmt.Sprintf("RESTART %s (state: %s)", exp.Name, act.State))
+				actions = append(actions, reconcileAction{
+					Kind:         actionRedeployContainer,
+					Description:  fmt.Sprintf("REDEPLOY %s (state: %s)", exp.Name, act.State),
+					DeploymentID: id,
+					Expected:     &expectedContainer,
+					Actual:       &actualContainer,
+				})
 			} else if normalizeImage(exp.Image) != normalizeImage(act.Image) {
-				changes = append(changes, fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image))
+				actions = append(actions, reconcileAction{
+					Kind:         actionRedeployContainer,
+					Description:  fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image),
+					DeploymentID: id,
+					Expected:     &expectedContainer,
+					Actual:       &actualContainer,
+				})
 			}
 		}
 	}
@@ -217,7 +296,10 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		}
 		expectedDnsHash := dns.HashRecords(expectedDnsRecords)
 		if expectedDnsHash != actual.DnsConfigHash {
-			changes = append(changes, fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)))
+			actions = append(actions, reconcileAction{
+				Kind:        actionUpdateDNS,
+				Description: fmt.Sprintf("UPDATE DNS (%d records)", len(expected.Dns.Records)),
+			})
 		}
 	}
 
@@ -225,14 +307,20 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
 		expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName)
 		if expectedTraefikHash != actual.TraefikConfigHash {
-			changes = append(changes, fmt.Sprintf("UPDATE Traefik HTTP (%d routes)", len(expected.Traefik.HttpRoutes)))
+			actions = append(actions, reconcileAction{
+				Kind:        actionUpdateTraefik,
+				Description: fmt.Sprintf("UPDATE Traefik HTTP (%d routes)", len(expected.Traefik.HttpRoutes)),
+			})
 		}
 
 		tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
 		udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
 		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
 		if expectedL4Hash != actual.L4ConfigHash {
-			changes = append(changes, fmt.Sprintf("UPDATE Traefik L4 (%d TCP, %d UDP routes)", len(tcpRoutes), len(udpRoutes)))
+			actions = append(actions, reconcileAction{
+				Kind:        actionUpdateTraefik,
+				Description: fmt.Sprintf("UPDATE Traefik L4 (%d TCP, %d UDP)", len(tcpRoutes), len(udpRoutes)),
+			})
 		}
 
 		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
@@ -241,11 +329,17 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 		}
 		expectedCertsHash := traefik.HashCertificates(expectedCerts)
 		if expectedCertsHash != actual.CertificatesHash {
-			changes = append(changes, fmt.Sprintf("UPDATE Certificates (%d certs)", len(expected.Traefik.Certificates)))
+			actions = append(actions, reconcileAction{
+				Kind:        actionUpdateCertificates,
+				Description: fmt.Sprintf("UPDATE Certificates (%d certs)", len(expected.Traefik.Certificates)),
+			})
 		}
 
 		if expected.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
-			changes = append(changes, "WRITE Challenge Route")
+			actions = append(actions, reconcileAction{
+				Kind:        actionWriteChallengeRoute,
+				Description: "WRITE Challenge Route",
+			})
 		}
 	}
 
@@ -257,12 +351,21 @@ func (a *Agent) detectChanges(expected *agenthttp.ExpectedState, actual *ActualS
 			Endpoint:   p.Endpoint,
 		}
 	}
-	expectedWgHash := wireguard.HashPeers(expectedWgPeers)
-	if expectedWgHash != actual.WireguardHash {
-		changes = append(changes, fmt.Sprintf("UPDATE WireGuard (%d peers)", len(expected.Wireguard.Peers)))
+	if wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash {
+		actions = append(actions, reconcileAction{
+			Kind:        actionUpdateWireGuard,
+			Description: fmt.Sprintf("UPDATE WireGuard (%d peers)", len(expected.Wireguard.Peers)),
+		})
 	}
 
-	return changes
+	if !wireguard.IsUp(wireguard.DefaultInterface) {
+		actions = append(actions, reconcileAction{
+			Kind:        actionStartWireGuard,
+			Description: "START WireGuard",
+		})
+	}
+
+	return actions
 }
 
 func normalizeImage(image string) string {
@@ -283,204 +386,172 @@ func normalizeImage(image string) string {
 	return image + digest
 }
 
-func (a *Agent) reconcileOne(actual *ActualState) error {
-	expectedMap := make(map[string]agenthttp.ExpectedContainer)
-	for _, c := range a.expectedState.Containers {
-		expectedMap[c.DeploymentID] = c
-	}
+func (a *Agent) applyReconcileAction(action reconcileAction) error {
+	log.Printf("[reconcile] %s", action.Description)
 
-	actualMap := make(map[string]container.Container)
-	for _, c := range actual.Containers {
-		if c.DeploymentID != "" {
-			actualMap[c.DeploymentID] = c
+	switch action.Kind {
+	case actionStopOrphanNoDeploymentID, actionStopUnexpectedContainer:
+		if action.Actual == nil {
+			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
-	}
+		if err := container.Stop(action.Actual.ID); err != nil {
+			return fmt.Errorf("failed to stop orphan container: %w", err)
+		}
+		return nil
 
-	for _, act := range actual.Containers {
-		if act.DeploymentID == "" {
-			if act.State == "running" {
-				log.Printf("[reconcile] stopping orphan container %s (no deployment ID)", act.ID)
-				if err := container.Stop(act.ID); err != nil {
-					return fmt.Errorf("failed to stop orphan container: %w", err)
-				}
-				return nil
-			} else {
-				log.Printf("[reconcile] removing orphan container %s (no deployment ID)", act.ID)
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				err := retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
-					if err := container.ForceRemove(act.ID); err != nil {
-						log.Printf("[reconcile] remove attempt failed: %v, retrying...", err)
-						return false, err
-					}
-					return true, nil
-				})
-				cancel()
-				if err != nil {
-					log.Printf("[reconcile] warning: failed to remove orphan container after retries: %v", err)
-				}
-				return nil
+	case actionRemoveOrphanNoDeploymentID:
+		if action.Actual == nil {
+			return fmt.Errorf("missing actual container for %s", action.Kind)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		err := retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
+			if err := container.ForceRemove(action.Actual.ID); err != nil {
+				log.Printf("[reconcile] remove attempt failed: %v, retrying...", err)
+				return false, err
+			}
+			return true, nil
+		})
+		cancel()
+		if err != nil {
+			log.Printf("[reconcile] warning: failed to remove orphan container after retries: %v", err)
+		}
+		return nil
+
+	case actionRemoveUnexpectedContainer:
+		if action.Actual == nil {
+			return fmt.Errorf("missing actual container for %s", action.Kind)
+		}
+		if err := container.ForceRemove(action.Actual.ID); err != nil {
+			log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
+		}
+		return nil
+
+	case actionDeployMissingContainer:
+		if action.Expected == nil {
+			return fmt.Errorf("missing expected container for %s", action.Kind)
+		}
+		if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+			return fmt.Errorf("failed to deploy container: %w", err)
+		}
+		return nil
+
+	case actionStartContainer:
+		if action.Actual == nil || action.Expected == nil {
+			return fmt.Errorf("missing container state for %s", action.Kind)
+		}
+		if err := container.Start(action.Actual.ID); err != nil {
+			log.Printf("[reconcile] start failed, will redeploy: %v", err)
+			if err := container.Stop(action.Actual.ID); err != nil {
+				log.Printf("[reconcile] warning: failed to stop old container: %v", err)
+			}
+			if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+				return fmt.Errorf("failed to redeploy container: %w", err)
 			}
 		}
-	}
+		return nil
 
-	for id, act := range actualMap {
-		if _, exists := expectedMap[id]; !exists {
-			if act.State == "running" {
-				log.Printf("[reconcile] stopping orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
-				if err := container.Stop(act.ID); err != nil {
-					return fmt.Errorf("failed to stop orphan container: %w", err)
-				}
-				return nil
-			} else {
-				log.Printf("[reconcile] removing orphan container %s (deployment %s not in expected state)", act.Name, id[:8])
-				if err := container.ForceRemove(act.ID); err != nil {
-					log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
-				}
-				return nil
-			}
+	case actionRedeployContainer:
+		if action.Actual == nil || action.Expected == nil {
+			return fmt.Errorf("missing container state for %s", action.Kind)
 		}
-	}
-
-	for id, exp := range expectedMap {
-		if _, exists := actualMap[id]; !exists {
-			log.Printf("[reconcile] deploying missing container for deployment %s", id)
-			if err := a.Reconciler.Deploy(exp); err != nil {
-				return fmt.Errorf("failed to deploy container: %w", err)
-			}
-			return nil
+		if err := container.Stop(action.Actual.ID); err != nil {
+			log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 		}
-	}
-
-	for id, exp := range expectedMap {
-		if act, exists := actualMap[id]; exists {
-			if act.State == "created" || act.State == "exited" {
-				log.Printf("[reconcile] starting %s container %s for deployment %s", act.State, act.ID, id)
-				if err := container.Start(act.ID); err != nil {
-					log.Printf("[reconcile] start failed, will redeploy: %v", err)
-					if err := container.Stop(act.ID); err != nil {
-						log.Printf("[reconcile] warning: failed to stop old container: %v", err)
-					}
-					if err := a.Reconciler.Deploy(exp); err != nil {
-						return fmt.Errorf("failed to redeploy container: %w", err)
-					}
-				}
-				return nil
-			}
-			if act.State != "running" || normalizeImage(exp.Image) != normalizeImage(act.Image) {
-				log.Printf("[reconcile] redeploying container for deployment %s (state=%s)", id, act.State)
-				if err := container.Stop(act.ID); err != nil {
-					log.Printf("[reconcile] warning: failed to stop old container: %v", err)
-				}
-				if err := a.Reconciler.Deploy(exp); err != nil {
-					return fmt.Errorf("failed to redeploy container: %w", err)
-				}
-				return nil
-			}
+		if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+			return fmt.Errorf("failed to redeploy container: %w", err)
 		}
-	}
+		return nil
 
-	if !a.DisableDNS {
+	case actionUpdateDNS:
 		expectedDnsRecords := make([]dns.DnsRecord, len(a.expectedState.Dns.Records))
 		for i, r := range a.expectedState.Dns.Records {
 			expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
 		}
-		if dns.HashRecords(expectedDnsRecords) != actual.DnsConfigHash {
-			log.Printf("[reconcile] updating DNS records")
-			if err := dns.UpdateDnsRecords(expectedDnsRecords); err != nil {
-				return fmt.Errorf("failed to update DNS: %w", err)
-			}
-			return nil
+		if err := dns.UpdateDnsRecords(expectedDnsRecords); err != nil {
+			return fmt.Errorf("failed to update DNS: %w", err)
 		}
-	}
+		return nil
 
-	if a.IsProxy {
-		expectedHttpRoutes := ConvertToHttpRoutes(a.expectedState.Traefik.HttpRoutes)
-		tcpRoutes := ConvertToTCPRoutes(a.expectedState.Traefik.TCPRoutes)
-		udpRoutes := ConvertToUDPRoutes(a.expectedState.Traefik.UDPRoutes)
+	case actionUpdateTraefik:
+		return a.updateTraefik()
 
-		httpDrift := traefik.HashRoutesWithServerName(expectedHttpRoutes, a.expectedState.ServerName) != actual.TraefikConfigHash
-		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
-		l4Drift := expectedL4Hash != actual.L4ConfigHash
-
-		if httpDrift || l4Drift {
-			var tcpPorts, udpPorts []int
-			for _, r := range tcpRoutes {
-				tcpPorts = append(tcpPorts, r.ExternalPort)
-			}
-			for _, r := range udpRoutes {
-				udpPorts = append(udpPorts, r.ExternalPort)
-			}
-
-			needsRestart := false
-			if len(tcpPorts) > 0 || len(udpPorts) > 0 {
-				log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
-				var err error
-				needsRestart, err = traefik.EnsureEntryPoints(tcpPorts, udpPorts)
-				if err != nil {
-					return fmt.Errorf("failed to ensure entry points: %w", err)
-				}
-			}
-
-			log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
-			if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
-				return fmt.Errorf("failed to update Traefik: %w", err)
-			}
-
-			if needsRestart {
-				log.Printf("[reconcile] restarting Traefik to apply new entry points")
-				if err := traefik.ReloadTraefik(); err != nil {
-					return fmt.Errorf("failed to restart Traefik: %w", err)
-				}
-			}
-			return nil
-		}
-
+	case actionUpdateCertificates:
 		expectedCerts := make([]traefik.Certificate, len(a.expectedState.Traefik.Certificates))
 		for i, c := range a.expectedState.Traefik.Certificates {
 			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
 		}
-		if traefik.HashCertificates(expectedCerts) != actual.CertificatesHash {
-			log.Printf("[reconcile] updating certificates")
-			if err := traefik.UpdateCertificates(expectedCerts); err != nil {
-				return fmt.Errorf("failed to update certificates: %w", err)
-			}
+		if err := traefik.UpdateCertificates(expectedCerts); err != nil {
+			return fmt.Errorf("failed to update certificates: %w", err)
+		}
+		return nil
+
+	case actionWriteChallengeRoute:
+		if a.expectedState.Traefik.ChallengeRoute == nil {
 			return nil
 		}
+		if err := traefik.WriteChallengeRoute(a.expectedState.Traefik.ChallengeRoute.ControlPlaneUrl); err != nil {
+			return fmt.Errorf("failed to write challenge route: %w", err)
+		}
+		return nil
 
-		if a.expectedState.Traefik.ChallengeRoute != nil && !actual.ChallengeRouteWritten {
-			log.Printf("[reconcile] writing challenge route")
-			if err := traefik.WriteChallengeRoute(a.expectedState.Traefik.ChallengeRoute.ControlPlaneUrl); err != nil {
-				return fmt.Errorf("failed to write challenge route: %w", err)
+	case actionUpdateWireGuard:
+		expectedWgPeers := make([]wireguard.Peer, len(a.expectedState.Wireguard.Peers))
+		for i, p := range a.expectedState.Wireguard.Peers {
+			expectedWgPeers[i] = wireguard.Peer{
+				PublicKey:  p.PublicKey,
+				AllowedIPs: p.AllowedIPs,
+				Endpoint:   p.Endpoint,
 			}
-			return nil
 		}
-	}
-
-	expectedWgPeers := make([]wireguard.Peer, len(a.expectedState.Wireguard.Peers))
-	for i, p := range a.expectedState.Wireguard.Peers {
-		expectedWgPeers[i] = wireguard.Peer{
-			PublicKey:  p.PublicKey,
-			AllowedIPs: p.AllowedIPs,
-			Endpoint:   p.Endpoint,
-		}
-	}
-	wgPeersChanged := wireguard.HashPeers(expectedWgPeers) != actual.WireguardHash
-	wgIsUp := wireguard.IsUp(wireguard.DefaultInterface)
-
-	if wgPeersChanged {
-		log.Printf("[reconcile] updating WireGuard peers")
 		if err := a.reconcileWireguard(expectedWgPeers); err != nil {
 			return fmt.Errorf("failed to update WireGuard: %w", err)
 		}
 		return nil
-	}
 
-	if !wgIsUp {
-		log.Printf("[reconcile] WireGuard interface is down, bringing it up")
+	case actionStartWireGuard:
 		if err := wireguard.Up(wireguard.DefaultInterface); err != nil {
 			return fmt.Errorf("failed to bring up WireGuard: %w", err)
 		}
 		return nil
+
+	default:
+		return fmt.Errorf("unknown reconcile action: %s", action.Kind)
+	}
+}
+
+func (a *Agent) updateTraefik() error {
+	expectedHttpRoutes := ConvertToHttpRoutes(a.expectedState.Traefik.HttpRoutes)
+	tcpRoutes := ConvertToTCPRoutes(a.expectedState.Traefik.TCPRoutes)
+	udpRoutes := ConvertToUDPRoutes(a.expectedState.Traefik.UDPRoutes)
+
+	var tcpPorts, udpPorts []int
+	for _, r := range tcpRoutes {
+		tcpPorts = append(tcpPorts, r.ExternalPort)
+	}
+	for _, r := range udpRoutes {
+		udpPorts = append(udpPorts, r.ExternalPort)
+	}
+
+	needsRestart := false
+	if len(tcpPorts) > 0 || len(udpPorts) > 0 {
+		log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
+		var err error
+		needsRestart, err = traefik.EnsureEntryPoints(tcpPorts, udpPorts)
+		if err != nil {
+			return fmt.Errorf("failed to ensure entry points: %w", err)
+		}
+	}
+
+	log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
+	if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
+		return fmt.Errorf("failed to update Traefik: %w", err)
+	}
+
+	if needsRestart {
+		log.Printf("[reconcile] restarting Traefik to apply new entry points")
+		if err := traefik.ReloadTraefik(); err != nil {
+			return fmt.Errorf("failed to restart Traefik: %w", err)
+		}
 	}
 
 	return nil
