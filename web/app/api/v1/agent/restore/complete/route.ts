@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { revalidatePath } from "next/cache";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -63,6 +63,13 @@ export async function POST(request: NextRequest) {
 					serviceId: backup.serviceId,
 				}),
 			);
+			await inngest.send(
+				inngestEvents.migrationRestoreFinished.create({
+					backupId,
+					serviceId: backup.serviceId,
+					status: "completed",
+				}),
+			);
 		}
 	} else {
 		await inngest.send(
@@ -76,11 +83,20 @@ export async function POST(request: NextRequest) {
 		);
 
 		if (isMigration) {
+			const message = error || "Restore failed";
 			await inngest.send(
 				inngestEvents.migrationRestoreFailed.create({
 					backupId,
 					serviceId: backup.serviceId,
-					error: error || "Restore failed",
+					error: message,
+				}),
+			);
+			await inngest.send(
+				inngestEvents.migrationRestoreFinished.create({
+					backupId,
+					serviceId: backup.serviceId,
+					status: "failed",
+					error: message,
 				}),
 			);
 		}

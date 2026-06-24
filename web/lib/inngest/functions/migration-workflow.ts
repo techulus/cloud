@@ -254,29 +254,17 @@ export const migrationWorkflow = inngest.createFunction(
 
 		const restoreResults = await Promise.all(
 			backupIds.map((backupId) =>
-				group.parallel(() => {
-					const completedPromise = step
-						.waitForEvent(`wait-restore-${backupId}`, {
-							event: inngestEvents.migrationRestoreCompleted,
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "completed" as const, result }));
-
-					const failedPromise = step
-						.waitForEvent(`wait-restore-failed-${backupId}`, {
-							event: inngestEvents.migrationRestoreFailed,
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "failed" as const, result }));
-
-					return Promise.race([completedPromise, failedPromise]);
-				}),
+				group.parallel(() =>
+					step.waitForEvent(`wait-restore-${backupId}`, {
+						event: inngestEvents.migrationRestoreFinished,
+						timeout: "30m",
+						if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+					}),
+				),
 			),
 		);
 
-		const restoreTimedOut = restoreResults.some((r) => r.result === null);
+		const restoreTimedOut = restoreResults.some((r) => r === null);
 		if (restoreTimedOut) {
 			await step.run("handle-restore-timeout", async () => {
 				await db
@@ -290,7 +278,9 @@ export const migrationWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "restore_timeout" };
 		}
 
-		const restoreFailure = restoreResults.find((r) => r.status === "failed");
+		const restoreFailure = restoreResults.find(
+			(r) => r?.data.status === "failed",
+		);
 		if (restoreFailure) {
 			await step.run("handle-restore-failure", async () => {
 				await db
@@ -298,7 +288,7 @@ export const migrationWorkflow = inngest.createFunction(
 					.set({
 						migrationStatus: "failed",
 						migrationError:
-							restoreFailure.result?.data.error || "Restore failed",
+							restoreFailure.data.error || "Restore failed",
 					})
 					.where(eq(services.id, serviceId));
 			});
@@ -308,7 +298,7 @@ export const migrationWorkflow = inngest.createFunction(
 		await step.run("deploy-target", async () => {
 			await db
 				.update(services)
-				.set({ migrationStatus: "starting" })
+				.set({ migrationStatus: "deploying_target" })
 				.where(eq(services.id, serviceId));
 
 			await db
@@ -330,7 +320,7 @@ export const migrationWorkflow = inngest.createFunction(
 			await deployServiceInternal(serviceId);
 		});
 
-		await step.run("complete-migration", async () => {
+		await step.run("finalize-migration", async () => {
 			await db
 				.update(services)
 				.set({
