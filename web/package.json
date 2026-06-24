@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "portless cloud --app-port 3000 next dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
@@ -58,7 +58,6 @@
     "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
-    "portless": "^0.13.0",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
     "typescript": "^5",
