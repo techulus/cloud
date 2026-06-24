@@ -1,5 +1,4 @@
 import { z } from "zod";
-import cronstrue from "cronstrue";
 
 export const nameSchema = z
 	.string()
@@ -7,18 +6,6 @@ export const nameSchema = z
 	.max(100, "Name must be 100 characters or less")
 	.transform((val) => val.trim())
 	.refine((val) => val.length > 0, "Name cannot be empty");
-
-export const slugSchema = z
-	.string()
-	.min(1, "Slug is required")
-	.transform((val) => val.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
-	.refine((val) => val.length > 0, "Invalid slug");
-
-export const replicaCountSchema = z
-	.number()
-	.int("Replicas must be a whole number")
-	.min(1, "Replicas must be at least 1")
-	.max(10, "Replicas cannot exceed 10");
 
 export const volumeNameSchema = z
 	.string()
@@ -44,24 +31,7 @@ export const githubRepoUrlSchema = z
 		"Repository URL must be a GitHub URL (https://github.com/...)",
 	);
 
-export const cronScheduleSchema = z
-	.string()
-	.nullable()
-	.refine((val) => {
-		if (!val) return true;
-		try {
-			cronstrue.toString(val);
-			return true;
-		} catch {
-			return false;
-		}
-	}, "Invalid cron expression");
-
-export const envVarKeySchema = z
-	.string()
-	.regex(/^[A-Z_][A-Z0-9_]*$/, "Invalid environment variable key");
-
-export const secretItemSchema = z.object({
+const secretItemSchema = z.object({
 	key: z.string().min(1, "Key is required"),
 	value: z.string().min(1, "Value is required"),
 });

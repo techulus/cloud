@@ -163,18 +163,16 @@ export async function GET(
 					)
 					.orderBy(desc(volumeBackups.createdAt));
 
-				const latestByVolume = new Map<string, Date | string>();
+				const latestByVolume: Record<string, Date | string> = {};
 				for (const backup of completedBackups) {
-					if (!latestByVolume.has(backup.volumeId)) {
-						latestByVolume.set(
-							backup.volumeId,
-							backup.completedAt ?? backup.createdAt,
-						);
+					if (!latestByVolume[backup.volumeId]) {
+						latestByVolume[backup.volumeId] =
+							backup.completedAt ?? backup.createdAt;
 					}
 				}
 
 				const latestBackupTimes = volumes
-					.map((volume) => latestByVolume.get(volume.id) ?? null)
+					.map((volume) => latestByVolume[volume.id] ?? null)
 					.filter((value): value is Date | string => value !== null);
 
 				deletionBackupFallback = {

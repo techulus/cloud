@@ -10,21 +10,6 @@ export type RolloutEvents = {
 			rolloutId: string;
 		};
 	};
-	"deployment/healthy": {
-		data: {
-			deploymentId: string;
-			rolloutId: string;
-			serviceId: string;
-		};
-	};
-	"deployment/failed": {
-		data: {
-			deploymentId: string;
-			rolloutId: string;
-			serviceId: string;
-			reason: string;
-		};
-	};
 	"server/dns-synced": {
 		data: {
 			serverId: string;

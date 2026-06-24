@@ -1,6 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import {
 	builds,
@@ -10,6 +9,7 @@ import {
 	services,
 } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import { sendBuildFailureAlert } from "@/lib/email";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
@@ -351,7 +351,7 @@ export async function POST(
 				);
 
 				try {
-					await deployService(build.serviceId);
+					await deployServiceInternal(build.serviceId);
 				} catch (error) {
 					console.error("[build:complete] deployment failed:", error);
 					await db

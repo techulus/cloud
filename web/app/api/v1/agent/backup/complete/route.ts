@@ -57,24 +57,12 @@ export async function POST(request: NextRequest) {
 	revalidatePath("/dashboard/projects");
 
 	await inngest.send(
-		inngestEvents.backupCompleted.create({
-			backupId,
-			volumeId: backup.volumeId,
-			serviceId: backup.serviceId,
-			checksum,
-			sizeBytes,
-			isMigrationBackup: backup.isMigrationBackup ?? false,
+		inngestEvents.resourceStatusChanged.create({
+			type: "backup",
+			id: backupId,
+			parentType: "service",
+			parentId: backup.serviceId,
 		}),
 	);
-
-	if (backup.isMigrationBackup) {
-		await inngest.send(
-			inngestEvents.migrationBackupCompleted.create({
-				backupId,
-				serviceId: backup.serviceId,
-			}),
-		);
-	}
-
 	return NextResponse.json({ ok: true });
 }

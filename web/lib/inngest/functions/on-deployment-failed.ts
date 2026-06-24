@@ -1,15 +1,39 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { rollouts } from "@/db/schema";
+import { deployments, rollouts } from "@/db/schema";
+import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import { handleRolloutFailure } from "./rollout-utils";
-import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 export const onDeploymentFailed = inngest.createFunction(
-	{ id: "on-deployment-failed", triggers: [inngestEvents.deploymentFailed] },
+	{ id: "on-deployment-failed", triggers: [inngestEvents.resourceStatusChanged] },
 	async ({ event, step }) => {
-		const { rolloutId, serviceId, reason } = event.data;
+		if (event.data.type !== "deployment") return;
+
+		const deployment = await step.run("get-deployment", async () => {
+			return db
+				.select({
+					id: deployments.id,
+					rolloutId: deployments.rolloutId,
+					serviceId: deployments.serviceId,
+					status: deployments.status,
+					failedStage: deployments.failedStage,
+				})
+				.from(deployments)
+				.where(eq(deployments.id, event.data.id))
+				.then((r) => r[0]);
+		});
+
+		if (
+			!deployment?.rolloutId ||
+			(deployment.status !== "failed" && deployment.status !== "rolled_back")
+		) {
+			return;
+		}
+
+		const { rolloutId, serviceId } = deployment;
+		const reason = deployment.failedStage || "deployment_failed";
 
 		const rollout = await step.run("get-rollout", async () => {
 			return db

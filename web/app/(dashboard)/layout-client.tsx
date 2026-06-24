@@ -9,6 +9,7 @@ import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
+import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
 import { OfflineServersBanner } from "@/components/server/offline-servers-banner";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +27,10 @@ import { signOut, useSession } from "@/lib/auth-client";
 function DashboardHeader({ email }: { email: string }) {
 	const router = useRouter();
 	const breadcrumbs = useBreadcrumbs();
+	const getBreadcrumbKey = (
+		crumb: (typeof breadcrumbs)[number],
+		index: number,
+	) => `${crumb.href}:${crumb.label}:${index}`;
 
 	const mobileBreadcrumbs =
 		breadcrumbs.length > 2 ? breadcrumbs.slice(-2) : breadcrumbs;
@@ -48,7 +53,10 @@ function DashboardHeader({ email }: { email: string }) {
 						<>
 							<nav className="hidden sm:flex items-center gap-2 text-sm">
 								{breadcrumbs.map((crumb, index) => (
-									<span key={crumb.href} className="flex items-center gap-2">
+									<span
+										key={getBreadcrumbKey(crumb, index)}
+										className="flex items-center gap-2"
+									>
 										<Link
 											href={crumb.href}
 											className={
@@ -73,7 +81,10 @@ function DashboardHeader({ email }: { email: string }) {
 									</>
 								)}
 								{mobileBreadcrumbs.map((crumb, index) => (
-									<span key={crumb.href} className="flex items-center gap-2">
+									<span
+										key={getBreadcrumbKey(crumb, index)}
+										className="flex items-center gap-2"
+									>
 										<Link
 											href={crumb.href}
 											className={
@@ -145,28 +156,7 @@ export function DashboardLayoutClient({
 	}, [session, isPending, router]);
 
 	if (isPending) {
-		return (
-			<div className="min-h-screen">
-				<header className="border-b">
-					<div className="container max-w-full mx-auto px-4 h-14 flex items-center justify-between">
-						<div className="flex items-center gap-3">
-							<div className="h-6 w-6 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-							<div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-						</div>
-						<div className="flex items-center gap-4">
-							<div className="hidden sm:block h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-							<div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-						</div>
-					</div>
-				</header>
-				<main className="container max-w-7xl mx-auto px-4 py-6">
-					<div className="space-y-4">
-						<div className="h-8 w-48 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-						<div className="h-4 w-64 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-					</div>
-				</main>
-			</div>
-		);
+		return <DashboardPageSkeleton />;
 	}
 
 	if (!session) {

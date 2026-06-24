@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -15,38 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { signIn, useSession } from "@/lib/auth-client";
-
-export function SignInPageSkeleton() {
-	return (
-		<div className="min-h-screen bg-background">
-			<div
-				aria-hidden="true"
-				className="mx-auto flex min-h-screen w-full max-w-md items-center px-6"
-			>
-				<div className="w-full space-y-6">
-					<div className="flex items-center gap-3">
-						<Skeleton className="size-10 rounded-lg" />
-						<div className="space-y-2">
-							<Skeleton className="h-4 w-36" />
-							<Skeleton className="h-3 w-24" />
-						</div>
-					</div>
-
-					<div className="space-y-3">
-						<Skeleton className="h-10 w-full rounded-lg" />
-						<Skeleton className="h-10 w-full rounded-lg" />
-						<Skeleton className="h-10 w-2/3 rounded-lg" />
-					</div>
-				</div>
-			</div>
-			<div aria-live="polite" className="sr-only">
-				Loading
-			</div>
-		</div>
-	);
-}
 
 export function SignInPage() {
 	const router = useRouter();
@@ -86,7 +56,7 @@ export function SignInPage() {
 	}
 
 	if (isPending || session) {
-		return <SignInPageSkeleton />;
+		return <DashboardPageSkeleton />;
 	}
 
 	return (

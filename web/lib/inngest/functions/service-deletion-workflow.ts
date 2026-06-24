@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { cron } from "inngest";
 import { deleteBackup } from "@/actions/backups";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -13,6 +12,8 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { deployServiceInternal } from "@/lib/deploy-service";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -144,42 +145,83 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 			if (newBackupIds.length > 0) {
 				const backupResults = await Promise.all(
 					newBackupIds.map((backupId) =>
-						group.parallel(() => {
-							const completed = step
-								.waitForEvent(`wait-delete-backup-${backupId}`, {
-									event: inngestEvents.backupCompleted,
-									timeout: "30m",
-									if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-								})
-								.then((result) => ({ status: "completed" as const, result }));
+						group.parallel(async (): Promise<{
+							status: "completed" | "failed" | "pending" | "timed_out";
+							error?: string;
+						}> => {
+							const readBackup = async () =>
+								db
+									.select({
+										status: volumeBackups.status,
+										errorMessage: volumeBackups.errorMessage,
+									})
+									.from(volumeBackups)
+									.where(eq(volumeBackups.id, backupId))
+									.then((r) => r[0]);
 
-							const failed = step
-								.waitForEvent(`wait-delete-backup-failed-${backupId}`, {
-									event: inngestEvents.backupFailed,
-									timeout: "30m",
-									if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-								})
-								.then((result) => ({ status: "failed" as const, result }));
+							const before = await step.run(
+								`check-delete-backup-${backupId}-before`,
+								readBackup,
+							);
+							if (before?.status === "completed") {
+								return { status: "completed" as const };
+							}
+							if (before?.status === "failed") {
+								return {
+									status: "failed" as const,
+									error: before.errorMessage || "Deletion backup failed",
+								};
+							}
 
-							return Promise.race([completed, failed]);
+							const wakeup = await step.waitForEvent(
+								`wait-delete-backup-status-${backupId}`,
+								{
+									event: inngestEvents.resourceStatusChanged,
+									timeout: "30m",
+									if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
+								},
+							);
+
+							const after = await step.run(
+								`check-delete-backup-${backupId}-after`,
+								readBackup,
+							);
+							if (after?.status === "completed") {
+								return { status: "completed" as const };
+							}
+							if (after?.status === "failed") {
+								return {
+									status: "failed" as const,
+									error: after.errorMessage || "Deletion backup failed",
+								};
+							}
+
+							return { status: wakeup ? "pending" : "timed_out" } as const;
 						}),
 					),
 				);
 
-				const timedOut = backupResults.some((r) => r.result === null);
+				const timedOut = backupResults.some((r) => r.status === "timed_out");
 				const failed = backupResults.find((r) => r.status === "failed");
-				if (timedOut || failed) {
+				const stillPending = backupResults.some((r) => r.status === "pending");
+				if (timedOut || failed || stillPending) {
 					await step.run("mark-delete-backup-failed", async () => {
 						await db
 							.update(services)
 							.set({
 								deletionStatus: "failed",
 								deletionError:
-									failed?.result?.data.error || "Deletion backup timed out",
+									failed?.error ||
+									(stillPending
+										? "Deletion backup did not reach a terminal state"
+										: "Deletion backup timed out"),
 							})
 							.where(eq(services.id, serviceId));
 					});
-					return { status: "failed", reason: timedOut ? "timeout" : "backup" };
+					return {
+						status: "failed",
+						reason: timedOut ? "timeout" : stillPending ? "pending" : "backup",
+					};
 				}
 			}
 
@@ -202,7 +244,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					) {
 						await db
 							.update(deployments)
-							.set({ status: "stopping" })
+							.set(markDeploymentUndesired("stopping"))
 							.where(eq(deployments.id, deployment.id));
 
 						await enqueueWork(deployment.serverId, "stop", {
@@ -390,7 +432,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						.where(eq(services.id, serviceId));
 
 					try {
-						const result = await deployService(serviceId);
+						const result = await deployServiceInternal(serviceId);
 						if (!("rolloutId" in result) || !result.rolloutId) {
 							throw new Error("Restore could not start a deployment");
 						}
@@ -415,32 +457,43 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				},
 			);
 
-			const deploymentResult = await group.parallel(() => {
-				const healthy = step
-					.waitForEvent("wait-restore-deployment-healthy", {
-						event: inngestEvents.deploymentHealthy,
-						timeout: "15m",
-						if: `async.data.rolloutId == "${deployResult.rolloutId}" && async.data.serviceId == "${serviceId}"`,
-					})
-					.then((result) => ({ status: "healthy" as const, result }));
+			await group.parallel(() =>
+				step.waitForEvent("wait-restore-deployment-status", {
+					event: inngestEvents.resourceStatusChanged,
+					timeout: "15m",
+					if: `async.data.type == "deployment" && async.data.parentType == "rollout" && async.data.parentId == "${deployResult.rolloutId}"`,
+				}),
+			);
 
-				const failed = step
-					.waitForEvent("wait-restore-deployment-failed", {
-						event: inngestEvents.deploymentFailed,
-						timeout: "15m",
-						if: `async.data.rolloutId == "${deployResult.rolloutId}" && async.data.serviceId == "${serviceId}"`,
-					})
-					.then((result) => ({ status: "failed" as const, result }));
+			const restoredDeployments = await step.run(
+				"check-restore-deployment-status",
+				async () => {
+					return db
+						.select({
+							status: deployments.status,
+							failedStage: deployments.failedStage,
+						})
+						.from(deployments)
+						.where(
+							and(
+								eq(deployments.rolloutId, deployResult.rolloutId),
+								eq(deployments.serviceId, serviceId),
+							),
+						);
+				},
+			);
 
-				return Promise.race([healthy, failed]);
-			});
+			const healthyDeployment = restoredDeployments.find(
+				(deployment) =>
+					deployment.status === "healthy" || deployment.status === "running",
+			);
+			const failedDeployment = restoredDeployments.find(
+				(deployment) =>
+					deployment.status === "failed" || deployment.status === "rolled_back",
+			);
 
-			if (!deploymentResult.result || deploymentResult.status === "failed") {
+			if (!healthyDeployment || failedDeployment) {
 				await step.run("mark-restore-deployment-failed", async () => {
-					const errorMessage =
-						deploymentResult.status === "failed"
-							? deploymentResult.result?.data.reason
-							: undefined;
 					await db
 						.update(services)
 						.set({
@@ -450,7 +503,8 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 							originalHostname: setup.service.originalHostname,
 							deletionStatus: "failed",
 							deletionError:
-								errorMessage || "Restore deployment did not become healthy",
+								failedDeployment?.failedStage ||
+								"Restore deployment did not become healthy",
 						})
 						.where(eq(services.id, serviceId));
 				});

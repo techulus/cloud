@@ -10,13 +10,18 @@ import {
 	servers,
 	services,
 } from "@/db/schema";
+import {
+	AUTOHEAL_MAX_RECREATES,
+	AUTOHEAL_MAX_RESTARTS,
+	AUTOHEAL_UNHEALTHY_REPORTS,
+	getStartingHealthCheckFailureUpdate,
+	getSteadyStateRecreateDecision,
+} from "@/lib/autoheal-policy";
+import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueWork } from "@/lib/work-queue";
-
-const AUTOHEAL_UNHEALTHY_REPORTS = 3;
-const AUTOHEAL_MAX_RESTARTS = 3;
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -24,6 +29,27 @@ type ContainerStatus = {
 	status: "running" | "stopped" | "failed";
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy";
 };
+
+function isMigrationTargetStarting(status: string | null | undefined) {
+	return status === "deploying_target" || status === "starting";
+}
+
+async function completeTargetMigration(serviceId: string) {
+	await db
+		.update(services)
+		.set({
+			migrationStatus: null,
+			migrationTargetServerId: null,
+			migrationBackupId: null,
+			migrationError: null,
+		})
+		.where(
+			and(
+				eq(services.id, serviceId),
+				inArray(services.migrationStatus, ["deploying_target", "starting"]),
+			),
+		);
+}
 
 export type StatusReport = {
 	resources?: {
@@ -195,25 +221,20 @@ export async function applyStatusReport(
 				if (!hasHealthCheck) {
 					if (deployment.rolloutId) {
 						await inngest.send(
-							inngestEvents.deploymentHealthy.create({
-								deploymentId: deployment.id,
-								rolloutId: deployment.rolloutId,
-								serviceId: deployment.serviceId,
+							inngestEvents.resourceStatusChanged.create({
+								type: "deployment",
+								id: deployment.id,
+								parentType: "rollout",
+								parentId: deployment.rolloutId,
 							}),
 						);
 					}
 
-					if (service?.migrationStatus === "deploying_target") {
+					if (isMigrationTargetStarting(service?.migrationStatus)) {
 						console.log(
 							`[migration] target service ${service.id} healthy, promoting`,
 						);
-						await db
-							.update(services)
-							.set({
-								migrationStatus: null,
-								migrationTargetServerId: null,
-							})
-							.where(eq(services.id, service.id));
+						await completeTargetMigration(service.id);
 					}
 				}
 			}
@@ -225,6 +246,7 @@ export async function applyStatusReport(
 
 		const updateFields: Record<string, unknown> = { healthStatus };
 		let autohealRestartPayload: Record<string, unknown> | null = null;
+		let autohealRecreatePayload: Record<string, unknown> | null = null;
 		let autohealFailed = false;
 
 		if (deployment.containerId !== container.containerId) {
@@ -269,24 +291,20 @@ export async function applyStatusReport(
 
 				if (deployment.rolloutId) {
 					await inngest.send(
-						inngestEvents.deploymentHealthy.create({
-							deploymentId: deployment.id,
-							rolloutId: deployment.rolloutId,
-							serviceId: deployment.serviceId,
+						inngestEvents.resourceStatusChanged.create({
+							type: "deployment",
+							id: deployment.id,
+							parentType: "rollout",
+							parentId: deployment.rolloutId,
 						}),
 					);
 				}
 
-				if (service?.migrationStatus === "deploying_target") {
+				if (isMigrationTargetStarting(service?.migrationStatus)) {
 					console.log(
-						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
+						`[migration] deployment ${deployment.id} healthy (no health check), promoting`,
 					);
-					await inngest.send(
-						inngestEvents.migrationDeploymentHealthy.create({
-							deploymentId: deployment.id,
-							serviceId: deployment.serviceId,
-						}),
-					);
+					await completeTargetMigration(deployment.serviceId);
 				}
 				continue;
 			}
@@ -308,6 +326,9 @@ export async function applyStatusReport(
 			(deployment.status === "running" || deployment.status === "healthy");
 		const healthRecovered =
 			healthStatus === "healthy" || healthStatus === "none";
+		if (canAutoheal && healthRecovered) {
+			await completeTargetMigration(deployment.serviceId);
+		}
 
 		if (canAutoheal && healthStatus === "unhealthy") {
 			const unhealthyReportCount = (deployment.unhealthyReportCount ?? 0) + 1;
@@ -317,12 +338,29 @@ export async function applyStatusReport(
 				const restartCount = deployment.autohealRestartCount ?? 0;
 
 				if (restartCount >= AUTOHEAL_MAX_RESTARTS) {
-					console.log(
-						`[autoheal] deployment ${deployment.id} exceeded restart limit`,
-					);
-					updateFields.status = "failed";
-					updateFields.failedStage = "autoheal";
-					autohealFailed = true;
+					const rollout = deployment.rolloutId
+						? await db
+								.select({ status: rollouts.status })
+								.from(rollouts)
+								.where(eq(rollouts.id, deployment.rolloutId))
+								.then((r) => r[0])
+						: null;
+					const isRolloutDeployment = rollout?.status === "in_progress";
+
+					if (isRolloutDeployment) {
+						console.log(
+							`[autoheal] rollout deployment ${deployment.id} exceeded restart limit`,
+						);
+						Object.assign(updateFields, markDeploymentUndesired("failed"));
+						updateFields.failedStage = "autoheal";
+						autohealFailed = true;
+					} else {
+						autohealRecreatePayload = prepareAutohealRecreatePayload({
+							deployment,
+							containerId: container.containerId,
+							updateFields,
+						});
+					}
 				} else {
 					console.log(
 						`[autoheal] restarting unhealthy deployment ${deployment.id} (${restartCount + 1}/${AUTOHEAL_MAX_RESTARTS})`,
@@ -338,6 +376,7 @@ export async function applyStatusReport(
 			}
 		} else if (healthRecovered) {
 			updateFields.unhealthyReportCount = 0;
+			updateFields.autohealRecreateCount = 0;
 		}
 
 		await db
@@ -348,6 +387,9 @@ export async function applyStatusReport(
 		if (autohealRestartPayload) {
 			await enqueueWork(serverId, "restart", autohealRestartPayload);
 		}
+		if (autohealRecreatePayload) {
+			await enqueueWork(serverId, "force_cleanup", autohealRecreatePayload);
+		}
 
 		if (autohealFailed && deployment.rolloutId) {
 			await ingestRolloutLog(
@@ -357,11 +399,11 @@ export async function applyStatusReport(
 				`Deployment ${deployment.id} exceeded autoheal restart limit`,
 			);
 			await inngest.send(
-				inngestEvents.deploymentFailed.create({
-					deploymentId: deployment.id,
-					rolloutId: deployment.rolloutId,
-					serviceId: deployment.serviceId,
-					reason: "autoheal_restart_limit",
+				inngestEvents.resourceStatusChanged.create({
+					type: "deployment",
+					id: deployment.id,
+					parentType: "rollout",
+					parentId: deployment.rolloutId,
 				}),
 			);
 		}
@@ -377,7 +419,11 @@ export async function applyStatusReport(
 
 			await db
 				.update(deployments)
-				.set({ status: "healthy" })
+				.set({
+					status: "healthy",
+					autohealRestartCount: 0,
+					autohealRecreateCount: 0,
+				})
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
@@ -388,10 +434,11 @@ export async function applyStatusReport(
 					`Deployment ${deployment.id} is healthy`,
 				);
 				await inngest.send(
-					inngestEvents.deploymentHealthy.create({
-						deploymentId: deployment.id,
-						rolloutId: deployment.rolloutId,
-						serviceId: deployment.serviceId,
+					inngestEvents.resourceStatusChanged.create({
+						type: "deployment",
+						id: deployment.id,
+						parentType: "rollout",
+						parentId: deployment.rolloutId,
 					}),
 				);
 			}
@@ -402,28 +449,37 @@ export async function applyStatusReport(
 				.where(eq(services.id, deployment.serviceId))
 				.then((r) => r[0]);
 
-			if (deployedService?.migrationStatus === "deploying_target") {
+			if (isMigrationTargetStarting(deployedService?.migrationStatus)) {
 				console.log(
-					`[migration] deployment ${deployment.id} healthy, sending event`,
+					`[migration] deployment ${deployment.id} healthy, promoting`,
 				);
-				await inngest.send(
-					inngestEvents.migrationDeploymentHealthy.create({
-						deploymentId: deployment.id,
-						serviceId: deployment.serviceId,
-					}),
-				);
+				await completeTargetMigration(deployment.serviceId);
 			}
 		}
 
 		if (deployment.status === "starting" && healthStatus === "unhealthy") {
 			console.log(`[health] deployment ${deployment.id} failed health check`);
+			const rollout = deployment.rolloutId
+				? await db
+						.select({ status: rollouts.status })
+						.from(rollouts)
+						.where(eq(rollouts.id, deployment.rolloutId))
+						.then((r) => r[0])
+				: null;
+			const isRolloutDeployment = rollout?.status === "in_progress";
+			const recreateCount = deployment.autohealRecreateCount ?? 0;
+			const { update, recreateLimitReached } =
+				getStartingHealthCheckFailureUpdate({
+					isRolloutDeployment,
+					recreateCount,
+				});
 
 			await db
 				.update(deployments)
-				.set({ status: "failed", failedStage: "health_check" })
+				.set(update)
 				.where(eq(deployments.id, deployment.id));
 
-			if (deployment.rolloutId) {
+			if (isRolloutDeployment && deployment.rolloutId) {
 				await ingestRolloutLog(
 					deployment.rolloutId,
 					deployment.serviceId,
@@ -431,12 +487,25 @@ export async function applyStatusReport(
 					`Deployment ${deployment.id} failed health check`,
 				);
 				await inngest.send(
-					inngestEvents.deploymentFailed.create({
-						deploymentId: deployment.id,
-						rolloutId: deployment.rolloutId,
-						serviceId: deployment.serviceId,
-						reason: "health_check_failed",
+					inngestEvents.resourceStatusChanged.create({
+						type: "deployment",
+						id: deployment.id,
+						parentType: "rollout",
+						parentId: deployment.rolloutId,
 					}),
+				);
+			}
+
+			if (!isRolloutDeployment && !recreateLimitReached) {
+				await enqueueWork(serverId, "force_cleanup", {
+					reason: "autoheal_recreate",
+					deploymentId: deployment.id,
+					serviceId: deployment.serviceId,
+					containerIds: [container.containerId],
+				});
+			} else if (recreateLimitReached) {
+				console.log(
+					`[autoheal] deployment ${deployment.id} exceeded recreate limit`,
 				);
 			}
 		}
@@ -468,4 +537,29 @@ export async function applyStatusReport(
 			);
 		}
 	}
+}
+
+function prepareAutohealRecreatePayload({
+	deployment,
+	containerId,
+	updateFields,
+}: {
+	deployment: typeof deployments.$inferSelect;
+	containerId: string;
+	updateFields: Record<string, unknown>;
+}): Record<string, unknown> | null {
+	const decision = getSteadyStateRecreateDecision({ deployment, containerId });
+	Object.assign(updateFields, decision.updateFields);
+
+	if (decision.limitReached) {
+		console.log(
+			`[autoheal] deployment ${deployment.id} exceeded recreate limit`,
+		);
+		return null;
+	}
+
+	console.log(
+		`[autoheal] recreating steady-state deployment ${deployment.id} after restart limit (${(deployment.autohealRecreateCount ?? 0) + 1}/${AUTOHEAL_MAX_RECREATES})`,
+	);
+	return decision.cleanupPayload;
 }

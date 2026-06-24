@@ -10,11 +10,11 @@ import { formatDateTime } from "@/lib/date";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { Alert } from "./templates/alert";
 
-export function getAppBaseUrl(): string | undefined {
+function getAppBaseUrl(): string | undefined {
 	return process.env.APP_URL;
 }
 
-export function createTransporter(config: SmtpConfig): Transporter {
+function createTransporter(config: SmtpConfig): Transporter {
 	const secure = config.encryption === "tls";
 	const requireTLS = config.encryption === "starttls";
 
@@ -33,23 +33,13 @@ export function createTransporter(config: SmtpConfig): Transporter {
 	});
 }
 
-export async function verifyConnection(config: SmtpConfig): Promise<boolean> {
-	const transporter = createTransporter(config);
-	try {
-		await transporter.verify();
-		return true;
-	} finally {
-		transporter.close();
-	}
-}
-
 type SendEmailOptions = {
 	to: string;
 	subject: string;
 	template: ReactElement;
 };
 
-export async function sendEmail(
+async function sendEmail(
 	config: SmtpConfig,
 	options: SendEmailOptions,
 ): Promise<void> {
@@ -81,7 +71,7 @@ type AlertOptions = {
 	template: ReactElement;
 };
 
-export async function sendAlert(options: AlertOptions): Promise<void> {
+async function sendAlert(options: AlertOptions): Promise<void> {
 	const config = getSmtpConfig();
 
 	if (!config?.enabled || !config.alertEmails) {

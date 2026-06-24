@@ -19,7 +19,7 @@ export function formatDateTime(date: string | Date): string {
 	});
 }
 
-export function formatDate(date: string | Date): string {
+function formatDate(date: string | Date): string {
 	return new Date(date).toLocaleDateString();
 }
 

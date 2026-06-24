@@ -1,5 +1,3 @@
-//go:build linux
-
 package dns
 
 import (
@@ -39,10 +37,6 @@ func SetupLocalDNS(subnetID int) error {
 	}
 
 	return nil
-}
-
-func GetContainerDNS() string {
-	return containerDNSIP
 }
 
 func ConfigureClientDNS(dnsIP string) error {

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -67,16 +68,25 @@ func (a *Agent) ProcessForceCleanup(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[force_cleanup] cleaning up %d containers for service %s", len(payload.ContainerIDs), Truncate(payload.ServiceID, 8))
 
+	var cleanupErrors []error
 	for _, containerID := range payload.ContainerIDs {
 		if err := container.Stop(containerID); err != nil {
 			log.Printf("[force_cleanup] failed to stop %s: %v", Truncate(containerID, 12), err)
+			cleanupErrors = append(
+				cleanupErrors,
+				fmt.Errorf("stop %s: %w", Truncate(containerID, 12), err),
+			)
 		}
 		if err := container.ForceRemove(containerID); err != nil {
 			log.Printf("[force_cleanup] failed to remove %s: %v", Truncate(containerID, 12), err)
+			cleanupErrors = append(
+				cleanupErrors,
+				fmt.Errorf("remove %s: %w", Truncate(containerID, 12), err),
+			)
 		}
 	}
 
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 
 func (a *Agent) ProcessCleanupVolumes(item agenthttp.WorkQueueItem) error {
@@ -127,9 +137,9 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		a.buildMutex.Unlock()
 	}()
 
-	buildDetails, err := a.Client.GetBuild(payload.BuildID)
+	buildDetails, err := a.Client.ClaimBuild(payload.BuildID)
 	if err != nil {
-		return fmt.Errorf("failed to get build details: %w", err)
+		return fmt.Errorf("failed to claim build: %w", err)
 	}
 
 	timeoutMinutes := buildDetails.TimeoutMinutes

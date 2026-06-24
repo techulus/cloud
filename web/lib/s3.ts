@@ -1,7 +1,7 @@
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getBackupStorageConfig } from "@/db/queries";
 
-const DEFAULT_S3_DELETE_TIMEOUT_MS = 15000;
+const DEFAULT_S3_DELETE_TIMEOUT_MS = 60000;
 
 let cachedClient: S3Client | null = null;
 let cachedConfigHash: string | null = null;
@@ -10,11 +10,21 @@ function hashConfig(config: {
 	region: string;
 	endpoint: string | null;
 	accessKey: string;
+	secretKey: string;
 }): string {
-	return `${config.region}-${config.endpoint}-${config.accessKey}`;
+	return `${config.region}-${config.endpoint}-${config.accessKey}-${config.secretKey}`;
 }
 
-export async function getS3Client(): Promise<S3Client | null> {
+function getS3DeleteTimeoutMs(): number {
+	const configuredTimeout = Number(process.env.S3_DELETE_TIMEOUT_MS);
+	if (Number.isFinite(configuredTimeout) && configuredTimeout > 0) {
+		return configuredTimeout;
+	}
+
+	return DEFAULT_S3_DELETE_TIMEOUT_MS;
+}
+
+async function getS3Client(): Promise<S3Client | null> {
 	const config = await getBackupStorageConfig();
 	if (!config) {
 		return null;
@@ -44,7 +54,7 @@ export async function getS3Client(): Promise<S3Client | null> {
 export async function deleteFromS3(
 	bucket: string,
 	key: string,
-	timeoutMs = DEFAULT_S3_DELETE_TIMEOUT_MS,
+	timeoutMs = getS3DeleteTimeoutMs(),
 ): Promise<void> {
 	const client = await getS3Client();
 	if (!client) {

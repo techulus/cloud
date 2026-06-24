@@ -14,6 +14,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { authClient, useSession } from "@/lib/auth-client";
 
+const REDIRECT_SECONDS = 10;
+
 export function DeviceApprovalPage() {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -25,6 +27,7 @@ export function DeviceApprovalPage() {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [error, setError] = useState("");
 	const [successMessage, setSuccessMessage] = useState("");
+	const [redirectCountdown, setRedirectCountdown] = useState(REDIRECT_SECONDS);
 
 	useEffect(() => {
 		if (isPending || session || !userCode) {
@@ -33,6 +36,23 @@ export function DeviceApprovalPage() {
 
 		router.replace(`/?redirect=${encodeURIComponent(`/device/approve?user_code=${userCode}`)}`);
 	}, [isPending, router, session, userCode]);
+
+	useEffect(() => {
+		if (!successMessage) {
+			return;
+		}
+
+		if (redirectCountdown <= 0) {
+			router.replace("/dashboard");
+			return;
+		}
+
+		const timeout = window.setTimeout(() => {
+			setRedirectCountdown((current) => current - 1);
+		}, 1000);
+
+		return () => window.clearTimeout(timeout);
+	}, [redirectCountdown, router, successMessage]);
 
 	async function handleDecision(type: "approve" | "deny") {
 		if (!userCode) {
@@ -43,6 +63,7 @@ export function DeviceApprovalPage() {
 		setIsProcessing(true);
 		setError("");
 		setSuccessMessage("");
+		setRedirectCountdown(REDIRECT_SECONDS);
 
 		try {
 			if (type === "approve") {
@@ -91,27 +112,38 @@ export function DeviceApprovalPage() {
 						</div>
 					) : null}
 					{successMessage ? (
-						<div className="text-sm text-emerald-700 bg-emerald-500/10 p-3 rounded-lg">
-							{successMessage}
+						<div className="space-y-1 text-sm text-emerald-700 bg-emerald-500/10 p-3 rounded-lg">
+							<p>{successMessage}</p>
+							<p className="text-xs text-emerald-700/80">
+								Redirecting to dashboard in {redirectCountdown}s.
+							</p>
 						</div>
 					) : null}
 				</CardContent>
 				<CardFooter className="flex justify-end gap-2">
-					<Button
-						type="button"
-						variant="outline"
-						onClick={() => void handleDecision("deny")}
-						disabled={isProcessing || !!successMessage}
-					>
-						Deny
-					</Button>
-					<Button
-						type="button"
-						onClick={() => void handleDecision("approve")}
-						disabled={isProcessing || !!successMessage}
-					>
-						{isProcessing ? "Processing..." : "Approve"}
-					</Button>
+					{successMessage ? (
+						<Button type="button" onClick={() => router.push("/dashboard")}>
+							Go to dashboard
+						</Button>
+					) : (
+						<>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => void handleDecision("deny")}
+								disabled={isProcessing}
+							>
+								Deny
+							</Button>
+							<Button
+								type="button"
+								onClick={() => void handleDecision("approve")}
+								disabled={isProcessing}
+							>
+								{isProcessing ? "Processing..." : "Approve"}
+							</Button>
+						</>
+					)}
 				</CardFooter>
 			</Card>
 		</div>

@@ -1,10 +1,11 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
-import { ZodError } from "zod";
+import { requireAuth } from "@/lib/auth";
 import { nameSchema } from "@/lib/schemas";
 import { getZodErrorMessage } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ function generateToken(): string {
 }
 
 export async function createServer(name: string) {
+	await requireAuth();
 	try {
 		const validatedName = nameSchema.parse(name);
 		const id = generateId();
@@ -45,14 +47,12 @@ export async function createServer(name: string) {
 }
 
 export async function deleteServer(id: string) {
+	await requireAuth();
 	await db.delete(servers).where(eq(servers.id, id));
 }
 
-export async function approveServer(id: string) {
-	await db.update(servers).set({ status: "pending" }).where(eq(servers.id, id));
-}
-
 export async function updateServerName(id: string, name: string) {
+	await requireAuth();
 	try {
 		const validatedName = nameSchema.parse(name);
 		await db

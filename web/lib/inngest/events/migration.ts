@@ -14,19 +14,6 @@ export type MigrationEvents = {
 			serviceId: string;
 		};
 	};
-	"migration/backup-completed": {
-		data: {
-			backupId: string;
-			serviceId: string;
-		};
-	};
-	"migration/backup-failed": {
-		data: {
-			backupId: string;
-			serviceId: string;
-			error: string;
-		};
-	};
 	"migration/restore-completed": {
 		data: {
 			backupId: string;
@@ -40,10 +27,12 @@ export type MigrationEvents = {
 			error: string;
 		};
 	};
-	"migration/deployment-healthy": {
+	"migration/restore-finished": {
 		data: {
-			deploymentId: string;
+			backupId: string;
 			serviceId: string;
+			status: "completed" | "failed";
+			error?: string;
 		};
 	};
 };

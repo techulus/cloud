@@ -14,11 +14,19 @@ import {
 
 const CLI_VERSION = "0.1.0";
 const CLI_CLIENT_ID = "techulus-cli";
+const DEFAULT_LOG_TAIL = 100;
+const LOG_POLL_INTERVAL_MS = 2000;
 
 type JsonRequestOptions = {
 	method?: string;
 	headers?: Record<string, string>;
 	body?: unknown;
+};
+
+type ErrorResponse = {
+	error?: string;
+	message?: string;
+	code?: string;
 };
 
 type LinkServiceTarget = {
@@ -43,6 +51,13 @@ type LinkProjectTarget = {
 	environments: LinkEnvironmentTarget[];
 };
 
+type ServiceLog = {
+	deploymentId: string | undefined;
+	stream: string;
+	message: string;
+	timestamp: string;
+};
+
 function normalizeHost(host: string) {
 	const trimmed = host.trim().replace(/\/$/, "");
 	if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
@@ -63,13 +78,32 @@ async function requestJson<T>(url: string, options: JsonRequestOptions = {}) {
 	});
 
 	const text = await response.text();
-	const data = text ? (JSON.parse(text) as T | { error?: string }) : null;
+	const data = text ? (JSON.parse(text) as T | ErrorResponse) : null;
 
 	if (!response.ok) {
-		const message =
-			data && typeof data === "object" && "error" in data && data.error
-				? data.error
-				: `Request failed with ${response.status}`;
+		const apiMessage =
+			data && typeof data === "object"
+				? "message" in data && data.message
+					? data.message
+					: "error" in data && data.error
+						? data.error
+						: null
+				: null;
+		const code =
+			data && typeof data === "object" && "code" in data && data.code
+				? ` (${data.code})`
+				: "";
+		const message = apiMessage
+			? `${apiMessage}${code}`
+			: `Request failed with ${response.status}`;
+
+		if (response.status === 401 || response.status === 403) {
+			const host = normalizeHost(new URL(url).origin);
+			throw new Error(
+				`${message}\n\nYour CLI session is not authorized. Run:\n  tc auth login --host ${host}`,
+			);
+		}
+
 		throw new Error(message);
 	}
 
@@ -78,6 +112,35 @@ async function requestJson<T>(url: string, options: JsonRequestOptions = {}) {
 
 async function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shortId(id: string) {
+	if (id.length <= 16) return id;
+	return `${id.slice(0, 8)}…${id.slice(-4)}`;
+}
+
+function formatStatus(value: string) {
+	return value.replace(/_/g, " ");
+}
+
+function formatTimestamp(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	return date.toISOString();
+}
+
+function printSection(title: string) {
+	console.log(`\n${title}`);
+	console.log("─".repeat(title.length));
+}
+
+function printField(label: string, value: string | number) {
+	console.log(`  ${label.padEnd(10)} ${value}`);
+}
+
+function printNext(command: string) {
+	printSection("Next");
+	printField("Run", command);
 }
 
 function parseOption(args: string[], name: string) {
@@ -94,16 +157,34 @@ function parseOption(args: string[], name: string) {
 	return value;
 }
 
+function parseLogLineLimit(args: string[]) {
+	const rawTail = parseOption(args, "-n") ?? parseOption(args, "--tail");
+	if (!rawTail) return null;
+
+	if (!/^\d+$/.test(rawTail)) {
+		throw new Error("log line count must be a positive integer");
+	}
+
+	const tail = Number.parseInt(rawTail, 10);
+	if (tail < 1 || tail > 1000) {
+		throw new Error("log line count must be between 1 and 1000");
+	}
+
+	return tail;
+}
+
 function printUsage() {
 	console.log(`Usage:
-  tcloud auth login --host <url>
-  tcloud auth logout
-  tcloud auth whoami
-  tcloud init
-  tcloud link [--force]
-  tcloud apply
-  tcloud deploy
-  tcloud status`);
+  tc auth login --host <url>
+  tc auth logout
+  tc auth whoami
+  tc init
+  tc link [--force]
+  tc apply
+  tc deploy
+  tc logs
+  tc logs -n <n>
+  tc status`);
 }
 
 async function pathExists(filePath: string) {
@@ -140,7 +221,7 @@ async function selectFromList<T>(
 	}
 
 	if (!process.stdin.isTTY || !process.stdout.isTTY) {
-		throw new Error("tcloud link requires an interactive terminal.");
+		throw new Error("tc link requires an interactive terminal.");
 	}
 
 	const rl = createInterface({ input, output });
@@ -181,7 +262,7 @@ async function ensureManifest(cwd: string) {
 	} catch (error) {
 		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
 			throw new Error(
-				"No techulus.yml found in the current directory. Run `tcloud init` to create one.",
+				"No techulus.yml found in the current directory. Run `tc init` to create one.",
 			);
 		}
 		throw new Error(
@@ -201,7 +282,7 @@ function authHeaders(apiKey: string) {
 async function requireConfig() {
 	const config = await readConfig();
 	if (!config) {
-		throw new Error("Not logged in. Run `tcloud auth login --host <url>` first.");
+		throw new Error("Not logged in. Run `tc auth login --host <url>` first.");
 	}
 
 	return config;
@@ -232,9 +313,14 @@ async function commandAuthLogin(args: string[]) {
 		},
 	});
 
-	console.log(`Visit ${deviceCode.verification_uri}`);
-	console.log(`Enter code: ${deviceCode.user_code}`);
-	console.log("Open the verification URL in your browser to continue.");
+	const verificationUrl =
+		deviceCode.verification_uri_complete || deviceCode.verification_uri;
+
+	printSection("Device login");
+	printField("Host", host);
+	printField("URL", verificationUrl);
+	printField("Code", deviceCode.user_code);
+	console.log("\nOpen the verification URL in your browser to continue.");
 
 	let accessToken = "";
 	let intervalMs = deviceCode.interval * 1000;
@@ -288,7 +374,7 @@ async function commandAuthLogin(args: string[]) {
 		}
 	}
 
-	console.log("\nDevice login approved. Creating a CLI API key...");
+	console.log("\n\nDevice approved. Creating a CLI API key...");
 
 	const machineName = os.hostname();
 	const platform = `${process.platform}/${process.arch}`;
@@ -317,12 +403,17 @@ async function commandAuthLogin(args: string[]) {
 		user: exchange.user,
 	});
 
-	console.log(`Signed in as ${exchange.user.email}`);
+	printSection("Signed in");
+	printField("User", exchange.user.email);
+	printField("Name", exchange.user.name);
+	printField("Host", host);
+	printField("Key", exchange.keyId ? shortId(exchange.keyId) : "created");
 }
 
 async function commandAuthLogout() {
 	await deleteConfig();
-	console.log("Signed out.");
+	printSection("Signed out");
+	printField("Config", "removed");
 }
 
 async function commandAuthWhoAmI() {
@@ -333,9 +424,10 @@ async function commandAuthWhoAmI() {
 		headers: authHeaders(config.apiKey),
 	});
 
-	console.log(`Signed in as ${whoami.user.email}`);
-	console.log(`Name: ${whoami.user.name}`);
-	console.log(`Host: ${config.host}`);
+	printSection("Account");
+	printField("User", whoami.user.email);
+	printField("Name", whoami.user.name);
+	printField("Host", config.host);
 }
 
 async function commandInit(cwd: string) {
@@ -369,7 +461,9 @@ service:
 `;
 
 	await writeFile(manifestPath, manifest, "utf8");
-	console.log(`Created ${manifestPath}`);
+	printSection("Manifest");
+	printField("Created", manifestPath);
+	printNext("tc apply");
 }
 
 async function commandLink(cwd: string, args: string[]) {
@@ -379,7 +473,7 @@ async function commandLink(cwd: string, args: string[]) {
 
 	if ((await pathExists(manifestPath)) && !force) {
 		throw new Error(
-			"techulus.yml already exists. Run `tcloud link --force` to replace it.",
+			"techulus.yml already exists. Run `tc link --force` to replace it.",
 		);
 	}
 
@@ -459,11 +553,13 @@ async function commandLink(cwd: string, args: string[]) {
 
 	await writeFile(manifestPath, stringifyManifest(result.manifest), "utf8");
 
-	console.log(
-		`Linked ${result.service.project}/${result.service.environment}/${result.service.name}`,
+	printSection("Linked");
+	printField(
+		"Service",
+		`${result.service.project}/${result.service.environment}/${result.service.name}`,
 	);
-	console.log(`Wrote ${manifestPath}`);
-	console.log("Next: run `tcloud status` or `tcloud apply`.");
+	printField("Manifest", manifestPath);
+	printNext("tc status  or  tc apply");
 }
 
 function printApplyResult(result: {
@@ -471,17 +567,20 @@ function printApplyResult(result: {
 	serviceId: string;
 	changes: Array<{ field: string; from: string; to: string }>;
 }) {
-	console.log(`Action: ${result.action}`);
-	console.log(`Service ID: ${result.serviceId}`);
+	printSection("Apply");
+	printField("Action", result.action);
+	printField("Service", shortId(result.serviceId));
 
 	if (result.changes.length === 0) {
-		console.log("No changes.");
+		printField("Changes", "none");
 		return;
 	}
 
-	console.log("Changes:");
+	printSection(`Changes (${result.changes.length})`);
 	for (const change of result.changes) {
-		console.log(`- ${change.field}: ${change.from} -> ${change.to}`);
+		console.log(`  • ${change.field}`);
+		printField("From", change.from);
+		printField("To", change.to);
 	}
 }
 
@@ -514,11 +613,13 @@ async function commandDeploy(cwd: string) {
 		body: manifest,
 	});
 
-	console.log(`Service ID: ${result.serviceId}`);
-	console.log(`Status: ${result.status}`);
+	printSection("Deploy");
+	printField("Service", shortId(result.serviceId));
+	printField("Status", formatStatus(result.status));
 	if (result.rolloutId) {
-		console.log(`Rollout ID: ${result.rolloutId}`);
+		printField("Rollout", shortId(result.rolloutId));
 	}
+	printNext("tc status");
 }
 
 async function commandStatus(cwd: string) {
@@ -550,26 +651,148 @@ async function commandStatus(cwd: string) {
 		headers: authHeaders(config.apiKey),
 	});
 
-	console.log(`Service ID: ${status.service.id}`);
-	console.log(`Image: ${status.service.image}`);
-	console.log(`Hostname: ${status.service.hostname ?? "(none)"}`);
-	console.log(`Replicas: ${status.service.replicas}`);
+	console.log(`${manifest.project}/${manifest.environment}/${manifest.service.name}`);
+
+	printSection("Service");
+	printField("ID", shortId(status.service.id));
+	printField("Image", status.service.image);
+	printField("Hostname", status.service.hostname ?? "none");
+	printField("Replicas", status.service.replicas);
+
+	printSection("Rollout");
 	if (status.latestRollout) {
-		console.log(
-			`Latest rollout: ${status.latestRollout.id} (${status.latestRollout.status}${status.latestRollout.currentStage ? `, ${status.latestRollout.currentStage}` : ""})`,
+		printField("ID", shortId(status.latestRollout.id));
+		printField("Status", formatStatus(status.latestRollout.status));
+		printField(
+			"Stage",
+			status.latestRollout.currentStage
+				? formatStatus(status.latestRollout.currentStage)
+				: "none",
 		);
 	} else {
-		console.log("Latest rollout: none");
+		printField("Latest", "none");
 	}
-	console.log(`Deployments: ${status.deployments.length}`);
+
+	printSection(`Deployments (${status.deployments.length})`);
+	if (status.deployments.length === 0) {
+		printField("Current", "none");
+		return;
+	}
+
 	for (const deployment of status.deployments) {
-		console.log(`- ${deployment.id}: ${deployment.status} on ${deployment.serverId}`);
+		console.log(`  • ${shortId(deployment.id)}`);
+		printField("Status", formatStatus(deployment.status));
+		printField("Server", shortId(deployment.serverId));
+	}
+}
+
+function printLogs(logs: ServiceLog[]) {
+	for (const log of logs) {
+		const stream = `[${log.stream || "stdout"}]`.padEnd(9);
+		const message = log.message.replace(/\n+$/, "");
+		console.log(`${formatTimestamp(log.timestamp)} ${stream} ${message}`);
+	}
+}
+
+function getLogCursor(logs: ServiceLog[]) {
+	return logs.reduce<string | null>((latest, log) => {
+		if (!latest) return log.timestamp;
+		return new Date(log.timestamp).getTime() > new Date(latest).getTime()
+			? log.timestamp
+			: latest;
+	}, null);
+}
+
+function getLogKey(log: ServiceLog) {
+	return `${log.timestamp}:${log.stream}:${log.deploymentId ?? ""}:${log.message}`;
+}
+
+async function fetchManifestLogs(
+	config: Awaited<ReturnType<typeof requireConfig>>,
+	manifest: TechulusManifest,
+	options: { tail: number; after?: string | null },
+) {
+	const params = new URLSearchParams({
+		project: manifest.project,
+		environment: manifest.environment,
+		service: manifest.service.name,
+		tail: String(options.tail),
+	});
+	if (options.after) {
+		params.set("after", options.after);
+	}
+
+	return requestJson<{
+		loggingEnabled: boolean;
+		logs: ServiceLog[];
+	}>(`${config.host}/api/v1/manifest/logs?${params.toString()}`, {
+		headers: authHeaders(config.apiKey),
+	});
+}
+
+async function commandLogs(cwd: string, args: string[]) {
+	const lineLimit = parseLogLineLimit(args);
+	const config = await requireConfig();
+	const { manifest } = await ensureManifest(cwd);
+	const result = await fetchManifestLogs(config, manifest, {
+		tail: lineLimit ?? DEFAULT_LOG_TAIL,
+	});
+
+	console.log(`${manifest.project}/${manifest.environment}/${manifest.service.name}`);
+
+	if (!result.loggingEnabled) {
+		printSection("Logs");
+		printField("Status", "disabled");
+		return;
+	}
+
+	if (lineLimit && result.logs.length === 0) {
+		printSection("Logs");
+		printField("Lines", "none");
+		return;
+	}
+
+	if (lineLimit) {
+		printSection(`Logs (${result.logs.length})`);
+		printLogs(result.logs);
+		return;
+	}
+
+	printSection("Logs");
+	if (result.logs.length > 0) {
+		printLogs(result.logs);
+	} else {
+		printField("Waiting", "new log lines");
+	}
+
+	let after = getLogCursor(result.logs) ?? new Date().toISOString();
+	const seen = new Set(result.logs.map(getLogKey));
+
+	while (true) {
+		await sleep(LOG_POLL_INTERVAL_MS);
+		const next = await fetchManifestLogs(config, manifest, {
+			tail: DEFAULT_LOG_TAIL,
+			after,
+		});
+		const logs = next.logs.filter((log) => !seen.has(getLogKey(log)));
+		if (logs.length === 0) continue;
+
+		printLogs(logs);
+		for (const log of logs) {
+			seen.add(getLogKey(log));
+		}
+		after = getLogCursor(logs) ?? after;
 	}
 }
 
 async function main() {
-	const [command, subcommand, ...rest] = process.argv.slice(2);
-	const cwd = process.cwd();
+	const argv = process.argv.slice(2);
+	if (argv[0] === "--") {
+		argv.shift();
+	}
+
+	const [command, subcommand, ...rest] = argv;
+	const cwd = process.env.INIT_CWD || process.cwd();
 
 	if (!command) {
 		printUsage();
@@ -603,6 +826,9 @@ async function main() {
 			return;
 		case "deploy":
 			await commandDeploy(cwd);
+			return;
+		case "logs":
+			await commandLogs(cwd, [subcommand, ...rest].filter(Boolean));
 			return;
 		case "status":
 			await commandStatus(cwd);

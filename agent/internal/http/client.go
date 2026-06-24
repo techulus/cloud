@@ -286,8 +286,8 @@ type BuildDetails struct {
 	TargetPlatforms []string          `json:"targetPlatforms"`
 }
 
-func (c *Client) GetBuild(buildID string) (*BuildDetails, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID, nil)
+func (c *Client) ClaimBuild(buildID string) (*BuildDetails, error) {
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -296,13 +296,13 @@ func (c *Client) GetBuild(buildID string) (*BuildDetails, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get build: %w", err)
+		return nil, fmt.Errorf("failed to claim build: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("get build failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("claim build failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result BuildDetails

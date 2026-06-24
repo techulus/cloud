@@ -109,11 +109,12 @@ export const apikey = pgTable(
 	"apikey",
 	{
 		id: text("id").primaryKey(),
+		configId: text("config_id").default("default").notNull(),
 		name: text("name"),
 		start: text("start"),
 		prefix: text("prefix"),
 		key: text("key").notNull(),
-		userId: text("user_id")
+		referenceId: text("reference_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 		refillInterval: integer("refill_interval"),
@@ -137,7 +138,8 @@ export const apikey = pgTable(
 	},
 	(table) => [
 		index("apikey_key_idx").on(table.key),
-		index("apikey_user_id_idx").on(table.userId),
+		index("apikey_config_id_idx").on(table.configId),
+		index("apikey_reference_id_idx").on(table.referenceId),
 	],
 );
 
@@ -171,7 +173,7 @@ export const deviceCodeRelations = relations(deviceCode, ({ one }) => ({
 
 export const apiKeyRelations = relations(apikey, ({ one }) => ({
 	user: one(user, {
-		fields: [apikey.userId],
+		fields: [apikey.referenceId],
 		references: [user.id],
 	}),
 }));
@@ -451,6 +453,7 @@ export const deployments = pgTable(
 		})
 			.notNull()
 			.default("pending"),
+		desired: boolean("desired").notNull().default(true),
 		healthStatus: text("health_status", {
 			enum: ["none", "starting", "healthy", "unhealthy"],
 		}),
@@ -458,6 +461,9 @@ export const deployments = pgTable(
 			.notNull()
 			.default(0),
 		autohealRestartCount: integer("autoheal_restart_count")
+			.notNull()
+			.default(0),
+		autohealRecreateCount: integer("autoheal_recreate_count")
 			.notNull()
 			.default(0),
 		rolloutId: text("rollout_id"),
@@ -521,6 +527,7 @@ export const workQueue = pgTable(
 		type: text("type", {
 			enum: [
 				"deploy",
+				"reconcile",
 				"stop",
 				"restart",
 				"force_cleanup",

@@ -1,7 +1,6 @@
 import { CronExpressionParser } from "cron-parser";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { triggerBuild } from "@/actions/builds";
-import { deployService } from "@/actions/projects";
 import { db } from "@/db";
 import {
 	deployments,
@@ -10,6 +9,7 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
+import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	sendManualRecoveryRequiredAlert,
 	sendServerOfflineAlert,
@@ -21,7 +21,7 @@ import {
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
-export async function triggerRecoveryForOfflineServers(
+async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
 ): Promise<void> {
 	if (offlineServerIds.length === 0) return;
@@ -216,7 +216,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 			if (service.sourceType === "github") {
 				await triggerBuild(service.id, "scheduled");
 			} else {
-				await deployService(service.id);
+				await deployServiceInternal(service.id);
 			}
 
 			console.log(
