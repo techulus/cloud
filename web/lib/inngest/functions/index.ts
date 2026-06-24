@@ -1,4 +1,4 @@
-export { backupWorkflow, onBackupFailed } from "./backup-workflow";
+export { backupWorkflow } from "./backup-workflow";
 export { buildTriggerWorkflow } from "./build-trigger-workflow";
 export { buildWorkflow } from "./build-workflow";
 export {

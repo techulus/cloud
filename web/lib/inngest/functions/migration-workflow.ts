@@ -115,29 +115,63 @@ export const migrationWorkflow = inngest.createFunction(
 
 		const backupResults = await Promise.all(
 			backupIds.map((backupId) =>
-				group.parallel(() => {
-					const completedPromise = step
-						.waitForEvent(`wait-backup-${backupId}`, {
-							event: inngestEvents.migrationBackupCompleted,
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "completed" as const, result }));
+				group.parallel(async (): Promise<{
+					status: "completed" | "failed" | "pending" | "timed_out";
+					error?: string;
+				}> => {
+					const readBackup = async () =>
+						db
+							.select({
+								status: volumeBackups.status,
+								errorMessage: volumeBackups.errorMessage,
+							})
+							.from(volumeBackups)
+							.where(eq(volumeBackups.id, backupId))
+							.then((r) => r[0]);
 
-					const failedPromise = step
-						.waitForEvent(`wait-backup-failed-${backupId}`, {
-							event: inngestEvents.migrationBackupFailed,
-							timeout: "30m",
-							if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-						})
-						.then((result) => ({ status: "failed" as const, result }));
+					const before = await step.run(
+						`check-backup-${backupId}-before`,
+						readBackup,
+					);
+					if (before?.status === "completed") {
+						return { status: "completed" as const };
+					}
+					if (before?.status === "failed") {
+						return {
+							status: "failed" as const,
+							error: before.errorMessage || "Backup failed",
+						};
+					}
 
-					return Promise.race([completedPromise, failedPromise]);
+					const wakeup = await step.waitForEvent(
+						`wait-backup-status-${backupId}`,
+						{
+							event: inngestEvents.resourceStatusChanged,
+							timeout: "30m",
+							if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
+						},
+					);
+
+					const after = await step.run(
+						`check-backup-${backupId}-after`,
+						readBackup,
+					);
+					if (after?.status === "completed") {
+						return { status: "completed" as const };
+					}
+					if (after?.status === "failed") {
+						return {
+							status: "failed" as const,
+							error: after.errorMessage || "Backup failed",
+						};
+					}
+
+					return { status: wakeup ? "pending" : "timed_out" } as const;
 				}),
 			),
 		);
 
-		const backupTimedOut = backupResults.some((r) => r.result === null);
+		const backupTimedOut = backupResults.some((r) => r.status === "timed_out");
 		if (backupTimedOut) {
 			await step.run("handle-backup-timeout", async () => {
 				await db
@@ -151,6 +185,20 @@ export const migrationWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "backup_timeout" };
 		}
 
+		const backupStillPending = backupResults.some((r) => r.status === "pending");
+		if (backupStillPending) {
+			await step.run("handle-backup-still-pending", async () => {
+				await db
+					.update(services)
+					.set({
+						migrationStatus: "failed",
+						migrationError: "Backup did not reach a terminal state",
+					})
+					.where(eq(services.id, serviceId));
+			});
+			return { status: "failed", reason: "backup_pending" };
+		}
+
 		const backupFailure = backupResults.find((r) => r.status === "failed");
 		if (backupFailure) {
 			await step.run("handle-backup-failure", async () => {
@@ -158,7 +206,7 @@ export const migrationWorkflow = inngest.createFunction(
 					.update(services)
 					.set({
 						migrationStatus: "failed",
-						migrationError: backupFailure.result?.data.error || "Backup failed",
+						migrationError: backupFailure.error,
 					})
 					.where(eq(services.id, serviceId));
 			});

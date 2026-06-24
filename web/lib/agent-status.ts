@@ -200,10 +200,11 @@ export async function applyStatusReport(
 				if (!hasHealthCheck) {
 					if (deployment.rolloutId) {
 						await inngest.send(
-							inngestEvents.deploymentHealthy.create({
-								deploymentId: deployment.id,
-								rolloutId: deployment.rolloutId,
-								serviceId: deployment.serviceId,
+							inngestEvents.resourceStatusChanged.create({
+								type: "deployment",
+								id: deployment.id,
+								parentType: "rollout",
+								parentId: deployment.rolloutId,
 							}),
 						);
 					}
@@ -275,10 +276,11 @@ export async function applyStatusReport(
 
 				if (deployment.rolloutId) {
 					await inngest.send(
-						inngestEvents.deploymentHealthy.create({
-							deploymentId: deployment.id,
-							rolloutId: deployment.rolloutId,
-							serviceId: deployment.serviceId,
+						inngestEvents.resourceStatusChanged.create({
+							type: "deployment",
+							id: deployment.id,
+							parentType: "rollout",
+							parentId: deployment.rolloutId,
 						}),
 					);
 				}
@@ -286,12 +288,6 @@ export async function applyStatusReport(
 				if (service?.migrationStatus === "deploying_target") {
 					console.log(
 						`[migration] deployment ${deployment.id} healthy (no health check), sending event`,
-					);
-					await inngest.send(
-						inngestEvents.migrationDeploymentHealthy.create({
-							deploymentId: deployment.id,
-							serviceId: deployment.serviceId,
-						}),
 					);
 				}
 				continue;
@@ -384,11 +380,11 @@ export async function applyStatusReport(
 				`Deployment ${deployment.id} exceeded autoheal restart limit`,
 			);
 			await inngest.send(
-				inngestEvents.deploymentFailed.create({
-					deploymentId: deployment.id,
-					rolloutId: deployment.rolloutId,
-					serviceId: deployment.serviceId,
-					reason: "autoheal_restart_limit",
+				inngestEvents.resourceStatusChanged.create({
+					type: "deployment",
+					id: deployment.id,
+					parentType: "rollout",
+					parentId: deployment.rolloutId,
 				}),
 			);
 		}
@@ -419,10 +415,11 @@ export async function applyStatusReport(
 					`Deployment ${deployment.id} is healthy`,
 				);
 				await inngest.send(
-					inngestEvents.deploymentHealthy.create({
-						deploymentId: deployment.id,
-						rolloutId: deployment.rolloutId,
-						serviceId: deployment.serviceId,
+					inngestEvents.resourceStatusChanged.create({
+						type: "deployment",
+						id: deployment.id,
+						parentType: "rollout",
+						parentId: deployment.rolloutId,
 					}),
 				);
 			}
@@ -436,12 +433,6 @@ export async function applyStatusReport(
 			if (deployedService?.migrationStatus === "deploying_target") {
 				console.log(
 					`[migration] deployment ${deployment.id} healthy, sending event`,
-				);
-				await inngest.send(
-					inngestEvents.migrationDeploymentHealthy.create({
-						deploymentId: deployment.id,
-						serviceId: deployment.serviceId,
-					}),
 				);
 			}
 		}
@@ -476,11 +467,11 @@ export async function applyStatusReport(
 					`Deployment ${deployment.id} failed health check`,
 				);
 				await inngest.send(
-					inngestEvents.deploymentFailed.create({
-						deploymentId: deployment.id,
-						rolloutId: deployment.rolloutId,
-						serviceId: deployment.serviceId,
-						reason: "health_check_failed",
+					inngestEvents.resourceStatusChanged.create({
+						type: "deployment",
+						id: deployment.id,
+						parentType: "rollout",
+						parentId: deployment.rolloutId,
 					}),
 				);
 			}
