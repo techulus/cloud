@@ -1,8 +1,50 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
 import { servers, serviceReplicas, services } from "@/db/schema";
 import { SETTING_KEYS } from "@/lib/settings-keys";
+
+type BuildTargetServer = {
+	id: string;
+	status: string;
+	meta: { arch: string };
+};
+
+async function getStatefulBuildTargetServer(
+	serviceId: string,
+): Promise<BuildTargetServer> {
+	const targetServers = await db
+		.select({ id: servers.id, status: servers.status, meta: servers.meta })
+		.from(serviceReplicas)
+		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+		.where(
+			and(
+				eq(serviceReplicas.serviceId, serviceId),
+				gt(serviceReplicas.count, 0),
+			),
+		);
+
+	if (targetServers.length !== 1) {
+		throw new Error(
+			"Stateful services must have exactly one active replica server",
+		);
+	}
+
+	const [targetServer] = targetServers;
+
+	if (targetServer.status !== "online") {
+		throw new Error("Stateful service target server is offline");
+	}
+
+	if (!targetServer.meta?.arch) {
+		throw new Error("Stateful service target server architecture is unknown");
+	}
+
+	return {
+		...targetServer,
+		meta: { arch: targetServer.meta.arch },
+	};
+}
 
 export async function selectBuildServerForPlatform(
 	serviceId: string,
@@ -18,26 +60,18 @@ export async function selectBuildServerForPlatform(
 		throw new Error("Service not found");
 	}
 
-	if (service.stateful && service.lockedServerId) {
-		const server = await db
-			.select()
-			.from(servers)
-			.where(
-				and(
-					eq(servers.id, service.lockedServerId),
-					eq(servers.status, "online"),
-				),
-			)
-			.then((r) => r[0]);
+	const arch = platform.split("/")[1];
 
-		if (!server) {
-			throw new Error("Locked server is offline");
+	if (service.stateful) {
+		const targetServer = await getStatefulBuildTargetServer(serviceId);
+		if (targetServer.meta.arch !== arch) {
+			throw new Error(
+				`Stateful service target server architecture ${targetServer.meta.arch} does not match platform ${platform}`,
+			);
 		}
 
-		return server.id;
+		return targetServer.id;
 	}
-
-	const arch = platform.split("/")[1];
 
 	const allowedBuildServerIds = await getSetting<string[]>(
 		SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS,
@@ -84,13 +118,23 @@ export async function getTargetPlatformsForService(
 		throw new Error("Service not found");
 	}
 
+	if (service.stateful) {
+		const targetServer = await getStatefulBuildTargetServer(serviceId);
+		return [`linux/${targetServer.meta.arch}`];
+	}
+
 	let targetPlatforms: string[] = [];
 
 	const replicas = await db
 		.select({ meta: servers.meta })
 		.from(serviceReplicas)
 		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-		.where(eq(serviceReplicas.serviceId, service.id));
+		.where(
+			and(
+				eq(serviceReplicas.serviceId, service.id),
+				gt(serviceReplicas.count, 0),
+			),
+		);
 
 	targetPlatforms = [
 		...new Set(
