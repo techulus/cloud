@@ -34,6 +34,16 @@ function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
 
+async function getServerLogName(serverId: string) {
+	const server = await db
+		.select({ name: servers.name })
+		.from(servers)
+		.where(eq(servers.id, serverId))
+		.then((r) => r[0]);
+
+	return server?.name || serverId;
+}
+
 async function completeTargetMigration(serviceId: string) {
 	await db
 		.update(services)
@@ -109,6 +119,12 @@ export async function applyStatusReport(
 	}
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
+
+	let serverLogName: string | undefined;
+	const getCurrentServerLogName = async () => {
+		serverLogName ??= await getServerLogName(serverId);
+		return serverLogName;
+	};
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)
@@ -275,11 +291,12 @@ export async function applyStatusReport(
 			);
 
 			if (deployment.rolloutId) {
+				const currentServerName = await getCurrentServerLogName();
 				await ingestRolloutLog(
 					deployment.rolloutId,
 					deployment.serviceId,
 					"deploying",
-					`Deployment ${deployment.id} starting on server ${serverId}`,
+					`Starting container on server ${currentServerName}`,
 				);
 			}
 
@@ -392,11 +409,12 @@ export async function applyStatusReport(
 		}
 
 		if (autohealFailed && deployment.rolloutId) {
+			const currentServerName = await getCurrentServerLogName();
 			await ingestRolloutLog(
 				deployment.rolloutId,
 				deployment.serviceId,
 				"autoheal",
-				`Deployment ${deployment.id} exceeded autoheal restart limit`,
+				`Container exceeded autoheal restart limit on server ${currentServerName}`,
 			);
 			await inngest.send(
 				inngestEvents.resourceStatusChanged.create({
@@ -427,11 +445,12 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (deployment.rolloutId) {
+				const currentServerName = await getCurrentServerLogName();
 				await ingestRolloutLog(
 					deployment.rolloutId,
 					deployment.serviceId,
 					"health_check",
-					`Deployment ${deployment.id} is healthy`,
+					`Container is healthy on server ${currentServerName}`,
 				);
 				await inngest.send(
 					inngestEvents.resourceStatusChanged.create({
@@ -480,11 +499,12 @@ export async function applyStatusReport(
 				.where(eq(deployments.id, deployment.id));
 
 			if (isRolloutDeployment && deployment.rolloutId) {
+				const currentServerName = await getCurrentServerLogName();
 				await ingestRolloutLog(
 					deployment.rolloutId,
 					deployment.serviceId,
 					"health_check",
-					`Deployment ${deployment.id} failed health check`,
+					`Container failed health check on server ${currentServerName}`,
 				);
 				await inngest.send(
 					inngestEvents.resourceStatusChanged.create({
@@ -523,11 +543,12 @@ export async function applyStatusReport(
 			);
 
 		for (const rollout of rolloutsInDnsSync) {
+			const currentServerName = await getCurrentServerLogName();
 			await ingestRolloutLog(
 				rollout.id,
 				"",
 				"dns_sync",
-				`DNS synced on server ${serverId}`,
+				`DNS synced on server ${currentServerName}`,
 			);
 			await inngest.send(
 				inngestEvents.serverDnsSynced.create({

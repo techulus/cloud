@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import { deployments, rollouts } from "@/db/schema";
+import { deployments, rollouts, servers } from "@/db/schema";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -335,8 +335,13 @@ export const rolloutWorkflow = inngest.createFunction(
 				}
 
 				const deploymentStates = await db
-					.select({ id: deployments.id, status: deployments.status })
+					.select({
+						id: deployments.id,
+						status: deployments.status,
+						serverName: servers.name,
+					})
 					.from(deployments)
+					.innerJoin(servers, eq(deployments.serverId, servers.id))
 					.where(inArray(deployments.id, pendingHealthDeploymentIds));
 
 				return deploymentStates.filter(
@@ -347,7 +352,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		);
 
 		if (unhealthyDeployments.length > 0) {
-			const failedDeploymentId = unhealthyDeployments[0].id;
+			const failedDeployment = unhealthyDeployments[0];
 			const failedReason = healthResults.includes(null)
 				? "health_check_timeout"
 				: "health_check_failed";
@@ -357,8 +362,8 @@ export const rolloutWorkflow = inngest.createFunction(
 					serviceId,
 					"health_check",
 					failedReason === "health_check_timeout"
-						? `Health check timed out for deployment ${failedDeploymentId}`
-						: `Health check failed for deployment ${failedDeploymentId}`,
+						? `Health check timed out on server ${failedDeployment.serverName}`
+						: `Health check failed on server ${failedDeployment.serverName}`,
 				);
 			});
 			await step.run("handle-health-timeout", async () => {
@@ -372,7 +377,7 @@ export const rolloutWorkflow = inngest.createFunction(
 			return {
 				status: "failed",
 				reason: failedReason,
-				deploymentId: failedDeploymentId,
+				deploymentId: failedDeployment.id,
 			};
 		}
 
@@ -425,18 +430,32 @@ export const rolloutWorkflow = inngest.createFunction(
 		);
 
 		const dnsTimedOut = dnsResults.some((r) => r === null);
+		const dnsServerNames = await step.run("load-dns-server-names", async () => {
+			if (serverIds.length === 0) {
+				return [];
+			}
+
+			return db
+				.select({ id: servers.id, name: servers.name })
+				.from(servers)
+				.where(inArray(servers.id, serverIds));
+		});
+		const dnsServerNameById = new Map(
+			dnsServerNames.map((server) => [server.id, server.name]),
+		);
 
 		for (let i = 0; i < dnsResults.length; i++) {
 			if (dnsResults[i] === null) {
+				const serverName = dnsServerNameById.get(serverIds[i]) || serverIds[i];
 				console.warn(
-					`[rollout:${rolloutId}] DNS sync timeout for server ${serverIds[i]}`,
+					`[rollout:${rolloutId}] DNS sync timeout for server ${serverName}`,
 				);
 				await step.run(`log-dns-timeout-${serverIds[i]}`, async () => {
 					await ingestRolloutLog(
 						rolloutId,
 						serviceId,
 						"dns_sync",
-						`DNS sync timed out for server ${serverIds[i]}`,
+						`DNS sync timed out for server ${serverName}`,
 					);
 				});
 			}
