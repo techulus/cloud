@@ -64,6 +64,8 @@ const CANVAS_WIDTH = 1320;
 const CANVAS_HEIGHT = 900;
 const MIN_CANVAS_SCALE = 0.5;
 const SNAP_GRID_SIZE = 24;
+const CANVAS_DOT_PATTERN =
+	"radial-gradient(circle, color-mix(in oklab, var(--muted-foreground) 36%, transparent) 1px, transparent 1px)";
 
 function getCanvasScale() {
 	if (typeof window === "undefined") {
@@ -706,7 +708,7 @@ export function ServiceCanvas({
 					"
 					style={{
 						height: "calc(100vh - 3.5rem)",
-						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
+						backgroundImage: CANVAS_DOT_PATTERN,
 						backgroundSize: "24px 24px",
 					}}
 				>
@@ -764,7 +766,7 @@ export function ServiceCanvas({
 					"
 						style={{
 							height: "calc(100vh - 5rem)",
-							backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
+							backgroundImage: CANVAS_DOT_PATTERN,
 							backgroundSize: "20px 20px",
 						}}
 					>
@@ -842,7 +844,7 @@ export function ServiceCanvas({
 					"
 					style={{
 						height: "calc(100vh - 3.5rem)",
-						backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
+						backgroundImage: CANVAS_DOT_PATTERN,
 						backgroundSize: "24px 24px",
 					}}
 				>
@@ -855,34 +857,36 @@ export function ServiceCanvas({
 					<div className="absolute top-4 right-4">
 						<AddServiceMenu {...menuCallbacks} />
 					</div>
-					<div
-						className="relative mx-auto"
-						style={{
-							width: CANVAS_WIDTH * canvasScale,
-							height: CANVAS_HEIGHT * canvasScale,
-						}}
-					>
+					<div className="flex min-h-full items-center justify-center px-10 py-24">
 						<div
 							className="relative"
 							style={{
-								width: CANVAS_WIDTH,
-								height: CANVAS_HEIGHT,
-								transform: `scale(${canvasScale})`,
-								transformOrigin: "top left",
+								width: CANVAS_WIDTH * canvasScale,
+								height: CANVAS_HEIGHT * canvasScale,
 							}}
 						>
-							{services.map((service, index) => (
-								<DraggableServiceCard
-									key={service.id}
-									service={service}
-									index={index}
-									projectSlug={projectSlug}
-									envName={envName}
-									proxyDomain={proxyDomain}
-									canvasScale={canvasScale}
-									onPositionChange={handlePositionChange}
-								/>
-							))}
+							<div
+								className="relative"
+								style={{
+									width: CANVAS_WIDTH,
+									height: CANVAS_HEIGHT,
+									transform: `scale(${canvasScale})`,
+									transformOrigin: "top left",
+								}}
+							>
+								{services.map((service, index) => (
+									<DraggableServiceCard
+										key={service.id}
+										service={service}
+										index={index}
+										projectSlug={projectSlug}
+										envName={envName}
+										proxyDomain={proxyDomain}
+										canvasScale={canvasScale}
+										onPositionChange={handlePositionChange}
+									/>
+								))}
+							</div>
 						</div>
 					</div>
 				</ContextMenuTrigger>
