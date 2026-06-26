@@ -310,6 +310,8 @@ export const services = pgTable("services", {
 		enum: ["backing_up", "deleting", "restoring", "failed"],
 	}),
 	deletionError: text("deletion_error"),
+	canvasX: integer("canvas_x"),
+	canvasY: integer("canvas_y"),
 	migrationStatus: text("migration_status", {
 		enum: [
 			"stopping",
