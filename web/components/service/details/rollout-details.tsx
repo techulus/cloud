@@ -3,21 +3,16 @@
 import {
 	ArrowLeft,
 	CheckCircle2,
+	Clock,
 	Loader2,
 	RotateCcw,
 	XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-	Item,
-	ItemContent,
-	ItemDescription,
-	ItemTitle,
-} from "@/components/ui/item";
+import { LogViewer } from "@/components/logs/log-viewer";
 import { Button } from "@/components/ui/button";
 import type { Rollout, RolloutStatus, Service } from "@/db/types";
 import { formatRelativeTime } from "@/lib/date";
-import { LogViewer } from "@/components/logs/log-viewer";
 
 type RolloutWithDates = Omit<Rollout, "createdAt" | "completedAt"> & {
 	createdAt: string | Date;
@@ -33,6 +28,12 @@ const STATUS_CONFIG: Record<
 		label: string;
 	}
 > = {
+	queued: {
+		icon: Clock,
+		color: "text-slate-500",
+		bgColor: "bg-slate-500/10",
+		label: "Queued",
+	},
 	in_progress: {
 		icon: Loader2,
 		color: "text-blue-500",
@@ -60,6 +61,7 @@ const STATUS_CONFIG: Record<
 };
 
 const STAGE_LABELS: Record<string, string> = {
+	queued: "Queued",
 	preparing: "Preparing",
 	certificates: "Issuing Certificates",
 	deploying: "Deploying",
@@ -102,7 +104,9 @@ export function RolloutDetails({
 	const router = useRouter();
 	const config = STATUS_CONFIG[rollout.status as RolloutStatus];
 	const Icon = config.icon;
-	const isLive = rollout.status === "in_progress";
+	const isLive =
+		rollout.status === "queued" || rollout.status === "in_progress";
+	const isAnimated = rollout.status === "in_progress";
 
 	return (
 		<div className="space-y-6">
@@ -123,7 +127,7 @@ export function RolloutDetails({
 						<span
 							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${config.color} ${config.bgColor}`}
 						>
-							<Icon className={`size-4 ${isLive ? "animate-spin" : ""}`} />
+							<Icon className={`size-4 ${isAnimated ? "animate-spin" : ""}`} />
 							{config.label}
 						</span>
 						{rollout.currentStage && isLive && (

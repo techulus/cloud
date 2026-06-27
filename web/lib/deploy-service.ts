@@ -53,16 +53,28 @@ export async function deployServiceInternal(serviceId: string) {
 	await db.insert(rollouts).values({
 		id: rolloutId,
 		serviceId,
-		status: "in_progress",
+		status: "queued",
 		currentStage: "queued",
 	});
 
-	await inngest.send(
-		inngestEvents.rolloutCreated.create({
-			rolloutId,
-			serviceId,
-		}),
-	);
+	try {
+		await inngest.send(
+			inngestEvents.rolloutCreated.create({
+				rolloutId,
+				serviceId,
+			}),
+		);
+	} catch (error) {
+		await db
+			.update(rollouts)
+			.set({
+				status: "failed",
+				currentStage: "enqueue_failed",
+				completedAt: new Date(),
+			})
+			.where(eq(rollouts.id, rolloutId));
+		throw error;
+	}
 
 	return { rolloutId };
 }

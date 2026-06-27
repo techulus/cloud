@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { CheckCircle2, Clock, Loader2, RotateCcw, XCircle } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import useSWR from "swr";
 import {
 	Empty,
@@ -39,6 +39,11 @@ const STATUS_CONFIG: Record<
 		label: string;
 	}
 > = {
+	queued: {
+		icon: Clock,
+		color: "text-slate-500",
+		label: "Queued",
+	},
 	in_progress: {
 		icon: Loader2,
 		color: "text-blue-500",
@@ -77,6 +82,7 @@ function StatusBadge({ status }: { status: RolloutStatus }) {
 }
 
 const STAGE_LABELS: Record<string, string> = {
+	queued: "Queued",
 	preparing: "Preparing",
 	certificates: "Issuing Certificates",
 	deploying: "Deploying",
@@ -123,7 +129,9 @@ export function RolloutHistory({
 			revalidateOnFocus: true,
 			onSuccess: (data) => {
 				setHasInProgress(
-					data?.rollouts?.some((r) => r.status === "in_progress") ?? false,
+					data?.rollouts?.some(
+						(r) => r.status === "queued" || r.status === "in_progress",
+					) ?? false,
 				);
 			},
 		},
@@ -168,9 +176,11 @@ export function RolloutHistory({
 								<ItemContent>
 									<ItemTitle>
 										<span className="truncate">
-											{rollout.status === "in_progress"
-												? `Deploying — ${formatStage(rollout.currentStage)}`
-												: STATUS_CONFIG[rollout.status].label}
+											{rollout.status === "queued"
+												? "Queued"
+												: rollout.status === "in_progress"
+													? `Deploying — ${formatStage(rollout.currentStage)}`
+													: STATUS_CONFIG[rollout.status].label}
 										</span>
 									</ItemTitle>
 									<ItemDescription>
