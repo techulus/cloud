@@ -34,9 +34,28 @@ Clone the repository and configure your environment:
 ```bash
 cd deployment
 cp .env.example .env
+openssl rand -hex 32
 ```
 
-Edit `.env` with your values (see below), then start the stack:
+Edit `.env` with your values. Set `CONTROL_PLANE_UPDATER_TOKEN` to
+the generated token.
+
+For an external PostgreSQL database, keep:
+
+```env
+COMPOSE_FILE=compose.production.yml
+```
+
+Set `TECHULUS_CLOUD_VERSION` to the release tag you are installing:
+
+```env
+TECHULUS_CLOUD_VERSION=vX.Y.Z
+```
+
+Use `tip` only for rolling installs. Rolling installs do not show release
+update prompts.
+
+Then start the stack:
 
 ```bash
 docker compose -f compose.production.yml up -d --pull always --remove-orphans
@@ -45,6 +64,7 @@ docker compose -f compose.production.yml up -d --pull always --remove-orphans
 To use the bundled PostgreSQL instead of an external database:
 
 ```bash
+sed -i.bak 's/^COMPOSE_FILE=.*/COMPOSE_FILE=compose.postgres.yml/' .env
 docker compose -f compose.postgres.yml up -d --pull always --remove-orphans
 ```
 
@@ -68,6 +88,14 @@ use the common commands below when investigating a self-hosted service.
 | `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`) |
 | `BETTER_AUTH_SECRET` | Secret key for authentication |
 | `ENCRYPTION_KEY` | 32 bytes as a 64-character hex string |
+
+### Control plane deployment
+
+| Variable | Description |
+| --- | --- |
+| `COMPOSE_FILE` | Compose file used by self-updates. Use `compose.production.yml` for external PostgreSQL or `compose.postgres.yml` for bundled PostgreSQL. |
+| `TECHULUS_CLOUD_VERSION` | Installed release tag. Use `tip` only for rolling installs without release prompts. |
+| `CONTROL_PLANE_UPDATER_TOKEN` | Random token used by the web app to call the internal updater service. Generate with `openssl rand -hex 32`. |
 
 ### Victoria Logs
 

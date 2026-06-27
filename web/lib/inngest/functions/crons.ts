@@ -1,14 +1,15 @@
+import { cron } from "inngest";
 import {
 	cleanupExpiredChallenges,
 	renewExpiringCertificates,
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
+import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
 import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
 	cleanupStaleItems,
 } from "@/lib/scheduler";
-import { cron } from "inngest";
 import { inngest } from "../client";
 
 export const staleServerCheck = inngest.createFunction(
@@ -90,6 +91,20 @@ export const oldBackupsCleanup = inngest.createFunction(
 		await step.run("cleanup-old-backups", async () => {
 			console.log("[cron] cleaning up old backups");
 			await cleanupOldBackups();
+		});
+	},
+);
+
+export const controlPlaneUpdateCheck = inngest.createFunction(
+	{
+		id: "cron-control-plane-update-check",
+		triggers: [cron("0 4 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("check-control-plane-updates", async () => {
+			console.log("[cron] checking control plane updates");
+			await checkAndPersistControlPlaneUpdate();
 		});
 	},
 );

@@ -6,6 +6,9 @@ export const SETTING_KEYS = {
 	ACME_EMAIL: "acme_email",
 	PROXY_DOMAIN: "proxy_domain",
 	EMAIL_ALERTS_CONFIG: "email_alerts_config",
+	CONTROL_PLANE_UPDATE_STATE: "control_plane_update_state",
+	CONTROL_PLANE_LAST_UPDATE_CHECK_AT: "control_plane_last_update_check_at",
+	CONTROL_PLANE_UPGRADE_STATE: "control_plane_upgrade_state",
 } as const;
 
 export const DEFAULT_BUILD_TIMEOUT_MINUTES = 30;
