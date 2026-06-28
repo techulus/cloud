@@ -151,7 +151,9 @@ export function ServiceLayoutClient({
 
 	const isActiveTab = (href: string) => {
 		if (href === basePath) {
-			return pathname === basePath;
+			return (
+				pathname === basePath || pathname.startsWith(`${basePath}/rollouts`)
+			);
 		}
 		return pathname.startsWith(href);
 	};
