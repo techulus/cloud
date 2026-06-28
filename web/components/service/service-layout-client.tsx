@@ -2,13 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-	createContext,
-	useCallback,
-	useContext,
-	useMemo,
-	useState,
-} from "react";
+import { createContext, use, useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
@@ -109,6 +103,28 @@ export function ServiceLayoutClient({
 		mutate();
 	}, [mutate]);
 
+	const serviceContextValue = useMemo<ServiceContextType | null>(
+		() =>
+			service
+				? {
+						service,
+						pendingChanges,
+						projectSlug,
+						envName,
+						proxyDomain,
+						onUpdate: handleActionComplete,
+					}
+				: null,
+		[
+			service,
+			pendingChanges,
+			projectSlug,
+			envName,
+			proxyDomain,
+			handleActionComplete,
+		],
+	);
+
 	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service?.id}`;
 
 	const isConstrainedTab =
@@ -193,16 +209,7 @@ export function ServiceLayoutClient({
 					isConstrainedTab && "container max-w-7xl mx-auto",
 				)}
 			>
-				<ServiceContext.Provider
-					value={{
-						service,
-						pendingChanges,
-						projectSlug,
-						envName,
-						proxyDomain,
-						onUpdate: handleActionComplete,
-					}}
-				>
+				<ServiceContext.Provider value={serviceContextValue}>
 					{children}
 				</ServiceContext.Provider>
 			</div>
@@ -222,7 +229,7 @@ interface ServiceContextType {
 const ServiceContext = createContext<ServiceContextType | null>(null);
 
 export function useService() {
-	const context = useContext(ServiceContext);
+	const context = use(ServiceContext);
 	if (!context) {
 		throw new Error("useService must be used within ServiceLayoutClient");
 	}

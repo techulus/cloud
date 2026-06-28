@@ -25,7 +25,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDateTime, formatTime } from "@/lib/date";
@@ -65,6 +65,25 @@ interface ServerLogEntry extends BaseEntry {
 }
 
 type Server = { id: string; name: string };
+
+const STATUS_OPTIONS: {
+	value: StatusCategory;
+	label: string;
+	color: string;
+}[] = [
+	{ value: "2xx", label: "2xx Success", color: "bg-green-500" },
+	{ value: "3xx", label: "3xx Redirect", color: "bg-blue-500" },
+	{ value: "4xx", label: "4xx Client Error", color: "bg-yellow-500" },
+	{ value: "5xx", label: "5xx Server Error", color: "bg-red-500" },
+];
+
+const SERVER_LOG_LEVEL_COLORS: Record<string, string> = {
+	error: "text-red-500 bg-red-500/10",
+	warn: "text-yellow-500 bg-yellow-500/10",
+	info: "text-blue-500 bg-blue-500/10",
+};
+
+const EMPTY_LOGS: unknown[] = [];
 
 type LogViewerProps =
 	| { variant: "service-logs"; serviceId: string; servers?: Server[] }
@@ -112,19 +131,23 @@ function highlightMatches(text: string, search: string): React.ReactNode {
 		"gi",
 	);
 	const parts = text.split(regex);
+	let offset = 0;
 
-	return parts.map((part, i) =>
-		regex.test(part) ? (
+	return parts.map((part) => {
+		const start = offset;
+		offset += part.length;
+
+		return regex.test(part) ? (
 			<mark
-				key={`${part}-${i}`}
+				key={`${part}-${start}`}
 				className="bg-yellow-300 dark:bg-yellow-700 text-inherit rounded-sm px-0.5"
 			>
 				{part}
 			</mark>
 		) : (
 			part
-		),
-	);
+		);
+	});
 }
 
 function useLogData(props: LogViewerProps, filterServerId?: string) {
@@ -358,17 +381,6 @@ function RequestsFilters({
 		return Array.from(statusFilter).join(", ");
 	}, [statusFilter]);
 
-	const statusOptions: {
-		value: StatusCategory;
-		label: string;
-		color: string;
-	}[] = [
-		{ value: "2xx", label: "2xx Success", color: "bg-green-500" },
-		{ value: "3xx", label: "3xx Redirect", color: "bg-blue-500" },
-		{ value: "4xx", label: "4xx Client Error", color: "bg-yellow-500" },
-		{ value: "5xx", label: "5xx Server Error", color: "bg-red-500" },
-	];
-
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 h-7 px-2.5 text-[0.8rem] font-medium rounded-[min(var(--radius-md),12px)] border border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50">
@@ -379,7 +391,7 @@ function RequestsFilters({
 				<DropdownMenuGroup>
 					<DropdownMenuLabel>Status Codes</DropdownMenuLabel>
 					<DropdownMenuSeparator />
-					{statusOptions.map((opt) => (
+					{STATUS_OPTIONS.map((opt) => (
 						<DropdownMenuCheckboxItem
 							key={opt.value}
 							checked={statusFilter.has(opt.value)}
@@ -566,12 +578,6 @@ function ServerLogRow({
 	entry: ServerLogEntry;
 	search: string;
 }) {
-	const levelColors: Record<string, string> = {
-		error: "text-red-500 bg-red-500/10",
-		warn: "text-yellow-500 bg-yellow-500/10",
-		info: "text-blue-500 bg-blue-500/10",
-	};
-
 	return (
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
@@ -581,7 +587,7 @@ function ServerLogRow({
 				{formatTime(entry.timestamp)}
 			</span>
 			<span
-				className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${levelColors[entry.level] || levelColors.info}`}
+				className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${SERVER_LOG_LEVEL_COLORS[entry.level] || SERVER_LOG_LEVEL_COLORS.info}`}
 			>
 				{entry.level}
 			</span>
@@ -648,11 +654,10 @@ export function LogViewer(props: LogViewerProps) {
 	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 	const [olderHasMore, setOlderHasMore] = useState(true);
-	const [prevSelectedServerId, setPrevSelectedServerId] =
-		useState(selectedServerId);
+	const prevSelectedServerIdRef = useRef(selectedServerId);
 
-	if (selectedServerId !== prevSelectedServerId) {
-		setPrevSelectedServerId(selectedServerId);
+	if (selectedServerId !== prevSelectedServerIdRef.current) {
+		prevSelectedServerIdRef.current = selectedServerId;
 		setOlderLogs([]);
 		setOlderHasMore(true);
 	}
@@ -660,7 +665,7 @@ export function LogViewer(props: LogViewerProps) {
 	const servers = props.variant === "service-logs" ? props.servers : undefined;
 
 	const { data, isLoading } = useLogData(props, selectedServerId ?? undefined);
-	const recentLogs = (data?.logs || []) as unknown[];
+	const recentLogs = (data?.logs as unknown[] | undefined) || EMPTY_LOGS;
 	const logs = useMemo(() => {
 		const seenIds = new Set<string>();
 		const combined: unknown[] = [];
@@ -818,8 +823,10 @@ export function LogViewer(props: LogViewerProps) {
 		showStderr,
 		statusFilter,
 	]);
+	const filteredLogCount = filteredLogs.length;
 
 	useLayoutEffect(() => {
+		void filteredLogCount;
 		const container = containerRef.current;
 		const restoration = scrollRestorationRef.current;
 
@@ -831,7 +838,7 @@ export function LogViewer(props: LogViewerProps) {
 		} else if (autoScroll && container) {
 			container.scrollTop = container.scrollHeight;
 		}
-	}, [filteredLogs.length, autoScroll]);
+	}, [filteredLogCount, autoScroll]);
 
 	const config = useMemo(() => {
 		switch (props.variant) {

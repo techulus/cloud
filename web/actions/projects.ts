@@ -425,11 +425,6 @@ type CreateServiceInput = {
 const SERVICE_CANVAS_WIDTH = 1320;
 const SERVICE_CARD_WIDTH = 320;
 
-const NEW_SERVICE_CANVAS_POSITION = {
-	canvasX: (SERVICE_CANVAS_WIDTH - SERVICE_CARD_WIDTH) / 2,
-	canvasY: 0,
-};
-
 export async function createService(input: CreateServiceInput) {
 	await requireAuth();
 	const { projectId, environmentId, name, image, github } = input;
@@ -446,6 +441,10 @@ export async function createService(input: CreateServiceInput) {
 
 	const id = randomUUID();
 	const hostname = `${project.slug}-${slugify(name)}-${env.name}`;
+	const newServiceCanvasPosition = {
+		canvasX: (SERVICE_CANVAS_WIDTH - SERVICE_CARD_WIDTH) / 2,
+		canvasY: 0,
+	};
 
 	let finalImage = image;
 	let sourceType: "image" | "github" = "image";
@@ -490,8 +489,8 @@ export async function createService(input: CreateServiceInput) {
 			stateful: false,
 			resourceCpuLimit: resourceLimits.cpuCores,
 			resourceMemoryLimitMb: resourceLimits.memoryMb,
-			canvasX: NEW_SERVICE_CANVAS_POSITION.canvasX,
-			canvasY: NEW_SERVICE_CANVAS_POSITION.canvasY,
+			canvasX: newServiceCanvasPosition.canvasX,
+			canvasY: newServiceCanvasPosition.canvasY,
 		});
 
 		if (selectedServer) {

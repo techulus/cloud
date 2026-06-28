@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -34,42 +34,48 @@ export function DeviceAuthorizationPage() {
 		setUserCode(initialUserCode);
 	}, [initialUserCode]);
 
-	async function verifyCode(code: string) {
-		const formatted = normalizeUserCode(code);
-		if (!formatted) {
-			setError("Enter the device code to continue");
-			return;
-		}
-
-		setLoading(true);
-		setError("");
-
-		try {
-			const response = await authClient.device({
-				query: { user_code: formatted },
-			});
-
-			if (response.error || !response.data) {
-				setError(response.error?.error_description || "Invalid or expired code");
+	const verifyCode = useCallback(
+		async (code: string) => {
+			const formatted = normalizeUserCode(code);
+			if (!formatted) {
+				setError("Enter the device code to continue");
 				return;
 			}
 
-			router.push(`/device/approve?user_code=${encodeURIComponent(formatted)}`);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Invalid or expired code");
-		} finally {
-			setLoading(false);
-		}
-	}
+			setLoading(true);
+			setError("");
+
+			try {
+				const response = await authClient.device({
+					query: { user_code: formatted },
+				});
+
+				if (response.error || !response.data) {
+					setError(
+						response.error?.error_description || "Invalid or expired code",
+					);
+					return;
+				}
+
+				router.push(
+					`/device/approve?user_code=${encodeURIComponent(formatted)}`,
+				);
+			} catch (err) {
+				setError(
+					err instanceof Error ? err.message : "Invalid or expired code",
+				);
+			} finally {
+				setLoading(false);
+			}
+		},
+		[router],
+	);
 
 	useEffect(() => {
 		if (initialUserCode) {
 			void verifyCode(initialUserCode);
 		}
-		// initialUserCode is intentionally the only trigger here so a shared
-		// verification link can continue without another submit.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [initialUserCode]);
+	}, [initialUserCode, verifyCode]);
 
 	return (
 		<div className="min-h-screen flex items-center justify-center p-4">
@@ -80,17 +86,13 @@ export function DeviceAuthorizationPage() {
 						Enter the code shown in your terminal to continue signing in.
 					</CardDescription>
 				</CardHeader>
-				<form
-					onSubmit={(event) => {
-						event.preventDefault();
-						void verifyCode(userCode);
-					}}
-				>
+				<form action={() => void verifyCode(userCode)}>
 					<CardContent className="space-y-4">
 						<div className="space-y-2">
 							<Label htmlFor="user-code">Device Code</Label>
 							<Input
 								id="user-code"
+								name="user-code"
 								value={userCode}
 								onChange={(event) => {
 									setUserCode(event.target.value);

@@ -68,14 +68,16 @@ type Props = {
 	appVersion: string | null;
 };
 
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+	dateStyle: "medium",
+	timeStyle: "short",
+});
+
 function formatCheckedAt(value: string | null | undefined) {
 	if (!value) return "Never";
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "Unknown";
-	return new Intl.DateTimeFormat(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(date);
+	return dateTimeFormatter.format(date);
 }
 
 function buildUpgradeCommand(targetVersion: string) {

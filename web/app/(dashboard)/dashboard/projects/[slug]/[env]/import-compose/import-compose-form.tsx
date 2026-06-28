@@ -112,10 +112,11 @@ export function ImportComposeForm({
 
 		try {
 			const overrides: Record<string, ServiceOverride> = {};
+			const parsedServiceByName = new Map(
+				parsedServices.map((service) => [service.name, service]),
+			);
 			for (const [originalName, config] of Object.entries(serviceConfigs)) {
-				const originalService = parsedServices.find(
-					(s) => s.name === originalName,
-				);
+				const originalService = parsedServiceByName.get(originalName);
 				if (originalService) {
 					overrides[originalName] = {
 						name: config.name !== originalName ? config.name : undefined,

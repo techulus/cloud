@@ -586,7 +586,7 @@ export function ServiceCanvas({
 
 	const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
 	const [githubDialogOpen, setGithubDialogOpen] = useState(false);
-	const [canvasScale, setCanvasScale] = useState(1);
+	const [canvasScale, setCanvasScale] = useState(getCanvasScale);
 
 	const {
 		data: services,
@@ -604,7 +604,6 @@ export function ServiceCanvas({
 	useEffect(() => {
 		const updateCanvasScale = () => setCanvasScale(getCanvasScale());
 
-		updateCanvasScale();
 		window.addEventListener("resize", updateCanvasScale);
 
 		return () => window.removeEventListener("resize", updateCanvasScale);

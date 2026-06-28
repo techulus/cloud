@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useReducer, useMemo, memo } from "react";
+import { ChevronDown, HeartPulse } from "lucide-react";
+import { memo, useMemo, useReducer, useState } from "react";
+import { updateServiceHealthCheck } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { HeartPulse, ChevronDown } from "lucide-react";
-import { updateServiceHealthCheck } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 type HealthCheckState = {
@@ -139,8 +139,11 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Command</label>
+					<label htmlFor="health-check-command" className="text-sm font-medium">
+						Command
+					</label>
 					<Input
+						id="health-check-command"
 						placeholder="curl -f http://localhost:8080/health || exit 1"
 						value={state.cmd}
 						onChange={(e) =>
@@ -166,56 +169,80 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 				{showAdvanced && (
 					<div className="grid grid-cols-2 gap-3 pt-2">
 						<div className="space-y-1">
-							<label className="text-xs font-medium">Interval (s)</label>
+							<label
+								htmlFor="health-check-interval"
+								className="text-xs font-medium"
+							>
+								Interval (s)
+							</label>
 							<Input
+								id="health-check-interval"
 								type="number"
 								value={state.interval}
 								onChange={(e) =>
 									dispatch({
 										type: "SET_INTERVAL",
-										payload: parseInt(e.target.value) || 10,
+										payload: parseInt(e.target.value, 10) || 10,
 									})
 								}
 								min={1}
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-xs font-medium">Timeout (s)</label>
+							<label
+								htmlFor="health-check-timeout"
+								className="text-xs font-medium"
+							>
+								Timeout (s)
+							</label>
 							<Input
+								id="health-check-timeout"
 								type="number"
 								value={state.timeout}
 								onChange={(e) =>
 									dispatch({
 										type: "SET_TIMEOUT",
-										payload: parseInt(e.target.value) || 5,
+										payload: parseInt(e.target.value, 10) || 5,
 									})
 								}
 								min={1}
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-xs font-medium">Retries</label>
+							<label
+								htmlFor="health-check-retries"
+								className="text-xs font-medium"
+							>
+								Retries
+							</label>
 							<Input
+								id="health-check-retries"
 								type="number"
 								value={state.retries}
 								onChange={(e) =>
 									dispatch({
 										type: "SET_RETRIES",
-										payload: parseInt(e.target.value) || 3,
+										payload: parseInt(e.target.value, 10) || 3,
 									})
 								}
 								min={1}
 							/>
 						</div>
 						<div className="space-y-1">
-							<label className="text-xs font-medium">Start Period (s)</label>
+							<label
+								htmlFor="health-check-start-period"
+								className="text-xs font-medium"
+							>
+								Start Period (s)
+							</label>
 							<Input
+								id="health-check-start-period"
 								type="number"
 								value={state.startPeriod}
 								onChange={(e) =>
 									dispatch({
 										type: "SET_START_PERIOD",
-										payload: parseInt(e.target.value) || 30,
+										payload: parseInt(e.target.value, 10) || 30,
 									})
 								}
 								min={0}
