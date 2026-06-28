@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, workQueue } from "@/db/schema";
+import { deployments, servers, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
@@ -162,6 +162,9 @@ export async function claimNextWorkItem(
 
 	const row = rows[0];
 	if (!row) return null;
+	if (row.type === "upgrade_agent") {
+		await markAgentUpgradeStarted(serverId, row.payload);
+	}
 
 	return {
 		id: row.id,
@@ -169,6 +172,29 @@ export async function claimNextWorkItem(
 		payload: row.payload,
 		attempt: row.attempts,
 	};
+}
+
+async function markAgentUpgradeStarted(serverId: string, payloadText: string) {
+	try {
+		const payload = JSON.parse(payloadText) as { targetVersion?: string };
+		if (!payload.targetVersion) return;
+		await db
+			.update(servers)
+			.set({
+				agentUpgradeStatus: "upgrading",
+				agentUpgradeStartedAt: new Date(),
+				agentUpgradeError: null,
+			})
+			.where(
+				and(
+					eq(servers.id, serverId),
+					eq(servers.agentUpgradeTargetVersion, payload.targetVersion),
+					inArray(servers.agentUpgradeStatus, ["queued", "upgrading"]),
+				),
+			);
+	} catch (error) {
+		console.error("[work-queue] failed to mark agent upgrade started:", error);
+	}
 }
 
 async function getRejectionReason(
@@ -205,6 +231,11 @@ async function runWorkItemCompletionSideEffects(
 		return;
 	}
 
+	if (item.type === "upgrade_agent" && item.payload) {
+		await runAgentUpgradeCompletionSideEffects(item, result);
+		return;
+	}
+
 	if (item.type !== "create_manifest" || !item.payload) {
 		return;
 	}
@@ -237,6 +268,60 @@ async function runWorkItemCompletionSideEffects(
 		}
 	} catch (error) {
 		console.error("[work-queue] failed to run completion side effects:", error);
+	}
+}
+
+async function runAgentUpgradeCompletionSideEffects(
+	item: WorkQueue,
+	result: WorkItemResult,
+): Promise<void> {
+	try {
+		const payload = JSON.parse(item.payload) as { targetVersion?: string };
+		if (!payload.targetVersion) return;
+
+		if (result.status === "failed") {
+			await db
+				.update(servers)
+				.set({
+					agentUpgradeStatus: "failed",
+					agentUpgradeError: result.error || "Agent upgrade failed",
+				})
+				.where(
+					and(
+						eq(servers.id, item.serverId),
+						eq(servers.agentUpgradeTargetVersion, payload.targetVersion),
+					),
+				);
+			return;
+		}
+
+		const [server] = await db
+			.select({ agentHealth: servers.agentHealth })
+			.from(servers)
+			.where(eq(servers.id, item.serverId))
+			.limit(1);
+
+		await db
+			.update(servers)
+			.set({
+				agentUpgradeStatus:
+					server?.agentHealth?.version === payload.targetVersion
+						? "succeeded"
+						: "upgrading",
+				agentUpgradeStartedAt: item.startedAt ?? new Date(),
+				agentUpgradeError: null,
+			})
+			.where(
+				and(
+					eq(servers.id, item.serverId),
+					eq(servers.agentUpgradeTargetVersion, payload.targetVersion),
+				),
+			);
+	} catch (error) {
+		console.error(
+			"[work-queue] failed to run agent upgrade completion side effects:",
+			error,
+		);
 	}
 }
 

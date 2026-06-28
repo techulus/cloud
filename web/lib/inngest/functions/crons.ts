@@ -9,6 +9,7 @@ import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
 	cleanupStaleItems,
+	failTimedOutAgentUpgrades,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
 
@@ -119,6 +120,20 @@ export const staleItemsCleanup = inngest.createFunction(
 		await step.run("cleanup-stale-items", async () => {
 			console.log("[cron] cleaning up stale items");
 			await cleanupStaleItems();
+		});
+	},
+);
+
+export const agentUpgradeTimeoutCheck = inngest.createFunction(
+	{
+		id: "cron-agent-upgrade-timeout-check",
+		triggers: [cron("*/5 * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("fail-timed-out-agent-upgrades", async () => {
+			console.log("[cron] checking timed out agent upgrades");
+			await failTimedOutAgentUpgrades();
 		});
 	},
 );

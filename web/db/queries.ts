@@ -112,6 +112,10 @@ export async function getServerDetails(id: string) {
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
+			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
+			agentUpgradeStatus: servers.agentUpgradeStatus,
+			agentUpgradeStartedAt: servers.agentUpgradeStartedAt,
+			agentUpgradeError: servers.agentUpgradeError,
 		})
 		.from(servers)
 		.where(eq(servers.id, id));
@@ -129,6 +133,10 @@ export async function getClusterHealth() {
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
+			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
+			agentUpgradeStatus: servers.agentUpgradeStatus,
+			agentUpgradeStartedAt: servers.agentUpgradeStartedAt,
+			agentUpgradeError: servers.agentUpgradeError,
 		})
 		.from(servers);
 
