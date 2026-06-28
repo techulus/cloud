@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
@@ -465,38 +465,58 @@ export async function createService(input: CreateServiceInput) {
 		githubRootDir = github.rootDir?.trim() || null;
 	}
 
-	await db.insert(services).values({
-		id,
-		projectId,
-		environmentId,
-		name,
-		hostname,
-		image: finalImage,
-		sourceType,
-		githubRepoUrl,
-		githubBranch,
-		githubRootDir,
-		replicas: 1,
-		stateful: false,
-		resourceCpuLimit: resourceLimits.cpuCores,
-		resourceMemoryLimitMb: resourceLimits.memoryMb,
-		canvasX: NEW_SERVICE_CANVAS_POSITION.canvasX,
-		canvasY: NEW_SERVICE_CANVAS_POSITION.canvasY,
-	});
+	const availableServers = await db
+		.select({ id: servers.id })
+		.from(servers)
+		.where(and(eq(servers.status, "online"), isNotNull(servers.wireguardIp)));
+	const selectedServer =
+		availableServers.length > 0
+			? availableServers[Math.floor(Math.random() * availableServers.length)]
+			: null;
 
-	if (github?.installationId && github?.repoId) {
-		const repoFullName = github.repoUrl.replace("https://github.com/", "");
-		await db.insert(githubRepos).values({
-			id: randomUUID(),
-			installationId: github.installationId,
-			repoId: github.repoId,
-			repoFullName,
-			defaultBranch: github.branch || "main",
-			serviceId: id,
-			deployBranch: github.branch || "main",
-			autoDeploy: true,
+	await db.transaction(async (tx) => {
+		await tx.insert(services).values({
+			id,
+			projectId,
+			environmentId,
+			name,
+			hostname,
+			image: finalImage,
+			sourceType,
+			githubRepoUrl,
+			githubBranch,
+			githubRootDir,
+			replicas: 1,
+			stateful: false,
+			resourceCpuLimit: resourceLimits.cpuCores,
+			resourceMemoryLimitMb: resourceLimits.memoryMb,
+			canvasX: NEW_SERVICE_CANVAS_POSITION.canvasX,
+			canvasY: NEW_SERVICE_CANVAS_POSITION.canvasY,
 		});
-	}
+
+		if (selectedServer) {
+			await tx.insert(serviceReplicas).values({
+				id: randomUUID(),
+				serviceId: id,
+				serverId: selectedServer.id,
+				count: 1,
+			});
+		}
+
+		if (github?.installationId && github?.repoId) {
+			const repoFullName = github.repoUrl.replace("https://github.com/", "");
+			await tx.insert(githubRepos).values({
+				id: randomUUID(),
+				installationId: github.installationId,
+				repoId: github.repoId,
+				repoFullName,
+				defaultBranch: github.branch || "main",
+				serviceId: id,
+				deployBranch: github.branch || "main",
+				autoDeploy: true,
+			});
+		}
+	});
 
 	return { id, name, image: finalImage, sourceType };
 }
