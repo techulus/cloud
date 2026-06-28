@@ -1,24 +1,24 @@
-export function StatusIndicator({ status }: { status: string }) {
-	const colors: Record<string, { dot: string; text: string }> = {
-		online: {
-			dot: "bg-emerald-500",
-			text: "text-emerald-600 dark:text-emerald-400",
-		},
-		pending: {
-			dot: "bg-amber-500",
-			text: "text-amber-600 dark:text-amber-400",
-		},
-		offline: {
-			dot: "bg-rose-500",
-			text: "text-rose-600 dark:text-rose-400",
-		},
-		unknown: {
-			dot: "bg-slate-400",
-			text: "text-slate-500",
-		},
-	};
+const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
+	online: {
+		dot: "bg-emerald-500",
+		text: "text-emerald-600 dark:text-emerald-400",
+	},
+	pending: {
+		dot: "bg-amber-500",
+		text: "text-amber-600 dark:text-amber-400",
+	},
+	offline: {
+		dot: "bg-rose-500",
+		text: "text-rose-600 dark:text-rose-400",
+	},
+	unknown: {
+		dot: "bg-slate-400",
+		text: "text-slate-500",
+	},
+};
 
-	const color = colors[status] || colors.unknown;
+export function StatusIndicator({ status }: { status: string }) {
+	const color = STATUS_COLORS[status] || STATUS_COLORS.unknown;
 
 	return (
 		<div className="flex items-center gap-1.5">

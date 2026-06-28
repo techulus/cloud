@@ -70,10 +70,11 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ghcr.io/techulus/cloud/web:tip
+    image: ghcr.io/techulus/cloud/web:${TECHULUS_CLOUD_VERSION:-tip}
     env_file:
       - ./.env
     environment:
+      - TECHULUS_CLOUD_VERSION=${TECHULUS_CLOUD_VERSION:-tip}
       - DATABASE_URL=${DATABASE_URL}
       - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
       - APP_URL=https://${ROOT_DOMAIN}
@@ -86,6 +87,8 @@ services:
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
+      - CONTROL_PLANE_UPDATER_URL=http://control-plane-updater:8080
+      - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
     depends_on:
       postgres:
@@ -94,11 +97,12 @@ services:
     restart: on-failure
 
   web:
-    image: ghcr.io/techulus/cloud/web:tip
+    image: ghcr.io/techulus/cloud/web:${TECHULUS_CLOUD_VERSION:-tip}
     scale: ${WEB_REPLICAS:-1}
     env_file:
       - ./.env
     environment:
+      - TECHULUS_CLOUD_VERSION=${TECHULUS_CLOUD_VERSION:-tip}
       - DATABASE_URL=${DATABASE_URL}
       - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
       - APP_URL=https://${ROOT_DOMAIN}
@@ -111,6 +115,8 @@ services:
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
+      - CONTROL_PLANE_UPDATER_URL=http://control-plane-updater:8080
+      - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
     depends_on:
       migrate:
@@ -141,8 +147,24 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  control-plane-updater:
+    image: ghcr.io/techulus/cloud/updater:${TECHULUS_CLOUD_VERSION:-tip}
+    environment:
+      - DEPLOY_DIR=/opt/techulus-cloud
+      - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
+      - WEB_HEALTH_URL=http://web:3000/api/health
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/techulus-cloud:/opt/techulus-cloud
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   registry:
-    image: ghcr.io/techulus/cloud/registry:tip
+    image: ghcr.io/techulus/cloud/registry:${TECHULUS_CLOUD_VERSION:-tip}
     env_file:
       - ./.env
     volumes:

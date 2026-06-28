@@ -233,6 +233,11 @@ type ContainerStatus struct {
 	HealthStatus string `json:"healthStatus"`
 }
 
+type DeploymentError struct {
+	DeploymentID string `json:"deploymentId"`
+	Message      string `json:"message"`
+}
+
 type Resources struct {
 	CpuCores int `json:"cpuCores"`
 	MemoryMb int `json:"memoryMb"`
@@ -245,15 +250,16 @@ type AgentHealth struct {
 }
 
 type StatusReport struct {
-	Resources       *Resources              `json:"resources,omitempty"`
-	PublicIP        string                  `json:"publicIp,omitempty"`
-	PrivateIP       string                  `json:"privateIp,omitempty"`
-	Meta            map[string]string       `json:"meta,omitempty"`
-	Containers      []ContainerStatus       `json:"containers"`
-	DnsInSync       bool                    `json:"dnsInSync,omitempty"`
-	NetworkHealth   *health.NetworkHealth   `json:"networkHealth,omitempty"`
-	ContainerHealth *health.ContainerHealth `json:"containerHealth,omitempty"`
-	AgentHealth     *AgentHealth            `json:"agentHealth,omitempty"`
+	Resources        *Resources              `json:"resources,omitempty"`
+	PublicIP         string                  `json:"publicIp,omitempty"`
+	PrivateIP        string                  `json:"privateIp,omitempty"`
+	Meta             map[string]string       `json:"meta,omitempty"`
+	Containers       []ContainerStatus       `json:"containers"`
+	DeploymentErrors []DeploymentError       `json:"deploymentErrors,omitempty"`
+	DnsInSync        bool                    `json:"dnsInSync,omitempty"`
+	NetworkHealth    *health.NetworkHealth   `json:"networkHealth,omitempty"`
+	ContainerHealth  *health.ContainerHealth `json:"containerHealth,omitempty"`
+	AgentHealth      *AgentHealth            `json:"agentHealth,omitempty"`
 }
 
 type CompletedWorkItem struct {

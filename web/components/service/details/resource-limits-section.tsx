@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useMemo, memo } from "react";
+import { Gauge } from "lucide-react";
+import { memo, useMemo, useState } from "react";
+import { updateServiceResourceLimits } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
@@ -8,8 +10,6 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import { Gauge } from "lucide-react";
-import { updateServiceResourceLimits } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 
@@ -162,8 +162,14 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Preset</label>
+					<label
+						htmlFor="resource-limits-preset"
+						className="text-sm font-medium"
+					>
+						Preset
+					</label>
 					<NativeSelect
+						id="resource-limits-preset"
 						value={selectedPreset}
 						onChange={handlePresetChange}
 						className="w-full"
@@ -180,8 +186,14 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 					<div className="space-y-3">
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1">
-								<label className="text-xs font-medium">CPU Cores</label>
+								<label
+									htmlFor="resource-cpu-cores"
+									className="text-xs font-medium"
+								>
+									CPU Cores
+								</label>
 								<Input
+									id="resource-cpu-cores"
 									type="number"
 									step="0.1"
 									min="0.1"
@@ -192,8 +204,14 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 								/>
 							</div>
 							<div className="space-y-1">
-								<label className="text-xs font-medium">Memory (MB)</label>
+								<label
+									htmlFor="resource-memory-mb"
+									className="text-xs font-medium"
+								>
+									Memory (MB)
+								</label>
 								<Input
+									id="resource-memory-mb"
 									type="number"
 									step="64"
 									min="64"

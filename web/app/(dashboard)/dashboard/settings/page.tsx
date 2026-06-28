@@ -1,6 +1,6 @@
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { GlobalSettings } from "@/components/settings/global-settings";
-import { listServers, getGlobalSettings } from "@/db/queries";
+import { getGlobalSettings, listServers } from "@/db/queries";
 
 export default async function SettingsPage() {
 	const [servers, settings] = await Promise.all([
@@ -27,7 +27,11 @@ export default async function SettingsPage() {
 				<GlobalSettings
 					servers={servers}
 					initialSettings={settings}
-					appVersion={process.env.NEXT_PUBLIC_APP_VERSION ?? null}
+					appVersion={
+						process.env.TECHULUS_CLOUD_VERSION ??
+						process.env.NEXT_PUBLIC_APP_VERSION ??
+						null
+					}
 				/>
 			</div>
 		</>

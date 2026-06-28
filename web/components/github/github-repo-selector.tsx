@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Globe, Loader2, Lock } from "lucide-react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { Globe, Lock, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 type GitHubRepo = {
@@ -24,6 +24,13 @@ type SelectedRepo = {
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
+const EMPTY_REPOS: GitHubRepo[] = [];
+
+function getValidGitHubRepoName(url: string) {
+	const match = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
+	return match ? match[1] : null;
+}
+
 export function GitHubRepoSelector({
 	value,
 	onChange,
@@ -44,7 +51,7 @@ export function GitHubRepoSelector({
 		}>;
 	}>("/api/github/repos", fetcher);
 
-	const repos = data?.repos || [];
+	const repos = data?.repos || EMPTY_REPOS;
 	const hasInstallations = (data?.installations?.length || 0) > 0;
 
 	const filteredRepos = useMemo(() => {
@@ -53,13 +60,8 @@ export function GitHubRepoSelector({
 		return repos.filter((r) => r.fullName.toLowerCase().includes(lower));
 	}, [repos, search]);
 
-	const isValidGitHubUrl = (url: string) => {
-		const match = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
-		return match ? match[1] : null;
-	};
-
 	const publicRepoFromSearch = useMemo(() => {
-		const repoName = isValidGitHubUrl(search);
+		const repoName = getValidGitHubRepoName(search);
 		if (!repoName) return null;
 		const alreadyInList = repos.some(
 			(r) => r.fullName.toLowerCase() === repoName.toLowerCase(),

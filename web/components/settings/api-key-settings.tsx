@@ -1,10 +1,6 @@
 "use client";
 
-import {
-	KeyRound,
-	RefreshCw,
-	Trash2,
-} from "lucide-react";
+import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -70,6 +66,11 @@ type ApiKeyClient = {
 
 const apiKeysClient = authClient as unknown as ApiKeyClient;
 
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+	dateStyle: "medium",
+	timeStyle: "short",
+});
+
 function getErrorMessage(
 	error: { message?: string; error_description?: string } | null | undefined,
 	fallback: string,
@@ -83,10 +84,7 @@ function formatDate(value: string | Date | null) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return "Unknown";
 
-	return new Intl.DateTimeFormat(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(date);
+	return dateTimeFormatter.format(date);
 }
 
 function describeSource(apiKey: ApiKeyRecord) {
@@ -110,7 +108,7 @@ export function ApiKeySettings() {
 
 	const sortedApiKeys = useMemo(
 		() =>
-			[...apiKeys].sort(
+			apiKeys.toSorted(
 				(a, b) =>
 					new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 			),
@@ -182,8 +180,8 @@ export function ApiKeySettings() {
 					<ItemContent>
 						<ItemTitle>API Keys</ItemTitle>
 						<p className="text-sm text-muted-foreground">
-							Manage keys created by CLI logins. Run <code>tc auth login</code> to
-							create a new CLI session.
+							Manage keys created by CLI logins. Run <code>tc auth login</code>{" "}
+							to create a new CLI session.
 						</p>
 					</ItemContent>
 				</Item>

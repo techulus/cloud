@@ -3,11 +3,12 @@
 import { usePathname } from "next/navigation";
 import {
 	createContext,
-	useContext,
-	useLayoutEffect,
-	useCallback,
-	useState,
 	type ReactNode,
+	use,
+	useCallback,
+	useLayoutEffect,
+	useMemo,
+	useState,
 } from "react";
 
 export type Breadcrumb = { label: string; href: string };
@@ -24,6 +25,8 @@ const BreadcrumbDataContext = createContext<BreadcrumbContextType>({
 	setBreadcrumbs: () => {},
 });
 
+const EMPTY_BREADCRUMBS: Breadcrumb[] = [];
+
 export function BreadcrumbDataProvider({ children }: { children: ReactNode }) {
 	const pathname = usePathname();
 	const [state, setState] = useState<{
@@ -34,7 +37,8 @@ export function BreadcrumbDataProvider({ children }: { children: ReactNode }) {
 		pathname: "",
 	});
 
-	const breadcrumbs = state.pathname === pathname ? state.breadcrumbs : [];
+	const breadcrumbs =
+		state.pathname === pathname ? state.breadcrumbs : EMPTY_BREADCRUMBS;
 
 	const setBreadcrumbs = useCallback(
 		(newBreadcrumbs: Breadcrumb[], forPathname: string) => {
@@ -43,21 +47,24 @@ export function BreadcrumbDataProvider({ children }: { children: ReactNode }) {
 		[],
 	);
 
+	const value = useMemo(
+		() => ({ breadcrumbs, pathname, setBreadcrumbs }),
+		[breadcrumbs, pathname, setBreadcrumbs],
+	);
+
 	return (
-		<BreadcrumbDataContext.Provider
-			value={{ breadcrumbs, pathname, setBreadcrumbs }}
-		>
+		<BreadcrumbDataContext.Provider value={value}>
 			{children}
 		</BreadcrumbDataContext.Provider>
 	);
 }
 
 export function useBreadcrumbs() {
-	return useContext(BreadcrumbDataContext).breadcrumbs;
+	return use(BreadcrumbDataContext).breadcrumbs;
 }
 
 export function SetBreadcrumbs({ items }: { items: Breadcrumb[] }) {
-	const { setBreadcrumbs, pathname } = useContext(BreadcrumbDataContext);
+	const { setBreadcrumbs, pathname } = use(BreadcrumbDataContext);
 
 	useLayoutEffect(() => {
 		setBreadcrumbs(items, pathname);

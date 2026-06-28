@@ -10,6 +10,10 @@ import {
 } from "@/db/schema";
 import type { HealthStats } from "@/db/types";
 import type {
+	ControlPlaneUpdateState,
+	ControlPlaneUpgradeState,
+} from "@/lib/control-plane-updates";
+import type {
 	EmailAlertsConfig,
 	SmtpConfig,
 	SmtpEncryption,
@@ -272,12 +276,16 @@ export async function getGlobalSettings() {
 		acmeEmail,
 		proxyDomain,
 		emailAlertsConfig,
+		controlPlaneUpdateState,
+		controlPlaneUpgradeState,
 	] = await Promise.all([
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<number>("build_timeout_minutes"),
 		getSetting<string>("acme_email"),
 		getSetting<string>("proxy_domain"),
 		getSetting<EmailAlertsConfig>("email_alerts_config"),
+		getSetting<ControlPlaneUpdateState>("control_plane_update_state"),
+		getSetting<ControlPlaneUpgradeState>("control_plane_upgrade_state"),
 	]);
 
 	return {
@@ -286,6 +294,8 @@ export async function getGlobalSettings() {
 		acmeEmail: acmeEmail ?? null,
 		proxyDomain: proxyDomain ?? null,
 		emailAlertsConfig: emailAlertsConfig ?? null,
+		controlPlaneUpdateState: controlPlaneUpdateState ?? null,
+		controlPlaneUpgradeState: controlPlaneUpgradeState ?? null,
 	};
 }
 

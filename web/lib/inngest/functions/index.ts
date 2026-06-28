@@ -4,6 +4,7 @@ export { buildWorkflow } from "./build-workflow";
 export {
 	certificateRenewal,
 	challengeCleanup,
+	controlPlaneUpdateCheck,
 	oldBackupsCleanup,
 	scheduledBackupsCheck,
 	scheduledDeploymentsCheck,

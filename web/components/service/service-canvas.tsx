@@ -345,7 +345,7 @@ function ServiceCard({
 										className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors.dot}`}
 									/>
 								</span>
-								<span className={`text-[13px] font-medium ${colors.text}`}>
+								<span className={`text-xs font-medium ${colors.text}`}>
 									{service.deployments.length > 0
 										? `${runningCount}/${service.deployments.length}`
 										: "Not deployed"}
@@ -361,7 +361,7 @@ function ServiceCard({
 									key={port.id}
 									className="border-l-2 border-sky-500 pl-2.5 py-0.5"
 								>
-									<div className="flex items-center gap-2 text-[13px] text-foreground">
+									<div className="flex items-center gap-2 text-xs text-foreground">
 										<Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 										<span className="truncate">{port.domain}</span>
 									</div>
@@ -374,7 +374,7 @@ function ServiceCard({
 										key={port.id}
 										className="border-l-2 border-violet-500 pl-2.5 py-0.5"
 									>
-										<div className="flex items-center gap-2 text-[13px] text-foreground font-mono">
+										<div className="flex items-center gap-2 text-xs text-foreground font-mono">
 											<Network className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 											<span className="truncate">
 												{port.protocol}://{proxyDomain}:{port.externalPort}
@@ -384,7 +384,7 @@ function ServiceCard({
 								))}
 							{hasInternalDns && (
 								<div className="border-l-2 border-slate-300 dark:border-slate-600 pl-2.5 py-0.5">
-									<div className="flex items-center gap-2 text-[13px] text-foreground">
+									<div className="flex items-center gap-2 text-xs text-foreground">
 										<Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 										<span className="truncate">
 											{service.hostname || service.name}.internal
@@ -404,7 +404,7 @@ function ServiceCard({
 								className="flex items-center gap-2.5 text-muted-foreground"
 							>
 								<HardDrive className="h-4 w-4 shrink-0" />
-								<span className="text-sm font-medium truncate">
+								<span className="text-xs font-medium truncate">
 									{volume.name}
 								</span>
 							</div>
@@ -586,7 +586,7 @@ export function ServiceCanvas({
 
 	const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
 	const [githubDialogOpen, setGithubDialogOpen] = useState(false);
-	const [canvasScale, setCanvasScale] = useState(1);
+	const [canvasScale, setCanvasScale] = useState(getCanvasScale);
 
 	const {
 		data: services,
@@ -604,7 +604,6 @@ export function ServiceCanvas({
 	useEffect(() => {
 		const updateCanvasScale = () => setCanvasScale(getCanvasScale());
 
-		updateCanvasScale();
 		window.addEventListener("resize", updateCanvasScale);
 
 		return () => window.removeEventListener("resize", updateCanvasScale);

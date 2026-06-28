@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useMemo, memo } from "react";
+import cronstrue from "cronstrue";
+import { Clock } from "lucide-react";
+import { memo, useMemo, useState } from "react";
+import { updateServiceSchedule } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Clock } from "lucide-react";
-import { updateServiceSchedule } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
-import cronstrue from "cronstrue";
 
 export const ScheduleSection = memo(function ScheduleSection({
 	service,
@@ -85,8 +85,11 @@ export const ScheduleSection = memo(function ScheduleSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Cron Expression</label>
+					<label htmlFor="deployment-schedule" className="text-sm font-medium">
+						Cron Expression
+					</label>
 					<Input
+						id="deployment-schedule"
 						placeholder="0 2 * * * (daily at 2am)"
 						value={schedule}
 						onChange={(e) => setSchedule(e.target.value)}
