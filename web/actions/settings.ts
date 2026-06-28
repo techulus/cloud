@@ -5,6 +5,11 @@ import isEmail from "validator/es/lib/isEmail";
 import { ZodError } from "zod";
 import { setSetting } from "@/db/queries";
 import { requireAuth } from "@/lib/auth";
+import {
+	checkAndPersistControlPlaneUpdate,
+	refreshControlPlaneUpgradeState,
+	startControlPlaneUpgrade,
+} from "@/lib/control-plane-updates";
 import { buildTimeoutSchema } from "@/lib/schemas";
 import {
 	type EmailAlertsConfig,
@@ -69,4 +74,25 @@ export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
 		}
 		throw error;
 	}
+}
+
+export async function checkControlPlaneUpdatesNow() {
+	await requireAuth();
+	const state = await checkAndPersistControlPlaneUpdate();
+	revalidatePath("/dashboard/settings");
+	return state;
+}
+
+export async function upgradeControlPlane(targetVersion: string) {
+	await requireAuth();
+	const state = await startControlPlaneUpgrade(targetVersion);
+	revalidatePath("/dashboard/settings");
+	return state;
+}
+
+export async function refreshControlPlaneUpgradeStatus() {
+	await requireAuth();
+	const state = await refreshControlPlaneUpgradeState();
+	revalidatePath("/dashboard/settings");
+	return state;
 }

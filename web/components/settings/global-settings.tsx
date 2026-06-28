@@ -1,10 +1,13 @@
 "use client";
 
 import {
+	ArrowUpCircle,
 	Clock,
+	ExternalLink,
 	Hammer,
 	Info,
 	Network,
+	RefreshCw,
 	Server,
 	Shield,
 } from "lucide-react";
@@ -13,14 +16,27 @@ import { useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
+	checkControlPlaneUpdatesNow,
+	refreshControlPlaneUpgradeStatus,
 	updateAcmeEmail,
 	updateBuildServers,
 	updateBuildTimeout,
 	updateProxyDomain,
+	upgradeControlPlane,
 } from "@/actions/settings";
 import { ApiKeySettings } from "@/components/settings/api-key-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@/components/ui/dialog";
 import {
 	Empty,
 	EmptyDescription,
@@ -32,6 +48,10 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Server as ServerType } from "@/db/types";
+import type {
+	ControlPlaneUpdateState,
+	ControlPlaneUpgradeState,
+} from "@/lib/control-plane-updates";
 import type { EmailAlertsConfig } from "@/lib/settings-keys";
 
 type Props = {
@@ -42,9 +62,40 @@ type Props = {
 		acmeEmail: string | null;
 		proxyDomain: string | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
+		controlPlaneUpdateState: ControlPlaneUpdateState | null;
+		controlPlaneUpgradeState: ControlPlaneUpgradeState | null;
 	};
 	appVersion: string | null;
 };
+
+function formatCheckedAt(value: string | null | undefined) {
+	if (!value) return "Never";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "Unknown";
+	return new Intl.DateTimeFormat(undefined, {
+		dateStyle: "medium",
+		timeStyle: "short",
+	}).format(date);
+}
+
+function buildUpgradeCommand(targetVersion: string) {
+	return `DEPLOY_DIR=/opt/techulus-cloud
+cd "$DEPLOY_DIR"
+COMPOSE_FILE=$(grep -E '^COMPOSE_FILE=' .env | cut -d= -f2- || true)
+if [ -z "$COMPOSE_FILE" ]; then
+  COMPOSE_FILE=compose.production.yml
+fi
+sudo cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
+sudo curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${targetVersion}/deployment/compose.production.yml" -o compose.production.yml
+sudo curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${targetVersion}/deployment/compose.postgres.yml" -o compose.postgres.yml
+if grep -q '^TECHULUS_CLOUD_VERSION=' .env; then
+  sudo sed -i.bak "s/^TECHULUS_CLOUD_VERSION=.*/TECHULUS_CLOUD_VERSION=${targetVersion}/" .env
+else
+  echo "TECHULUS_CLOUD_VERSION=${targetVersion}" | sudo tee -a .env >/dev/null
+fi
+sudo docker compose -f "$COMPOSE_FILE" pull
+sudo docker compose -f "$COMPOSE_FILE" up -d --remove-orphans`;
+}
 
 export function GlobalSettings({
 	servers,
@@ -68,6 +119,9 @@ export function GlobalSettings({
 	);
 	const [isSavingAcmeEmail, setIsSavingAcmeEmail] = useState(false);
 	const [isSavingProxyDomain, setIsSavingProxyDomain] = useState(false);
+	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
+	const [isRefreshingUpgrade, setIsRefreshingUpgrade] = useState(false);
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -143,6 +197,65 @@ export function GlobalSettings({
 		}
 	};
 
+	const handleCheckUpdates = async () => {
+		setIsCheckingUpdates(true);
+		try {
+			const state = await checkControlPlaneUpdatesNow();
+			if (state.error) {
+				toast.error(state.error);
+			} else if (state.updateAvailable && state.latestVersion) {
+				toast.success(`Update available: ${state.latestVersion}`);
+			} else {
+				toast.success("Control plane is up to date");
+			}
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to check updates",
+			);
+		} finally {
+			setIsCheckingUpdates(false);
+		}
+	};
+
+	const handleStartUpgrade = async (targetVersion: string) => {
+		setIsStartingUpgrade(true);
+		try {
+			await upgradeControlPlane(targetVersion);
+			toast.success("Control plane upgrade started");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to start upgrade",
+			);
+		} finally {
+			setIsStartingUpgrade(false);
+		}
+	};
+
+	const handleRefreshUpgradeStatus = async () => {
+		setIsRefreshingUpgrade(true);
+		try {
+			const state = await refreshControlPlaneUpgradeStatus();
+			if (state.status === "succeeded") {
+				toast.success("Upgrade completed");
+			} else if (state.status === "failed") {
+				toast.error(state.error ?? "Upgrade failed");
+			} else {
+				toast.info(`Upgrade status: ${state.status}`);
+			}
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Failed to refresh upgrade status",
+			);
+		} finally {
+			setIsRefreshingUpgrade(false);
+		}
+	};
+
 	const buildServersChanged =
 		buildServerIds.size !== initialSettings.buildServerIds.length ||
 		!initialSettings.buildServerIds.every((id) => buildServerIds.has(id));
@@ -153,6 +266,13 @@ export function GlobalSettings({
 	const acmeEmailChanged = acmeEmail !== (initialSettings.acmeEmail ?? "");
 	const proxyDomainChanged =
 		proxyDomain !== (initialSettings.proxyDomain ?? "");
+	const updateState = initialSettings.controlPlaneUpdateState;
+	const upgradeState = initialSettings.controlPlaneUpgradeState;
+	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
+	const upgradeCommand = updateState?.latestVersion
+		? buildUpgradeCommand(updateState.latestVersion)
+		: null;
+	const upgradeRunning = upgradeState?.status === "running";
 
 	if (servers.length === 0) {
 		return (
@@ -389,11 +509,173 @@ export function GlobalSettings({
 							<Info className="size-5 text-muted-foreground" />
 						</ItemMedia>
 						<ItemContent>
-							<ItemTitle>Version</ItemTitle>
+							<ItemTitle>Control Plane Updates</ItemTitle>
 						</ItemContent>
 					</Item>
-					<div className="p-4">
-						<p className="text-sm font-mono">{appVersion ?? "dev"}</p>
+					<div className="p-4 space-y-4">
+						<div className="grid gap-3 sm:grid-cols-3">
+							<div>
+								<p className="text-xs text-muted-foreground">Current version</p>
+								<p className="font-mono text-sm">{displayVersion}</p>
+							</div>
+							<div>
+								<p className="text-xs text-muted-foreground">Latest version</p>
+								<p className="font-mono text-sm">
+									{updateState?.latestVersion ?? "Not checked"}
+								</p>
+							</div>
+							<div>
+								<p className="text-xs text-muted-foreground">Last checked</p>
+								<p className="text-sm">
+									{formatCheckedAt(updateState?.checkedAt)}
+								</p>
+							</div>
+						</div>
+
+						{updateState?.channel === "rolling" && (
+							<div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+								This instance is running the rolling channel ({displayVersion}),
+								so release update prompts are disabled.
+							</div>
+						)}
+
+						{updateState?.channel === "unknown" && (
+							<div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+								This instance version is not a release tag, so update prompts
+								are disabled.
+							</div>
+						)}
+
+						{updateState?.error && (
+							<div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+								{updateState.error}
+							</div>
+						)}
+
+						{updateState?.updateAvailable && updateState.latestVersion && (
+							<div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+								<div className="flex items-center gap-2 font-medium">
+									<ArrowUpCircle className="size-4" />
+									Control plane update available: {displayVersion} →{" "}
+									{updateState.latestVersion}
+								</div>
+							</div>
+						)}
+
+						{upgradeState && upgradeState.status !== "idle" && (
+							<div className="rounded-md border p-3 text-sm">
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<div>
+										<p className="font-medium">
+											Upgrade status: {upgradeState.status}
+											{upgradeState.targetVersion
+												? ` (${upgradeState.targetVersion})`
+												: ""}
+										</p>
+										{upgradeState.error && (
+											<p className="text-destructive">{upgradeState.error}</p>
+										)}
+									</div>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={handleRefreshUpgradeStatus}
+										disabled={isRefreshingUpgrade}
+									>
+										{isRefreshingUpgrade ? "Refreshing..." : "Refresh status"}
+									</Button>
+								</div>
+								{upgradeState.logs.length > 0 && (
+									<code className="mt-3 block max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs font-mono text-muted-foreground">
+										{upgradeState.logs.slice(-20).join("\n")}
+									</code>
+								)}
+							</div>
+						)}
+
+						<div className="flex flex-wrap items-center gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={handleCheckUpdates}
+								disabled={isCheckingUpdates}
+							>
+								<RefreshCw
+									className={isCheckingUpdates ? "animate-spin" : ""}
+								/>
+								{isCheckingUpdates ? "Checking..." : "Check for updates"}
+							</Button>
+
+							{updateState?.releaseUrl && (
+								<Button
+									variant="outline"
+									render={
+										<a
+											href={updateState.releaseUrl}
+											target="_blank"
+											rel="noreferrer"
+										>
+											<ExternalLink />
+											Release notes
+										</a>
+									}
+								></Button>
+							)}
+
+							{updateState?.updateAvailable &&
+								updateState.latestVersion &&
+								upgradeCommand && (
+									<Dialog>
+										<DialogTrigger
+											render={
+												<Button variant="warning" disabled={upgradeRunning} />
+											}
+										>
+											Upgrade to {updateState.latestVersion}
+										</DialogTrigger>
+										<DialogContent className="sm:max-w-2xl">
+											<DialogHeader>
+												<DialogTitle>Upgrade control plane</DialogTitle>
+												<DialogDescription>
+													Run this command on the host that runs
+													/opt/techulus-cloud. It updates the compose files from
+													the release tag, pulls images, and restarts the stack.
+												</DialogDescription>
+											</DialogHeader>
+											<code className="block max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs font-mono">
+												{upgradeCommand}
+											</code>
+											<div className="text-xs text-muted-foreground">
+												The one-click upgrader runs the same flow through an
+												internal updater service. Back up your database before
+												upgrades that may include schema changes. Rollback after
+												migrations may require restoring the database backup.
+											</div>
+											<DialogFooter showCloseButton>
+												<Button
+													type="button"
+													variant="warning"
+													onClick={() => {
+														if (updateState.latestVersion) {
+															handleStartUpgrade(updateState.latestVersion);
+														}
+													}}
+													disabled={isStartingUpgrade || upgradeRunning}
+												>
+													{isStartingUpgrade ? "Starting..." : "Start upgrade"}
+												</Button>
+											</DialogFooter>
+										</DialogContent>
+									</Dialog>
+								)}
+
+							{updateState &&
+								!updateState.updateAvailable &&
+								!updateState.error && (
+									<Badge variant="secondary">Up to date</Badge>
+								)}
+						</div>
 					</div>
 				</div>
 			</TabsContent>
