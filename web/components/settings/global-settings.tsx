@@ -73,30 +73,14 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
 	timeStyle: "short",
 });
 
+const CONTROL_PLANE_UPGRADE_DOCS_URL =
+	"https://docs.techulus.com/installation#manual-upgrades";
+
 function formatCheckedAt(value: string | null | undefined) {
 	if (!value) return "Never";
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "Unknown";
 	return dateTimeFormatter.format(date);
-}
-
-function buildUpgradeCommand(targetVersion: string) {
-	return `DEPLOY_DIR=/opt/techulus-cloud
-cd "$DEPLOY_DIR"
-COMPOSE_FILE=$(grep -E '^COMPOSE_FILE=' .env | cut -d= -f2- || true)
-if [ -z "$COMPOSE_FILE" ]; then
-  COMPOSE_FILE=compose.production.yml
-fi
-sudo cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
-sudo curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${targetVersion}/deployment/compose.production.yml" -o compose.production.yml
-sudo curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${targetVersion}/deployment/compose.postgres.yml" -o compose.postgres.yml
-if grep -q '^TECHULUS_CLOUD_VERSION=' .env; then
-  sudo sed -i.bak "s/^TECHULUS_CLOUD_VERSION=.*/TECHULUS_CLOUD_VERSION=${targetVersion}/" .env
-else
-  echo "TECHULUS_CLOUD_VERSION=${targetVersion}" | sudo tee -a .env >/dev/null
-fi
-sudo docker compose -f "$COMPOSE_FILE" pull
-sudo docker compose -f "$COMPOSE_FILE" up -d --remove-orphans`;
 }
 
 export function GlobalSettings({
@@ -271,9 +255,6 @@ export function GlobalSettings({
 	const updateState = initialSettings.controlPlaneUpdateState;
 	const upgradeState = initialSettings.controlPlaneUpgradeState;
 	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
-	const upgradeCommand = updateState?.latestVersion
-		? buildUpgradeCommand(updateState.latestVersion)
-		: null;
 	const upgradeRunning = upgradeState?.status === "running";
 
 	if (servers.length === 0) {
@@ -625,52 +606,56 @@ export function GlobalSettings({
 								></Button>
 							)}
 
-							{updateState?.updateAvailable &&
-								updateState.latestVersion &&
-								upgradeCommand && (
-									<Dialog>
-										<DialogTrigger
-											render={
-												<Button variant="warning" disabled={upgradeRunning} />
-											}
-										>
-											Upgrade to {updateState.latestVersion}
-										</DialogTrigger>
-										<DialogContent className="sm:max-w-2xl">
-											<DialogHeader>
-												<DialogTitle>Upgrade control plane</DialogTitle>
-												<DialogDescription>
-													Run this command on the host that runs
-													/opt/techulus-cloud. It updates the compose files from
-													the release tag, pulls images, and restarts the stack.
-												</DialogDescription>
-											</DialogHeader>
-											<code className="block max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs font-mono">
-												{upgradeCommand}
-											</code>
-											<div className="text-xs text-muted-foreground">
-												The one-click upgrader runs the same flow through an
-												internal updater service. Back up your database before
-												upgrades that may include schema changes. Rollback after
-												migrations may require restoring the database backup.
-											</div>
-											<DialogFooter showCloseButton>
-												<Button
-													type="button"
-													variant="warning"
-													onClick={() => {
-														if (updateState.latestVersion) {
-															handleStartUpgrade(updateState.latestVersion);
-														}
-													}}
-													disabled={isStartingUpgrade || upgradeRunning}
-												>
-													{isStartingUpgrade ? "Starting..." : "Start upgrade"}
-												</Button>
-											</DialogFooter>
-										</DialogContent>
-									</Dialog>
-								)}
+							{updateState?.updateAvailable && updateState.latestVersion && (
+								<Dialog>
+									<DialogTrigger
+										render={
+											<Button variant="warning" disabled={upgradeRunning} />
+										}
+									>
+										Upgrade to {updateState.latestVersion}
+									</DialogTrigger>
+									<DialogContent className="sm:max-w-2xl">
+										<DialogHeader>
+											<DialogTitle>Upgrade control plane</DialogTitle>
+											<DialogDescription>
+												This starts the internal updater service, which backs up
+												the environment file, refreshes the release compose
+												files, pulls images, and restarts the stack.
+											</DialogDescription>
+										</DialogHeader>
+										<div className="text-xs text-muted-foreground">
+											The updater creates a database backup before running the
+											new version. Rollback after migrations may require
+											restoring that backup. Prefer the one-click upgrade; use
+											manual upgrade steps only if the updater cannot run. See{" "}
+											<a
+												href={CONTROL_PLANE_UPGRADE_DOCS_URL}
+												target="_blank"
+												rel="noreferrer"
+												className="underline underline-offset-2"
+											>
+												the installation docs
+											</a>
+											.
+										</div>
+										<DialogFooter showCloseButton>
+											<Button
+												type="button"
+												variant="warning"
+												onClick={() => {
+													if (updateState.latestVersion) {
+														handleStartUpgrade(updateState.latestVersion);
+													}
+												}}
+												disabled={isStartingUpgrade || upgradeRunning}
+											>
+												{isStartingUpgrade ? "Starting..." : "Start upgrade"}
+											</Button>
+										</DialogFooter>
+									</DialogContent>
+								</Dialog>
+							)}
 
 							{updateState &&
 								!updateState.updateAvailable &&

@@ -104,8 +104,9 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
 	return response.json();
 }
 
-export async function checkControlPlaneUpdate(): Promise<ControlPlaneUpdateState> {
-	const currentVersion = getCurrentControlPlaneVersion();
+export async function checkControlPlaneUpdate(
+	currentVersion = getCurrentControlPlaneVersion(),
+): Promise<ControlPlaneUpdateState> {
 	const checkedAt = new Date().toISOString();
 	const channel = getChannel(currentVersion);
 
@@ -150,12 +151,14 @@ export async function checkControlPlaneUpdate(): Promise<ControlPlaneUpdateState
 	}
 }
 
-export async function checkAndPersistControlPlaneUpdate() {
+export async function checkAndPersistControlPlaneUpdate(
+	currentVersion?: string,
+) {
 	const [previousState, nextState] = await Promise.all([
 		getSetting<ControlPlaneUpdateState>(
 			SETTING_KEYS.CONTROL_PLANE_UPDATE_STATE,
 		),
-		checkControlPlaneUpdate(),
+		checkControlPlaneUpdate(currentVersion),
 	]);
 	const state =
 		nextState.error && previousState
@@ -245,5 +248,17 @@ export async function startControlPlaneUpgrade(targetVersion: string) {
 export async function refreshControlPlaneUpgradeState() {
 	const upgradeState = await fetchUpdaterStatus();
 	await setSetting(SETTING_KEYS.CONTROL_PLANE_UPGRADE_STATE, upgradeState);
+
+	if (upgradeState.status === "succeeded" && upgradeState.targetVersion) {
+		try {
+			await checkAndPersistControlPlaneUpdate(upgradeState.targetVersion);
+		} catch (error) {
+			console.error(
+				"[control-plane-updates] failed to refresh update state after upgrade",
+				error,
+			);
+		}
+	}
+
 	return upgradeState;
 }
