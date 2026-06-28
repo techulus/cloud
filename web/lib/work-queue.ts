@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, rollouts, servers, workQueue } from "@/db/schema";
+import { deployments, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { ingestRolloutLog } from "@/lib/victoria-logs";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * 60 * 1000;
@@ -201,11 +200,6 @@ async function runWorkItemCompletionSideEffects(
 	item: WorkQueue,
 	result: WorkItemResult,
 ): Promise<void> {
-	if ((item.type === "deploy" || item.type === "reconcile") && item.payload) {
-		await runDeploymentWorkCompletionSideEffects(item, result);
-		return;
-	}
-
 	if (item.type === "force_cleanup" && item.payload) {
 		await runForceCleanupCompletionSideEffects(item, result);
 		return;
@@ -244,79 +238,6 @@ async function runWorkItemCompletionSideEffects(
 	} catch (error) {
 		console.error("[work-queue] failed to run completion side effects:", error);
 	}
-}
-
-async function runDeploymentWorkCompletionSideEffects(
-	item: WorkQueue,
-	result: WorkItemResult,
-): Promise<void> {
-	if (result.status !== "failed") return;
-
-	try {
-		const payload = JSON.parse(item.payload) as {
-			deploymentId?: string;
-		};
-
-		if (!payload.deploymentId) return;
-
-		const deployment = await db
-			.select({
-				id: deployments.id,
-				serviceId: deployments.serviceId,
-				rolloutId: deployments.rolloutId,
-				rolloutStatus: rollouts.status,
-				serverName: servers.name,
-			})
-			.from(deployments)
-			.innerJoin(servers, eq(deployments.serverId, servers.id))
-			.innerJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
-			.where(eq(deployments.id, payload.deploymentId))
-			.then((rows) => rows[0]);
-
-		if (
-			!deployment ||
-			!deployment.rolloutId ||
-			deployment.rolloutStatus !== "in_progress"
-		) {
-			return;
-		}
-
-		await db
-			.update(deployments)
-			.set({
-				status: "failed",
-				failedStage: "deploying",
-			})
-			.where(eq(deployments.id, deployment.id));
-
-		await ingestRolloutLog(
-			deployment.rolloutId,
-			deployment.serviceId,
-			"deploying",
-			`Deployment failed on server ${deployment.serverName}: ${formatWorkItemError(result.error)}`,
-		);
-
-		await inngest.send(
-			inngestEvents.resourceStatusChanged.create({
-				type: "deployment",
-				id: deployment.id,
-				parentType: "rollout",
-				parentId: deployment.rolloutId,
-			}),
-		);
-	} catch (error) {
-		console.error(
-			"[work-queue] failed to run deployment completion side effects:",
-			error,
-		);
-	}
-}
-
-function formatWorkItemError(error: string | undefined): string {
-	const fallback = "Agent failed to apply the deployment";
-	if (!error?.trim()) return fallback;
-
-	return error.trim().replace(/\s+/g, " ").slice(0, 1000);
 }
 
 async function runForceCleanupCompletionSideEffects(

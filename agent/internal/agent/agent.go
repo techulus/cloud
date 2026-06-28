@@ -59,6 +59,8 @@ type Agent struct {
 	workMutex                   sync.Mutex
 	activeWorkItem              *agenthttp.WorkQueueItem
 	pendingWorkResults          []agenthttp.CompletedWorkItem
+	deploymentErrorMutex        sync.Mutex
+	pendingDeploymentErrors     []agenthttp.DeploymentError
 	Client                      *agenthttp.Client
 	Reconciler                  *reconcile.Reconciler
 	Config                      *Config

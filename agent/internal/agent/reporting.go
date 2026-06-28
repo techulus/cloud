@@ -90,7 +90,42 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		}
 	}
 
+	report.DeploymentErrors = a.SnapshotDeploymentErrors()
+
 	return report
+}
+
+func (a *Agent) RecordDeploymentError(deploymentID string, err error) {
+	if deploymentID == "" || err == nil {
+		return
+	}
+
+	a.deploymentErrorMutex.Lock()
+	defer a.deploymentErrorMutex.Unlock()
+
+	a.pendingDeploymentErrors = append(a.pendingDeploymentErrors, agenthttp.DeploymentError{
+		DeploymentID: deploymentID,
+		Message:      err.Error(),
+	})
+}
+
+func (a *Agent) SnapshotDeploymentErrors() []agenthttp.DeploymentError {
+	a.deploymentErrorMutex.Lock()
+	defer a.deploymentErrorMutex.Unlock()
+
+	return append([]agenthttp.DeploymentError(nil), a.pendingDeploymentErrors...)
+}
+
+func (a *Agent) ClearReportedDeploymentErrors(count int) {
+	a.deploymentErrorMutex.Lock()
+	defer a.deploymentErrorMutex.Unlock()
+
+	if count >= len(a.pendingDeploymentErrors) {
+		a.pendingDeploymentErrors = nil
+		return
+	}
+
+	a.pendingDeploymentErrors = a.pendingDeploymentErrors[count:]
 }
 
 func (a *Agent) CollectLogs() {

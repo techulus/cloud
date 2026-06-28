@@ -148,8 +148,11 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
-	if err := a.applyReconcileAction(actions[0]); err != nil {
+	action := actions[0]
+	if err := a.applyReconcileAction(action); err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
+		a.RecordDeploymentError(action.DeploymentID, err)
+		a.RequestStatusReport("reconcile failed")
 		a.transitionToIdle()
 		return
 	}
