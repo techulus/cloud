@@ -107,12 +107,14 @@ func (a *Agent) RequestStatusReport(reason string) {
 
 func (a *Agent) reportStatus(reason string) {
 	report := a.BuildStatusReport(true)
+	reportedDeploymentErrorCount := len(report.DeploymentErrors)
 	completed, active := a.SnapshotWorkStatus()
 	response, err := a.Client.ReportStatus(report, completed, active)
 	if err != nil {
 		log.Printf("[status] failed to report (%s): %v", reason, err)
 		return
 	}
+	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
 	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)

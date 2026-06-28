@@ -30,6 +30,11 @@ type ContainerStatus = {
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy";
 };
 
+type DeploymentError = {
+	deploymentId: string;
+	message: string;
+};
+
 function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
@@ -61,6 +66,75 @@ async function completeTargetMigration(serviceId: string) {
 		);
 }
 
+async function applyDeploymentErrors(
+	serverId: string,
+	errors: DeploymentError[],
+) {
+	for (const error of errors) {
+		if (!error.deploymentId || !error.message?.trim()) continue;
+
+		const deployment = await db
+			.select({
+				id: deployments.id,
+				serviceId: deployments.serviceId,
+				rolloutId: deployments.rolloutId,
+				rolloutStatus: rollouts.status,
+				serverName: servers.name,
+			})
+			.from(deployments)
+			.innerJoin(servers, eq(deployments.serverId, servers.id))
+			.innerJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
+			.where(
+				and(
+					eq(deployments.id, error.deploymentId),
+					eq(deployments.serverId, serverId),
+				),
+			)
+			.then((rows) => rows[0]);
+
+		if (
+			!deployment ||
+			!deployment.rolloutId ||
+			deployment.rolloutStatus !== "in_progress"
+		) {
+			continue;
+		}
+
+		const updated = await db
+			.update(deployments)
+			.set({ status: "failed", failedStage: "deploying" })
+			.where(
+				and(
+					eq(deployments.id, deployment.id),
+					inArray(deployments.status, ["pending", "pulling", "starting"]),
+				),
+			)
+			.returning({ id: deployments.id });
+
+		if (updated.length === 0) continue;
+
+		await ingestRolloutLog(
+			deployment.rolloutId,
+			deployment.serviceId,
+			"deploying",
+			`Deployment failed on server ${deployment.serverName}: ${formatDeploymentError(error.message)}`,
+		);
+
+		await inngest.send(
+			inngestEvents.resourceStatusChanged.create({
+				type: "deployment",
+				id: deployment.id,
+				parentType: "rollout",
+				parentId: deployment.rolloutId,
+			}),
+		);
+	}
+}
+
+function formatDeploymentError(message: string): string {
+	return message.trim().replace(/\s+/g, " ").slice(0, 1000);
+}
+
 export type StatusReport = {
 	resources?: {
 		cpuCores: number;
@@ -75,6 +149,7 @@ export type StatusReport = {
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
+	deploymentErrors?: DeploymentError[];
 };
 
 export async function applyStatusReport(
@@ -125,6 +200,8 @@ export async function applyStatusReport(
 		serverLogName ??= await getServerLogName(serverId);
 		return serverLogName;
 	};
+
+	await applyDeploymentErrors(serverId, report.deploymentErrors || []);
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)
