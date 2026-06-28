@@ -73,6 +73,40 @@ Production hosts should also cap Docker container logs. The installer creates
 already configured, keep your existing daemon settings and add equivalent log
 rotation manually.
 
+## Manual upgrades
+
+Use the one-click upgrade flow in **Settings** when possible. If the updater
+cannot run, update the deployment from the host manually.
+
+Back up your `.env` file and database before upgrading. Then fetch the Compose
+files for the release, update `TECHULUS_CLOUD_VERSION`, pull images, and restart
+the stack:
+
+```bash
+cd /opt/techulus-cloud
+TARGET_VERSION=vX.Y.Z
+COMPOSE_FILE=$(grep -E '^COMPOSE_FILE=' .env | cut -d= -f2- || true)
+if [ -z "$COMPOSE_FILE" ]; then
+  COMPOSE_FILE=compose.production.yml
+fi
+
+cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
+curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${TARGET_VERSION}/deployment/compose.production.yml" -o compose.production.yml
+curl -fsSL "https://raw.githubusercontent.com/techulus/cloud/${TARGET_VERSION}/deployment/compose.postgres.yml" -o compose.postgres.yml
+
+if grep -q '^TECHULUS_CLOUD_VERSION=' .env; then
+  sed -i.bak "s/^TECHULUS_CLOUD_VERSION=.*/TECHULUS_CLOUD_VERSION=${TARGET_VERSION}/" .env
+else
+  echo "TECHULUS_CLOUD_VERSION=${TARGET_VERSION}" >> .env
+fi
+
+docker compose -f "$COMPOSE_FILE" pull
+docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+```
+
+Rollback after migrations may require restoring the database backup before you
+restart older images.
+
 The Compose files include container health checks for visibility. Plain Docker
 Compose reports unhealthy containers but does not restart them automatically, so
 use the common commands below when investigating a self-hosted service.
