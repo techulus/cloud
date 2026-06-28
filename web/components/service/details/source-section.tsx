@@ -58,10 +58,10 @@ export const SourceSection = memo(function SourceSection({
 	const [isEditing, setIsEditing] = useState(false);
 	const [editMode, setEditMode] = useState<"github" | "image">("image");
 	const [isSaving, setIsSaving] = useState(false);
-	const [repoUrl, setRepoUrl] = useState(service.githubRepoUrl || "");
-	const [branch, setBranch] = useState(service.githubBranch || "main");
-	const [rootDir, setRootDir] = useState(service.githubRootDir || "");
-	const [image, setImage] = useState(service.image);
+	const [repoUrl, setRepoUrl] = useState("");
+	const [branch, setBranch] = useState("main");
+	const [rootDir, setRootDir] = useState("");
+	const [image, setImage] = useState("");
 	const [imageError, setImageError] = useState<string | null>(null);
 
 	const { registry, repository, tag } = parseImageInfo(service.image);

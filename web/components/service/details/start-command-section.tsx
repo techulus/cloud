@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, memo } from "react";
+import { Terminal } from "lucide-react";
+import { memo, useState } from "react";
+import { updateServiceStartCommand } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Terminal } from "lucide-react";
-import { updateServiceStartCommand } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const StartCommandSection = memo(function StartCommandSection({
@@ -60,8 +60,11 @@ export const StartCommandSection = memo(function StartCommandSection({
 			</Item>
 			<div className="p-4 space-y-4">
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Command</label>
+					<label htmlFor="start-command" className="text-sm font-medium">
+						Command
+					</label>
 					<Input
+						id="start-command"
 						placeholder="npm run start"
 						value={command}
 						onChange={(e) => setCommand(e.target.value)}
