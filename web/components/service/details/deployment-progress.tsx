@@ -21,6 +21,7 @@ type StageInfo = {
 
 const STAGES: StageInfo[] = [
 	{ id: "migrating", label: "Migrating" },
+	{ id: "queued", label: "Queued" },
 	{ id: "deploying", label: "Starting" },
 	{ id: "health_check", label: "Checking Health" },
 	{ id: "dns_sync", label: "Routing traffic" },
@@ -103,10 +104,16 @@ export function getBarState(
 
 	const latestRollout = service.rollouts?.[0];
 	const activeRollout =
-		latestRollout?.status === "in_progress" ? latestRollout : undefined;
+		latestRollout?.status === "queued" ||
+		latestRollout?.status === "in_progress"
+			? latestRollout
+			: undefined;
 
 	if (activeRollout) {
-		const currentStage = activeRollout.currentStage || "deploying";
+		const currentStage =
+			activeRollout.status === "queued"
+				? "queued"
+				: activeRollout.currentStage || "deploying";
 		return {
 			mode: "deploying",
 			stage: currentStage,

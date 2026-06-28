@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
@@ -29,6 +29,11 @@ const PREFLIGHT_FAILURE_MESSAGES = [
 
 const PREFLIGHT_FAILURE_PREFIXES = ["Server "];
 
+const ROLLOUT_TURN_WAIT_ATTEMPTS = 360;
+const ROLLOUT_TURN_WAIT_INTERVAL = "10s";
+
+type RolloutTurnState = "acquired" | "waiting" | "terminal";
+
 function getPreflightFailureReason(error: unknown) {
 	if (!(error instanceof Error)) return null;
 
@@ -47,6 +52,63 @@ function getPreflightFailureReason(error: unknown) {
 	return null;
 }
 
+async function acquireRolloutTurn(
+	rolloutId: string,
+	serviceId: string,
+): Promise<RolloutTurnState> {
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+
+		const rollout = await tx
+			.select({ status: rollouts.status, createdAt: rollouts.createdAt })
+			.from(rollouts)
+			.where(eq(rollouts.id, rolloutId))
+			.then((rows) => rows[0]);
+
+		if (!rollout) {
+			throw new Error("Rollout not found");
+		}
+
+		if (rollout.status !== "queued") {
+			return rollout.status === "in_progress" ? "acquired" : "terminal";
+		}
+
+		const blockingRollout = await tx
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				or(
+					and(
+						eq(rollouts.serviceId, serviceId),
+						eq(rollouts.status, "in_progress"),
+						ne(rollouts.id, rolloutId),
+					),
+					and(
+						eq(rollouts.serviceId, serviceId),
+						eq(rollouts.status, "queued"),
+						lt(rollouts.createdAt, rollout.createdAt),
+					),
+				),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+
+		if (blockingRollout) {
+			return "waiting";
+		}
+
+		await tx
+			.update(rollouts)
+			.set({
+				status: "in_progress",
+				currentStage: "preparing",
+			})
+			.where(eq(rollouts.id, rolloutId));
+
+		return "acquired";
+	});
+}
+
 export const rolloutWorkflow = inngest.createFunction(
 	{
 		id: "rollout-workflow",
@@ -55,6 +117,27 @@ export const rolloutWorkflow = inngest.createFunction(
 		cancelOn: [
 			{ event: inngestEvents.rolloutCancelled, match: "data.rolloutId" },
 		],
+		onFailure: async ({ event }) => {
+			const { rolloutId } = event.data.event.data as {
+				rolloutId?: string;
+			};
+
+			if (!rolloutId) return;
+
+			await db
+				.update(rollouts)
+				.set({
+					status: "failed",
+					currentStage: "workflow_failed",
+					completedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(rollouts.id, rolloutId),
+						inArray(rollouts.status, ["queued", "in_progress"]),
+					),
+				);
+		},
 	},
 	async ({ event, step }) => {
 		const { rolloutId, serviceId } = event.data;
@@ -66,11 +149,51 @@ export const rolloutWorkflow = inngest.createFunction(
 			}
 		});
 
-		await step.run("mark-rollout-in-progress", async () => {
-			await db
-				.update(rollouts)
-				.set({ status: "in_progress", currentStage: "preparing" })
-				.where(eq(rollouts.id, rolloutId));
+		let acquiredTurn = false;
+		for (let attempt = 0; attempt < ROLLOUT_TURN_WAIT_ATTEMPTS; attempt++) {
+			const turnState = await step.run(
+				`acquire-rollout-turn-${attempt}`,
+				async () => {
+					return acquireRolloutTurn(rolloutId, serviceId);
+				},
+			);
+
+			if (turnState === "terminal") {
+				return { status: "cancelled", rolloutId };
+			}
+
+			if (turnState === "acquired") {
+				acquiredTurn = true;
+				break;
+			}
+
+			await step.sleep(
+				`wait-for-active-rollout-${attempt}`,
+				ROLLOUT_TURN_WAIT_INTERVAL,
+			);
+		}
+
+		if (!acquiredTurn) {
+			await step.run("mark-rollout-queue-timeout", async () => {
+				await db
+					.update(rollouts)
+					.set({
+						status: "failed",
+						currentStage: "queue_timeout",
+						completedAt: new Date(),
+					})
+					.where(eq(rollouts.id, rolloutId));
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"queue_timeout",
+					"Timed out waiting for previous rollout to finish",
+				);
+			});
+			return { status: "failed", rolloutId, reason: "queue_timeout" };
+		}
+
+		await step.run("log-rollout-started", async () => {
 			await ingestRolloutLog(
 				rolloutId,
 				serviceId,

@@ -192,7 +192,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 				.where(
 					and(
 						eq(rollouts.serviceId, service.id),
-						eq(rollouts.status, "in_progress"),
+						inArray(rollouts.status, ["queued", "in_progress"]),
 					),
 				)
 				.limit(1);
@@ -233,36 +233,13 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 	console.log("[scheduler] finished checking scheduled deployments");
 }
 
-const STALE_ITEM_THRESHOLD_MS = 15 * 60 * 1000;
 const OLD_ITEM_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
 
 export async function cleanupStaleItems(): Promise<void> {
-	const staleThreshold = new Date(Date.now() - STALE_ITEM_THRESHOLD_MS);
 	const workItemLeaseThreshold = new Date(
 		Date.now() - WORK_QUEUE_LEASE_DURATION_MS,
 	);
 	const oldThreshold = new Date(Date.now() - OLD_ITEM_THRESHOLD_MS);
-
-	const staleRollouts = await db
-		.update(rollouts)
-		.set({
-			status: "failed",
-			currentStage: "timeout",
-			completedAt: new Date(),
-		})
-		.where(
-			and(
-				eq(rollouts.status, "in_progress"),
-				lt(rollouts.createdAt, staleThreshold),
-			),
-		)
-		.returning({ id: rollouts.id });
-
-	if (staleRollouts.length > 0) {
-		console.log(
-			`[scheduler] cleaned up ${staleRollouts.length} stale rollouts`,
-		);
-	}
 
 	// Pending work is intentionally retained so commands can run when an agent
 	// reconnects. Only exhausted processing attempts are failed here.
