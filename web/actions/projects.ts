@@ -1194,32 +1194,38 @@ export async function restartService(serviceId: string) {
 
 export async function abortRollout(serviceId: string) {
 	await requireAuth();
-	const updatedRollouts = await db
+	const activeRollouts = await db
+		.select({ id: rollouts.id, status: rollouts.status })
+		.from(rollouts)
+		.where(
+			and(
+				eq(rollouts.serviceId, serviceId),
+				inArray(rollouts.status, ["queued", "in_progress"]),
+			),
+		);
+
+	if (activeRollouts.length === 0) {
+		return { success: false, error: "No in-progress rollout found" };
+	}
+
+	const activeRolloutIds = activeRollouts.map((rollout) => rollout.id);
+
+	await db
 		.update(rollouts)
 		.set({
 			status: "failed",
 			currentStage: "aborted",
 			completedAt: new Date(),
 		})
-		.where(
-			and(
-				eq(rollouts.serviceId, serviceId),
-				eq(rollouts.status, "in_progress"),
-			),
-		)
-		.returning();
+		.where(inArray(rollouts.id, activeRolloutIds));
 
-	const inProgressRollout = updatedRollouts[0];
-
-	if (!inProgressRollout) {
-		return { success: false, error: "No in-progress rollout found" };
+	for (const rolloutId of activeRolloutIds) {
+		await inngest.send(
+			inngestEvents.rolloutCancelled.create({
+				rolloutId,
+			}),
+		);
 	}
-
-	await inngest.send(
-		inngestEvents.rolloutCancelled.create({
-			rolloutId: inProgressRollout.id,
-		}),
-	);
 
 	await db
 		.update(deployments)
@@ -1231,10 +1237,13 @@ export async function abortRollout(serviceId: string) {
 			),
 		);
 
-	const rolloutDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.rolloutId, inProgressRollout.id));
+	const rolloutDeployments =
+		activeRolloutIds.length > 0
+			? await db
+					.select()
+					.from(deployments)
+					.where(inArray(deployments.rolloutId, activeRolloutIds))
+			: [];
 
 	const serverContainers = new Map<string, string[]>();
 
@@ -1259,20 +1268,25 @@ export async function abortRollout(serviceId: string) {
 			.where(eq(deploymentPorts.deploymentId, dep.id));
 	}
 
-	await db
-		.delete(deployments)
-		.where(eq(deployments.rolloutId, inProgressRollout.id));
+	if (activeRolloutIds.length > 0) {
+		await db
+			.delete(deployments)
+			.where(inArray(deployments.rolloutId, activeRolloutIds));
+	}
 
-	const pendingWork = await db
-		.select({ id: workQueue.id, payload: workQueue.payload })
-		.from(workQueue)
-		.where(
-			and(
-				eq(workQueue.status, "pending"),
-				inArray(workQueue.type, ["deploy", "reconcile"]),
-				inArray(workQueue.serverId, [...serverContainers.keys()]),
-			),
-		);
+	const pendingWork =
+		serverContainers.size > 0
+			? await db
+					.select({ id: workQueue.id, payload: workQueue.payload })
+					.from(workQueue)
+					.where(
+						and(
+							eq(workQueue.status, "pending"),
+							inArray(workQueue.type, ["deploy", "reconcile"]),
+							inArray(workQueue.serverId, [...serverContainers.keys()]),
+						),
+					)
+			: [];
 
 	const rolloutDeploymentIds = new Set(rolloutDeployments.map((d) => d.id));
 	const workToDelete = pendingWork.filter((w) => {

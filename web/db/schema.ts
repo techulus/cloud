@@ -492,10 +492,10 @@ export const rollouts = pgTable(
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
 		status: text("status", {
-			enum: ["in_progress", "completed", "failed", "rolled_back"],
+			enum: ["queued", "in_progress", "completed", "failed", "rolled_back"],
 		})
 			.notNull()
-			.default("in_progress"),
+			.default("queued"),
 		currentStage: text("current_stage"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()

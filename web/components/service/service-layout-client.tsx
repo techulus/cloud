@@ -11,8 +11,8 @@ import {
 } from "react";
 import useSWR from "swr";
 import type { ServiceWithDetails as Service } from "@/db/types";
-import type { ConfigChange } from "@/lib/service-config";
 import { fetcher } from "@/lib/fetcher";
+import type { ConfigChange } from "@/lib/service-config";
 import {
 	buildCurrentConfig,
 	diffConfigs,
@@ -68,6 +68,7 @@ export function ServiceLayoutClient({
 			const isActive =
 				(svc.latestBuild != null &&
 					ACTIVE_BUILD_STATUSES.includes(svc.latestBuild.status)) ||
+				svc.rollouts?.[0]?.status === "queued" ||
 				svc.rollouts?.[0]?.status === "in_progress" ||
 				!!svc.migrationStatus ||
 				svc.deployments.some((d) =>
