@@ -28,17 +28,13 @@ function getAuthErrorResponse(error: unknown) {
 	);
 }
 
-async function getRequestSession(request: Request) {
-	return auth.api.getSession({
-		headers: request.headers,
-	});
-}
-
 export async function requireRequestSession(request: Request) {
-	let session: Awaited<ReturnType<typeof getRequestSession>>;
+	let session: Awaited<ReturnType<typeof auth.api.getSession>>;
 
 	try {
-		session = await getRequestSession(request);
+		session = await auth.api.getSession({
+			headers: request.headers,
+		});
 	} catch (error) {
 		const response = getAuthErrorResponse(error);
 		if (response) {

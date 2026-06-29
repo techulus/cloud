@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	canAdminister,
-	canRead,
-	canWrite,
 	createInviteToken,
 	hashInviteToken,
 	isInvitableMemberRole,
@@ -21,14 +18,6 @@ describe("member roles", () => {
 		expect(isInvitableMemberRole("developer")).toBe(true);
 		expect(isInvitableMemberRole("reader")).toBe(true);
 		expect(isInvitableMemberRole("admin")).toBe(false);
-	});
-
-	it("maps role capabilities", () => {
-		expect(canRead("reader")).toBe(true);
-		expect(canWrite("reader")).toBe(false);
-		expect(canWrite("developer")).toBe(true);
-		expect(canAdminister("developer")).toBe(false);
-		expect(canAdminister("admin")).toBe(true);
 	});
 });
 

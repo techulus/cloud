@@ -49,16 +49,16 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 	timeStyle: "short",
 });
 
+const roleBadgeVariants = {
+	admin: "default",
+	developer: "secondary",
+	reader: "outline",
+} as const;
+
 function formatDate(value: string | Date) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return "Unknown";
 	return dateFormatter.format(date);
-}
-
-function getRoleVariant(role: MemberRole) {
-	if (role === "admin") return "default";
-	if (role === "developer") return "secondary";
-	return "outline";
 }
 
 export function MemberSettings({ initialMembers, initialInvitations }: Props) {
@@ -213,7 +213,7 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 							<div className="min-w-0">
 								<div className="flex flex-wrap items-center gap-2">
 									<p className="font-medium">{member.name}</p>
-									<Badge variant={getRoleVariant(member.role)}>
+									<Badge variant={roleBadgeVariants[member.role]}>
 										{member.role}
 									</Badge>
 								</div>

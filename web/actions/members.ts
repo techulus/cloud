@@ -45,26 +45,12 @@ type CreateUserInput = {
 	};
 };
 
-async function createAuthUser(input: CreateUserInput) {
-	return (
-		auth.api.createUser as (data: CreateUserInput) => Promise<CreateUserResult>
-	)(input);
-}
+const createAuthUser = auth.api.createUser as (
+	data: CreateUserInput,
+) => Promise<CreateUserResult>;
 
 function isExpired(expiresAt: Date) {
 	return expiresAt.getTime() <= Date.now();
-}
-
-async function markExpiredInvitations() {
-	await db
-		.update(memberInvitations)
-		.set({ status: "expired" })
-		.where(
-			and(
-				eq(memberInvitations.status, "pending"),
-				lte(memberInvitations.expiresAt, new Date()),
-			),
-		);
 }
 
 async function requireAdminSession() {
@@ -79,7 +65,15 @@ async function requireAdminSession() {
 export async function listMembers() {
 	await requireAdminSession();
 
-	await markExpiredInvitations();
+	await db
+		.update(memberInvitations)
+		.set({ status: "expired" })
+		.where(
+			and(
+				eq(memberInvitations.status, "pending"),
+				lte(memberInvitations.expiresAt, new Date()),
+			),
+		);
 
 	const [members, invitations] = await Promise.all([
 		db

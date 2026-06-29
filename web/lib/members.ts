@@ -38,18 +38,6 @@ export function isInvitableMemberRole(
 	);
 }
 
-export function canRead(role: MemberRole) {
-	return role === "admin" || role === "developer" || role === "reader";
-}
-
-export function canWrite(role: MemberRole) {
-	return role === "admin" || role === "developer";
-}
-
-export function canAdminister(role: MemberRole) {
-	return role === "admin";
-}
-
 export function hasAnyRole(role: MemberRole, allowedRoles: MemberRole[]) {
 	return allowedRoles.includes(role);
 }
