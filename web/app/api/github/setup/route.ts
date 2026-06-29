@@ -64,12 +64,6 @@ export async function GET(request: NextRequest) {
 		);
 	}
 
-	if (!sessionResult.session) {
-		const loginUrl = new URL("/auth/login", request.url);
-		loginUrl.searchParams.set("redirect", request.url);
-		return NextResponse.redirect(loginUrl, 303);
-	}
-
 	const searchParams = request.nextUrl.searchParams;
 	const installationIdParam = searchParams.get("installation_id");
 	const setupAction = searchParams.get("setup_action");
@@ -127,12 +121,6 @@ export async function POST(request: NextRequest) {
 	}
 
 	const session = sessionResult.session;
-
-	if (!session) {
-		const loginUrl = new URL("/auth/login", request.url);
-		loginUrl.searchParams.set("redirect", request.url);
-		return NextResponse.redirect(loginUrl, 303);
-	}
 
 	const formData = await request.formData();
 	const installationIdParam = formData.get("installation_id");

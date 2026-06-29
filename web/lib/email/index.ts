@@ -71,10 +71,14 @@ export async function sendMemberInviteEmail(
 	options: MemberInviteEmailOptions,
 ): Promise<boolean> {
 	const config = getSmtpConfig();
-	const baseUrl = getAppBaseUrl();
+	let baseUrl = getAppBaseUrl();
 
-	if (!config?.enabled || !baseUrl) {
+	if (!config?.enabled) {
 		return false;
+	}
+
+	if (!baseUrl) {
+		baseUrl = new URL(options.inviteUrl).origin;
 	}
 
 	await sendEmail(config, {

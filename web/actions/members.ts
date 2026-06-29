@@ -1,18 +1,19 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { hashPassword } from "better-auth/crypto";
 import { and, asc, desc, eq, gt, isNull, lte, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import isEmail from "validator/es/lib/isEmail";
 import { z } from "zod";
 import { db } from "@/db";
-import { memberInvitations, user } from "@/db/schema";
+import { account, memberInvitations, user } from "@/db/schema";
 import type { InvitableMemberRole } from "@/db/types";
 import { auth, requireAdminRole } from "@/lib/auth";
 import { sendMemberInviteEmail } from "@/lib/email";
 import {
 	createInviteToken,
-	getInviteUrl,
 	hashInviteToken,
 	isInvitableMemberRole,
 } from "@/lib/members";
@@ -162,7 +163,24 @@ export async function inviteMember(input: {
 		);
 
 	const token = createInviteToken();
-	const inviteUrl = getInviteUrl(token);
+	let baseUrl = process.env.APP_URL?.replace(/\/$/, "");
+	if (!baseUrl) {
+		const requestHeaders = await headers();
+		const host =
+			requestHeaders.get("x-forwarded-host")?.split(",")[0]?.trim() ??
+			requestHeaders.get("host");
+		const protocol =
+			requestHeaders.get("x-forwarded-proto")?.split(",")[0]?.trim() ?? "https";
+		if (host) {
+			baseUrl = `${protocol}://${host}`;
+		}
+	}
+
+	if (!baseUrl) {
+		throw new Error("APP_URL is required to create member invitations");
+	}
+
+	const inviteUrl = `${baseUrl}/invite/${encodeURIComponent(token)}`;
 	const expiresAt = new Date(Date.now() + INVITE_EXPIRY_MS);
 
 	await db.insert(memberInvitations).values({
@@ -296,6 +314,53 @@ export async function acceptInvite(input: {
 			},
 		});
 	} catch (error) {
+		const [createdUser] = await db
+			.select({ id: user.id })
+			.from(user)
+			.where(eq(user.email, claimedInvite.email))
+			.limit(1);
+
+		if (createdUser) {
+			const now = new Date();
+			const passwordHash = await hashPassword(parsed.password);
+			const [credentialAccount] = await db
+				.select({ id: account.id })
+				.from(account)
+				.where(
+					and(
+						eq(account.userId, createdUser.id),
+						eq(account.providerId, "credential"),
+					),
+				)
+				.limit(1);
+
+			if (credentialAccount) {
+				await db
+					.update(account)
+					.set({ password: passwordHash, updatedAt: now })
+					.where(eq(account.id, credentialAccount.id));
+			} else {
+				await db.insert(account).values({
+					id: randomUUID(),
+					accountId: createdUser.id,
+					providerId: "credential",
+					userId: createdUser.id,
+					password: passwordHash,
+					createdAt: now,
+					updatedAt: now,
+				});
+			}
+
+			await db
+				.update(memberInvitations)
+				.set({
+					acceptedByUserId: createdUser.id,
+				})
+				.where(eq(memberInvitations.id, claimedInvite.id));
+
+			return { success: true };
+		}
+
 		await db
 			.update(memberInvitations)
 			.set({

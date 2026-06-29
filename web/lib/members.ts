@@ -80,9 +80,3 @@ export function createInviteToken() {
 export function hashInviteToken(token: string) {
 	return createHash("sha256").update(token).digest("hex");
 }
-
-export function getInviteUrl(token: string) {
-	const baseUrl = process.env.APP_URL?.replace(/\/$/, "");
-	const path = `/invite/${encodeURIComponent(token)}`;
-	return baseUrl ? `${baseUrl}${path}` : path;
-}

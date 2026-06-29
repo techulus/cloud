@@ -2,20 +2,10 @@ import { listMembers } from "@/actions/members";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { GlobalSettings } from "@/components/settings/global-settings";
 import { getGlobalSettings, listServers } from "@/db/queries";
-import { requireAuth } from "@/lib/auth";
-import { getUserRole } from "@/lib/members";
+import { AdminNotConfiguredError } from "@/lib/members";
 
 async function getMembersData() {
 	try {
-		const session = await requireAuth();
-		if (!session) {
-			return null;
-		}
-		const role = await getUserRole(session.user.id);
-		if (role !== "admin") {
-			return null;
-		}
-
 		const data = await listMembers();
 		return {
 			members: data.members.map((member) => ({
@@ -28,8 +18,16 @@ async function getMembersData() {
 				createdAt: invitation.createdAt.toISOString(),
 			})),
 		};
-	} catch {
-		return null;
+	} catch (error) {
+		if (
+			error instanceof AdminNotConfiguredError ||
+			(error instanceof Error &&
+				(error.message === "Unauthorized" || error.message === "Forbidden"))
+		) {
+			return null;
+		}
+
+		throw error;
 	}
 }
 
