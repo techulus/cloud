@@ -388,7 +388,7 @@ func (a *App) logsCommand() *cobra.Command {
 			if tail < 1 || tail > 1000 {
 				return errors.New("log line count must be between 1 and 1000")
 			}
-			tailChanged := cmd.Flags().Changed("tail") || cmd.Flags().Changed("n")
+			tailChanged := cmd.Flags().Changed("tail")
 			if tailChanged && !cmd.Flags().Changed("follow") {
 				follow = false
 			}
@@ -497,9 +497,16 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
+	expiresAt := a.Now().Add(time.Duration(deviceCode.ExpiresIn) * time.Second)
 	var accessToken string
 	for accessToken == "" {
+		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
+			return errors.New("device authorization expired")
+		}
 		a.Sleep(interval)
+		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
+			return errors.New("device authorization expired")
+		}
 		var tokenResponse deviceTokenResponse
 		status, err := api.JSONStatus(ctx, a.HTTPClient, http.MethodPost, host+"/api/auth/device/token", map[string]string{
 			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
@@ -605,30 +612,17 @@ func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.M
 	if after == "" {
 		after = a.Now().UTC().Format(time.RFC3339Nano)
 	}
-	seen := map[string]bool{}
-	for _, log := range result.Logs {
-		seen[getLogKey(log)] = true
-	}
 	for {
 		a.Sleep(logPollInterval)
 		next, err := fetchLogs(ctx, client, value, defaultLogTail, after)
 		if err != nil {
 			return err
 		}
-		var unseen []serviceLog
-		for _, log := range next.Logs {
-			if !seen[getLogKey(log)] {
-				unseen = append(unseen, log)
-			}
-		}
-		if len(unseen) == 0 {
+		if len(next.Logs) == 0 {
 			continue
 		}
-		printLogs(a.Out, unseen)
-		for _, log := range unseen {
-			seen[getLogKey(log)] = true
-		}
-		if cursor := getLogCursor(unseen); cursor != "" {
+		printLogs(a.Out, next.Logs)
+		if cursor := getLogCursor(next.Logs); cursor != "" {
 			after = cursor
 		}
 	}
@@ -737,10 +731,6 @@ func getLogCursor(logs []serviceLog) string {
 		return logs[len(logs)-1].Timestamp
 	}
 	return ""
-}
-
-func getLogKey(log serviceLog) string {
-	return fmt.Sprintf("%s:%s:%s:%s", log.Timestamp, log.Stream, log.DeploymentID, log.Message)
 }
 
 func selectFromList[T any](

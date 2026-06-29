@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"techulus/cloud-cli/internal/auth"
+	"techulus/cloud-cli/internal/manifest"
 )
 
 func TestInitCreatesManifest(t *testing.T) {
@@ -125,6 +127,46 @@ func TestAuthLoginDeviceFlow(t *testing.T) {
 	}
 }
 
+func TestAuthLoginStopsAtDeviceExpiry(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/device/code":
+			w.Write([]byte(`{"device_code":"device","user_code":"ABCD","verification_uri":"https://verify","expires_in":2,"interval":1}`))
+		case "/api/auth/device/token":
+			polls++
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"authorization_pending"}`))
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Unix(0, 0)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp("test", strings.NewReader(""), &stdout, &stderr)
+	app.HTTPClient = server.Client()
+	app.Now = func() time.Time { return now }
+	app.Sleep = func(duration time.Duration) { now = now.Add(duration) }
+	app.GetCWD = func() (string, error) { return tmp, nil }
+	cmd := app.rootCommand()
+	cmd.SetArgs([]string{"auth", "login", "--host", server.URL})
+	cmd.SetIn(app.In)
+	cmd.SetOut(app.Out)
+	cmd.SetErr(app.Err)
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "device authorization expired") {
+		t.Fatalf("auth login error = %v", err)
+	}
+	if polls != 1 {
+		t.Fatalf("polls = %d, want 1", polls)
+	}
+}
+
 func TestLinkInteractiveFlow(t *testing.T) {
 	tmp := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +191,41 @@ func TestLinkInteractiveFlow(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "techulus.yml")); err != nil {
 		t.Fatalf("manifest not written: %v", err)
+	}
+}
+
+func TestRunLogsFollowPrintsDuplicateReturnedLines(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestManifest(t, tmp)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/logs" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		requests++
+		switch requests {
+		case 1:
+			w.Write([]byte(`{"loggingEnabled":true,"logs":[]}`))
+		case 2:
+			w.Write([]byte(`{"loggingEnabled":true,"logs":[{"deploymentId":"d","stream":"stdout","message":"same","timestamp":"2026-01-01T00:00:00Z"},{"deploymentId":"d","stream":"stdout","message":"same","timestamp":"2026-01-01T00:00:00Z"}]}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"stop"}`))
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp("test", strings.NewReader(""), &stdout, &bytes.Buffer{})
+	app.HTTPClient = server.Client()
+	app.Sleep = func(time.Duration) {}
+	app.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+	err := app.runLogs(context.Background(), &auth.Config{Host: server.URL, APIKey: "secret"}, testManifest(), 100, true)
+	if err == nil || !strings.Contains(err.Error(), "stop") {
+		t.Fatalf("runLogs error = %v", err)
+	}
+	if count := strings.Count(stdout.String(), " same\n"); count != 2 {
+		t.Fatalf("printed duplicate count = %d, stdout = %s", count, stdout.String())
 	}
 }
 
@@ -191,6 +268,20 @@ service:
 `
 	if err := os.WriteFile(filepath.Join(dir, "techulus.yml"), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+func testManifest() manifest.Manifest {
+	return manifest.Manifest{
+		APIVersion:  "v1",
+		Project:     "app",
+		Environment: "production",
+		Service: manifest.Service{
+			Name:     "web",
+			Source:   manifest.Source{Type: "image", Image: "nginx:1.27"},
+			Replicas: manifest.Replicas{Count: 1},
+			Ports:    []manifest.Port{},
+		},
 	}
 }
 
