@@ -25,13 +25,22 @@ From the `deployment/` directory, create the first admin user after the
 database migration completes:
 
 ```bash
-docker compose -f compose.production.yml run --rm web node scripts/create-admin.mjs admin@example.com
+docker compose -f compose.production.yml run --rm web node scripts/admin.mjs --create admin@example.com
 ```
 
 The command runs inside the Docker image and prints a random password once.
 Store it, sign in with that admin account, then invite developers and readers
 from Settings. The app blocks authenticated role-gated access until one admin
 user exists.
+
+To reset the existing admin password, run:
+
+```bash
+docker compose -f compose.production.yml run --rm web node scripts/admin.mjs --reset-password admin@example.com
+```
+
+The reset command refuses to run unless the provided email is the only admin
+user.
 
 Production hosts should cap Docker container logs in `/etc/docker/daemon.json`.
 For release deployments, prefer versioned or digest-pinned image references over
@@ -99,7 +108,8 @@ Escape `$` as `$$` in the `.env` file.
 docker compose -f compose.production.yml ps
 docker compose -f compose.production.yml logs -f
 docker compose -f compose.production.yml logs migrate
-docker compose -f compose.production.yml run --rm web node scripts/create-admin.mjs admin@example.com
+docker compose -f compose.production.yml run --rm web node scripts/admin.mjs --create admin@example.com
+docker compose -f compose.production.yml run --rm web node scripts/admin.mjs --reset-password admin@example.com
 docker compose -f compose.production.yml down --remove-orphans
 docker compose -f compose.production.yml up -d --build --remove-orphans
 ```

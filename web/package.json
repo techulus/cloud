@@ -8,7 +8,9 @@
     "start": "next start",
     "test": "vitest run",
     "lint": "next lint",
-    "admin:create": "node scripts/create-admin.mjs",
+    "admin": "node scripts/admin.mjs",
+    "admin:create": "node scripts/admin.mjs --create",
+    "admin:reset-password": "node scripts/admin.mjs --reset-password",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
