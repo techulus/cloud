@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
 import { ArrowUpCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { upgradeAgent } from "@/actions/servers";
+import { Button } from "@/components/ui/button";
 import {
 	Dialog,
+	DialogClose,
 	DialogContent,
 	DialogDescription,
 	DialogFooter,
@@ -12,17 +17,49 @@ import {
 } from "@/components/ui/dialog";
 
 interface AgentUpdateNudgeProps {
+	serverId: string;
 	currentVersion: string;
 	latestVersion: string;
-	appUrl: string;
+	serverStatus: "pending" | "online" | "offline" | "unknown";
+	upgradeStatus: "idle" | "queued" | "upgrading" | "succeeded" | "failed";
+	upgradeTargetVersion: string | null;
+	upgradeError: string | null;
 }
 
 export function AgentUpdateNudge({
+	serverId,
 	currentVersion,
 	latestVersion,
-	appUrl,
+	serverStatus,
+	upgradeStatus,
+	upgradeTargetVersion,
+	upgradeError,
 }: AgentUpdateNudgeProps) {
 	const [open, setOpen] = useState(false);
+	const [isPending, startTransition] = useTransition();
+	const router = useRouter();
+	const isTargetUpgradeActive =
+		upgradeTargetVersion === latestVersion &&
+		(upgradeStatus === "queued" || upgradeStatus === "upgrading");
+	const disabled =
+		serverStatus !== "online" || isTargetUpgradeActive || isPending;
+
+	const handleUpgrade = () => {
+		startTransition(async () => {
+			try {
+				await upgradeAgent(serverId, latestVersion);
+				toast.success("Agent upgrade queued");
+				setOpen(false);
+				router.refresh();
+			} catch (error) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: "Failed to queue agent upgrade",
+				);
+			}
+		});
+	};
 
 	return (
 		<>
@@ -45,17 +82,46 @@ export function AgentUpdateNudge({
 					<DialogHeader>
 						<DialogTitle>Update Agent</DialogTitle>
 						<DialogDescription>
-							Run the following command on your server to update the agent from{" "}
+							Queue an upgrade for this server from{" "}
 							<span className="font-mono">{currentVersion}</span> to{" "}
 							<span className="font-mono">{latestVersion}</span>.
 						</DialogDescription>
 					</DialogHeader>
 
-					<code className="block rounded-lg bg-muted p-3 text-sm font-mono break-all">
-						sudo bash -c &quot;$(curl -fsSL {appUrl}/update.sh)&quot;
-					</code>
+					<div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+						The control plane will send a signed work item to the agent. The
+						agent downloads the release binary, verifies its checksum, and
+						restarts itself after installation.
+					</div>
 
-					<DialogFooter showCloseButton />
+					{isTargetUpgradeActive && (
+						<p className="text-sm text-muted-foreground">
+							Upgrade is already {upgradeStatus} for this version.
+						</p>
+					)}
+					{upgradeStatus === "failed" && upgradeError && (
+						<p className="text-sm text-destructive">
+							Last failure: {upgradeError}
+						</p>
+					)}
+					{serverStatus !== "online" && (
+						<p className="text-sm text-destructive">
+							Server must be online before an upgrade can be queued.
+						</p>
+					)}
+
+					<DialogFooter>
+						<DialogClose render={<Button variant="outline" />}>
+							Cancel
+						</DialogClose>
+						<Button onClick={handleUpgrade} disabled={disabled}>
+							{isPending
+								? "Queueing..."
+								: isTargetUpgradeActive
+									? "Upgrade queued"
+									: "Queue upgrade"}
+						</Button>
+					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 		</>

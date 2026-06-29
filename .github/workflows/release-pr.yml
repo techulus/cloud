@@ -1,0 +1,205 @@
+name: Release PR
+
+on:
+  push:
+    branches:
+      - main
+      - release
+  pull_request:
+    types:
+      - closed
+    branches:
+      - release
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump to use for the next release PR
+        type: choice
+        default: minor
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  AUTOMATION_BRANCH: automation/release
+  RELEASE_BASE: release
+  RELEASE_HEAD: main
+  RELEASE_LABEL: release-pr
+
+jobs:
+  maintain-release-pr:
+    name: Maintain release PR
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release'))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-pr-maintain
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create or update release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUMP_KIND: ${{ github.event.inputs.bump || 'minor' }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$RELEASE_HEAD" "$RELEASE_BASE" --tags
+
+          commits_ahead=$(git rev-list --count "origin/$RELEASE_BASE..origin/$RELEASE_HEAD")
+          existing_pr=$(gh pr list \
+            --base "$RELEASE_BASE" \
+            --head "${{ github.repository_owner }}:$AUTOMATION_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ "$commits_ahead" -eq 0 ]; then
+            echo "No commits from $RELEASE_HEAD to release."
+            if [ -n "$existing_pr" ]; then
+              gh pr close "$existing_pr" \
+                --comment "Closing because there are no unreleased commits from $RELEASE_HEAD." \
+                --delete-branch
+            fi
+            exit 0
+          fi
+
+          latest_tag=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          if [ -z "$latest_tag" ]; then
+            latest_tag="v0.0.0"
+          fi
+
+          version_without_prefix="${latest_tag#v}"
+          IFS=. read -r major minor patch <<EOF
+          $version_without_prefix
+          EOF
+
+          case "$BUMP_KIND" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+            *)
+              echo "Unsupported bump kind: $BUMP_KIND" >&2
+              exit 1
+              ;;
+          esac
+
+          next_version="v${major}.${minor}.${patch}"
+          echo "Preparing $next_version from latest tag $latest_tag."
+
+          gh label create "$RELEASE_LABEL" \
+            --color "0e8a16" \
+            --description "Automated release PR" \
+            --force
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$AUTOMATION_BRANCH" "origin/$RELEASE_HEAD"
+
+          printf '%s\n' "$next_version" > VERSION
+          git add VERSION
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: prepare release $next_version"
+          fi
+
+          git push --force origin "$AUTOMATION_BRANCH"
+
+          body=$(cat <<EOF
+          Automated release PR.
+
+          Version: $next_version
+          Base: $RELEASE_BASE
+          Source: $RELEASE_HEAD
+
+          Merging this PR will tag the merge commit as $next_version and dispatch the release workflow.
+          EOF
+          )
+
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --title "Release $next_version" \
+              --body "$body" \
+              --add-label "$RELEASE_LABEL"
+          else
+            gh pr create \
+              --base "$RELEASE_BASE" \
+              --head "$AUTOMATION_BRANCH" \
+              --title "Release $next_version" \
+              --body "$body" \
+              --label "$RELEASE_LABEL" \
+              --draft
+          fi
+
+  tag-merged-release-pr:
+    name: Tag merged release PR
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'release' &&
+      github.event.pull_request.head.ref == 'automation/release'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-tag-${{ github.event.pull_request.merge_commit_sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag merge commit and dispatch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$RELEASE_BASE" --tags
+
+          if [ -z "$MERGE_SHA" ]; then
+            echo "Merged PR does not have a merge_commit_sha." >&2
+            exit 1
+          fi
+
+          version=$(git show "$MERGE_SHA:VERSION" | tr -d '[:space:]')
+          if ! echo "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid VERSION at $MERGE_SHA: $version" >&2
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "Tag $version already exists; not tagging again."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$version" "$MERGE_SHA" -m "Release $version"
+          git push origin "refs/tags/$version"
+
+          gh workflow run release.yml --ref "$version"

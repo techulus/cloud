@@ -2,9 +2,11 @@
 
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { enqueueAgentUpgrade } from "@/lib/agent-upgrades";
 import { requireAuth } from "@/lib/auth";
 import { nameSchema } from "@/lib/schemas";
 import { getZodErrorMessage } from "@/lib/utils";
@@ -65,4 +67,12 @@ export async function updateServerName(id: string, name: string) {
 		}
 		throw error;
 	}
+}
+
+export async function upgradeAgent(serverId: string, targetVersion: string) {
+	await requireAuth();
+	const result = await enqueueAgentUpgrade(serverId, targetVersion);
+	revalidatePath("/dashboard/servers");
+	revalidatePath(`/dashboard/servers/${serverId}`);
+	return result;
 }

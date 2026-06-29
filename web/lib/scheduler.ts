@@ -234,6 +234,45 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 }
 
 const OLD_ITEM_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
+const AGENT_UPGRADE_TIMEOUT_MS = 5 * 60 * 1000;
+
+export async function failTimedOutAgentUpgrades(): Promise<void> {
+	const timeoutThreshold = new Date(Date.now() - AGENT_UPGRADE_TIMEOUT_MS);
+
+	const timedOut = await db
+		.update(servers)
+		.set({
+			agentUpgradeStatus: "failed",
+			agentUpgradeError: "Agent did not report the target version in time",
+		})
+		.where(
+			and(
+				eq(servers.agentUpgradeStatus, "upgrading"),
+				lt(servers.agentUpgradeStartedAt, timeoutThreshold),
+				sql`(${servers.agentHealth}->>'version') IS DISTINCT FROM ${servers.agentUpgradeTargetVersion}`,
+			),
+		)
+		.returning({ id: servers.id });
+
+	if (timedOut.length > 0) {
+		await db
+			.update(workQueue)
+			.set({ status: "failed" })
+			.where(
+				and(
+					inArray(
+						workQueue.serverId,
+						timedOut.map((server) => server.id),
+					),
+					eq(workQueue.type, "upgrade_agent"),
+					inArray(workQueue.status, ["pending", "processing"]),
+				),
+			);
+		console.log(
+			`[scheduler] marked ${timedOut.length} agent upgrade(s) timed out`,
+		);
+	}
+}
 
 export async function cleanupStaleItems(): Promise<void> {
 	const workItemLeaseThreshold = new Date(

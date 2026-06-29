@@ -2,6 +2,7 @@ export { backupWorkflow } from "./backup-workflow";
 export { buildTriggerWorkflow } from "./build-trigger-workflow";
 export { buildWorkflow } from "./build-workflow";
 export {
+	agentUpgradeTimeoutCheck,
 	certificateRenewal,
 	challengeCleanup,
 	controlPlaneUpdateCheck,

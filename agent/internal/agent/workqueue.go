@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	agenthttp "techulus/cloud-agent/internal/http"
@@ -84,16 +86,21 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 
 	status := "completed"
 	errorMsg := ""
+	restartAfterReport := false
 	if err := a.ProcessWorkItem(item); err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-		log.Printf("[work-queue] item %s failed: %v", Truncate(item.ID, 8), err)
+		if errors.Is(err, errAgentUpgradeRestartNeeded) {
+			restartAfterReport = true
+		} else {
+			status = "failed"
+			errorMsg = err.Error()
+			log.Printf("[work-queue] item %s failed: %v", Truncate(item.ID, 8), err)
+		}
 	} else {
 		log.Printf("[work-queue] item %s completed", Truncate(item.ID, 8))
 	}
 
 	a.workMutex.Lock()
-	if a.activeWorkItem != nil && a.activeWorkItem.ID == item.ID && a.activeWorkItem.Attempt == item.Attempt {
+	if !restartAfterReport && a.activeWorkItem != nil && a.activeWorkItem.ID == item.ID && a.activeWorkItem.Attempt == item.Attempt {
 		a.activeWorkItem = nil
 	}
 	a.pendingWorkResults = append(a.pendingWorkResults, agenthttp.CompletedWorkItem{
@@ -105,6 +112,11 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	a.workMutex.Unlock()
 
 	a.RequestStatusReport("work item " + status)
+	if restartAfterReport {
+		a.reportStatus("agent upgrade completed")
+		log.Printf("[upgrade] exiting so systemd restarts the upgraded agent")
+		os.Exit(0)
+	}
 }
 
 func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
@@ -128,6 +140,8 @@ func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
 		return a.ProcessRestoreVolume(item)
 	case "create_manifest":
 		return a.ProcessCreateManifest(item)
+	case "upgrade_agent":
+		return a.ProcessAgentUpgrade(item)
 	default:
 		return fmt.Errorf("unknown work item type: %s", item.Type)
 	}

@@ -9,6 +9,7 @@ import {
 	rollouts,
 	servers,
 	services,
+	workQueue,
 } from "@/db/schema";
 import {
 	AUTOHEAL_MAX_RECREATES,
@@ -160,6 +161,7 @@ export async function applyStatusReport(
 		lastHeartbeat: new Date(),
 		status: "online",
 	};
+	let completedAgentUpgradeTarget: string | null = null;
 
 	if (report.resources) {
 		if (report.resources.cpuCores !== undefined) {
@@ -191,9 +193,40 @@ export async function applyStatusReport(
 	}
 	if (report.agentHealth) {
 		updateData.agentHealth = report.agentHealth;
+
+		const [server] = await db
+			.select({
+				agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
+				agentUpgradeStatus: servers.agentUpgradeStatus,
+			})
+			.from(servers)
+			.where(eq(servers.id, serverId))
+			.limit(1);
+
+		if (
+			server?.agentUpgradeTargetVersion === report.agentHealth.version &&
+			server.agentUpgradeStatus !== "succeeded" &&
+			server.agentUpgradeStatus !== "idle"
+		) {
+			updateData.agentUpgradeStatus = "succeeded";
+			updateData.agentUpgradeError = null;
+			completedAgentUpgradeTarget = report.agentHealth.version;
+		}
 	}
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
+	if (completedAgentUpgradeTarget) {
+		await db
+			.update(workQueue)
+			.set({ status: "completed" })
+			.where(
+				and(
+					eq(workQueue.serverId, serverId),
+					eq(workQueue.type, "upgrade_agent"),
+					inArray(workQueue.status, ["pending", "processing"]),
+				),
+			);
+	}
 
 	let serverLogName: string | undefined;
 	const getCurrentServerLogName = async () => {
