@@ -21,6 +21,16 @@ Edit `.env` with your values, then:
 docker compose -f compose.production.yml up -d --build --remove-orphans
 ```
 
+Create the first admin user after the database migration completes:
+
+```bash
+docker compose -f compose.production.yml run --rm web node scripts/create-admin.mjs admin@example.com
+```
+
+The command prints a random password once. Store it, sign in with that
+admin account, then invite developers and readers from Settings. The app blocks
+authenticated role-gated access until one admin user exists.
+
 Production hosts should cap Docker container logs in `/etc/docker/daemon.json`.
 For release deployments, prefer versioned or digest-pinned image references over
 mutable tags such as `latest` or `tip`.

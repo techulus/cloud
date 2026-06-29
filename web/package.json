@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "vitest run",
     "lint": "next lint",
+    "admin:create": "node scripts/create-admin.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

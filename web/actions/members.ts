@@ -67,8 +67,17 @@ async function markExpiredInvitations() {
 		);
 }
 
+async function requireAdminSession() {
+	const session = await requireAdminRole();
+	if (!session) {
+		throw new Error("Unauthorized");
+	}
+
+	return session;
+}
+
 export async function listMembers() {
-	await requireAdminRole();
+	await requireAdminSession();
 
 	await markExpiredInvitations();
 
@@ -133,10 +142,7 @@ export async function inviteMember(input: {
 	email: string;
 	role: InvitableMemberRole;
 }) {
-	const session = await requireAdminRole();
-	if (!session) {
-		throw new Error("Unauthorized");
-	}
+	const session = await requireAdminSession();
 
 	const parsed = inviteMemberSchema.parse(input);
 	const email = parsed.email.toLowerCase();
@@ -187,7 +193,7 @@ export async function inviteMember(input: {
 }
 
 export async function revokeInvitation(invitationId: string) {
-	await requireAdminRole();
+	await requireAdminSession();
 
 	await db
 		.update(memberInvitations)
@@ -207,7 +213,7 @@ export async function updateMemberRole(
 	userId: string,
 	role: InvitableMemberRole,
 ) {
-	await requireAdminRole();
+	await requireAdminSession();
 
 	if (!isInvitableMemberRole(role)) {
 		throw new Error("Invalid role");
@@ -223,7 +229,7 @@ export async function updateMemberRole(
 }
 
 export async function removeMember(userId: string) {
-	await requireAdminRole();
+	await requireAdminSession();
 
 	await db.delete(user).where(and(eq(user.id, userId), ne(user.role, "admin")));
 

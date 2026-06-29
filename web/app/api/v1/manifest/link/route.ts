@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
-import { requireRequestSession } from "@/lib/api-auth";
+import { requireRequestRole } from "@/lib/api-auth";
 import { exportManifestForLinkedService } from "@/lib/cli-service";
 
 const bodySchema = z.object({
@@ -9,7 +9,11 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
-	const sessionResult = await requireRequestSession(request);
+	const sessionResult = await requireRequestRole(request, [
+		"admin",
+		"developer",
+		"reader",
+	]);
 	if (!sessionResult.ok) {
 		return sessionResult.response;
 	}
@@ -29,7 +33,10 @@ export async function POST(request: Request) {
 		return Response.json(result);
 	} catch (error) {
 		return Response.json(
-			{ error: error instanceof Error ? error.message : "Failed to link service" },
+			{
+				error:
+					error instanceof Error ? error.message : "Failed to link service",
+			},
 			{ status: 400 },
 		);
 	}

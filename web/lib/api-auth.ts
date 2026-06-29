@@ -1,6 +1,10 @@
 import type { MemberRole } from "@/db/types";
 import { auth } from "@/lib/auth";
-import { getUserRole, hasAnyRole } from "@/lib/members";
+import {
+	AdminNotConfiguredError,
+	getUserRole,
+	hasAnyRole,
+} from "@/lib/members";
 
 function getAuthErrorResponse(error: unknown) {
 	if (!(error instanceof Error)) {
@@ -72,7 +76,23 @@ export async function requireRequestRole(
 		return sessionResult;
 	}
 
-	const role = await getUserRole(sessionResult.session.user.id);
+	let role: MemberRole | null;
+	try {
+		role = await getUserRole(sessionResult.session.user.id);
+	} catch (error) {
+		if (error instanceof AdminNotConfiguredError) {
+			return {
+				ok: false as const,
+				response: Response.json(
+					{ message: error.message, code: error.code },
+					{ status: 503 },
+				),
+			};
+		}
+
+		throw error;
+	}
+
 	if (!role || !hasAnyRole(role, allowedRoles)) {
 		return {
 			ok: false as const,

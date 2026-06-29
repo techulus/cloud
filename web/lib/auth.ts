@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, deviceAuthorization } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
-import { adminAc, userAc } from "better-auth/plugins/admin/access";
+import { userAc } from "better-auth/plugins/admin/access";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -42,7 +42,7 @@ export const auth = betterAuth({
 			defaultRole: "reader",
 			adminRoles: ["admin"],
 			roles: {
-				admin: adminAc,
+				admin: userAc,
 				developer: userAc,
 				reader: userAc,
 			},
