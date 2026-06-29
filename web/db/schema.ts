@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
@@ -208,6 +208,13 @@ export type AgentHealth = {
 	uptimeSecs: number;
 };
 
+export type AgentUpgradeStatus =
+	| "idle"
+	| "queued"
+	| "upgrading"
+	| "succeeded"
+	| "failed";
+
 export const servers = pgTable("servers", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -229,6 +236,16 @@ export const servers = pgTable("servers", {
 	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
 	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
 	agentHealth: jsonb("agent_health").$type<AgentHealth>(),
+	agentUpgradeTargetVersion: text("agent_upgrade_target_version"),
+	agentUpgradeStatus: text("agent_upgrade_status", {
+		enum: ["idle", "queued", "upgrading", "succeeded", "failed"],
+	})
+		.notNull()
+		.default("idle"),
+	agentUpgradeStartedAt: timestamp("agent_upgrade_started_at", {
+		withTimezone: true,
+	}),
+	agentUpgradeError: text("agent_upgrade_error"),
 	agentToken: text("agent_token"),
 	tokenCreatedAt: timestamp("token_created_at", { withTimezone: true }),
 	tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),
@@ -538,6 +555,7 @@ export const workQueue = pgTable(
 				"backup_volume",
 				"restore_volume",
 				"create_manifest",
+				"upgrade_agent",
 			],
 		}).notNull(),
 		payload: text("payload").notNull(),
@@ -554,6 +572,11 @@ export const workQueue = pgTable(
 	},
 	(table) => [
 		index("work_queue_server_status_idx").on(table.serverId, table.status),
+		uniqueIndex("work_queue_one_active_agent_upgrade_idx")
+			.on(table.serverId)
+			.where(
+				sql`${table.type} = 'upgrade_agent' AND ${table.status} IN ('pending', 'processing')`,
+			),
 	],
 );
 

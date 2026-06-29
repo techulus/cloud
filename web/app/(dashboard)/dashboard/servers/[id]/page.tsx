@@ -68,9 +68,13 @@ export default async function ServerDetailPage({
 
 				{hasUpdate && (
 					<AgentUpdateNudge
+						serverId={id}
 						currentVersion={currentVersion}
 						latestVersion={latestVersion}
-						appUrl={process.env.APP_URL!}
+						serverStatus={server.status}
+						upgradeStatus={server.agentUpgradeStatus}
+						upgradeTargetVersion={server.agentUpgradeTargetVersion}
+						upgradeError={server.agentUpgradeError}
 					/>
 				)}
 

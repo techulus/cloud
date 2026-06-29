@@ -102,6 +102,7 @@ func main() {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
+	agent.CheckPendingUpgradeMarker(dataDir)
 
 	keyDir := filepath.Join(dataDir, "keys")
 
