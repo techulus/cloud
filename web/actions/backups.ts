@@ -5,14 +5,14 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { volumeBackups } from "@/db/schema";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { triggerBackup } from "@/lib/backups/trigger-backup";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { deleteFromS3 } from "@/lib/s3";
 
 export async function createBackup(serviceId: string, volumeId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const result = await triggerBackup({
 		serviceId,
 		volumeId,
@@ -36,7 +36,7 @@ export async function restoreBackup(
 	backupId: string,
 	targetServerId?: string,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	await inngest.send(
 		inngestEvents.restoreTrigger.create({
 			serviceId,
@@ -53,7 +53,7 @@ export async function deleteBackup(
 	backupId: string,
 	options: { revalidate?: boolean } = {},
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const backup = await db
 		.select({
 			status: volumeBackups.status,

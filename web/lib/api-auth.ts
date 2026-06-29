@@ -1,4 +1,6 @@
+import type { MemberRole } from "@/db/types";
 import { auth } from "@/lib/auth";
+import { getUserRole, hasAnyRole } from "@/lib/members";
 
 function getAuthErrorResponse(error: unknown) {
 	if (!(error instanceof Error)) {
@@ -59,4 +61,41 @@ export async function requireRequestSession(request: Request) {
 		ok: true as const,
 		session,
 	};
+}
+
+export async function requireRequestRole(
+	request: Request,
+	allowedRoles: MemberRole[],
+) {
+	const sessionResult = await requireRequestSession(request);
+	if (!sessionResult.ok) {
+		return sessionResult;
+	}
+
+	const role = await getUserRole(sessionResult.session.user.id);
+	if (!role || !hasAnyRole(role, allowedRoles)) {
+		return {
+			ok: false as const,
+			response: Response.json(
+				{ message: "Forbidden", code: "FORBIDDEN" },
+				{ status: 403 },
+			),
+		};
+	}
+
+	return {
+		ok: true as const,
+		session: {
+			...sessionResult.session,
+			user: { ...sessionResult.session.user, role },
+		},
+	};
+}
+
+export async function requireRequestDeveloperRole(request: Request) {
+	return requireRequestRole(request, ["admin", "developer"]);
+}
+
+export async function requireRequestAdminRole(request: Request) {
+	return requireRequestRole(request, ["admin"]);
 }

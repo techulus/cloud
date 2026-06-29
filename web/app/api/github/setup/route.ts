@@ -1,11 +1,10 @@
 import { createPrivateKey, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
-import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { githubInstallations } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { requireRequestDeveloperRole } from "@/lib/api-auth";
 
 async function getInstallationDetails(installationId: number): Promise<{
 	account: { login: string; type: "User" | "Organization" };
@@ -52,11 +51,20 @@ async function getInstallationDetails(installationId: number): Promise<{
 }
 
 export async function GET(request: NextRequest) {
-	const session = await auth.api.getSession({
-		headers: await headers(),
-	});
+	const sessionResult = await requireRequestDeveloperRole(request);
 
-	if (!session) {
+	if (!sessionResult.ok) {
+		if (sessionResult.response.status === 401) {
+			const loginUrl = new URL("/auth/login", request.url);
+			loginUrl.searchParams.set("redirect", request.url);
+			return NextResponse.redirect(loginUrl, 303);
+		}
+		return NextResponse.redirect(
+			new URL("/dashboard?error=forbidden", request.url),
+		);
+	}
+
+	if (!sessionResult.session) {
 		const loginUrl = new URL("/auth/login", request.url);
 		loginUrl.searchParams.set("redirect", request.url);
 		return NextResponse.redirect(loginUrl, 303);
@@ -105,9 +113,20 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-	const session = await auth.api.getSession({
-		headers: await headers(),
-	});
+	const sessionResult = await requireRequestDeveloperRole(request);
+
+	if (!sessionResult.ok) {
+		if (sessionResult.response.status === 401) {
+			const loginUrl = new URL("/auth/login", request.url);
+			loginUrl.searchParams.set("redirect", request.url);
+			return NextResponse.redirect(loginUrl, 303);
+		}
+		return NextResponse.redirect(
+			new URL("/dashboard?error=forbidden", request.url),
+		);
+	}
+
+	const session = sessionResult.session;
 
 	if (!session) {
 		const loginUrl = new URL("/auth/login", request.url);

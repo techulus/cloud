@@ -2,9 +2,13 @@ import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, deviceAuthorization } from "better-auth/plugins";
+import { admin } from "better-auth/plugins/admin";
+import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import type { MemberRole } from "@/db/types";
+import { getUserRole, hasAnyRole } from "@/lib/members";
 
 const TECHULUS_CLI_CLIENT_ID = "techulus-cli";
 
@@ -34,6 +38,15 @@ export const auth = betterAuth({
 				timeWindow: 1000 * 60 * 60 * 24,
 			},
 		}),
+		admin({
+			defaultRole: "reader",
+			adminRoles: ["admin"],
+			roles: {
+				admin: adminAc,
+				developer: userAc,
+				reader: userAc,
+			},
+		}),
 		bearer(),
 	],
 });
@@ -58,4 +71,26 @@ export async function requireAuth() {
 	}
 
 	return session;
+}
+
+export async function requireRole(allowedRoles: MemberRole[]) {
+	const session = await requireAuth();
+	if (!session) {
+		return null;
+	}
+
+	const role = await getUserRole(session.user.id);
+	if (!role || !hasAnyRole(role, allowedRoles)) {
+		throw new Error("Forbidden");
+	}
+
+	return { ...session, user: { ...session.user, role } };
+}
+
+export async function requireDeveloperRole() {
+	return requireRole(["admin", "developer"]);
+}
+
+export async function requireAdminRole() {
+	return requireRole(["admin"]);
 }

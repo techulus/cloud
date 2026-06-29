@@ -9,6 +9,7 @@ import { environments, projects, servers, services } from "@/db/schema";
 import { formatDateTime } from "@/lib/date";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { Alert } from "./templates/alert";
+import { MemberInvitation } from "./templates/member-invitation";
 
 function getAppBaseUrl(): string | undefined {
 	return process.env.APP_URL;
@@ -57,6 +58,37 @@ async function sendEmail(
 	} finally {
 		transporter.close();
 	}
+}
+
+type MemberInviteEmailOptions = {
+	to: string;
+	inviterName: string;
+	role: string;
+	inviteUrl: string;
+};
+
+export async function sendMemberInviteEmail(
+	options: MemberInviteEmailOptions,
+): Promise<boolean> {
+	const config = getSmtpConfig();
+	const baseUrl = getAppBaseUrl();
+
+	if (!config?.enabled || !baseUrl) {
+		return false;
+	}
+
+	await sendEmail(config, {
+		to: options.to,
+		subject: "You have been invited to Techulus Cloud",
+		template: MemberInvitation({
+			inviterName: options.inviterName,
+			role: options.role,
+			inviteUrl: options.inviteUrl,
+			baseUrl,
+		}),
+	});
+
+	return true;
 }
 
 function parseAlertEmails(alertEmails: string): string[] {

@@ -7,7 +7,7 @@ import { ZodError } from "zod";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { enqueueAgentUpgrade } from "@/lib/agent-upgrades";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { nameSchema } from "@/lib/schemas";
 import { getZodErrorMessage } from "@/lib/utils";
 
@@ -20,7 +20,7 @@ function generateToken(): string {
 }
 
 export async function createServer(name: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const validatedName = nameSchema.parse(name);
 		const id = generateId();
@@ -49,12 +49,12 @@ export async function createServer(name: string) {
 }
 
 export async function deleteServer(id: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	await db.delete(servers).where(eq(servers.id, id));
 }
 
 export async function updateServerName(id: string, name: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const validatedName = nameSchema.parse(name);
 		await db
@@ -70,7 +70,7 @@ export async function updateServerName(id: string, name: string) {
 }
 
 export async function upgradeAgent(serverId: string, targetVersion: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const result = await enqueueAgentUpgrade(serverId, targetVersion);
 	revalidatePath("/dashboard/servers");
 	revalidatePath(`/dashboard/servers/${serverId}`);
