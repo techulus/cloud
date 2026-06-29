@@ -1,22 +1,22 @@
-name: Agent CI
+name: Updater CI
 
 on:
   pull_request:
     paths:
-      - "agent/**"
-      - ".github/workflows/agent-ci.yml"
+      - "deployment/updater/**"
+      - ".github/workflows/updater-ci.yml"
   push:
     branches:
       - main
     paths:
-      - "agent/**"
-      - ".github/workflows/agent-ci.yml"
+      - "deployment/updater/**"
+      - ".github/workflows/updater-ci.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: agent-ci-${{ github.ref }}
+  group: updater-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: agent
+        working-directory: deployment/updater
 
     steps:
       - name: Checkout
@@ -33,8 +33,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: agent/go.mod
-          cache-dependency-path: agent/go.sum
+          go-version-file: deployment/updater/go.mod
+          cache-dependency-path: deployment/updater/go.mod
 
       - name: Test
         run: go test ./...
@@ -59,7 +59,7 @@ jobs:
             goarch: arm64
     defaults:
       run:
-        working-directory: agent
+        working-directory: deployment/updater
 
     steps:
       - name: Checkout
@@ -68,8 +68,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: agent/go.mod
-          cache-dependency-path: agent/go.sum
+          go-version-file: deployment/updater/go.mod
+          cache-dependency-path: deployment/updater/go.mod
 
       - name: Build
         env:
@@ -78,4 +78,4 @@ jobs:
           CGO_ENABLED: 0
         run: |
           mkdir -p dist
-          go build -o dist/agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/agent
+          go build -o dist/control-plane-updater-${{ matrix.goos }}-${{ matrix.goarch }} .
