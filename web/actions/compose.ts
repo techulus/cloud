@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { services } from "@/db/schema";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { parseComposeYaml } from "@/lib/compose-parser";
 import {
 	addServiceVolume,
@@ -39,14 +39,14 @@ export type ImportComposeResult = {
 };
 
 export async function parseComposeFile(yaml: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	return parseComposeYaml(yaml);
 }
 
 export async function importCompose(
 	input: ImportComposeInput,
 ): Promise<ImportComposeResult> {
-	await requireAuth();
+	await requireDeveloperRole();
 	const { projectId, environmentId, yaml, serviceOverrides = {} } = input;
 
 	const parseResult = parseComposeYaml(yaml);

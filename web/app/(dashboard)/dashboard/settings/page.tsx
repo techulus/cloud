@@ -1,11 +1,41 @@
+import { listMembers } from "@/actions/members";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { GlobalSettings } from "@/components/settings/global-settings";
 import { getGlobalSettings, listServers } from "@/db/queries";
+import { AdminNotConfiguredError } from "@/lib/members";
+
+async function getMembersData() {
+	try {
+		const data = await listMembers();
+		return {
+			members: data.members.map((member) => ({
+				...member,
+				createdAt: member.createdAt.toISOString(),
+			})),
+			invitations: data.invitations.map((invitation) => ({
+				...invitation,
+				expiresAt: invitation.expiresAt.toISOString(),
+				createdAt: invitation.createdAt.toISOString(),
+			})),
+		};
+	} catch (error) {
+		if (
+			error instanceof AdminNotConfiguredError ||
+			(error instanceof Error &&
+				(error.message === "Unauthorized" || error.message === "Forbidden"))
+		) {
+			return null;
+		}
+
+		throw error;
+	}
+}
 
 export default async function SettingsPage() {
-	const [servers, settings] = await Promise.all([
+	const [servers, settings, membersData] = await Promise.all([
 		listServers(),
 		getGlobalSettings(),
+		getMembersData(),
 	]);
 
 	return (
@@ -26,6 +56,7 @@ export default async function SettingsPage() {
 
 				<GlobalSettings
 					servers={servers}
+					membersData={membersData}
 					initialSettings={settings}
 					appVersion={
 						process.env.TECHULUS_CLOUD_VERSION ??

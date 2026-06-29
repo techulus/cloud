@@ -28,7 +28,7 @@ import {
 	volumeBackups,
 	workQueue,
 } from "@/db/schema";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
@@ -116,7 +116,7 @@ function parseImageReference(image: string): {
 export async function validateDockerImage(
 	image: string,
 ): Promise<{ valid: boolean; error?: string }> {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const { registry, namespace, repository, tag, digest } =
 			parseImageReference(image);
@@ -226,7 +226,7 @@ export async function validateDockerImage(
 }
 
 export async function createProject(name: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const validatedName = nameSchema.parse(name);
 		const id = randomUUID();
@@ -256,7 +256,7 @@ export async function createProject(name: string) {
 }
 
 export async function deleteProject(id: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const projectServices = await db
 		.select()
 		.from(services)
@@ -309,7 +309,7 @@ async function deleteBackupsForServices(serviceIds: string[]) {
 }
 
 export async function updateProjectName(projectId: string, name: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const validatedName = nameSchema.parse(name);
 
@@ -328,7 +328,7 @@ export async function updateProjectName(projectId: string, name: string) {
 }
 
 export async function updateProjectSlug(projectId: string, slug: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const sanitized = slugify(slug);
 	if (!sanitized) {
 		throw new Error("Invalid slug");
@@ -352,7 +352,7 @@ export async function updateProjectSlug(projectId: string, slug: string) {
 }
 
 export async function createEnvironment(projectId: string, name: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const sanitizedName = slugify(name);
 	if (!sanitizedName) {
 		throw new Error("Invalid environment name");
@@ -383,7 +383,7 @@ export async function createEnvironment(projectId: string, name: string) {
 }
 
 export async function deleteEnvironment(environmentId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const env = await getEnvironment(environmentId);
 
 	if (!env) {
@@ -426,7 +426,7 @@ const SERVICE_CANVAS_WIDTH = 1320;
 const SERVICE_CARD_WIDTH = 320;
 
 export async function createService(input: CreateServiceInput) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const { projectId, environmentId, name, image, github } = input;
 	const resourceLimits = input.resourceLimits ?? DEFAULT_RESOURCE_LIMITS;
 	const env = await getEnvironment(environmentId);
@@ -587,7 +587,7 @@ async function hardDeleteService(serviceId: string) {
 }
 
 export async function deleteService(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -692,7 +692,7 @@ export async function deleteService(serviceId: string) {
 }
 
 export async function restoreDeletedService(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await db
 		.select()
 		.from(services)
@@ -810,7 +810,7 @@ export async function updateServiceHostname(
 	serviceId: string,
 	hostname: string,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -844,7 +844,7 @@ export async function updateServiceGithubRepo(
 	branch: string,
 	rootDir?: string,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const service = await getService(serviceId);
 		if (!service) {
@@ -888,12 +888,12 @@ export async function updateServiceGithubRepo(
 }
 
 export async function deployService(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	return deployServiceInternal(serviceId);
 }
 
 export async function deleteDeployments(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 	return { success: true };
 }
@@ -910,7 +910,7 @@ export async function updateServiceHealthCheck(
 	serviceId: string,
 	config: HealthCheckConfig,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -934,7 +934,7 @@ export async function updateServiceStartCommand(
 	serviceId: string,
 	startCommand: string | null,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -968,7 +968,7 @@ export async function updateServiceResourceLimits(
 	serviceId: string,
 	limits: { cpuCores: number | null; memoryMb: number | null },
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const validated = resourceLimitsSchema.parse(limits);
 
 	const service = await getService(serviceId);
@@ -991,7 +991,7 @@ export async function updateServiceSchedule(
 	serviceId: string,
 	schedule: string | null,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -1024,7 +1024,7 @@ export async function updateServiceConfig(
 	serviceId: string,
 	config: ServiceConfigUpdate,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -1163,7 +1163,7 @@ export async function updateServiceConfig(
 }
 
 export async function stopService(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const runningDeployments = await db
 		.select()
 		.from(deployments)
@@ -1192,7 +1192,7 @@ export async function stopService(serviceId: string) {
 }
 
 export async function restartService(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -1222,7 +1222,7 @@ export async function restartService(serviceId: string) {
 }
 
 export async function abortRollout(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const activeRollouts = await db
 		.select({ id: rollouts.id, status: rollouts.status })
 		.from(rollouts)
@@ -1344,7 +1344,7 @@ export async function addServiceVolume(
 	name: string,
 	containerPath: string,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	try {
 		const validatedName = volumeNameSchema.parse(name);
 		const validatedPath = containerPathSchema.parse(containerPath);
@@ -1409,7 +1409,7 @@ export async function addServiceVolume(
 }
 
 export async function removeServiceVolume(volumeId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const volume = await db
 		.select()
 		.from(serviceVolumes)
@@ -1465,7 +1465,7 @@ export async function updateServiceBackupSettings(
 	backupEnabled: boolean,
 	backupSchedule: string | null,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");

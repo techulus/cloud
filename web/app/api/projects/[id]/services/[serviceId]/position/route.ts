@@ -1,9 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { db } from "@/db";
 import { services } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { requireRequestDeveloperRole } from "@/lib/api-auth";
 
 const positionSchema = z.object({
 	canvasX: z.number().int().min(0).max(10000),
@@ -14,12 +13,9 @@ export async function PATCH(
 	request: Request,
 	{ params }: { params: Promise<{ id: string; serviceId: string }> },
 ) {
-	const session = await auth.api.getSession({
-		headers: await headers(),
-	});
-
-	if (!session) {
-		return Response.json({ error: "Unauthorized" }, { status: 401 });
+	const sessionResult = await requireRequestDeveloperRole(request);
+	if (!sessionResult.ok) {
+		return sessionResult.response;
 	}
 
 	const { id: projectId, serviceId } = await params;

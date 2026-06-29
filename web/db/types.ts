@@ -5,6 +5,7 @@ import type {
 	environments,
 	githubInstallations,
 	githubRepos,
+	memberInvitations,
 	projects,
 	rollouts,
 	secrets,
@@ -13,6 +14,7 @@ import type {
 	serviceReplicas,
 	services,
 	serviceVolumes,
+	user,
 	volumeBackups,
 	workQueue,
 } from "./schema";
@@ -33,6 +35,10 @@ export type GithubInstallation = typeof githubInstallations.$inferSelect;
 export type Build = typeof builds.$inferSelect;
 export type VolumeBackup = typeof volumeBackups.$inferSelect;
 export type WorkQueue = typeof workQueue.$inferSelect;
+export type User = typeof user.$inferSelect;
+export type MemberInvitation = typeof memberInvitations.$inferSelect;
+export type MemberRole = User["role"];
+export type InvitableMemberRole = MemberInvitation["role"];
 
 export type DeploymentStatus = NonNullable<Deployment["status"]>;
 export type HealthStatus = Deployment["healthStatus"];

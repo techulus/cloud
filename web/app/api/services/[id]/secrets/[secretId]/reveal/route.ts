@@ -1,22 +1,18 @@
 export const dynamic = "force-dynamic";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { secrets } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { decryptSecret } from "@/lib/crypto";
 
 export async function POST(
 	request: Request,
 	{ params }: { params: Promise<{ id: string; secretId: string }> },
 ) {
-	const session = await auth.api.getSession({
-		headers: await headers(),
-	});
-
-	if (!session) {
-		return Response.json({ error: "Unauthorized" }, { status: 401 });
+	const sessionResult = await requireRequestDeveloperRole(request);
+	if (!sessionResult.ok) {
+		return sessionResult.response;
 	}
 
 	const { id: serviceId, secretId } = await params;

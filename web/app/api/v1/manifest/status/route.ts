@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
+import { requireRequestRole } from "@/lib/api-auth";
 import { getManifestStatus } from "@/lib/cli-service";
-import { requireRequestSession } from "@/lib/api-auth";
 import { slugify } from "@/lib/utils";
 
 const querySchema = z.object({
@@ -12,7 +12,11 @@ const querySchema = z.object({
 });
 
 export async function GET(request: Request) {
-	const sessionResult = await requireRequestSession(request);
+	const sessionResult = await requireRequestRole(request, [
+		"admin",
+		"developer",
+		"reader",
+	]);
 	if (!sessionResult.ok) {
 		return sessionResult.response;
 	}

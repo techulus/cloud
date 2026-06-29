@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
+import { requireRequestRole } from "@/lib/api-auth";
 import { auth } from "@/lib/auth";
-import { requireRequestSession } from "@/lib/api-auth";
 
 const exchangeSchema = z
 	.object({
@@ -13,7 +13,11 @@ const exchangeSchema = z
 	.strict();
 
 export async function POST(request: Request) {
-	const sessionResult = await requireRequestSession(request);
+	const sessionResult = await requireRequestRole(request, [
+		"admin",
+		"developer",
+		"reader",
+	]);
 	if (!sessionResult.ok) {
 		return sessionResult.response;
 	}
