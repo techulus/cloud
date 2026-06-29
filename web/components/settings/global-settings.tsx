@@ -13,10 +13,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
 	checkControlPlaneUpdatesNow,
+	refreshControlPlaneAboutStatus,
 	refreshControlPlaneUpgradeStatus,
 	updateAcmeEmail,
 	updateBuildServers,
@@ -90,6 +91,7 @@ export function GlobalSettings({
 }: Props) {
 	const router = useRouter();
 	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
+	const previousTabRef = useRef<string | null>(null);
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
 	);
@@ -108,6 +110,32 @@ export function GlobalSettings({
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [isRefreshingUpgrade, setIsRefreshingUpgrade] = useState(false);
+
+	useEffect(() => {
+		const openedAbout = tab === "about" && previousTabRef.current !== "about";
+		previousTabRef.current = tab;
+
+		if (!openedAbout) return;
+
+		let cancelled = false;
+
+		async function refreshAboutStatus() {
+			try {
+				await refreshControlPlaneAboutStatus();
+				if (!cancelled) {
+					router.refresh();
+				}
+			} catch (error) {
+				console.error("Failed to refresh about status", error);
+			}
+		}
+
+		refreshAboutStatus();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [tab, router]);
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
