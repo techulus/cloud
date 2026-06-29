@@ -7,6 +7,7 @@ import { setSetting } from "@/db/queries";
 import { requireAuth } from "@/lib/auth";
 import {
 	checkAndPersistControlPlaneUpdate,
+	refreshControlPlaneAboutState,
 	refreshControlPlaneUpgradeState,
 	startControlPlaneUpgrade,
 } from "@/lib/control-plane-updates";
@@ -93,6 +94,13 @@ export async function upgradeControlPlane(targetVersion: string) {
 export async function refreshControlPlaneUpgradeStatus() {
 	await requireAuth();
 	const state = await refreshControlPlaneUpgradeState();
+	revalidatePath("/dashboard/settings");
+	return state;
+}
+
+export async function refreshControlPlaneAboutStatus() {
+	await requireAuth();
+	const state = await refreshControlPlaneAboutState();
 	revalidatePath("/dashboard/settings");
 	return state;
 }
