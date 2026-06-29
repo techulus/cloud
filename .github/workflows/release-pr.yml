@@ -149,7 +149,8 @@ jobs:
               --head "$AUTOMATION_BRANCH" \
               --title "Release $next_version" \
               --body "$body" \
-              --label "$RELEASE_LABEL"
+              --label "$RELEASE_LABEL" \
+              --draft
           fi
 
   tag-merged-release-pr:
