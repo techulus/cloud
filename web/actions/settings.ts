@@ -18,15 +18,24 @@ import {
 } from "@/lib/settings-keys";
 import { getZodErrorMessage } from "@/lib/utils";
 
+async function requireAdminSession() {
+	const session = await requireAdminRole();
+	if (!session) {
+		throw new Error("Unauthorized");
+	}
+
+	return session;
+}
+
 export async function updateBuildServers(serverIds: string[]) {
-	await requireAdminRole();
+	await requireAdminSession();
 	await setSetting(SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS, serverIds);
 	revalidatePath("/dashboard/settings");
 	return { success: true };
 }
 
 export async function updateBuildTimeout(minutes: number) {
-	await requireAdminRole();
+	await requireAdminSession();
 	try {
 		const validatedMinutes = buildTimeoutSchema.parse(minutes);
 		await setSetting(SETTING_KEYS.BUILD_TIMEOUT_MINUTES, validatedMinutes);
@@ -41,7 +50,7 @@ export async function updateBuildTimeout(minutes: number) {
 }
 
 export async function updateAcmeEmail(email: string) {
-	await requireAdminRole();
+	await requireAdminSession();
 	const trimmed = email.trim();
 	if (trimmed && !isEmail(trimmed)) {
 		throw new Error("Invalid email address");
@@ -52,7 +61,7 @@ export async function updateAcmeEmail(email: string) {
 }
 
 export async function updateProxyDomain(domain: string) {
-	await requireAdminRole();
+	await requireAdminSession();
 	const trimmed = domain.trim();
 	await setSetting(SETTING_KEYS.PROXY_DOMAIN, trimmed || null);
 	revalidatePath("/dashboard/settings");
@@ -60,7 +69,7 @@ export async function updateProxyDomain(domain: string) {
 }
 
 export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
-	await requireAdminRole();
+	await requireAdminSession();
 	try {
 		const validated = emailAlertsConfigSchema.parse(config);
 		await setSetting(SETTING_KEYS.EMAIL_ALERTS_CONFIG, validated);
@@ -77,21 +86,21 @@ export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
 }
 
 export async function checkControlPlaneUpdatesNow() {
-	await requireAdminRole();
+	await requireAdminSession();
 	const state = await checkAndPersistControlPlaneUpdate();
 	revalidatePath("/dashboard/settings");
 	return state;
 }
 
 export async function upgradeControlPlane(targetVersion: string) {
-	await requireAdminRole();
+	await requireAdminSession();
 	const state = await startControlPlaneUpgrade(targetVersion);
 	revalidatePath("/dashboard/settings");
 	return state;
 }
 
 export async function refreshControlPlaneUpgradeStatus() {
-	await requireAdminRole();
+	await requireAdminSession();
 	const state = await refreshControlPlaneUpgradeState();
 	revalidatePath("/dashboard/settings");
 	return state;

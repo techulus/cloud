@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lte, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import isEmail from "validator/es/lib/isEmail";
 import { z } from "zod";
@@ -267,23 +267,63 @@ export async function acceptInvite(input: {
 		throw new Error("A member with this email already exists");
 	}
 
-	const created = await createAuthUser({
-		body: {
-			email: invite.email,
-			name: parsed.name,
-			password: parsed.password,
-			role: invite.role,
-		},
-	});
+	const now = new Date();
+	const [claimedInvite] = await db
+		.update(memberInvitations)
+		.set({
+			status: "accepted",
+			acceptedAt: now,
+		})
+		.where(
+			and(
+				eq(memberInvitations.id, invite.id),
+				eq(memberInvitations.status, "pending"),
+				gt(memberInvitations.expiresAt, now),
+			),
+		)
+		.returning({
+			id: memberInvitations.id,
+			email: memberInvitations.email,
+			role: memberInvitations.role,
+		});
+
+	if (!claimedInvite) {
+		throw new Error("Invitation is invalid or no longer available");
+	}
+
+	let created: CreateUserResult;
+	try {
+		created = await createAuthUser({
+			body: {
+				email: claimedInvite.email,
+				name: parsed.name,
+				password: parsed.password,
+				role: claimedInvite.role,
+			},
+		});
+	} catch (error) {
+		await db
+			.update(memberInvitations)
+			.set({
+				status: "pending",
+				acceptedAt: null,
+			})
+			.where(
+				and(
+					eq(memberInvitations.id, claimedInvite.id),
+					eq(memberInvitations.status, "accepted"),
+					isNull(memberInvitations.acceptedByUserId),
+				),
+			);
+		throw error;
+	}
 
 	await db
 		.update(memberInvitations)
 		.set({
-			status: "accepted",
 			acceptedByUserId: created.user.id,
-			acceptedAt: new Date(),
 		})
-		.where(eq(memberInvitations.id, invite.id));
+		.where(eq(memberInvitations.id, claimedInvite.id));
 
 	return { success: true };
 }

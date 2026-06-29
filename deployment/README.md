@@ -11,6 +11,17 @@ cp .env.example .env
 docker compose -f compose.production.yml up -d --pull always --remove-orphans
 ```
 
+After the one-shot `migrate` service completes, create the first admin user:
+
+```bash
+docker compose -f compose.production.yml run --rm web node scripts/create-admin.mjs admin@example.com
+```
+
+The command runs inside the Docker image, writes the admin user to the
+configured database, and prints a random password once. Store the password,
+sign in as that admin, then invite developers and readers from Settings.
+Authenticated role-gated access is blocked until one admin user exists.
+
 For production hosts, cap Docker logs in `/etc/docker/daemon.json` or use the
 installer, which writes bounded `json-file` log settings on fresh Docker hosts.
 Prefer versioned or digest-pinned image references over mutable tags when you
@@ -77,5 +88,7 @@ Schema is synced automatically by the one-shot `migrate` service via `drizzle-ki
 ```bash
 docker compose -f compose.production.yml ps
 docker compose -f compose.production.yml logs -f
+docker compose -f compose.production.yml logs migrate
+docker compose -f compose.production.yml run --rm web node scripts/create-admin.mjs admin@example.com
 docker compose -f compose.production.yml down --remove-orphans
 ```
