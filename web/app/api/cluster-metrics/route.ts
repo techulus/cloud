@@ -22,12 +22,9 @@ export async function GET(request: Request) {
 	const range = parseMetricRange(url.searchParams.get("range"));
 
 	if (!isMetricsEnabled()) {
-		return Response.json({
-			current: null,
-			history: emptyHistory(),
-			range,
-			enabled: false,
-		});
+		throw new Error(
+			"Missing VictoriaMetrics configuration: set VICTORIA_METRICS_URL or VICTORIA_METRICS_PRIVATE_URL",
+		);
 	}
 
 	const end = new Date();
@@ -48,7 +45,6 @@ export async function GET(request: Request) {
 			current,
 			history,
 			range,
-			enabled: true,
 		});
 	} catch (error) {
 		console.error("[metrics:cluster] failed to query metrics:", error);
@@ -56,7 +52,6 @@ export async function GET(request: Request) {
 			current: null,
 			history: emptyHistory(),
 			range,
-			enabled: true,
 		});
 	}
 }

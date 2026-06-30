@@ -38,7 +38,6 @@ type MetricsResponse = {
 	current: NodeMetricsSnapshot | null;
 	history: MetricsHistory;
 	range: MetricRange;
-	enabled: boolean;
 };
 
 type ChartRow = {
@@ -145,13 +144,7 @@ export function MetricsHistoryCharts({
 				</NativeSelect>
 			</div>
 
-			{data?.enabled === false ? (
-				<MetricsStateCard
-					icon={Activity}
-					title="Metrics disabled"
-					description="Set VICTORIA_METRICS_URL or VICTORIA_METRICS_PRIVATE_URL to enable metrics history."
-				/>
-			) : error ? (
+			{error ? (
 				<MetricsStateCard
 					icon={Activity}
 					title="Metrics unavailable"
