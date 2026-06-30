@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import isEmail from "validator/es/lib/isEmail";
 import { ZodError } from "zod";
 import { setSetting } from "@/db/queries";
-import { requireAdminRole } from "@/lib/auth";
+import { requireAdminRole, requireAuth } from "@/lib/auth";
 import {
 	checkAndPersistControlPlaneUpdate,
 	refreshControlPlaneAboutState,
