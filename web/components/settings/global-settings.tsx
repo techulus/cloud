@@ -13,10 +13,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
 	checkControlPlaneUpdatesNow,
+	refreshControlPlaneAboutStatus,
 	refreshControlPlaneUpgradeStatus,
 	updateAcmeEmail,
 	updateBuildServers,
@@ -26,6 +27,7 @@ import {
 } from "@/actions/settings";
 import { ApiKeySettings } from "@/components/settings/api-key-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
+import { MemberSettings } from "@/components/settings/member-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +49,11 @@ import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Server as ServerType } from "@/db/types";
+import type {
+	InvitableMemberRole,
+	MemberRole,
+	Server as ServerType,
+} from "@/db/types";
 import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
@@ -56,6 +62,23 @@ import type { EmailAlertsConfig } from "@/lib/settings-keys";
 
 type Props = {
 	servers: ServerType[];
+	membersData: {
+		members: Array<{
+			id: string;
+			name: string;
+			email: string;
+			role: MemberRole;
+			createdAt: string;
+		}>;
+		invitations: Array<{
+			id: string;
+			email: string;
+			role: InvitableMemberRole;
+			status: string;
+			expiresAt: string;
+			createdAt: string;
+		}>;
+	} | null;
 	initialSettings: {
 		buildServerIds: string[];
 		buildTimeoutMinutes: number;
@@ -85,11 +108,13 @@ function formatCheckedAt(value: string | null | undefined) {
 
 export function GlobalSettings({
 	servers,
+	membersData,
 	initialSettings,
 	appVersion,
 }: Props) {
 	const router = useRouter();
 	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
+	const previousTabRef = useRef<string | null>(null);
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
 	);
@@ -108,6 +133,32 @@ export function GlobalSettings({
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [isRefreshingUpgrade, setIsRefreshingUpgrade] = useState(false);
+
+	useEffect(() => {
+		const openedAbout = tab === "about" && previousTabRef.current !== "about";
+		previousTabRef.current = tab;
+
+		if (!openedAbout) return;
+
+		let cancelled = false;
+
+		async function refreshAboutStatus() {
+			try {
+				await refreshControlPlaneAboutStatus();
+				if (!cancelled) {
+					router.refresh();
+				}
+			} catch (error) {
+				console.error("Failed to refresh about status", error);
+			}
+		}
+
+		refreshAboutStatus();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [tab, router]);
 
 	const toggleBuildServer = (serverId: string) => {
 		setBuildServerIds((prev) => {
@@ -257,20 +308,6 @@ export function GlobalSettings({
 	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
 	const upgradeRunning = upgradeState?.status === "running";
 
-	if (servers.length === 0) {
-		return (
-			<Empty className="border py-10">
-				<EmptyMedia variant="icon">
-					<Server />
-				</EmptyMedia>
-				<EmptyTitle>No servers</EmptyTitle>
-				<EmptyDescription>
-					Add servers to configure global settings.
-				</EmptyDescription>
-			</Empty>
-		);
-	}
-
 	return (
 		<Tabs value={tab} onValueChange={(value) => setTab(value)}>
 			<TabsList className="w-full justify-start overflow-x-auto">
@@ -286,12 +323,28 @@ export function GlobalSettings({
 				<TabsTrigger value="api-keys" className="px-4 shrink-0">
 					API Keys
 				</TabsTrigger>
+				{membersData && (
+					<TabsTrigger value="members" className="px-4 shrink-0">
+						Members
+					</TabsTrigger>
+				)}
 				<TabsTrigger value="about" className="px-4 shrink-0">
 					About
 				</TabsTrigger>
 			</TabsList>
 
 			<TabsContent value="build" className="space-y-6 pt-4">
+				{servers.length === 0 && (
+					<Empty className="border py-10">
+						<EmptyMedia variant="icon">
+							<Server />
+						</EmptyMedia>
+						<EmptyTitle>No servers</EmptyTitle>
+						<EmptyDescription>
+							Add servers to configure build settings.
+						</EmptyDescription>
+					</Empty>
+				)}
 				<div className="rounded-lg border">
 					<Item className="border-0 border-b rounded-none">
 						<ItemMedia variant="icon">
@@ -484,6 +537,15 @@ export function GlobalSettings({
 			<TabsContent value="api-keys" className="space-y-6 pt-4">
 				<ApiKeySettings />
 			</TabsContent>
+
+			{membersData && (
+				<TabsContent value="members" className="space-y-6 pt-4">
+					<MemberSettings
+						initialMembers={membersData.members}
+						initialInvitations={membersData.invitations}
+					/>
+				</TabsContent>
+			)}
 
 			<TabsContent value="about" className="space-y-6 pt-4">
 				<div className="rounded-lg border">

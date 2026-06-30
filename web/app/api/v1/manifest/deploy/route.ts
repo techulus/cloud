@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 
+import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { techulusManifestSchema } from "@/lib/cli-manifest";
 import { deployManifest } from "@/lib/cli-service";
-import { requireRequestSession } from "@/lib/api-auth";
 
 export async function POST(request: Request) {
-	const sessionResult = await requireRequestSession(request);
+	const sessionResult = await requireRequestDeveloperRole(request);
 	if (!sessionResult.ok) {
 		return sessionResult.response;
 	}
@@ -25,7 +25,10 @@ export async function POST(request: Request) {
 		return Response.json(result);
 	} catch (error) {
 		return Response.json(
-			{ error: error instanceof Error ? error.message : "Failed to deploy manifest" },
+			{
+				error:
+					error instanceof Error ? error.message : "Failed to deploy manifest",
+			},
 			{ status: 400 },
 		);
 	}

@@ -28,7 +28,7 @@ permissions:
   pull-requests: write
 
 env:
-  AUTOMATION_BRANCH: automation/release
+  AUTOMATION_BRANCH_PREFIX: automation/release
   RELEASE_BASE: release
   RELEASE_HEAD: main
   RELEASE_LABEL: release-pr
@@ -60,21 +60,38 @@ jobs:
 
           git fetch origin "$RELEASE_HEAD" "$RELEASE_BASE" --tags
 
+          repo_owner="${GITHUB_REPOSITORY%/*}"
+
+          find_existing_pr_for_branch() {
+            local branch="$1"
+            gh pr list \
+              --base "$RELEASE_BASE" \
+              --state open \
+              --json number,headRefName,headRepositoryOwner \
+              --jq ".[] | select(.headRefName == \"$branch\") | select(.headRepositoryOwner.login == \"$repo_owner\") | .number" \
+              | head -n 1
+          }
+
+          find_automation_prs() {
+            gh pr list \
+              --base "$RELEASE_BASE" \
+              --state open \
+              --json number,headRefName,headRepositoryOwner \
+              --jq ".[] | select(.headRepositoryOwner.login == \"$repo_owner\") | select(.headRefName == \"$AUTOMATION_BRANCH_PREFIX\" or (.headRefName | startswith(\"$AUTOMATION_BRANCH_PREFIX/\"))) | [.number, .headRefName] | @tsv"
+          }
+
           commits_ahead=$(git rev-list --count "origin/$RELEASE_BASE..origin/$RELEASE_HEAD")
-          existing_pr=$(gh pr list \
-            --base "$RELEASE_BASE" \
-            --head "${{ github.repository_owner }}:$AUTOMATION_BRANCH" \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')
 
           if [ "$commits_ahead" -eq 0 ]; then
             echo "No commits from $RELEASE_HEAD to release."
-            if [ -n "$existing_pr" ]; then
-              gh pr close "$existing_pr" \
-                --comment "Closing because there are no unreleased commits from $RELEASE_HEAD." \
-                --delete-branch
-            fi
+            find_automation_prs | while IFS=$'\t' read -r pr_number pr_head; do
+              if [ -n "$pr_number" ]; then
+                gh pr close "$pr_number" \
+                  --comment "Closing because there are no unreleased commits from $RELEASE_HEAD." \
+                  --delete-branch </dev/null || \
+                  echo "::warning::Failed to close stale release PR #$pr_number"
+              fi
+            done
             exit 0
           fi
 
@@ -108,7 +125,19 @@ jobs:
           esac
 
           next_version="v${major}.${minor}.${patch}"
+          automation_branch="$AUTOMATION_BRANCH_PREFIX/$next_version"
           echo "Preparing $next_version from latest tag $latest_tag."
+
+          find_automation_prs | while IFS=$'\t' read -r pr_number pr_head; do
+            if [ -n "$pr_number" ] && [ "$pr_head" != "$automation_branch" ]; then
+              gh pr close "$pr_number" \
+                --comment "Closing because release automation now uses $automation_branch for $next_version." \
+                --delete-branch </dev/null || \
+                echo "::warning::Failed to close stale release PR #$pr_number"
+            fi
+          done
+
+          existing_pr=$(find_existing_pr_for_branch "$automation_branch")
 
           gh label create "$RELEASE_LABEL" \
             --color "0e8a16" \
@@ -117,15 +146,9 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$AUTOMATION_BRANCH" "origin/$RELEASE_HEAD"
+          git checkout -B "$automation_branch" "origin/$RELEASE_HEAD"
 
-          printf '%s\n' "$next_version" > VERSION
-          git add VERSION
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: prepare release $next_version"
-          fi
-
-          git push --force origin "$AUTOMATION_BRANCH"
+          git push --force origin "$automation_branch"
 
           body=$(cat <<EOF
           Automated release PR.
@@ -144,13 +167,24 @@ jobs:
               --body "$body" \
               --add-label "$RELEASE_LABEL"
           else
-            gh pr create \
+            if ! gh pr create \
               --base "$RELEASE_BASE" \
-              --head "$AUTOMATION_BRANCH" \
+              --head "$automation_branch" \
               --title "Release $next_version" \
               --body "$body" \
               --label "$RELEASE_LABEL" \
-              --draft
+              --draft; then
+              existing_pr=$(find_existing_pr_for_branch "$automation_branch")
+              if [ -n "$existing_pr" ]; then
+                echo "Release PR #$existing_pr already exists; updating it instead."
+                gh pr edit "$existing_pr" \
+                  --title "Release $next_version" \
+                  --body "$body" \
+                  --add-label "$RELEASE_LABEL"
+                exit 0
+              fi
+              exit 1
+            fi
           fi
 
   tag-merged-release-pr:
@@ -160,7 +194,7 @@ jobs:
       github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'release' &&
-      github.event.pull_request.head.ref == 'automation/release'
+      startsWith(github.event.pull_request.head.ref, 'automation/release/')
     runs-on: ubuntu-latest
     concurrency:
       group: release-tag-${{ github.event.pull_request.merge_commit_sha }}
@@ -176,6 +210,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
 
@@ -186,9 +221,9 @@ jobs:
             exit 1
           fi
 
-          version=$(git show "$MERGE_SHA:VERSION" | tr -d '[:space:]')
+          version="${HEAD_REF#automation/release/}"
           if ! echo "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid VERSION at $MERGE_SHA: $version" >&2
+            echo "Release PR head branch does not include a valid release version: $HEAD_REF" >&2
             exit 1
           fi
 

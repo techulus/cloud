@@ -18,6 +18,12 @@ export const user = pgTable("user", {
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text("image"),
+	role: text("role", { enum: ["admin", "developer", "reader"] })
+		.notNull()
+		.default("reader"),
+	banned: boolean("banned").default(false),
+	banReason: text("ban_reason"),
+	banExpires: timestamp("ban_expires"),
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at")
 		.defaultNow()
@@ -37,6 +43,7 @@ export const session = pgTable(
 			.notNull(),
 		ipAddress: text("ip_address"),
 		userAgent: text("user_agent"),
+		impersonatedBy: text("impersonated_by"),
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
@@ -143,11 +150,54 @@ export const apikey = pgTable(
 	],
 );
 
+export const memberInvitations = pgTable(
+	"member_invitations",
+	{
+		id: text("id").primaryKey(),
+		email: text("email").notNull(),
+		role: text("role", { enum: ["developer", "reader"] }).notNull(),
+		tokenHash: text("token_hash").notNull().unique(),
+		status: text("status", {
+			enum: ["pending", "accepted", "revoked", "expired"],
+		})
+			.notNull()
+			.default("pending"),
+		invitedByUserId: text("invited_by_user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		acceptedByUserId: text("accepted_by_user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull()
+			.$onUpdate(() => new Date()),
+	},
+	(table) => [
+		index("member_invitations_email_idx").on(table.email),
+		index("member_invitations_status_idx").on(table.status),
+		index("member_invitations_invited_by_user_id_idx").on(
+			table.invitedByUserId,
+		),
+	],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
 	accounts: many(account),
 	apiKeys: many(apikey),
 	deviceCodes: many(deviceCode),
+	sentMemberInvitations: many(memberInvitations, {
+		relationName: "sentMemberInvitations",
+	}),
+	acceptedMemberInvitations: many(memberInvitations, {
+		relationName: "acceptedMemberInvitations",
+	}),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -177,6 +227,22 @@ export const apiKeyRelations = relations(apikey, ({ one }) => ({
 		references: [user.id],
 	}),
 }));
+
+export const memberInvitationRelations = relations(
+	memberInvitations,
+	({ one }) => ({
+		invitedBy: one(user, {
+			fields: [memberInvitations.invitedByUserId],
+			references: [user.id],
+			relationName: "sentMemberInvitations",
+		}),
+		acceptedBy: one(user, {
+			fields: [memberInvitations.acceptedByUserId],
+			references: [user.id],
+			relationName: "acceptedMemberInvitations",
+		}),
+	}),
+);
 
 type ServerMeta = {
 	arch?: string;

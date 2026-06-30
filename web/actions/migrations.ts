@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { services } from "@/db/schema";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { startMigrationInternal } from "@/lib/migrations";
@@ -13,14 +13,14 @@ export async function startMigration(
 	serviceId: string,
 	targetServerId: string,
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	await startMigrationInternal(serviceId, targetServerId);
 	revalidatePath(`/dashboard/projects`);
 	return { success: true };
 }
 
 export async function cancelMigration(serviceId: string) {
-	await requireAuth();
+	await requireDeveloperRole();
 	await inngest.send(inngestEvents.migrationCancelled.create({ serviceId }));
 
 	await db

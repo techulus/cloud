@@ -1,9 +1,13 @@
 export const dynamic = "force-dynamic";
 
-import { requireRequestSession } from "@/lib/api-auth";
+import { requireRequestRole } from "@/lib/api-auth";
 
 export async function GET(request: Request) {
-	const sessionResult = await requireRequestSession(request);
+	const sessionResult = await requireRequestRole(request, [
+		"admin",
+		"developer",
+		"reader",
+	]);
 	if (!sessionResult.ok) {
 		return sessionResult.response;
 	}

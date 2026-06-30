@@ -262,3 +262,22 @@ export async function refreshControlPlaneUpgradeState() {
 
 	return upgradeState;
 }
+
+export async function refreshControlPlaneAboutState() {
+	const existingUpgradeState = await getSetting<ControlPlaneUpgradeState>(
+		SETTING_KEYS.CONTROL_PLANE_UPGRADE_STATE,
+	);
+
+	if (existingUpgradeState?.status === "running") {
+		try {
+			await refreshControlPlaneUpgradeState();
+		} catch (error) {
+			console.error(
+				"[control-plane-updates] failed to refresh upgrade state on about page",
+				error,
+			);
+		}
+	}
+
+	return checkAndPersistControlPlaneUpdate();
+}

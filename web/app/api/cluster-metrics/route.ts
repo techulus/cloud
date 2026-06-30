@@ -1,19 +1,15 @@
 import { headers } from "next/headers";
+import { listServers } from "@/db/queries";
 import { auth } from "@/lib/auth";
 import {
-	emptyHistory,
 	isMetricsEnabled,
 	METRIC_RANGE_OPTIONS,
 	parseMetricRange,
-	queryNodeMetricsHistory,
-	queryNodeMetricsSnapshot,
+	queryServersMetricsHistory,
 	warnMissingMetricsConfig,
 } from "@/lib/victoria-metrics";
 
-export async function GET(
-	request: Request,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(request: Request) {
 	const session = await auth.api.getSession({
 		headers: await headers(),
 	});
@@ -22,16 +18,15 @@ export async function GET(
 		return new Response("Unauthorized", { status: 401 });
 	}
 
-	const { id: serverId } = await params;
 	const url = new URL(request.url);
 	const range = parseMetricRange(url.searchParams.get("range"));
+	const serverId = url.searchParams.get("serverId");
 
 	if (!isMetricsEnabled()) {
-		warnMissingMetricsConfig("server");
+		warnMissingMetricsConfig("cluster");
 		return Response.json({
-			current: null,
-			history: emptyHistory(),
 			range,
+			series: [],
 			enabled: false,
 		});
 	}
@@ -39,29 +34,32 @@ export async function GET(
 	const end = new Date();
 	const option = METRIC_RANGE_OPTIONS[range];
 	const start = new Date(end.getTime() - option.durationMs);
+	const servers = await listServers();
+	const selectedServers =
+		serverId && serverId !== "all"
+			? servers.filter((server) => server.id === serverId)
+			: servers;
 
 	try {
-		const [current, history] = await Promise.all([
-			queryNodeMetricsSnapshot(serverId),
-			queryNodeMetricsHistory({
-				serverId,
-				start,
-				end,
-				stepSeconds: option.stepSeconds,
-			}),
-		]);
+		const series = await queryServersMetricsHistory({
+			servers: selectedServers.map((server) => ({
+				id: server.id,
+				name: server.name,
+			})),
+			start,
+			end,
+			stepSeconds: option.stepSeconds,
+		});
 
 		return Response.json({
-			current,
-			history,
 			range,
+			series,
 		});
 	} catch (error) {
-		console.error("[metrics:server] failed to query metrics:", error);
+		console.error("[metrics:cluster] failed to query metrics:", error);
 		return Response.json({
-			current: null,
-			history: emptyHistory(),
 			range,
+			series: [],
 		});
 	}
 }

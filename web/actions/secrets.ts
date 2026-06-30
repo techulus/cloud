@@ -5,7 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { ZodError } from "zod";
 import { db } from "@/db";
 import { secrets, services } from "@/db/schema";
-import { requireAuth } from "@/lib/auth";
+import { requireDeveloperRole } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
 import { secretItemArraySchema } from "@/lib/schemas";
 import { getZodErrorMessage } from "@/lib/utils";
@@ -14,7 +14,7 @@ export async function createSecretsBatch(
 	serviceId: string,
 	items: { key: string; value: string }[],
 ) {
-	await requireAuth();
+	await requireDeveloperRole();
 	if (items.length === 0) {
 		return { created: 0, updated: 0 };
 	}
@@ -80,7 +80,7 @@ export async function createSecretsBatch(
 }
 
 export async function deleteSecretsBatch(secretIds: string[]) {
-	await requireAuth();
+	await requireDeveloperRole();
 	if (secretIds.length === 0) {
 		return { deleted: 0 };
 	}
