@@ -240,7 +240,13 @@ function MetricChartCard({
 			</CardHeader>
 			<CardContent className="space-y-3 pt-1">
 				<div className="h-72 min-w-0 lg:h-80">
-					<ResponsiveContainer width="100%" height="100%">
+					<ResponsiveContainer
+						width="100%"
+						height="100%"
+						minWidth={1}
+						minHeight={1}
+						initialDimension={{ width: 1, height: 1 }}
+					>
 						<LineChart
 							data={rows}
 							margin={{
