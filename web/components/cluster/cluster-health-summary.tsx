@@ -1,7 +1,9 @@
 "use client";
 
-import { Activity, Cpu, Network, Server } from "lucide-react";
+import { Activity, BarChart3, Cpu, Network, Server } from "lucide-react";
+import Link from "next/link";
 import useSWR from "swr";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetcher } from "@/lib/fetcher";
 
@@ -18,10 +20,12 @@ type ClusterHealthData = {
 
 interface ClusterHealthSummaryProps {
 	initialData: ClusterHealthData;
+	showMetricsLink?: boolean;
 }
 
 export function ClusterHealthSummary({
 	initialData,
+	showMetricsLink = true,
 }: ClusterHealthSummaryProps) {
 	const { data } = useSWR<ClusterHealthData>("/api/cluster-health", fetcher, {
 		fallbackData: initialData,
@@ -63,11 +67,24 @@ export function ClusterHealthSummary({
 
 	return (
 		<div className="space-y-4">
-			<div>
-				<h2 className="text-lg font-semibold">Cluster Health</h2>
-				<p className="text-sm text-muted-foreground">
-					Real-time infrastructure status
-				</p>
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h2 className="text-lg font-semibold">Cluster Health</h2>
+					<p className="text-sm text-muted-foreground">
+						Real-time infrastructure status
+					</p>
+				</div>
+				{showMetricsLink && (
+					<Button
+						variant="outline"
+						size="sm"
+						nativeButton={false}
+						render={<Link href="/dashboard/metrics" />}
+					>
+						<BarChart3 className="size-3.5" />
+						Metrics
+					</Button>
+				)}
 			</div>
 			<div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
 				{stats.map((stat) => (
