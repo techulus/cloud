@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { LogViewer } from "@/components/logs/log-viewer";
+import { MetricsHistoryCharts } from "@/components/metrics/metrics-history-charts";
 import { AgentUpdateNudge } from "@/components/server/agent-update-nudge";
 import { ServerDangerZone } from "@/components/server/server-danger-zone";
 import { ServerHeader } from "@/components/server/server-header";
@@ -183,6 +184,13 @@ export default async function ServerDetailPage({
 						containerHealth: server.containerHealth,
 						agentHealth: server.agentHealth,
 					}}
+				/>
+
+				<MetricsHistoryCharts
+					endpoint={`/api/servers/${id}/metrics`}
+					title="Metrics History"
+					description="CPU, memory, and disk usage reported by this server"
+					scope="node"
 				/>
 
 				<ServerServices serverId={id} />

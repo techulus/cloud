@@ -50,6 +50,18 @@ export type NodeMetricsHistory = {
 	diskUsedBytes: NodeMetricPoint[];
 };
 
+export type MetricsHistory = NodeMetricsHistory;
+
+export const METRIC_RANGE_OPTIONS = {
+	"1h": { durationMs: 60 * 60 * 1000, stepSeconds: 60 },
+	"6h": { durationMs: 6 * 60 * 60 * 1000, stepSeconds: 60 },
+	"24h": { durationMs: 24 * 60 * 60 * 1000, stepSeconds: 5 * 60 },
+	"7d": { durationMs: 7 * 24 * 60 * 60 * 1000, stepSeconds: 30 * 60 },
+	"30d": { durationMs: 30 * 24 * 60 * 60 * 1000, stepSeconds: 2 * 60 * 60 },
+} as const;
+
+export type MetricRange = keyof typeof METRIC_RANGE_OPTIONS;
+
 const METRIC_NAMES = {
 	cpuUsagePercent: "techulus_node_cpu_usage_percent",
 	memoryUsagePercent: "techulus_node_memory_usage_percent",
@@ -81,6 +93,13 @@ function buildFetchOptions(config: EndpointConfig): RequestInit {
 		return { headers: { Authorization: `Basic ${credentials}` } };
 	}
 	return {};
+}
+
+export function parseMetricRange(value: string | null): MetricRange {
+	if (value && value in METRIC_RANGE_OPTIONS) {
+		return value as MetricRange;
+	}
+	return "1h";
 }
 
 export function isMetricsEnabled(): boolean {
@@ -180,6 +199,55 @@ export async function queryNodeMetricsHistory(options: {
 	return Object.fromEntries(entries) as NodeMetricsHistory;
 }
 
+export async function queryClusterMetricsSnapshot(): Promise<NodeMetricsSnapshot | null> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) return null;
+
+	const snapshot: NodeMetricsSnapshot = {
+		cpuUsagePercent: null,
+		memoryUsagePercent: null,
+		memoryUsedBytes: null,
+		diskUsagePercent: null,
+		diskUsedBytes: null,
+	};
+
+	await Promise.all(
+		Object.entries(METRIC_NAMES).map(async ([key, metricName]) => {
+			const value = await queryInstantAggregateMetric(endpoint, {
+				metricName,
+				aggregation: isByteMetric(key) ? "sum" : "avg",
+			}).catch(() => null);
+			snapshot[key as keyof NodeMetricsSnapshot] = value;
+		}),
+	);
+
+	return snapshot;
+}
+
+export async function queryClusterMetricsHistory(options: {
+	start: Date;
+	end: Date;
+	stepSeconds: number;
+}): Promise<MetricsHistory> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) return emptyHistory();
+
+	const entries = await Promise.all(
+		Object.entries(METRIC_NAMES).map(async ([key, metricName]) => {
+			const series = await queryRangeAggregateMetric(endpoint, {
+				metricName,
+				aggregation: isByteMetric(key) ? "sum" : "avg",
+				start: options.start,
+				end: options.end,
+				stepSeconds: options.stepSeconds,
+			}).catch(() => []);
+			return [key, series] as const;
+		}),
+	);
+
+	return Object.fromEntries(entries) as MetricsHistory;
+}
+
 async function queryInstantMetric(
 	endpoint: EndpointConfig,
 	metricName: string,
@@ -243,6 +311,37 @@ async function queryInstantMetricGroup(
 	return byServer;
 }
 
+async function queryInstantAggregateMetric(
+	endpoint: EndpointConfig,
+	options: {
+		metricName: string;
+		aggregation: "avg" | "sum";
+	},
+) {
+	const url = new URL(`${endpoint.url}/api/v1/query`);
+	url.searchParams.set(
+		"query",
+		`${options.aggregation}(${options.metricName})`,
+	);
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query aggregate metrics: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const data = (await response.json()) as VictoriaInstantResponse;
+	if (data.status !== "success") {
+		throw new Error(data.error || "Failed to query aggregate metrics");
+	}
+
+	const rawValue = data.data?.result?.[0]?.value?.[1];
+	if (rawValue === undefined) return null;
+	const value = Number.parseFloat(rawValue);
+	return Number.isFinite(value) ? value : null;
+}
+
 async function queryRangeMetric(
 	endpoint: EndpointConfig,
 	options: {
@@ -285,6 +384,48 @@ async function queryRangeMetric(
 		.filter((point) => Number.isFinite(point.value));
 }
 
+async function queryRangeAggregateMetric(
+	endpoint: EndpointConfig,
+	options: {
+		metricName: string;
+		aggregation: "avg" | "sum";
+		start: Date;
+		end: Date;
+		stepSeconds: number;
+	},
+): Promise<NodeMetricPoint[]> {
+	const url = new URL(`${endpoint.url}/api/v1/query_range`);
+	url.searchParams.set(
+		"query",
+		`${options.aggregation}(${options.metricName})`,
+	);
+	url.searchParams.set(
+		"start",
+		String(Math.floor(options.start.getTime() / 1000)),
+	);
+	url.searchParams.set("end", String(Math.floor(options.end.getTime() / 1000)));
+	url.searchParams.set("step", String(options.stepSeconds));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query aggregate metrics range: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const data = (await response.json()) as VictoriaMatrixResponse;
+	if (data.status !== "success") {
+		throw new Error(data.error || "Failed to query aggregate metrics range");
+	}
+
+	return (data.data?.result?.[0]?.values ?? [])
+		.map(([timestamp, rawValue]) => ({
+			timestamp: new Date(timestamp * 1000).toISOString(),
+			value: Number.parseFloat(rawValue),
+		}))
+		.filter((point) => Number.isFinite(point.value));
+}
+
 export function emptyHistory(): NodeMetricsHistory {
 	return {
 		cpuUsagePercent: [],
@@ -300,4 +441,8 @@ function escapePromQL(value: string) {
 		.replace(/\\/g, "\\\\")
 		.replace(/"/g, '\\"')
 		.replace(/\n/g, "\\n");
+}
+
+function isByteMetric(key: string) {
+	return key === "memoryUsedBytes" || key === "diskUsedBytes";
 }

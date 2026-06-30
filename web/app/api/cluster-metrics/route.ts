@@ -5,14 +5,11 @@ import {
 	isMetricsEnabled,
 	METRIC_RANGE_OPTIONS,
 	parseMetricRange,
-	queryNodeMetricsHistory,
-	queryNodeMetricsSnapshot,
+	queryClusterMetricsHistory,
+	queryClusterMetricsSnapshot,
 } from "@/lib/victoria-metrics";
 
-export async function GET(
-	request: Request,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(request: Request) {
 	const session = await auth.api.getSession({
 		headers: await headers(),
 	});
@@ -21,7 +18,6 @@ export async function GET(
 		return new Response("Unauthorized", { status: 401 });
 	}
 
-	const { id: serverId } = await params;
 	const url = new URL(request.url);
 	const range = parseMetricRange(url.searchParams.get("range"));
 
@@ -40,9 +36,8 @@ export async function GET(
 
 	try {
 		const [current, history] = await Promise.all([
-			queryNodeMetricsSnapshot(serverId),
-			queryNodeMetricsHistory({
-				serverId,
+			queryClusterMetricsSnapshot(),
+			queryClusterMetricsHistory({
 				start,
 				end,
 				stepSeconds: option.stepSeconds,
@@ -56,7 +51,7 @@ export async function GET(
 			enabled: true,
 		});
 	} catch (error) {
-		console.error("[metrics:server] failed to query metrics:", error);
+		console.error("[metrics:cluster] failed to query metrics:", error);
 		return Response.json({
 			current: null,
 			history: emptyHistory(),
