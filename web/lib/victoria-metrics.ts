@@ -1,3 +1,11 @@
+import {
+	METRIC_RANGE_OPTIONS,
+	type MetricRange,
+	parseMetricRange,
+} from "@/lib/metric-ranges";
+
+export { METRIC_RANGE_OPTIONS, type MetricRange, parseMetricRange };
+
 const VICTORIA_METRICS_URL = process.env.VICTORIA_METRICS_URL;
 const VICTORIA_METRICS_PRIVATE_URL = process.env.VICTORIA_METRICS_PRIVATE_URL;
 
@@ -52,16 +60,6 @@ export type NodeMetricsHistory = {
 
 export type MetricsHistory = NodeMetricsHistory;
 
-export const METRIC_RANGE_OPTIONS = {
-	"1h": { durationMs: 60 * 60 * 1000, stepSeconds: 60 },
-	"6h": { durationMs: 6 * 60 * 60 * 1000, stepSeconds: 60 },
-	"24h": { durationMs: 24 * 60 * 60 * 1000, stepSeconds: 5 * 60 },
-	"7d": { durationMs: 7 * 24 * 60 * 60 * 1000, stepSeconds: 30 * 60 },
-	"30d": { durationMs: 30 * 24 * 60 * 60 * 1000, stepSeconds: 2 * 60 * 60 },
-} as const;
-
-export type MetricRange = keyof typeof METRIC_RANGE_OPTIONS;
-
 const METRIC_NAMES = {
 	cpuUsagePercent: "techulus_node_cpu_usage_percent",
 	memoryUsagePercent: "techulus_node_memory_usage_percent",
@@ -93,13 +91,6 @@ function buildFetchOptions(config: EndpointConfig): RequestInit {
 		return { headers: { Authorization: `Basic ${credentials}` } };
 	}
 	return {};
-}
-
-export function parseMetricRange(value: string | null): MetricRange {
-	if (value && value in METRIC_RANGE_OPTIONS) {
-		return value as MetricRange;
-	}
-	return "1h";
 }
 
 export function isMetricsEnabled(): boolean {

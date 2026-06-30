@@ -27,20 +27,12 @@ import {
 } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { fetcher } from "@/lib/fetcher";
+import { METRIC_RANGE_KEYS, type MetricRange } from "@/lib/metric-ranges";
 import { cn } from "@/lib/utils";
 import type {
-	MetricRange,
 	MetricsHistory,
 	NodeMetricsSnapshot,
 } from "@/lib/victoria-metrics";
-
-const RANGE_OPTIONS: Array<{ value: MetricRange; label: string }> = [
-	{ value: "1h", label: "1h" },
-	{ value: "6h", label: "6h" },
-	{ value: "24h", label: "24h" },
-	{ value: "7d", label: "7d" },
-	{ value: "30d", label: "30d" },
-];
 
 type MetricsResponse = {
 	current: NodeMetricsSnapshot | null;
@@ -126,7 +118,7 @@ export function MetricsHistoryCharts({
 	const { data, error, isLoading } = useSWR<MetricsResponse>(
 		`${endpoint}?range=${range}`,
 		fetcher,
-		{ refreshInterval: range === "1h" ? 15000 : 60000 },
+		{ refreshInterval: 60000 },
 	);
 
 	const rows = useMemo(() => buildChartRows(data?.history), [data?.history]);
@@ -145,9 +137,9 @@ export function MetricsHistoryCharts({
 					onChange={(event) => setRange(event.target.value as MetricRange)}
 					aria-label="Metrics range"
 				>
-					{RANGE_OPTIONS.map((option) => (
-						<NativeSelectOption key={option.value} value={option.value}>
-							{option.label}
+					{METRIC_RANGE_KEYS.map((option) => (
+						<NativeSelectOption key={option} value={option}>
+							{option}
 						</NativeSelectOption>
 					))}
 				</NativeSelect>
