@@ -78,6 +78,7 @@ export function ClusterHealthSummary({
 					<Button
 						variant="outline"
 						size="sm"
+						nativeButton={false}
 						render={<Link href="/dashboard/metrics" />}
 					>
 						<BarChart3 className="size-3.5" />
