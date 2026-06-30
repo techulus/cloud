@@ -78,6 +78,14 @@ mutable tags such as `latest` or `tip`.
 | `VL_PASSWORD` | Logs service password |
 | `VL_RETENTION` | Log retention period (default: `7d`) |
 
+### Victoria Metrics
+
+| Variable | Description |
+|----------|-------------|
+| `VM_USERNAME` | Metrics service username |
+| `VM_PASSWORD` | Metrics service password |
+| `VM_RETENTION` | Metrics retention period (default: `30d`) |
+
 ### Registry
 
 | Variable | Description |
