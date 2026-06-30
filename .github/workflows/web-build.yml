@@ -3,7 +3,17 @@ name: Web Build
 on:
   pull_request:
     branches:
+      - main
       - release
+    paths:
+      - "web/**"
+      - ".github/workflows/web-build.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/web-build.yml"
   workflow_dispatch:
 
 permissions:
