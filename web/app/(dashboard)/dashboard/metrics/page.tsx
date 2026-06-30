@@ -1,11 +1,7 @@
-import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summary";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { MetricsHistoryCharts } from "@/components/metrics/metrics-history-charts";
-import { getClusterHealth } from "@/db/queries";
 
 export default async function MetricsPage() {
-	const clusterHealth = await getClusterHealth();
-
 	return (
 		<>
 			<SetBreadcrumbs
@@ -21,11 +17,6 @@ export default async function MetricsPage() {
 						Cluster-level infrastructure health and historical resource usage
 					</p>
 				</div>
-
-				<ClusterHealthSummary
-					initialData={clusterHealth}
-					showMetricsLink={false}
-				/>
 
 				<MetricsHistoryCharts
 					endpoint="/api/cluster-metrics"
