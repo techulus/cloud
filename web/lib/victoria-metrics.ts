@@ -8,6 +8,7 @@ export { METRIC_RANGE_OPTIONS, type MetricRange, parseMetricRange };
 
 const VICTORIA_METRICS_URL = process.env.VICTORIA_METRICS_URL;
 const VICTORIA_METRICS_PRIVATE_URL = process.env.VICTORIA_METRICS_PRIVATE_URL;
+let hasWarnedMissingMetricsConfig = false;
 
 type EndpointConfig = {
 	url: string;
@@ -101,6 +102,15 @@ function buildFetchOptions(config: EndpointConfig): RequestInit {
 
 export function isMetricsEnabled(): boolean {
 	return !!(VICTORIA_METRICS_PRIVATE_URL || VICTORIA_METRICS_URL);
+}
+
+export function warnMissingMetricsConfig(context: string) {
+	if (hasWarnedMissingMetricsConfig) return;
+
+	hasWarnedMissingMetricsConfig = true;
+	console.warn(
+		`[metrics:${context}] Missing VictoriaMetrics configuration: set VICTORIA_METRICS_URL or VICTORIA_METRICS_PRIVATE_URL to enable metrics history.`,
+	);
 }
 
 export async function queryNodeMetricsSnapshots(

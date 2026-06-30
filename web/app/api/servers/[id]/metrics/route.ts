@@ -7,6 +7,7 @@ import {
 	parseMetricRange,
 	queryNodeMetricsHistory,
 	queryNodeMetricsSnapshot,
+	warnMissingMetricsConfig,
 } from "@/lib/victoria-metrics";
 
 export async function GET(
@@ -26,9 +27,13 @@ export async function GET(
 	const range = parseMetricRange(url.searchParams.get("range"));
 
 	if (!isMetricsEnabled()) {
-		throw new Error(
-			"Missing VictoriaMetrics configuration: set VICTORIA_METRICS_URL or VICTORIA_METRICS_PRIVATE_URL",
-		);
+		warnMissingMetricsConfig("server");
+		return Response.json({
+			current: null,
+			history: emptyHistory(),
+			range,
+			enabled: false,
+		});
 	}
 
 	const end = new Date();
