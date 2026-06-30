@@ -164,7 +164,7 @@ export function MetricsHistoryCharts({
 					description="Charts will appear once the agent has reported data for this range."
 				/>
 			) : (
-				<div className="grid gap-4 xl:grid-cols-3">
+				<div className="grid gap-4">
 					{CHARTS.map((chart) => (
 						<MetricChartCard
 							key={chart.title}
@@ -220,7 +220,7 @@ function MetricChartCard({
 				</div>
 			</CardHeader>
 			<CardContent className="space-y-3 pt-1">
-				<div className="h-56 min-w-0">
+				<div className="h-72 min-w-0 lg:h-80">
 					<ResponsiveContainer width="100%" height="100%">
 						<AreaChart
 							data={rows}
