@@ -3,9 +3,10 @@
 import { Activity, Cpu, HardDrive, MemoryStick } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
-	Area,
-	AreaChart,
 	CartesianGrid,
+	Legend,
+	Line,
+	LineChart,
 	ReferenceLine,
 	ResponsiveContainer,
 	Tooltip,
@@ -13,7 +14,6 @@ import {
 	YAxis,
 } from "recharts";
 import useSWR from "swr";
-import { Badge } from "@/components/ui/badge";
 import {
 	Card,
 	CardContent,
@@ -28,42 +28,34 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { fetcher } from "@/lib/fetcher";
 import { METRIC_RANGE_KEYS, type MetricRange } from "@/lib/metric-ranges";
-import { cn } from "@/lib/utils";
 import type {
 	MetricsHistory,
-	NodeMetricsSnapshot,
+	ServerMetricsHistory,
 } from "@/lib/victoria-metrics";
 
 type MetricsResponse = {
-	current: NodeMetricsSnapshot | null;
-	history: MetricsHistory;
 	range: MetricRange;
+	series: ServerMetricsHistory[];
 };
 
 type ChartRow = {
 	timestamp: string;
-	cpuUsagePercent?: number;
-	memoryUsagePercent?: number;
-	memoryUsedBytes?: number;
-	diskUsagePercent?: number;
-	diskUsedBytes?: number;
-};
+} & Record<string, number | string | undefined>;
 
 type MetricsHistoryChartsProps = {
 	endpoint: string;
 	title: string;
 	description: string;
-	scope: "node" | "cluster";
+	servers: Array<{ id: string; name: string }>;
 };
 
 type ChartConfig = {
 	title: string;
 	description: string;
 	icon: typeof Cpu;
-	percentKey: keyof ChartRow;
-	bytesKey?: keyof ChartRow;
+	percentKey: keyof MetricsHistory;
+	bytesKey?: keyof MetricsHistory;
 	percentColor: string;
-	bytesColor?: string;
 };
 
 type TooltipPayload = {
@@ -82,46 +74,66 @@ type MetricsTooltipProps = {
 const CHARTS: ChartConfig[] = [
 	{
 		title: "CPU",
-		description: "Usage percent",
+		description: "Usage percent by server",
 		icon: Cpu,
 		percentKey: "cpuUsagePercent",
 		percentColor: "#10b981",
 	},
 	{
 		title: "Memory",
-		description: "Usage percent and used memory",
+		description: "Usage percent and used memory by server",
 		icon: MemoryStick,
 		percentKey: "memoryUsagePercent",
 		bytesKey: "memoryUsedBytes",
 		percentColor: "#0ea5e9",
-		bytesColor: "#6366f1",
 	},
 	{
 		title: "Disk",
-		description: "Usage percent and used storage",
+		description: "Usage percent and used storage by server",
 		icon: HardDrive,
 		percentKey: "diskUsagePercent",
 		bytesKey: "diskUsedBytes",
 		percentColor: "#f59e0b",
-		bytesColor: "#ec4899",
 	},
+];
+
+const SERVER_COLORS = [
+	"#10b981",
+	"#0ea5e9",
+	"#f59e0b",
+	"#ec4899",
+	"#8b5cf6",
+	"#14b8a6",
+	"#f43f5e",
+	"#84cc16",
 ];
 
 export function MetricsHistoryCharts({
 	endpoint,
 	title,
 	description,
-	scope,
+	servers,
 }: MetricsHistoryChartsProps) {
 	const [range, setRange] = useState<MetricRange>("1h");
+	const [selectedServerId, setSelectedServerId] = useState("all");
+	const requestUrl = useMemo(() => {
+		const params = new URLSearchParams({ range });
+		if (selectedServerId !== "all") {
+			params.set("serverId", selectedServerId);
+		}
+		return `${endpoint}?${params.toString()}`;
+	}, [endpoint, range, selectedServerId]);
 	const { data, error, isLoading } = useSWR<MetricsResponse>(
-		`${endpoint}?range=${range}`,
+		requestUrl,
 		fetcher,
 		{ refreshInterval: 60000 },
 	);
 
-	const rows = useMemo(() => buildChartRows(data?.history), [data?.history]);
-	const hasData = rows.length > 0;
+	const series = data?.series ?? [];
+	const rows = useMemo(() => buildChartRows(series), [series]);
+	const hasData = series.some((server) =>
+		Object.values(server.history).some((points) => points.length > 0),
+	);
 
 	return (
 		<section className="space-y-4">
@@ -130,18 +142,33 @@ export function MetricsHistoryCharts({
 					<h2 className="text-lg font-semibold">{title}</h2>
 					<p className="text-sm text-muted-foreground">{description}</p>
 				</div>
-				<NativeSelect
-					size="sm"
-					value={range}
-					onChange={(event) => setRange(event.target.value as MetricRange)}
-					aria-label="Metrics range"
-				>
-					{METRIC_RANGE_KEYS.map((option) => (
-						<NativeSelectOption key={option} value={option}>
-							{option}
-						</NativeSelectOption>
-					))}
-				</NativeSelect>
+				<div className="flex flex-wrap gap-2">
+					<NativeSelect
+						size="sm"
+						value={selectedServerId}
+						onChange={(event) => setSelectedServerId(event.target.value)}
+						aria-label="Server"
+					>
+						<NativeSelectOption value="all">All</NativeSelectOption>
+						{servers.map((server) => (
+							<NativeSelectOption key={server.id} value={server.id}>
+								{server.name}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+					<NativeSelect
+						size="sm"
+						value={range}
+						onChange={(event) => setRange(event.target.value as MetricRange)}
+						aria-label="Metrics range"
+					>
+						{METRIC_RANGE_KEYS.map((option) => (
+							<NativeSelectOption key={option} value={option}>
+								{option}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+				</div>
 			</div>
 
 			{error ? (
@@ -169,9 +196,8 @@ export function MetricsHistoryCharts({
 						<MetricChartCard
 							key={chart.title}
 							chart={chart}
-							current={data?.current ?? null}
 							rows={rows}
-							scope={scope}
+							series={series}
 						/>
 					))}
 				</div>
@@ -182,20 +208,14 @@ export function MetricsHistoryCharts({
 
 function MetricChartCard({
 	chart,
-	current,
 	rows,
-	scope,
+	series,
 }: {
 	chart: ChartConfig;
-	current: NodeMetricsSnapshot | null;
 	rows: ChartRow[];
-	scope: "node" | "cluster";
+	series: ServerMetricsHistory[];
 }) {
 	const Icon = chart.icon;
-	const currentPercent = getSnapshotValue(current, chart.percentKey);
-	const currentBytes = chart.bytesKey
-		? getSnapshotValue(current, chart.bytesKey)
-		: null;
 
 	return (
 		<Card>
@@ -216,13 +236,12 @@ function MetricChartCard({
 							<CardDescription>{chart.description}</CardDescription>
 						</div>
 					</div>
-					<MetricBadge value={currentPercent} />
 				</div>
 			</CardHeader>
 			<CardContent className="space-y-3 pt-1">
 				<div className="h-72 min-w-0 lg:h-80">
 					<ResponsiveContainer width="100%" height="100%">
-						<AreaChart
+						<LineChart
 							data={rows}
 							margin={{
 								top: 12,
@@ -258,7 +277,13 @@ function MetricChartCard({
 									className="text-xs"
 								/>
 							)}
-							{thresholdsForChart(chart.title, scope).map((threshold) => (
+							<Legend
+								verticalAlign="top"
+								align="right"
+								iconType="plainline"
+								wrapperStyle={{ paddingBottom: 12 }}
+							/>
+							{thresholdsForChart().map((threshold) => (
 								<ReferenceLine
 									key={threshold.value}
 									y={threshold.value}
@@ -276,43 +301,24 @@ function MetricChartCard({
 									/>
 								)}
 							/>
-							<Area
-								yAxisId="percent"
-								type="monotone"
-								dataKey={chart.percentKey}
-								name={`${chart.title} %`}
-								stroke={chart.percentColor}
-								fill={chart.percentColor}
-								fillOpacity={0.14}
-								strokeWidth={2}
-								connectNulls
-								isAnimationActive={false}
-							/>
-							{chart.bytesKey && (
-								<Area
-									yAxisId="bytes"
+							{series.map((server, index) => (
+								<Line
+									key={getSeriesKey(chart.percentKey, server.serverId)}
+									yAxisId="percent"
 									type="monotone"
-									dataKey={chart.bytesKey}
-									name={`${chart.title} used`}
-									stroke={chart.bytesColor}
-									fill={chart.bytesColor}
-									fillOpacity={0.08}
-									strokeWidth={1.5}
+									dataKey={getSeriesKey(chart.percentKey, server.serverId)}
+									name={`${server.serverName} %`}
+									stroke={getServerColor(index)}
+									strokeWidth={2}
+									dot={false}
 									connectNulls
 									isAnimationActive={false}
 								/>
-							)}
-						</AreaChart>
+							))}
+							{chart.bytesKey ? renderByteLines(chart.bytesKey, series) : null}
+						</LineChart>
 					</ResponsiveContainer>
 				</div>
-				{currentBytes !== null && (
-					<p className="text-xs text-muted-foreground">
-						Current used:{" "}
-						<span className="font-medium text-foreground tabular-nums">
-							{formatBytes(currentBytes)}
-						</span>
-					</p>
-				)}
 			</CardContent>
 		</Card>
 	);
@@ -348,25 +354,25 @@ function MetricsStateCard({
 	);
 }
 
-function MetricBadge({ value }: { value: number | null }) {
-	if (value === null) {
-		return <Badge variant="outline">No data</Badge>;
-	}
-
-	return (
-		<Badge
-			variant="outline"
-			className={cn(
-				value >= 90
-					? "border-rose-500/35 bg-rose-500/10 text-rose-600 dark:text-rose-400"
-					: value >= 70
-						? "border-amber-500/35 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-						: "border-emerald-500/35 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-			)}
-		>
-			{value.toFixed(1)}%
-		</Badge>
-	);
+function renderByteLines(
+	bytesKey: keyof MetricsHistory,
+	series: ServerMetricsHistory[],
+) {
+	return series.map((server, index) => (
+		<Line
+			key={getSeriesKey(bytesKey, server.serverId)}
+			yAxisId="bytes"
+			type="monotone"
+			dataKey={getSeriesKey(bytesKey, server.serverId)}
+			name={`${server.serverName} used`}
+			stroke={getServerColor(index)}
+			strokeDasharray="4 4"
+			strokeWidth={1.5}
+			dot={false}
+			connectNulls
+			isAnimationActive={false}
+		/>
+	));
 }
 
 function MetricsTooltip({ active, payload, label }: MetricsTooltipProps) {
@@ -398,17 +404,17 @@ function MetricsTooltip({ active, payload, label }: MetricsTooltipProps) {
 	);
 }
 
-function buildChartRows(history?: MetricsHistory): ChartRow[] {
-	if (!history) return [];
-
+function buildChartRows(series: ServerMetricsHistory[]): ChartRow[] {
 	const rows = new Map<string, ChartRow>();
-	for (const [key, points] of Object.entries(history) as Array<
-		[keyof MetricsHistory, MetricsHistory[keyof MetricsHistory]]
-	>) {
-		for (const point of points) {
-			const row = rows.get(point.timestamp) ?? { timestamp: point.timestamp };
-			row[key] = point.value;
-			rows.set(point.timestamp, row);
+	for (const server of series) {
+		for (const [key, points] of Object.entries(server.history) as Array<
+			[keyof MetricsHistory, MetricsHistory[keyof MetricsHistory]]
+		>) {
+			for (const point of points) {
+				const row = rows.get(point.timestamp) ?? { timestamp: point.timestamp };
+				row[getSeriesKey(key, server.serverId)] = point.value;
+				rows.set(point.timestamp, row);
+			}
 		}
 	}
 
@@ -417,19 +423,7 @@ function buildChartRows(history?: MetricsHistory): ChartRow[] {
 	);
 }
 
-function getSnapshotValue(
-	snapshot: NodeMetricsSnapshot | null,
-	key: keyof ChartRow,
-) {
-	if (!snapshot || key === "timestamp") return null;
-	const value = snapshot[key as keyof NodeMetricsSnapshot];
-	return typeof value === "number" ? value : null;
-}
-
-function thresholdsForChart(title: string, scope: "node" | "cluster") {
-	if (scope === "cluster" && title === "CPU") {
-		return [{ value: 80, color: "#f59e0b" }];
-	}
+function thresholdsForChart() {
 	return [
 		{ value: 70, color: "#f59e0b" },
 		{ value: 90, color: "#f43f5e" },
@@ -438,9 +432,24 @@ function thresholdsForChart(title: string, scope: "node" | "cluster") {
 
 function formatTooltipValue(item: TooltipPayload) {
 	const value = Number(item.value);
-	if (!Number.isFinite(value)) return "—";
-	if (String(item.dataKey).endsWith("Bytes")) return formatBytes(value);
+	if (!Number.isFinite(value)) return "-";
+	if (isBytesSeries(String(item.dataKey))) return formatBytes(value);
 	return `${value.toFixed(1)}%`;
+}
+
+function getSeriesKey(metricKey: keyof MetricsHistory, serverId: string) {
+	return `${metricKey}:${serverId}`;
+}
+
+function getServerColor(index: number) {
+	return SERVER_COLORS[index % SERVER_COLORS.length];
+}
+
+function isBytesSeries(dataKey: string) {
+	return (
+		dataKey.startsWith("memoryUsedBytes:") ||
+		dataKey.startsWith("diskUsedBytes:")
+	);
 }
 
 function formatShortTime(value: string) {

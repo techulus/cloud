@@ -1,7 +1,10 @@
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { MetricsHistoryCharts } from "@/components/metrics/metrics-history-charts";
+import { listServers } from "@/db/queries";
 
 export default async function MetricsPage() {
+	const servers = await listServers();
+
 	return (
 		<>
 			<SetBreadcrumbs
@@ -21,8 +24,11 @@ export default async function MetricsPage() {
 				<MetricsHistoryCharts
 					endpoint="/api/cluster-metrics"
 					title="Cluster History"
-					description="Average CPU, memory, and disk usage across reporting servers"
-					scope="cluster"
+					description="CPU, memory, and disk usage by server"
+					servers={servers.map((server) => ({
+						id: server.id,
+						name: server.name,
+					}))}
 				/>
 			</div>
 		</>
