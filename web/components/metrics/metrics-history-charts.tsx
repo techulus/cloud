@@ -25,7 +25,7 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { fetcher } from "@/lib/fetcher";
 import { METRIC_RANGE_KEYS, type MetricRange } from "@/lib/metric-ranges";
 import type {
@@ -178,12 +178,7 @@ export function MetricsHistoryCharts({
 					description="The metrics API could not be reached. Current health data may still be available."
 				/>
 			) : isLoading ? (
-				<MetricsStateCard
-					icon={Activity}
-					title="Loading metrics"
-					description="Fetching recent infrastructure history."
-					loading
-				/>
+				<MetricsChartsSkeleton />
 			) : !hasData ? (
 				<MetricsStateCard
 					icon={Activity}
@@ -330,26 +325,43 @@ function MetricChartCard({
 	);
 }
 
+function MetricsChartsSkeleton() {
+	return (
+		<div aria-hidden="true" className="grid gap-4">
+			{CHARTS.map((chart) => (
+				<Card key={chart.title}>
+					<CardHeader className="border-b">
+						<div className="flex items-center gap-3">
+							<Skeleton className="size-8 rounded-lg" />
+							<div className="space-y-2">
+								<Skeleton className="h-5 w-24" />
+								<Skeleton className="h-4 w-56 max-w-full" />
+							</div>
+						</div>
+					</CardHeader>
+					<CardContent className="pt-4">
+						<Skeleton className="h-72 rounded-lg lg:h-80" />
+					</CardContent>
+				</Card>
+			))}
+		</div>
+	);
+}
+
 function MetricsStateCard({
 	icon: Icon,
 	title,
 	description,
-	loading = false,
 }: {
 	icon: typeof Activity;
 	title: string;
 	description: string;
-	loading?: boolean;
 }) {
 	return (
 		<Card>
 			<CardContent className="flex items-center gap-3 py-6">
 				<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-					{loading ? (
-						<Spinner className="size-4" />
-					) : (
-						<Icon className="size-4" />
-					)}
+					<Icon className="size-4" />
 				</div>
 				<div>
 					<p className="font-medium">{title}</p>
