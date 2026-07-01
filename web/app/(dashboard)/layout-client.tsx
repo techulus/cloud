@@ -119,10 +119,16 @@ function DashboardHeader({
 					>
 						<User className="size-4" />
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" sideOffset={8}>
+					<DropdownMenuContent
+						align="end"
+						sideOffset={8}
+						className="w-40"
+					>
 						<DropdownMenuGroup>
 							<DropdownMenuLabel>
-								<span className="block font-medium">{name}</span>
+								<span className="block truncate text-sm font-semibold">
+									{name}
+								</span>
 								<span className="block truncate text-xs font-normal text-muted-foreground">
 									{email}
 								</span>
