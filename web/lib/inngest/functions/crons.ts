@@ -16,7 +16,7 @@ import { inngest } from "../client";
 export const staleServerCheck = inngest.createFunction(
 	{
 		id: "cron-stale-server-check",
-		triggers: [cron("*/5 * * * *")],
+		triggers: [cron("* * * * *")],
 		singleton: { mode: "skip" },
 	},
 	async ({ step }) => {
