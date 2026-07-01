@@ -24,7 +24,13 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { signOut, useSession } from "@/lib/auth-client";
 
-function DashboardHeader({ email }: { email: string }) {
+function DashboardHeader({
+	email,
+	name,
+}: {
+	email: string;
+	name: string;
+}) {
 	const router = useRouter();
 	const breadcrumbs = useBreadcrumbs();
 	const getBreadcrumbKey = (
@@ -113,9 +119,20 @@ function DashboardHeader({ email }: { email: string }) {
 					>
 						<User className="size-4" />
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" sideOffset={8}>
+					<DropdownMenuContent
+						align="end"
+						sideOffset={8}
+						className="w-40"
+					>
 						<DropdownMenuGroup>
-							<DropdownMenuLabel>{email}</DropdownMenuLabel>
+							<DropdownMenuLabel>
+								<span className="block truncate text-sm font-semibold">
+									{name}
+								</span>
+								<span className="block truncate text-xs font-normal text-muted-foreground">
+									{email}
+								</span>
+							</DropdownMenuLabel>
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
@@ -166,7 +183,10 @@ export function DashboardLayoutClient({
 	return (
 		<BreadcrumbDataProvider>
 			<div className="min-h-screen">
-				<DashboardHeader email={session.user.email} />
+				<DashboardHeader
+					email={session.user.email}
+					name={session.user.name}
+				/>
 				<OfflineServersBanner />
 				<main>{children}</main>
 				<Toaster />

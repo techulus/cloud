@@ -244,18 +244,20 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 									<NativeSelectOption value="reader">Reader</NativeSelectOption>
 								</NativeSelect>
 							)}
-							<div className="flex justify-end">
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									disabled={member.role === "admin" || busyId === member.id}
-									onClick={() => void handleRemove(member)}
-									title="Remove member"
-								>
-									<Trash2 className="size-4" />
-								</Button>
-							</div>
+							{member.role !== "admin" && (
+								<div className="flex justify-end">
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										disabled={busyId === member.id}
+										onClick={() => void handleRemove(member)}
+										title="Remove member"
+									>
+										<Trash2 className="size-4" />
+									</Button>
+								</div>
+							)}
 						</div>
 					))}
 				</div>

@@ -19,7 +19,7 @@ import {
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
 
-const STALE_THRESHOLD_MS = 120_000; // 2 minutes
+const STALE_THRESHOLD_MS = 75_000; // 75 seconds
 
 async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
