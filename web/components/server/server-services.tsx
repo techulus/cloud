@@ -34,11 +34,11 @@ export async function ServerServices({ serverId }: { serverId: string }) {
 				<div className="space-y-5">
 					{groups.map((group) => (
 						<div key={group.key} className="space-y-2">
-							<div>
+							<div className="flex items-center gap-2">
 								<p className="font-medium text-sm">{group.projectName}</p>
-								<p className="text-xs text-muted-foreground">
+								<span className="text-xs text-muted-foreground">
 									{group.environmentName}
-								</p>
+								</span>
 							</div>
 							<div className="divide-y rounded-lg border">
 								{group.services.map((service) => (
