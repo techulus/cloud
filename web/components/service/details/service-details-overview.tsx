@@ -201,27 +201,12 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 
 				<div className="grid gap-x-8 gap-y-6 p-4 sm:grid-cols-2 lg:border-l">
 					<StatusItem status={overview.status} />
-					<DetailItem icon={Server} label="Servers">
-						<ServerList servers={overview.serverSummaries} />
-					</DetailItem>
+					<InstancesItem overview={overview} />
 					<DetailItem icon={Cpu} label="Resources">
 						<p>{formatResources(service)}</p>
 					</DetailItem>
-					<DetailItem icon={Box} label="Instances">
-						<p>
-							<span className="font-medium">{overview.runningDeployments}</span>{" "}
-							running
-						</p>
-						<p className="text-xs text-muted-foreground">
-							{overview.configuredReplicas} configured ·{" "}
-							{overview.totalDeployments} total
-						</p>
-					</DetailItem>
 					<DetailItem icon={overview.source.icon} label="Source">
 						<SourceDetails source={overview.source} />
-					</DetailItem>
-					<DetailItem icon={Activity} label="Created">
-						<p>{formatRelativeTime(service.createdAt)}</p>
 					</DetailItem>
 					<DetailItem icon={Globe} label="Endpoints">
 						<EndpointList endpoints={overview.endpoints} />
@@ -374,6 +359,30 @@ function StatusItem({ status }: { status: ServiceStatus }) {
 			<div className="flex items-center gap-2">
 				<span className={cn("size-2 rounded-full", classes.dot)} />
 				<span className={cn("font-medium", classes.text)}>{status.label}</span>
+			</div>
+		</DetailItem>
+	);
+}
+
+function InstancesItem({ overview }: { overview: OverviewData }) {
+	const serverCount = overview.serverSummaries.length;
+	const serverLabel = serverCount === 1 ? "server" : "servers";
+
+	return (
+		<DetailItem icon={Server} label="Instances">
+			<div className="space-y-2">
+				<div>
+					<p>
+						<span className="font-medium">{overview.runningDeployments}</span>{" "}
+						running
+						{serverCount > 0 ? ` across ${serverCount} ${serverLabel}` : ""}
+					</p>
+					<p className="text-xs text-muted-foreground">
+						{overview.configuredReplicas} configured ·{" "}
+						{overview.totalDeployments} total
+					</p>
+				</div>
+				<ServerList servers={overview.serverSummaries} />
 			</div>
 		</DetailItem>
 	);
@@ -771,27 +780,4 @@ function formatToday(): string {
 		day: "numeric",
 		month: "short",
 	}).format(new Date());
-}
-
-function formatRelativeTime(value: Date | string): string {
-	const createdAt = new Date(value);
-	const diffMs = Date.now() - createdAt.getTime();
-
-	if (!Number.isFinite(diffMs)) return "-";
-	if (diffMs < 60 * 1000) return "just now";
-
-	const minutes = Math.floor(diffMs / (60 * 1000));
-	if (minutes < 60) return `${minutes}m ago`;
-
-	const hours = Math.floor(minutes / 60);
-	if (hours < 48) return `${hours}h ago`;
-
-	const days = Math.floor(hours / 24);
-	if (days < 30) return `${days}d ago`;
-
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	}).format(createdAt);
 }
