@@ -198,7 +198,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 					<DetailItem icon={overview.source.icon} label="Source">
 						<SourceDetails source={overview.source} />
 					</DetailItem>
-					<DetailItem icon={Globe} label="Endpoints">
+					<DetailItem icon={Globe} label="Endpoints" className="sm:col-span-2">
 						<EndpointList endpoints={overview.endpoints} />
 					</DetailItem>
 				</div>
@@ -382,13 +382,15 @@ function DetailItem({
 	icon: Icon,
 	label,
 	children,
+	className,
 }: {
 	icon: LucideIcon;
 	label: string;
 	children: ReactNode;
+	className?: string;
 }) {
 	return (
-		<div className="min-w-0 space-y-2">
+		<div className={cn("min-w-0 space-y-2", className)}>
 			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
 				<Icon className="size-4" />
 				<span>{label}</span>
@@ -461,11 +463,11 @@ function EndpointList({ endpoints }: { endpoints: EndpointItem[] }) {
 				const content = (
 					<div
 						key={`${endpoint.key}-content`}
-						className="flex min-w-0 items-center gap-2"
+						className="flex min-w-0 items-start gap-2"
 					>
-						<Icon className="size-3.5 shrink-0 text-muted-foreground" />
+						<Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
 						<div className="min-w-0">
-							<p className="truncate font-medium">{endpoint.label}</p>
+							<p className="break-all font-medium">{endpoint.label}</p>
 							<p className="truncate text-xs text-muted-foreground">
 								{endpoint.meta}
 							</p>
