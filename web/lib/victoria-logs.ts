@@ -1,6 +1,30 @@
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
 
+export const REQUEST_STATS_RANGE_OPTIONS = {
+	"1h": { durationMs: 60 * 60 * 1000, stepSeconds: 60, stepLogSql: "1m" },
+	"6h": {
+		durationMs: 6 * 60 * 60 * 1000,
+		stepSeconds: 5 * 60,
+		stepLogSql: "5m",
+	},
+	"24h": {
+		durationMs: 24 * 60 * 60 * 1000,
+		stepSeconds: 5 * 60,
+		stepLogSql: "5m",
+	},
+	"7d": {
+		durationMs: 7 * 24 * 60 * 60 * 1000,
+		stepSeconds: 30 * 60,
+		stepLogSql: "30m",
+	},
+} as const;
+
+export type RequestStatsRange = keyof typeof REQUEST_STATS_RANGE_OPTIONS;
+
+export const DEFAULT_REQUEST_STATS_RANGE: RequestStatsRange = "7d";
+const CURRENT_RATE_WINDOW_SECONDS = 5 * 60;
+
 type EndpointConfig = {
 	url: string;
 	username?: string;
@@ -52,7 +76,202 @@ export type StoredLog = {
 };
 
 export function isLoggingEnabled(): boolean {
-	return !!VICTORIA_LOGS_URL;
+	return !!(VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL);
+}
+
+export type HttpRequestStatsBucket = {
+	timestamp: string;
+	requests: number;
+	errors: number;
+};
+
+export type HttpRequestStats = {
+	range: RequestStatsRange;
+	stepSeconds: number;
+	currentWindowSeconds: number;
+	totalRequests: number;
+	currentRequestsPerSecond: number;
+	currentErrorsPerSecond: number;
+	buckets: HttpRequestStatsBucket[];
+};
+
+type RequestStatsRow = Record<string, unknown>;
+
+export function parseRequestStatsRange(
+	value: string | null | undefined,
+): RequestStatsRange {
+	if (value && value in REQUEST_STATS_RANGE_OPTIONS) {
+		return value as RequestStatsRange;
+	}
+	return DEFAULT_REQUEST_STATS_RANGE;
+}
+
+export function createEmptyHttpRequestStats(
+	range: RequestStatsRange = DEFAULT_REQUEST_STATS_RANGE,
+): HttpRequestStats {
+	const config = REQUEST_STATS_RANGE_OPTIONS[range];
+	return {
+		range,
+		stepSeconds: config.stepSeconds,
+		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		totalRequests: 0,
+		currentRequestsPerSecond: 0,
+		currentErrorsPerSecond: 0,
+		buckets: [],
+	};
+}
+
+export function parseRequestStatsRows(text: string): RequestStatsRow[] {
+	const lines = text.trim().split("\n").filter(Boolean);
+	const rows: RequestStatsRow[] = [];
+
+	for (const line of lines) {
+		try {
+			const parsed = JSON.parse(line) as unknown;
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				rows.push(parsed as RequestStatsRow);
+			}
+		} catch {
+			// VictoriaLogs should return JSON lines, but a single malformed row should
+			// not break the service overview card.
+		}
+	}
+
+	return rows;
+}
+
+export function sumRequestStatsRows(rows: RequestStatsRow[]): {
+	requests: number;
+	errors: number;
+} {
+	return rows.reduce<{ requests: number; errors: number }>(
+		(acc, row) => {
+			acc.requests += parseStatNumber(row.requests);
+			acc.errors += parseStatNumber(row.errors);
+			return acc;
+		},
+		{ requests: 0, errors: 0 },
+	);
+}
+
+export function buildRequestStatsBuckets(
+	rows: RequestStatsRow[],
+	options: { start: Date; end: Date; stepSeconds: number },
+): HttpRequestStatsBucket[] {
+	const stepMs = options.stepSeconds * 1000;
+	const startMs = floorToStep(options.start.getTime(), stepMs);
+	const endMs = floorToStep(options.end.getTime(), stepMs);
+
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) {
+		return [];
+	}
+
+	const byBucket = new Map<number, { requests: number; errors: number }>();
+	for (const row of rows) {
+		const timestamp = parseTimestamp(row._time ?? row.time ?? row.timestamp);
+		if (!timestamp) continue;
+
+		const bucketMs = floorToStep(timestamp.getTime(), stepMs);
+		const bucket = byBucket.get(bucketMs) ?? { requests: 0, errors: 0 };
+		bucket.requests += parseStatNumber(row.requests);
+		bucket.errors += parseStatNumber(row.errors);
+		byBucket.set(bucketMs, bucket);
+	}
+
+	const buckets: HttpRequestStatsBucket[] = [];
+	for (let timestampMs = startMs; timestampMs <= endMs; timestampMs += stepMs) {
+		const bucket = byBucket.get(timestampMs) ?? { requests: 0, errors: 0 };
+		buckets.push({
+			timestamp: new Date(timestampMs).toISOString(),
+			requests: bucket.requests,
+			errors: bucket.errors,
+		});
+	}
+
+	return buckets;
+}
+
+export async function queryHttpRequestStats(options: {
+	serviceId: string;
+	range: RequestStatsRange;
+	now?: Date;
+}): Promise<HttpRequestStats> {
+	const config = REQUEST_STATS_RANGE_OPTIONS[options.range];
+	const now = options.now ?? new Date();
+	const start = new Date(now.getTime() - config.durationMs);
+	const bucketLimit =
+		Math.ceil(config.durationMs / (config.stepSeconds * 1000)) + 5;
+	const baseFilter = `service_id:${options.serviceId} log_type:http`;
+	const bucketQuery = `${baseFilter} _time:${options.range} | stats by (_time:${config.stepLogSql}) count() as requests, count() if (status:>=500) as errors | sort by (_time)`;
+	const currentQuery = `${baseFilter} _time:5m | stats count() as requests, count() if (status:>=500) as errors`;
+
+	const [bucketText, currentText] = await Promise.all([
+		queryLogSql(bucketQuery, bucketLimit),
+		queryLogSql(currentQuery, 5),
+	]);
+
+	const buckets = buildRequestStatsBuckets(parseRequestStatsRows(bucketText), {
+		start,
+		end: now,
+		stepSeconds: config.stepSeconds,
+	});
+	const currentCounts = sumRequestStatsRows(parseRequestStatsRows(currentText));
+
+	return {
+		range: options.range,
+		stepSeconds: config.stepSeconds,
+		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		totalRequests: buckets.reduce((sum, bucket) => sum + bucket.requests, 0),
+		currentRequestsPerSecond:
+			currentCounts.requests / CURRENT_RATE_WINDOW_SECONDS,
+		currentErrorsPerSecond: currentCounts.errors / CURRENT_RATE_WINDOW_SECONDS,
+		buckets,
+	};
+}
+
+async function queryLogSql(query: string, limit: number): Promise<string> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query logs: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	return response.text();
+}
+
+function parseStatNumber(value: unknown): number {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === "string" && value.trim() !== "") {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	return 0;
+}
+
+function parseTimestamp(value: unknown): Date | null {
+	if (typeof value !== "string" && typeof value !== "number") {
+		return null;
+	}
+
+	const timestamp = new Date(value);
+	return Number.isFinite(timestamp.getTime()) ? timestamp : null;
+}
+
+function floorToStep(timestampMs: number, stepMs: number): number {
+	return Math.floor(timestampMs / stepMs) * stepMs;
 }
 
 type QueryLogsByServiceOptions = {
@@ -242,7 +461,7 @@ export async function ingestRolloutLog(
 		await fetch(url, {
 			...options,
 			method: "POST",
-			body: JSON.stringify(entry) + "\n",
+			body: `${JSON.stringify(entry)}\n`,
 			headers: {
 				...((options.headers as Record<string, string>) || {}),
 				"Content-Type": "application/json",
