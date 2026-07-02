@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,251 @@ func TestLogsRejectsInvalidTailBeforeConfig(t *testing.T) {
 	_, _, err := runTestCommand(t, nil, t.TempDir(), "logs", "--tail", "0")
 	if err == nil || !strings.Contains(err.Error(), "between 1 and 1000") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAgentHelpOutputsStructuredCommandMetadata(t *testing.T) {
+	stdout, stderr, err := runTestCommand(t, nil, t.TempDir(), "status", "--help", "--agent")
+	if err != nil {
+		t.Fatalf("help error = %v\nstderr=%s", err, stderr)
+	}
+	var help agentHelpInfo
+	if err := json.Unmarshal([]byte(stdout), &help); err != nil {
+		t.Fatalf("decode help: %v\nstdout=%s", err, stdout)
+	}
+	if help.Command != "status" || help.Path != "tc status" {
+		t.Fatalf("help = %#v", help)
+	}
+	if !agentFlagsContain(help.Flags, "project") || !agentFlagsContain(help.InheritedFlags, "agent") {
+		t.Fatalf("flags = %#v inherited = %#v", help.Flags, help.InheritedFlags)
+	}
+	if len(help.Notes) == 0 || !strings.Contains(strings.Join(help.Notes, "\n"), "explicit target flags") {
+		t.Fatalf("notes = %#v", help.Notes)
+	}
+}
+
+func TestAgentStatusOutputsRawJSON(t *testing.T) {
+	tmp := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/status" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"service":{"id":"1234567890abcdef","name":"web","image":"nginx:1.27","hostname":null,"replicas":1},"latestRollout":null,"deployments":[]}`))
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestCommand(t, server.Client(), tmp, "--agent", "status", "--project", "app", "--environment", "production", "--service", "web")
+	if err != nil {
+		t.Fatalf("status error = %v\nstderr=%s", err, stderr)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		t.Fatalf("decode raw: %v\nstdout=%s", err, stdout)
+	}
+	if _, ok := raw["ok"]; ok {
+		t.Fatalf("agent output should be raw data, got %s", stdout)
+	}
+	target := raw["target"].(map[string]any)
+	if target["project"] != "app" || raw["status"] == nil {
+		t.Fatalf("raw = %#v", raw)
+	}
+}
+
+func TestJSONStatusOutputsEnvelope(t *testing.T) {
+	tmp := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/status" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"service":{"id":"1234567890abcdef","name":"web","image":"nginx:1.27","hostname":null,"replicas":1},"latestRollout":null,"deployments":[]}`))
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestCommand(t, server.Client(), tmp, "--json", "status", "--project", "app", "--environment", "production", "--service", "web")
+	if err != nil {
+		t.Fatalf("status error = %v\nstderr=%s", err, stderr)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\nstdout=%s", err, stdout)
+	}
+	if envelope["ok"] != true || envelope["data"] == nil || envelope["summary"] != "Status" {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestAgentLogsOutputsOneShotJSON(t *testing.T) {
+	tmp := t.TempDir()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/logs" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		requests++
+		w.Write([]byte(`{"loggingEnabled":true,"logs":[{"deploymentId":"d","stream":"stdout","message":"hello","timestamp":"2026-01-01T00:00:00Z"}]}`))
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestCommand(t, server.Client(), tmp, "--agent", "logs", "--project", "app", "--environment", "production", "--service", "web")
+	if err != nil {
+		t.Fatalf("logs error = %v\nstderr=%s", err, stderr)
+	}
+	var result logsOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode logs: %v\nstdout=%s", err, stdout)
+	}
+	if requests != 1 || !result.LoggingEnabled || len(result.Logs) != 1 || result.Logs[0].Message != "hello" {
+		t.Fatalf("requests=%d result=%#v", requests, result)
+	}
+}
+
+func TestAgentLogsRejectsFollowTrue(t *testing.T) {
+	_, _, err := runTestCommand(t, nil, t.TempDir(), "--agent", "logs", "--project", "app", "--environment", "production", "--service", "web", "--follow=true")
+	if err == nil || !strings.Contains(err.Error(), "--follow=true is not supported") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestExecuteWritesMachineErrorEnvelope(t *testing.T) {
+	tmp := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected API request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestAppExecute(t, server.Client(), tmp, "--json", "status", "--project", "app")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !IsHandledError(err) {
+		t.Fatalf("error should be marked handled, got %T %v", err, err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\nstdout=%s", err, stdout)
+	}
+	if envelope["ok"] != false || !strings.Contains(envelope["error"].(string), "provide --project") {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestHandledErrorUnwrapsOriginalError(t *testing.T) {
+	base := errors.New("base")
+	wrapped := handledError{err: base}
+	if !errors.Is(wrapped, base) {
+		t.Fatalf("handledError should unwrap original error")
+	}
+}
+
+func TestAuthLoginRejectsMachineOutputBeforeWritingHumanText(t *testing.T) {
+	stdout, stderr, err := runTestAppExecute(t, nil, t.TempDir(), "--agent", "auth", "login", "--host", "https://example.com")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\nstdout=%s", err, stdout)
+	}
+	if envelope["ok"] != false || !strings.Contains(envelope["error"].(string), "requires human browser approval") {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestLinkRejectsMachineOutputWithSpecificMessage(t *testing.T) {
+	stdout, stderr, err := runTestAppExecute(t, nil, t.TempDir(), "--json", "link")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\nstdout=%s", err, stdout)
+	}
+	if envelope["ok"] != false || !strings.Contains(envelope["error"].(string), "does not support --agent or --json") {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestStatusUsesExplicitTargetWithoutManifest(t *testing.T) {
+	tmp := t.TempDir()
+	var sawStatus bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/status" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		query := r.URL.Query()
+		if query.Get("project") != "app" || query.Get("environment") != "production" || query.Get("service") != "web" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		sawStatus = true
+		w.Write([]byte(`{"service":{"id":"1234567890abcdef","name":"web","image":"nginx:1.27","hostname":null,"replicas":1},"latestRollout":null,"deployments":[]}`))
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestCommand(t, server.Client(), tmp, "status", "--project", "app", "--environment", "production", "--service", "web")
+	if err != nil {
+		t.Fatalf("status error = %v\nstderr=%s", err, stderr)
+	}
+	if !sawStatus || !strings.Contains(stdout, "app/production/web") || !strings.Contains(stdout, "nginx:1.27") {
+		t.Fatalf("stdout = %s sawStatus=%v", stdout, sawStatus)
+	}
+}
+
+func TestLogsUsesExplicitTargetWithoutManifest(t *testing.T) {
+	tmp := t.TempDir()
+	var sawLogs bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/manifest/logs" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		query := r.URL.Query()
+		if query.Get("project") != "app" || query.Get("environment") != "production" || query.Get("service") != "web" || query.Get("tail") != "10" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		sawLogs = true
+		w.Write([]byte(`{"loggingEnabled":true,"logs":[{"deploymentId":"d","stream":"stdout","message":"hello","timestamp":"2026-01-01T00:00:00Z"}]}`))
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	stdout, stderr, err := runTestCommand(t, server.Client(), tmp, "logs", "--project", "app", "--environment", "production", "--service", "web", "--tail", "10", "--follow=false")
+	if err != nil {
+		t.Fatalf("logs error = %v\nstderr=%s", err, stderr)
+	}
+	if !sawLogs || !strings.Contains(stdout, "app/production/web") || !strings.Contains(stdout, "hello") {
+		t.Fatalf("stdout = %s sawLogs=%v", stdout, sawLogs)
+	}
+}
+
+func TestReadOnlyTargetsRejectPartialFlags(t *testing.T) {
+	tmp := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected API request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+	writeTestConfig(t, server.URL)
+
+	_, _, err := runTestCommand(t, server.Client(), tmp, "status", "--project", "app")
+	if err == nil || !strings.Contains(err.Error(), "provide --project, --environment, and --service together") {
+		t.Fatalf("status error = %v", err)
+	}
+
+	_, _, err = runTestCommand(t, server.Client(), tmp, "logs", "--project", "app", "--service", "web", "--follow=false")
+	if err == nil || !strings.Contains(err.Error(), "provide --project, --environment, and --service together") {
+		t.Fatalf("logs error = %v", err)
 	}
 }
 
@@ -253,6 +499,20 @@ func runTestCommandWithInput(t *testing.T, client *http.Client, cwd string, stdi
 	return stdout.String(), stderr.String(), err
 }
 
+func runTestAppExecute(t *testing.T, client *http.Client, cwd string, args ...string) (string, string, error) {
+	t.Helper()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp("test", strings.NewReader(""), &stdout, &stderr)
+	app.Args = args
+	if client != nil {
+		app.HTTPClient = client
+	}
+	app.GetCWD = func() (string, error) { return cwd, nil }
+	err := app.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
 func writeTestManifest(t *testing.T, dir string) {
 	t.Helper()
 	raw := `apiVersion: v1
@@ -292,4 +552,13 @@ func writeTestConfig(t *testing.T, host string) {
 	if err := auth.WriteConfig(auth.Config{Host: host, APIKey: "secret"}); err != nil {
 		t.Fatalf("WriteConfig() error = %v", err)
 	}
+}
+
+func agentFlagsContain(flags []agentFlag, name string) bool {
+	for _, flag := range flags {
+		if flag.Name == name {
+			return true
+		}
+	}
+	return false
 }
