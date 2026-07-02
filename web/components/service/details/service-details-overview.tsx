@@ -38,11 +38,16 @@ type RequestStatsResponse = {
 	currentWindowSeconds: number;
 	totalRequests: number;
 	currentRequestsPerSecond: number;
-	currentErrorsPerSecond: number;
+	statusCodes: string[];
+	currentStatuses: Array<{
+		status: string;
+		requests: number;
+		requestsPerSecond: number;
+	}>;
 	buckets: Array<{
 		timestamp: string;
-		requests: number;
-		errors: number;
+		totalRequests: number;
+		statuses: Record<string, number>;
 	}>;
 };
 
@@ -87,10 +92,14 @@ type ServiceStatus = {
 
 type ChartRow = {
 	timestamp: string;
-	requestsPerSecond: number;
-	errorsPerSecond: number;
-	requests: number;
-	errors: number;
+	totalRequests: number;
+} & Record<string, string | number>;
+
+type StatusSeries = {
+	status: string;
+	dataKey: string;
+	color: string;
+	currentRequestsPerSecond: number;
 };
 
 type RequestTooltipPayload = {
@@ -129,6 +138,14 @@ const ENDPOINT_KIND_ICONS: Record<EndpointItem["kind"], LucideIcon> = {
 	public: Globe,
 	private: Lock,
 	tcp: Network,
+};
+
+const STATUS_CODE_COLOR_PALETTES: Record<string, string[]> = {
+	"2": ["#10b981", "#22c55e", "#14b8a6", "#84cc16"],
+	"3": ["#6366f1", "#8b5cf6", "#06b6d4", "#3b82f6"],
+	"4": ["#f59e0b", "#f97316", "#eab308", "#fb7185"],
+	"5": ["#ef4444", "#f43f5e", "#dc2626", "#b91c1c"],
+	default: ["#64748b", "#0ea5e9", "#a855f7", "#71717a"],
 };
 
 export function ServiceDetailsOverview({ service }: { service: Service }) {
@@ -189,9 +206,8 @@ function RequestStatsPanel({
 	isLoading: boolean;
 }) {
 	const chartRows = useMemo(() => buildChartRows(stats), [stats]);
-	const hasChartData = chartRows.some(
-		(row) => row.requests > 0 || row.errors > 0,
-	);
+	const statusSeries = useMemo(() => buildStatusSeries(stats), [stats]);
+	const hasChartData = chartRows.some((row) => row.totalRequests > 0);
 	const isUnavailable = Boolean(error) || stats?.loggingEnabled === false;
 
 	return (
@@ -262,51 +278,40 @@ function RequestStatsPanel({
 									/>
 								)}
 							/>
-							<Line
-								type="monotone"
-								dataKey="requestsPerSecond"
-								name="Requests/s"
-								stroke="#0ea5e9"
-								strokeWidth={2}
-								dot={false}
-								connectNulls
-								isAnimationActive={false}
-							/>
-							<Line
-								type="monotone"
-								dataKey="errorsPerSecond"
-								name="Errors/s"
-								stroke="#ef4444"
-								strokeWidth={2}
-								dot={false}
-								connectNulls
-								isAnimationActive={false}
-							/>
+							{statusSeries.map((series) => (
+								<Line
+									key={series.status}
+									type="monotone"
+									dataKey={series.dataKey}
+									name={series.status}
+									stroke={series.color}
+									strokeWidth={2}
+									dot={false}
+									connectNulls
+									isAnimationActive={false}
+								/>
+							))}
 						</LineChart>
 					</ResponsiveContainer>
 				)}
 			</div>
 
-			<div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-				<LegendMetric
-					color="bg-sky-500"
-					label="Requests/s"
-					value={
-						stats && !isUnavailable
-							? formatRate(stats.currentRequestsPerSecond)
-							: "-"
-					}
-				/>
-				<LegendMetric
-					color="bg-red-500"
-					label="Errors/s"
-					value={
-						stats && !isUnavailable
-							? formatRate(stats.currentErrorsPerSecond)
-							: "-"
-					}
-				/>
-			</div>
+			{statusSeries.length > 0 && (
+				<div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+					{statusSeries.map((series) => (
+						<LegendMetric
+							key={series.status}
+							color={series.color}
+							label={`${series.status}/s`}
+							value={
+								stats && !isUnavailable
+									? formatRate(series.currentRequestsPerSecond)
+									: "-"
+							}
+						/>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -479,7 +484,10 @@ function LegendMetric({
 }) {
 	return (
 		<div className="flex items-center gap-2">
-			<span className={cn("size-2.5 rounded-full", color)} />
+			<span
+				className="size-2.5 rounded-full"
+				style={{ backgroundColor: color }}
+			/>
 			<span className="text-muted-foreground">{label}</span>
 			<span className="font-medium tabular-nums">{value}</span>
 		</div>
@@ -498,12 +506,14 @@ function RequestStatsTooltip({ active, payload, label }: RequestTooltipProps) {
 	if (!active || !payload?.length) return null;
 
 	const row = payload[0]?.payload;
+	const visiblePayload = payload.filter((item) => Number(item.value) > 0);
+	const items = visiblePayload.length > 0 ? visiblePayload : payload;
 
 	return (
 		<div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
 			<p className="mb-1 font-medium">{formatTooltipDate(String(label))}</p>
 			<div className="space-y-1">
-				{payload.map((item) => (
+				{items.map((item) => (
 					<div
 						key={`${item.dataKey}-${item.name}`}
 						className="flex items-center justify-between gap-5"
@@ -516,14 +526,14 @@ function RequestStatsTooltip({ active, payload, label }: RequestTooltipProps) {
 							{item.name}
 						</span>
 						<span className="font-medium tabular-nums">
-							{formatRate(Number(item.value))}
+							{formatRate(Number(item.value))}/s
 						</span>
 					</div>
 				))}
 			</div>
 			{row ? (
 				<p className="mt-1 text-muted-foreground">
-					{row.requests} requests · {row.errors} 5xx
+					{row.totalRequests} total requests
 				</p>
 			) : null}
 		</div>
@@ -672,13 +682,45 @@ function getSourceInfo(service: Service): SourceInfo {
 function buildChartRows(stats?: RequestStatsResponse): ChartRow[] {
 	if (!stats) return [];
 
-	return stats.buckets.map((bucket) => ({
-		timestamp: bucket.timestamp,
-		requests: bucket.requests,
-		errors: bucket.errors,
-		requestsPerSecond: bucket.requests / stats.stepSeconds,
-		errorsPerSecond: bucket.errors / stats.stepSeconds,
+	return stats.buckets.map((bucket) => {
+		const row: ChartRow = {
+			timestamp: bucket.timestamp,
+			totalRequests: bucket.totalRequests,
+		};
+		for (const status of stats.statusCodes) {
+			row[getStatusDataKey(status)] =
+				(bucket.statuses[status] ?? 0) / stats.stepSeconds;
+		}
+		return row;
+	});
+}
+
+function buildStatusSeries(stats?: RequestStatsResponse): StatusSeries[] {
+	if (!stats) return [];
+
+	const currentByStatus = new Map(
+		stats.currentStatuses.map((status) => [status.status, status]),
+	);
+
+	return stats.statusCodes.map((status, index) => ({
+		status,
+		dataKey: getStatusDataKey(status),
+		color: getStatusColor(status, index),
+		currentRequestsPerSecond:
+			currentByStatus.get(status)?.requestsPerSecond ?? 0,
 	}));
+}
+
+function getStatusDataKey(status: string): string {
+	const normalized = status.replace(/[^a-zA-Z0-9]/g, "_");
+	return `status_${normalized || "unknown"}`;
+}
+
+function getStatusColor(status: string, index: number): string {
+	const palette =
+		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
+		STATUS_CODE_COLOR_PALETTES.default;
+	return palette[index % palette.length];
 }
 
 function formatGithubRepo(repoUrl: string): string {

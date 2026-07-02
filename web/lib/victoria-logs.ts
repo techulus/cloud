@@ -81,8 +81,14 @@ export function isLoggingEnabled(): boolean {
 
 export type HttpRequestStatsBucket = {
 	timestamp: string;
+	totalRequests: number;
+	statuses: Record<string, number>;
+};
+
+export type HttpStatusCodeStats = {
+	status: string;
 	requests: number;
-	errors: number;
+	requestsPerSecond: number;
 };
 
 export type HttpRequestStats = {
@@ -91,7 +97,8 @@ export type HttpRequestStats = {
 	currentWindowSeconds: number;
 	totalRequests: number;
 	currentRequestsPerSecond: number;
-	currentErrorsPerSecond: number;
+	statusCodes: string[];
+	currentStatuses: HttpStatusCodeStats[];
 	buckets: HttpRequestStatsBucket[];
 };
 
@@ -116,7 +123,8 @@ export function createEmptyHttpRequestStats(
 		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
 		totalRequests: 0,
 		currentRequestsPerSecond: 0,
-		currentErrorsPerSecond: 0,
+		statusCodes: [],
+		currentStatuses: [],
 		buckets: [],
 	};
 }
@@ -142,15 +150,17 @@ export function parseRequestStatsRows(text: string): RequestStatsRow[] {
 
 export function sumRequestStatsRows(rows: RequestStatsRow[]): {
 	requests: number;
-	errors: number;
+	statuses: Record<string, number>;
 } {
-	return rows.reduce<{ requests: number; errors: number }>(
+	return rows.reduce<{ requests: number; statuses: Record<string, number> }>(
 		(acc, row) => {
-			acc.requests += parseStatNumber(row.requests);
-			acc.errors += parseStatNumber(row.errors);
+			const requests = parseStatNumber(row.requests);
+			const status = normalizeStatus(row.status);
+			acc.requests += requests;
+			acc.statuses[status] = (acc.statuses[status] ?? 0) + requests;
 			return acc;
 		},
-		{ requests: 0, errors: 0 },
+		{ requests: 0, statuses: {} },
 	);
 }
 
@@ -166,25 +176,36 @@ export function buildRequestStatsBuckets(
 		return [];
 	}
 
-	const byBucket = new Map<number, { requests: number; errors: number }>();
+	const byBucket = new Map<
+		number,
+		{ totalRequests: number; statuses: Record<string, number> }
+	>();
 	for (const row of rows) {
 		const timestamp = parseTimestamp(row._time ?? row.time ?? row.timestamp);
 		if (!timestamp) continue;
 
 		const bucketMs = floorToStep(timestamp.getTime(), stepMs);
-		const bucket = byBucket.get(bucketMs) ?? { requests: 0, errors: 0 };
-		bucket.requests += parseStatNumber(row.requests);
-		bucket.errors += parseStatNumber(row.errors);
+		const bucket = byBucket.get(bucketMs) ?? {
+			totalRequests: 0,
+			statuses: {},
+		};
+		const requests = parseStatNumber(row.requests);
+		const status = normalizeStatus(row.status);
+		bucket.totalRequests += requests;
+		bucket.statuses[status] = (bucket.statuses[status] ?? 0) + requests;
 		byBucket.set(bucketMs, bucket);
 	}
 
 	const buckets: HttpRequestStatsBucket[] = [];
 	for (let timestampMs = startMs; timestampMs <= endMs; timestampMs += stepMs) {
-		const bucket = byBucket.get(timestampMs) ?? { requests: 0, errors: 0 };
+		const bucket = byBucket.get(timestampMs) ?? {
+			totalRequests: 0,
+			statuses: {},
+		};
 		buckets.push({
 			timestamp: new Date(timestampMs).toISOString(),
-			requests: bucket.requests,
-			errors: bucket.errors,
+			totalRequests: bucket.totalRequests,
+			statuses: bucket.statuses,
 		});
 	}
 
@@ -199,15 +220,17 @@ export async function queryHttpRequestStats(options: {
 	const config = REQUEST_STATS_RANGE_OPTIONS[options.range];
 	const now = options.now ?? new Date();
 	const start = new Date(now.getTime() - config.durationMs);
+	const statusCodeLimit = 64;
 	const bucketLimit =
-		Math.ceil(config.durationMs / (config.stepSeconds * 1000)) + 5;
+		(Math.ceil(config.durationMs / (config.stepSeconds * 1000)) + 5) *
+		statusCodeLimit;
 	const baseFilter = `service_id:${options.serviceId} log_type:http`;
-	const bucketQuery = `${baseFilter} _time:${options.range} | stats by (_time:${config.stepLogSql}) count() as requests, count() if (status:>=500) as errors | sort by (_time)`;
-	const currentQuery = `${baseFilter} _time:5m | stats count() as requests, count() if (status:>=500) as errors`;
+	const bucketQuery = `${baseFilter} _time:${options.range} | stats by (_time:${config.stepLogSql}, status) count() as requests | sort by (_time)`;
+	const currentQuery = `${baseFilter} _time:5m | stats by (status) count() as requests`;
 
 	const [bucketText, currentText] = await Promise.all([
 		queryLogSql(bucketQuery, bucketLimit),
-		queryLogSql(currentQuery, 5),
+		queryLogSql(currentQuery, statusCodeLimit),
 	]);
 
 	const buckets = buildRequestStatsBuckets(parseRequestStatsRows(bucketText), {
@@ -216,15 +239,30 @@ export async function queryHttpRequestStats(options: {
 		stepSeconds: config.stepSeconds,
 	});
 	const currentCounts = sumRequestStatsRows(parseRequestStatsRows(currentText));
+	const statusCodes = sortStatusCodes([
+		...buckets.flatMap((bucket) => Object.keys(bucket.statuses)),
+		...Object.keys(currentCounts.statuses),
+	]);
 
 	return {
 		range: options.range,
 		stepSeconds: config.stepSeconds,
 		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
-		totalRequests: buckets.reduce((sum, bucket) => sum + bucket.requests, 0),
+		totalRequests: buckets.reduce(
+			(sum, bucket) => sum + bucket.totalRequests,
+			0,
+		),
 		currentRequestsPerSecond:
 			currentCounts.requests / CURRENT_RATE_WINDOW_SECONDS,
-		currentErrorsPerSecond: currentCounts.errors / CURRENT_RATE_WINDOW_SECONDS,
+		statusCodes,
+		currentStatuses: statusCodes.map((status) => {
+			const requests = currentCounts.statuses[status] ?? 0;
+			return {
+				status,
+				requests,
+				requestsPerSecond: requests / CURRENT_RATE_WINDOW_SECONDS,
+			};
+		}),
 		buckets,
 	};
 }
@@ -259,6 +297,27 @@ function parseStatNumber(value: unknown): number {
 		return Number.isFinite(parsed) ? parsed : 0;
 	}
 	return 0;
+}
+
+function normalizeStatus(value: unknown): string {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return String(value);
+	}
+	if (typeof value === "string" && value.trim() !== "") {
+		return value.trim();
+	}
+	return "unknown";
+}
+
+function sortStatusCodes(statuses: string[]): string[] {
+	return Array.from(new Set(statuses)).sort((a, b) => {
+		const statusA = Number(a);
+		const statusB = Number(b);
+		if (Number.isFinite(statusA) && Number.isFinite(statusB)) {
+			return statusA - statusB;
+		}
+		return a.localeCompare(b);
+	});
 }
 
 function parseTimestamp(value: unknown): Date | null {
