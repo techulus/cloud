@@ -135,8 +135,12 @@ func (a *App) rootCommand() *cobra.Command {
 	root.PersistentFlags().BoolVar(&a.flags.JSON, "json", false, "Output an ok/data JSON envelope")
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if a.shouldEmitAgentHelp(cmd) {
+		if a.flags.Agent {
 			_ = a.writeRaw(agentHelpForCommand(cmd))
+			return
+		}
+		if a.flags.JSON {
+			_ = a.writeData(agentHelpForCommand(cmd), "Help")
 			return
 		}
 		defaultHelp(cmd, args)
@@ -540,7 +544,7 @@ func (a *App) versionCommand() *cobra.Command {
 
 func (a *App) completionCommand(root *cobra.Command) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
+		Use:   "completion <bash|zsh|fish|powershell>",
 		Short: "Generate shell completion scripts",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -601,16 +605,6 @@ func (a *App) writeError(err error) error {
 	return output.Error(a.Out, err)
 }
 
-func (a *App) shouldEmitAgentHelp(cmd *cobra.Command) bool {
-	root := cmd.Root()
-	if root == nil {
-		root = cmd
-	}
-	agent, _ := root.PersistentFlags().GetBool("agent")
-	jsonOutput, _ := root.PersistentFlags().GetBool("json")
-	return agent || jsonOutput
-}
-
 type agentHelpInfo struct {
 	Command        string            `json:"command"`
 	Path           string            `json:"path"`
@@ -625,8 +619,9 @@ type agentHelpInfo struct {
 }
 
 type agentArg struct {
-	Name     string `json:"name"`
-	Required bool   `json:"required"`
+	Name     string   `json:"name"`
+	Required bool     `json:"required"`
+	Choices  []string `json:"choices,omitempty"`
 }
 
 type agentSubcommand struct {
@@ -704,9 +699,37 @@ func parseAgentArgs(cmd *cobra.Command) []agentArg {
 		if name == "" || name == "flags" {
 			continue
 		}
-		args = append(args, agentArg{Name: name, Required: required})
+		arg := agentArg{Name: name, Required: required}
+		if choices := parseAgentArgChoices(name); len(choices) > 0 {
+			arg.Name = agentChoiceArgName(cmd)
+			arg.Choices = choices
+		}
+		args = append(args, arg)
 	}
 	return args
+}
+
+func parseAgentArgChoices(name string) []string {
+	if !strings.Contains(name, "|") {
+		return nil
+	}
+	parts := strings.Split(name, "|")
+	choices := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil
+		}
+		choices = append(choices, part)
+	}
+	return choices
+}
+
+func agentChoiceArgName(cmd *cobra.Command) string {
+	if cmd.Name() == "completion" {
+		return "shell"
+	}
+	return "value"
 }
 
 type serviceTargetFlags struct {

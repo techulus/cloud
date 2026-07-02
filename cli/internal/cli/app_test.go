@@ -62,6 +62,49 @@ func TestAgentHelpOutputsStructuredCommandMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentCompletionHelpOutputsChoiceArg(t *testing.T) {
+	stdout, stderr, err := runTestCommand(t, nil, t.TempDir(), "completion", "--help", "--agent")
+	if err != nil {
+		t.Fatalf("help error = %v\nstderr=%s", err, stderr)
+	}
+	var help agentHelpInfo
+	if err := json.Unmarshal([]byte(stdout), &help); err != nil {
+		t.Fatalf("decode help: %v\nstdout=%s", err, stdout)
+	}
+	if len(help.Args) != 1 {
+		t.Fatalf("args = %#v", help.Args)
+	}
+	arg := help.Args[0]
+	if arg.Name != "shell" || !arg.Required {
+		t.Fatalf("arg = %#v", arg)
+	}
+	wantChoices := []string{"bash", "zsh", "fish", "powershell"}
+	if strings.Join(arg.Choices, ",") != strings.Join(wantChoices, ",") {
+		t.Fatalf("choices = %#v", arg.Choices)
+	}
+}
+
+func TestJSONHelpOutputsEnvelope(t *testing.T) {
+	stdout, stderr, err := runTestCommand(t, nil, t.TempDir(), "status", "--help", "--json")
+	if err != nil {
+		t.Fatalf("help error = %v\nstderr=%s", err, stderr)
+	}
+	var envelope struct {
+		OK      bool          `json:"ok"`
+		Data    agentHelpInfo `json:"data"`
+		Summary string        `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\nstdout=%s", err, stdout)
+	}
+	if !envelope.OK || envelope.Summary != "Help" {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+	if envelope.Data.Command != "status" || envelope.Data.Path != "tc status" {
+		t.Fatalf("data = %#v", envelope.Data)
+	}
+}
+
 func TestAgentStatusOutputsRawJSON(t *testing.T) {
 	tmp := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
