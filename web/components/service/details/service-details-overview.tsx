@@ -166,20 +166,10 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 								<Badge variant="secondary">+{hiddenEndpointCount}</Badge>
 							)}
 						</div>
-						<p className="truncate text-xs text-muted-foreground">
-							{service.name}
-						</p>
 					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-2">
-					<Link
-						href={`${basePath}/logs`}
-						className={buttonVariants({ variant: "outline", size: "sm" })}
-					>
-						Logs
-						<ArrowUpRight data-icon="inline-end" />
-					</Link>
-					{overview.publicHttpCount > 0 && (
+				{overview.publicHttpCount > 0 && (
+					<div className="flex flex-wrap items-center gap-2">
 						<Link
 							href={`${basePath}/requests`}
 							className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -187,8 +177,8 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 							Requests
 							<ArrowUpRight data-icon="inline-end" />
 						</Link>
-					)}
-				</div>
+					</div>
+				)}
 			</div>
 
 			<div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
