@@ -4,12 +4,10 @@ import {
 	Activity,
 	Box,
 	Cpu,
-	GitBranch,
 	Github,
 	Globe,
-	Lock,
+	HardDrive,
 	type LucideIcon,
-	Network,
 	Server,
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
@@ -134,12 +132,6 @@ const ACTIVE_BUILD_STATUSES = new Set([
 	"pushing",
 ]);
 
-const ENDPOINT_KIND_ICONS: Record<EndpointItem["kind"], LucideIcon> = {
-	public: Globe,
-	private: Lock,
-	tcp: Network,
-};
-
 const STATUS_CODE_COLOR_PALETTES: Record<string, string[]> = {
 	"2": ["#10b981", "#22c55e", "#14b8a6", "#84cc16"],
 	"3": ["#6366f1", "#8b5cf6", "#06b6d4", "#3b82f6"],
@@ -168,7 +160,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 
 	return (
 		<Card className="gap-0 py-0">
-			<div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+			<div className="grid items-stretch lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
 				<RequestStatsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
 					stats={requestStats}
@@ -176,19 +168,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 					isLoading={isRequestStatsLoading}
 				/>
 
-				<div className="grid gap-x-8 gap-y-6 p-4 sm:grid-cols-2 lg:border-l">
-					<StatusItem status={overview.status} />
-					<InstancesItem overview={overview} />
-					<DetailItem icon={Cpu} label="Resources">
-						<p>{formatResources(service)}</p>
-					</DetailItem>
-					<DetailItem icon={overview.source.icon} label="Source">
-						<SourceDetails source={overview.source} />
-					</DetailItem>
-					<DetailItem icon={Globe} label="Endpoints" className="sm:col-span-2">
-						<EndpointTable endpoints={overview.endpoints} />
-					</DetailItem>
-				</div>
+				<ServiceConfigPanel service={service} overview={overview} />
 			</div>
 		</Card>
 	);
@@ -211,7 +191,7 @@ function RequestStatsPanel({
 	const isUnavailable = Boolean(error) || stats?.loggingEnabled === false;
 
 	return (
-		<div className="space-y-4 p-4">
+		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
 			<div className="flex items-start justify-between gap-3">
 				<div>
 					{isLoading ? (
@@ -230,7 +210,7 @@ function RequestStatsPanel({
 				<p className="text-sm text-muted-foreground">{formatToday()}</p>
 			</div>
 
-			<div className="h-40 min-w-0">
+			<div className="min-h-40 min-w-0 flex-1">
 				{!hasPublicHttp ? (
 					<RequestStatsState message="No public HTTP ingress" />
 				) : isLoading ? (
@@ -316,40 +296,87 @@ function RequestStatsPanel({
 	);
 }
 
-function StatusItem({ status }: { status: ServiceStatus }) {
-	const classes = STATUS_TONE_CLASSES[status.tone];
+function ServiceConfigPanel({
+	service,
+	overview,
+}: {
+	service: Service;
+	overview: OverviewData;
+}) {
+	const primaryEndpoint = getPrimaryEndpoint(overview.endpoints);
 
 	return (
-		<DetailItem icon={Activity} label="Status">
-			<div className="flex items-center gap-2">
-				<span className={cn("size-2 rounded-full", classes.dot)} />
-				<span className={cn("font-medium", classes.text)}>{status.label}</span>
-			</div>
-		</DetailItem>
-	);
-}
-
-function InstancesItem({ overview }: { overview: OverviewData }) {
-	const serverCount = overview.serverSummaries.length;
-	const serverLabel = serverCount === 1 ? "server" : "servers";
-
-	return (
-		<DetailItem icon={Server} label="Instances">
-			<div className="space-y-2">
-				<div>
-					<p>
-						<span className="font-medium">{overview.runningDeployments}</span>{" "}
-						running
-						{serverCount > 0 ? ` across ${serverCount} ${serverLabel}` : ""}
+		<div className="min-w-0 border-t p-4 lg:border-t-0 lg:border-l">
+			<div className="grid gap-3 sm:grid-cols-2">
+				<SummaryItem icon={Activity} label="Status">
+					<StatusValue status={overview.status} />
+				</SummaryItem>
+				<SummaryItem icon={Server} label="Instances">
+					<p className="text-base font-medium">
+						{formatInstanceSummary(overview)}
 					</p>
-				</div>
-				<ServerList servers={overview.serverSummaries} />
+					<ServerList servers={overview.serverSummaries} />
+				</SummaryItem>
+
+				<ConfigDigestItem
+					icon={overview.source.icon}
+					label="Runtime"
+					primary={<SourcePrimary source={overview.source} />}
+				>
+					<ConfigChip>
+						{overview.source.branch || overview.source.detail}
+					</ConfigChip>
+					{service.githubRootDir ? (
+						<ConfigChip>{service.githubRootDir}</ConfigChip>
+					) : null}
+					<ConfigChip>
+						{service.startCommand ? "Custom Command" : "Image Command"}
+					</ConfigChip>
+					<ConfigChip tone={service.healthCheckCmd ? "active" : "muted"}>
+						{service.healthCheckCmd ? "Health Check" : "No Health Check"}
+					</ConfigChip>
+				</ConfigDigestItem>
+
+				<ConfigDigestItem
+					icon={Cpu}
+					label="Capacity"
+					primary={formatResources(service)}
+				>
+					<ConfigChip>{formatReplicaCompact(overview)}</ConfigChip>
+					<ConfigChip>{formatPlacementLabel(service)}</ConfigChip>
+					{overview.serverSummaries.length > 0 ? (
+						<ConfigChip>
+							{formatCount(overview.serverSummaries.length, "server")}
+						</ConfigChip>
+					) : null}
+				</ConfigDigestItem>
+
+				<ConfigDigestItem
+					icon={Globe}
+					label="Network"
+					primary={<EndpointPrimary endpoint={primaryEndpoint} />}
+				>
+					<ConfigChip>{formatEndpointCount(overview.endpoints)}</ConfigChip>
+					<ConfigChip>{formatPortSummary(service.ports || [])}</ConfigChip>
+					{primaryEndpoint.kind !== "private" ? (
+						<ConfigChip>{`${service.hostname || service.name}.internal`}</ConfigChip>
+					) : null}
+				</ConfigDigestItem>
+
+				<ConfigDigestItem
+					icon={HardDrive}
+					label="Data & ops"
+					primary={formatDataSummary(service)}
+				>
+					<ConfigChip>{formatBackupLabel(service)}</ConfigChip>
+					<ConfigChip>{formatDeployScheduleLabel(service)}</ConfigChip>
+				</ConfigDigestItem>
 			</div>
-		</DetailItem>
+		</div>
 	);
 }
 
-function DetailItem({
+function SummaryItem({
 	icon: Icon,
 	label,
 	children,
@@ -361,12 +388,105 @@ function DetailItem({
 	className?: string;
 }) {
 	return (
-		<div className={cn("min-w-0 space-y-2", className)}>
+		<div className={cn("min-w-0 rounded-md border bg-muted/20 p-4", className)}>
 			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
 				<Icon className="size-4" />
 				<span>{label}</span>
 			</div>
-			<div className="min-w-0 text-sm text-foreground">{children}</div>
+			<div className="mt-2 min-w-0 space-y-2 text-sm text-foreground">
+				{children}
+			</div>
+		</div>
+	);
+}
+
+function ConfigDigestItem({
+	icon: Icon,
+	label,
+	primary,
+	children,
+	className,
+}: {
+	icon: LucideIcon;
+	label: string;
+	primary: ReactNode;
+	children: ReactNode;
+	className?: string;
+}) {
+	return (
+		<div className={cn("min-w-0 rounded-md border bg-muted/20 p-4", className)}>
+			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+				<Icon className="size-4" />
+				<span>{label}</span>
+			</div>
+			<div className="mt-2 min-w-0 text-sm font-medium text-foreground">
+				{primary}
+			</div>
+			<div className="mt-2 flex flex-wrap gap-1.5">{children}</div>
+		</div>
+	);
+}
+
+function ConfigChip({
+	children,
+	tone = "muted",
+}: {
+	children: ReactNode;
+	tone?: "active" | "muted";
+}) {
+	return (
+		<Badge
+			variant={tone === "active" ? "secondary" : "outline"}
+			className={cn("max-w-full", tone === "muted" && "text-muted-foreground")}
+		>
+			<span className="truncate">{children}</span>
+		</Badge>
+	);
+}
+
+function SourcePrimary({ source }: { source: SourceInfo }) {
+	if (source.href) {
+		return (
+			<a
+				href={source.href}
+				target="_blank"
+				rel="noopener noreferrer"
+				className="block min-w-0 truncate hover:text-primary"
+			>
+				{source.label}
+			</a>
+		);
+	}
+
+	return <span className="block truncate">{source.label}</span>;
+}
+
+function EndpointPrimary({ endpoint }: { endpoint: EndpointItem }) {
+	if (endpoint.href) {
+		return (
+			<a
+				href={endpoint.href}
+				target="_blank"
+				rel="noopener noreferrer"
+				className="block min-w-0 truncate hover:text-primary"
+			>
+				{endpoint.label}
+			</a>
+		);
+	}
+
+	return <span className="block truncate">{endpoint.label}</span>;
+}
+
+function StatusValue({ status }: { status: ServiceStatus }) {
+	const classes = STATUS_TONE_CLASSES[status.tone];
+
+	return (
+		<div className="flex items-center gap-2">
+			<span className={cn("size-2 rounded-full", classes.dot)} />
+			<span className={cn("text-base font-medium", classes.text)}>
+				{status.label}
+			</span>
 		</div>
 	);
 }
@@ -384,91 +504,10 @@ function ServerList({ servers }: { servers: ServerSummary[] }) {
 					<span className="text-muted-foreground">
 						{server.configured > 0
 							? `${server.running}/${server.configured}`
-							: `${server.running} running`}
+							: `${server.running} Running`}
 					</span>
 				</Badge>
 			))}
-		</div>
-	);
-}
-
-function SourceDetails({ source }: { source: SourceInfo }) {
-	const content = (
-		<div className="min-w-0 space-y-1">
-			<p className="break-all font-medium">{source.label}</p>
-			<div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-				{source.branch ? <GitBranch className="size-3" /> : null}
-				<span className="truncate">{source.branch || source.detail}</span>
-			</div>
-		</div>
-	);
-
-	if (!source.href) return content;
-
-	return (
-		<a
-			href={source.href}
-			target="_blank"
-			rel="noopener noreferrer"
-			className="block hover:text-primary"
-		>
-			{content}
-		</a>
-	);
-}
-
-function EndpointTable({ endpoints }: { endpoints: EndpointItem[] }) {
-	if (endpoints.length === 0) {
-		return <p className="text-muted-foreground">No endpoints yet</p>;
-	}
-
-	return (
-		<div className="overflow-hidden rounded-md border">
-			<div className="overflow-x-auto">
-				<table className="w-full min-w-[520px] text-left text-sm">
-					<thead className="border-b bg-muted/30 text-xs text-muted-foreground">
-						<tr>
-							<th className="w-32 px-3 py-2 font-medium">Type</th>
-							<th className="px-3 py-2 font-medium">Endpoint</th>
-							<th className="w-40 px-3 py-2 font-medium">Target</th>
-						</tr>
-					</thead>
-					<tbody className="divide-y">
-						{endpoints.map((endpoint) => {
-							const Icon = ENDPOINT_KIND_ICONS[endpoint.kind];
-							return (
-								<tr key={endpoint.key}>
-									<td className="px-3 py-2 align-top">
-										<div className="flex items-center gap-1.5 text-muted-foreground">
-											<Icon className="size-3.5 shrink-0" />
-											<span>{endpoint.typeLabel}</span>
-										</div>
-									</td>
-									<td className="px-3 py-2 align-top">
-										{endpoint.href ? (
-											<a
-												href={endpoint.href}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="break-all font-medium hover:text-primary"
-											>
-												{endpoint.label}
-											</a>
-										) : (
-											<span className="break-all font-medium">
-												{endpoint.label}
-											</span>
-										)}
-									</td>
-									<td className="px-3 py-2 align-top text-muted-foreground">
-										{endpoint.target}
-									</td>
-								</tr>
-							);
-						})}
-					</tbody>
-				</table>
-			</div>
 		</div>
 	);
 }
@@ -548,6 +587,7 @@ function buildOverviewData(
 	const servers = new Map<string, ServerSummary>();
 	let publicHttpCount = 0;
 	let runningDeployments = 0;
+	const privateHostname = `${service.hostname || service.name}.internal`;
 
 	for (const replica of service.configuredReplicas || []) {
 		servers.set(replica.serverId, {
@@ -606,15 +646,13 @@ function buildOverviewData(
 		}
 	}
 
-	if (runningDeployments > 0) {
-		endpoints.push({
-			key: "internal",
-			kind: "private",
-			typeLabel: "Private",
-			label: `${service.hostname || service.name}.internal`,
-			target: "Internal DNS",
-		});
-	}
+	endpoints.push({
+		key: "internal",
+		kind: "private",
+		typeLabel: "Private",
+		label: privateHostname,
+		target: "Internal DNS",
+	});
 
 	return {
 		endpoints,
@@ -675,7 +713,7 @@ function getSourceInfo(service: Service): SourceInfo {
 	return {
 		icon: Box,
 		label: service.image,
-		detail: "Docker image",
+		detail: "Docker Image",
 	};
 }
 
@@ -743,6 +781,129 @@ function formatResources(service: Service): string {
 			: "Memory not set";
 
 	return `${cpuLabel} · ${memoryLabel}`;
+}
+
+function getConfiguredReplicaCount(overview: OverviewData): number {
+	return overview.serverSummaries.reduce(
+		(total, server) => total + server.configured,
+		0,
+	);
+}
+
+function formatInstanceSummary(overview: OverviewData): string {
+	const configured = getConfiguredReplicaCount(overview);
+	const serverCount = overview.serverSummaries.length;
+
+	if (configured === 0) {
+		return overview.runningDeployments > 0
+			? `${overview.runningDeployments} Running`
+			: "No Replicas";
+	}
+
+	return `${overview.runningDeployments}/${configured} Running Across ${formatCount(serverCount, "server")}`;
+}
+
+function getLockedServerLabel(service: Service): string | null {
+	if (!service.lockedServerId) return null;
+
+	return (
+		service.lockedServer?.name ??
+		service.configuredReplicas.find(
+			(replica) => replica.serverId === service.lockedServerId,
+		)?.serverName ??
+		service.lockedServerId
+	);
+}
+
+function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
+	return (
+		endpoints.find((endpoint) => endpoint.kind === "public") ??
+		endpoints.find((endpoint) => endpoint.kind === "tcp") ??
+		endpoints[0] ?? {
+			key: "none",
+			kind: "private",
+			typeLabel: "Private",
+			label: "No endpoint",
+			target: "Internal DNS",
+		}
+	);
+}
+
+function formatReplicaCompact(overview: OverviewData): string {
+	const configured = getConfiguredReplicaCount(overview);
+
+	if (configured === 0) return "No Replicas";
+
+	return `${overview.runningDeployments}/${configured} Running`;
+}
+
+function formatPlacementLabel(service: Service): string {
+	const lockedServer = getLockedServerLabel(service);
+
+	if (service.stateful) {
+		return lockedServer ? `Stateful on ${lockedServer}` : "Stateful";
+	}
+
+	return lockedServer ? `Pinned to ${lockedServer}` : "Stateless";
+}
+
+function formatEndpointCount(endpoints: EndpointItem[]): string {
+	const publicCount = endpoints.filter(
+		(endpoint) => endpoint.kind !== "private",
+	).length;
+
+	if (publicCount === 0) return "Private Only";
+
+	return `${formatCount(publicCount, "public endpoint")} + Private`;
+}
+
+function formatPortSummary(ports: Service["ports"]): string {
+	if (ports.length === 0) return "No Ports";
+	if (ports.length === 1) return formatPortLabel(ports[0]);
+
+	return formatCount(ports.length, "port");
+}
+
+function formatPortLabel(port: Service["ports"][number]): string {
+	const protocol = (port.protocol || "http").toUpperCase();
+	const external = port.externalPort ? ` -> :${port.externalPort}` : "";
+
+	return `${protocol} :${port.port}${external}`;
+}
+
+function formatDataSummary(service: Service): string {
+	const volumeCount = service.volumes?.length ?? 0;
+	const secretCount = service.secrets?.length ?? 0;
+	const parts = [];
+
+	if (volumeCount > 0) parts.push(formatCount(volumeCount, "volume"));
+	if (secretCount > 0) parts.push(formatCount(secretCount, "secret"));
+
+	return parts.length > 0 ? parts.join(" · ") : "No Volumes or Secrets";
+}
+
+function formatBackupLabel(service: Service): string {
+	if ((service.volumes?.length ?? 0) === 0) return "No Backups";
+	if (!service.backupEnabled) return "Manual Backups";
+
+	return service.backupSchedule
+		? `Backup ${service.backupSchedule}`
+		: "Backups On";
+}
+
+function formatDeployScheduleLabel(service: Service): string {
+	return service.deploymentSchedule
+		? `Deploy ${service.deploymentSchedule}`
+		: "Manual Deploy";
+}
+
+function formatCount(count: number, singular: string): string {
+	const label = singular
+		.split(" ")
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+		.join(" ");
+
+	return `${count} ${label}${count === 1 ? "" : "s"}`;
 }
 
 function formatCompactNumber(value: number): string {
