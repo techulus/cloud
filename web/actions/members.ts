@@ -139,8 +139,15 @@ export async function inviteMember(input: {
 }) {
 	const session = await requireAdminSession();
 
-	const parsed = inviteMemberSchema.parse(input);
-	const email = parsed.email.toLowerCase();
+	const parsed = inviteMemberSchema.safeParse(input);
+	if (!parsed.success) {
+		return {
+			success: false as const,
+			error: parsed.error.issues[0]?.message ?? "Invalid invitation details",
+		};
+	}
+
+	const email = parsed.data.email.toLowerCase();
 
 	const existingUser = await db
 		.select({ id: user.id })
@@ -149,7 +156,10 @@ export async function inviteMember(input: {
 		.limit(1);
 
 	if (existingUser.length > 0) {
-		throw new Error("A member with this email already exists");
+		return {
+			success: false as const,
+			error: "A member with this email already exists",
+		};
 	}
 
 	await db
@@ -186,7 +196,7 @@ export async function inviteMember(input: {
 	await db.insert(memberInvitations).values({
 		id: randomUUID(),
 		email,
-		role: parsed.role,
+		role: parsed.data.role,
 		tokenHash: hashInviteToken(token),
 		status: "pending",
 		invitedByUserId: session.user.id,
@@ -196,12 +206,12 @@ export async function inviteMember(input: {
 	const emailSent = await sendMemberInviteEmail({
 		to: email,
 		inviterName: session.user.name,
-		role: parsed.role,
+		role: parsed.data.role,
 		inviteUrl,
 	});
 
 	revalidatePath("/dashboard/settings");
-	return { success: true, inviteUrl, emailSent };
+	return { success: true as const, inviteUrl, emailSent };
 }
 
 export async function revokeInvitation(invitationId: string) {

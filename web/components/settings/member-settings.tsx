@@ -78,6 +78,11 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 		setIsInviting(true);
 		try {
 			const result = await inviteMember({ email, role });
+			if (!result.success) {
+				toast.error(result.error);
+				return;
+			}
+
 			setEmail("");
 			toast.success(
 				result.emailSent ? "Invitation sent" : "Invitation created",
