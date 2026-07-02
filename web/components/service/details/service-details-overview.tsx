@@ -2,7 +2,6 @@
 
 import {
 	Activity,
-	ArrowUpRight,
 	Box,
 	Cpu,
 	GitBranch,
@@ -13,7 +12,6 @@ import {
 	Network,
 	Server,
 } from "lucide-react";
-import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import {
 	CartesianGrid,
@@ -27,7 +25,6 @@ import {
 import useSWR from "swr";
 import { useService } from "@/components/service/service-layout-client";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -51,10 +48,11 @@ type RequestStatsResponse = {
 
 type EndpointItem = {
 	key: string;
+	kind: "public" | "private" | "tcp";
+	typeLabel: string;
 	label: string;
-	meta: string;
+	target: string;
 	href?: string;
-	icon: "http" | "tcp" | "internal";
 };
 
 type ServerSummary = {
@@ -129,8 +127,14 @@ const ACTIVE_BUILD_STATUSES = new Set([
 	"pushing",
 ]);
 
+const ENDPOINT_KIND_ICONS: Record<EndpointItem["kind"], LucideIcon> = {
+	public: Globe,
+	private: Lock,
+	tcp: Network,
+};
+
 export function ServiceDetailsOverview({ service }: { service: Service }) {
-	const { projectSlug, envName, proxyDomain } = useService();
+	const { proxyDomain } = useService();
 	const overview = useMemo(
 		() => buildOverviewData(service, proxyDomain),
 		[service, proxyDomain],
@@ -146,41 +150,9 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 	} = useSWR<RequestStatsResponse>(requestStatsUrl, fetcher, {
 		refreshInterval: 60000,
 	});
-	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`;
-	const titleEndpoint = overview.endpoints[0]?.label || service.name;
-	const hiddenEndpointCount = Math.max(0, overview.endpoints.length - 1);
 
 	return (
 		<Card className="gap-0 py-0">
-			<div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex min-w-0 items-center gap-2">
-					<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
-						<Globe className="size-4" />
-					</div>
-					<div className="min-w-0">
-						<div className="flex min-w-0 items-center gap-2">
-							<p className="truncate font-mono text-base font-semibold">
-								{titleEndpoint}
-							</p>
-							{hiddenEndpointCount > 0 && (
-								<Badge variant="secondary">+{hiddenEndpointCount}</Badge>
-							)}
-						</div>
-					</div>
-				</div>
-				{overview.publicHttpCount > 0 && (
-					<div className="flex flex-wrap items-center gap-2">
-						<Link
-							href={`${basePath}/requests`}
-							className={buttonVariants({ variant: "outline", size: "sm" })}
-						>
-							Requests
-							<ArrowUpRight data-icon="inline-end" />
-						</Link>
-					</div>
-				)}
-			</div>
-
 			<div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
 				<RequestStatsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
@@ -199,7 +171,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 						<SourceDetails source={overview.source} />
 					</DetailItem>
 					<DetailItem icon={Globe} label="Endpoints" className="sm:col-span-2">
-						<EndpointList endpoints={overview.endpoints} />
+						<EndpointTable endpoints={overview.endpoints} />
 					</DetailItem>
 				</div>
 			</div>
@@ -446,49 +418,58 @@ function SourceDetails({ source }: { source: SourceInfo }) {
 	);
 }
 
-function EndpointList({ endpoints }: { endpoints: EndpointItem[] }) {
+function EndpointTable({ endpoints }: { endpoints: EndpointItem[] }) {
 	if (endpoints.length === 0) {
 		return <p className="text-muted-foreground">No endpoints yet</p>;
 	}
 
 	return (
-		<div className="space-y-1.5">
-			{endpoints.map((endpoint) => {
-				const Icon =
-					endpoint.icon === "http"
-						? Globe
-						: endpoint.icon === "tcp"
-							? Network
-							: Lock;
-				const content = (
-					<div
-						key={`${endpoint.key}-content`}
-						className="flex min-w-0 items-start gap-2"
-					>
-						<Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-						<div className="min-w-0">
-							<p className="break-all font-medium">{endpoint.label}</p>
-							<p className="truncate text-xs text-muted-foreground">
-								{endpoint.meta}
-							</p>
-						</div>
-					</div>
-				);
-
-				return endpoint.href ? (
-					<a
-						key={endpoint.key}
-						href={endpoint.href}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="block hover:text-primary"
-					>
-						{content}
-					</a>
-				) : (
-					<div key={endpoint.key}>{content}</div>
-				);
-			})}
+		<div className="overflow-hidden rounded-md border">
+			<div className="overflow-x-auto">
+				<table className="w-full min-w-[520px] text-left text-sm">
+					<thead className="border-b bg-muted/30 text-xs text-muted-foreground">
+						<tr>
+							<th className="w-32 px-3 py-2 font-medium">Type</th>
+							<th className="px-3 py-2 font-medium">Endpoint</th>
+							<th className="w-40 px-3 py-2 font-medium">Target</th>
+						</tr>
+					</thead>
+					<tbody className="divide-y">
+						{endpoints.map((endpoint) => {
+							const Icon = ENDPOINT_KIND_ICONS[endpoint.kind];
+							return (
+								<tr key={endpoint.key}>
+									<td className="px-3 py-2 align-top">
+										<div className="flex items-center gap-1.5 text-muted-foreground">
+											<Icon className="size-3.5 shrink-0" />
+											<span>{endpoint.typeLabel}</span>
+										</div>
+									</td>
+									<td className="px-3 py-2 align-top">
+										{endpoint.href ? (
+											<a
+												href={endpoint.href}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="break-all font-medium hover:text-primary"
+											>
+												{endpoint.label}
+											</a>
+										) : (
+											<span className="break-all font-medium">
+												{endpoint.label}
+											</span>
+										)}
+									</td>
+									<td className="px-3 py-2 align-top text-muted-foreground">
+										{endpoint.target}
+									</td>
+								</tr>
+							);
+						})}
+					</tbody>
+				</table>
+			</div>
 		</div>
 	);
 }
@@ -600,10 +581,11 @@ function buildOverviewData(
 			publicHttpCount++;
 			endpoints.push({
 				key: port.id,
+				kind: "public",
+				typeLabel: "Public",
 				label: port.domain,
-				meta: `HTTP :${port.port}`,
+				target: `HTTP :${port.port}`,
 				href: `https://${port.domain}`,
-				icon: "http",
 			});
 			continue;
 		}
@@ -616,9 +598,10 @@ function buildOverviewData(
 		) {
 			endpoints.push({
 				key: port.id,
+				kind: "tcp",
+				typeLabel: port.protocol.toUpperCase(),
 				label: `${port.protocol}://${proxyDomain}:${port.externalPort}`,
-				meta: `Container :${port.port}`,
-				icon: "tcp",
+				target: `Container :${port.port}`,
 			});
 		}
 	}
@@ -626,9 +609,10 @@ function buildOverviewData(
 	if (runningDeployments > 0) {
 		endpoints.push({
 			key: "internal",
+			kind: "private",
+			typeLabel: "Private",
 			label: `${service.hostname || service.name}.internal`,
-			meta: "Internal DNS",
-			icon: "internal",
+			target: "Internal DNS",
 		});
 	}
 
