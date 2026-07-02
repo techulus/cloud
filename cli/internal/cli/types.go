@@ -29,6 +29,16 @@ type exchangeResponse struct {
 	User   auth.User `json:"user"`
 }
 
+type authWhoamiOutput struct {
+	User auth.User `json:"user"`
+	Host string    `json:"host"`
+}
+
+type initOutput struct {
+	Manifest string `json:"manifest"`
+	Next     string `json:"next"`
+}
+
 type linkServiceTarget struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`
@@ -113,6 +123,23 @@ type serviceLog struct {
 type logsResponse struct {
 	LoggingEnabled bool         `json:"loggingEnabled"`
 	Logs           []serviceLog `json:"logs"`
+}
+
+type serviceTargetOutput struct {
+	Project     string `json:"project"`
+	Environment string `json:"environment"`
+	Service     string `json:"service"`
+}
+
+type statusOutput struct {
+	Target serviceTargetOutput `json:"target"`
+	Status statusResponse      `json:"status"`
+}
+
+type logsOutput struct {
+	Target         serviceTargetOutput `json:"target"`
+	LoggingEnabled bool                `json:"loggingEnabled"`
+	Logs           []serviceLog        `json:"logs"`
 }
 
 func countSupportedServices(projects []linkProjectTarget) int {
