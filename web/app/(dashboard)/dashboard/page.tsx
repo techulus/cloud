@@ -1,9 +1,10 @@
 import { Box } from "lucide-react";
 import Link from "next/link";
-import { getClusterHealth, listProjects, listServers } from "@/db/queries";
 import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summary";
 import { CreateProjectDialog } from "@/components/project/create-project-dialog";
+import { CreateServerDialog } from "@/components/server/create-server-dialog";
 import { ServerList } from "@/components/server/server-list";
+import { Button } from "@/components/ui/button";
 import {
 	Empty,
 	EmptyContent,
@@ -19,6 +20,7 @@ import {
 	ItemMedia,
 	ItemTitle,
 } from "@/components/ui/item";
+import { getClusterHealth, listProjects, listServers } from "@/db/queries";
 
 export default async function DashboardPage() {
 	const [servers, projects, clusterHealth] = await Promise.all([
@@ -29,10 +31,6 @@ export default async function DashboardPage() {
 
 	return (
 		<div className="container max-w-7xl mx-auto px-4 py-6 space-y-12">
-			{servers.length > 0 && (
-				<ClusterHealthSummary initialData={clusterHealth} />
-			)}
-
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">
 					<div>
@@ -89,7 +87,38 @@ export default async function DashboardPage() {
 				)}
 			</div>
 
-			<ServerList initialServers={servers} />
+			<div className="space-y-6">
+				<div className="flex items-center justify-between gap-3">
+					<div className="min-w-0">
+						<h2 className="text-lg font-semibold">Servers</h2>
+						<p className="text-sm text-muted-foreground">
+							Real-time infrastructure status and fleet management
+						</p>
+					</div>
+					<div className="flex shrink-0 items-center gap-2">
+						{servers.length > 0 && (
+							<Button
+								variant="outline"
+								nativeButton={false}
+								render={<Link href="/dashboard/metrics" />}
+							>
+								Metrics
+							</Button>
+						)}
+						<CreateServerDialog />
+					</div>
+				</div>
+
+				{servers.length > 0 && (
+					<ClusterHealthSummary
+						initialData={clusterHealth}
+						showHeader={false}
+						showMetricsLink={false}
+					/>
+				)}
+
+				<ServerList initialServers={servers} showHeader={false} />
+			</div>
 		</div>
 	);
 }
