@@ -18,12 +18,17 @@ export const REQUEST_STATS_RANGE_OPTIONS = {
 		stepSeconds: 30 * 60,
 		stepLogSql: "30m",
 	},
+	week: {
+		durationMs: 0,
+		stepSeconds: 30 * 60,
+		stepLogSql: "30m",
+		weekToDate: true,
+	},
 } as const;
 
 export type RequestStatsRange = keyof typeof REQUEST_STATS_RANGE_OPTIONS;
 
 export const DEFAULT_REQUEST_STATS_RANGE: RequestStatsRange = "7d";
-const CURRENT_RATE_WINDOW_SECONDS = 5 * 60;
 
 type EndpointConfig = {
 	url: string;
@@ -85,20 +90,13 @@ export type HttpRequestStatsBucket = {
 	statuses: Record<string, number>;
 };
 
-export type HttpStatusCodeStats = {
-	status: string;
-	requests: number;
-	requestsPerSecond: number;
-};
-
 export type HttpRequestStats = {
 	range: RequestStatsRange;
+	windowStart: string;
+	windowEnd: string;
 	stepSeconds: number;
-	currentWindowSeconds: number;
 	totalRequests: number;
-	currentRequestsPerSecond: number;
 	statusCodes: string[];
-	currentStatuses: HttpStatusCodeStats[];
 	buckets: HttpRequestStatsBucket[];
 };
 
@@ -115,17 +113,42 @@ export function parseRequestStatsRange(
 
 export function createEmptyHttpRequestStats(
 	range: RequestStatsRange = DEFAULT_REQUEST_STATS_RANGE,
+	now = new Date(),
 ): HttpRequestStats {
-	const config = REQUEST_STATS_RANGE_OPTIONS[range];
+	const window = getRequestStatsWindow(range, now);
 	return {
 		range,
-		stepSeconds: config.stepSeconds,
-		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		windowStart: window.start.toISOString(),
+		windowEnd: window.end.toISOString(),
+		stepSeconds: window.stepSeconds,
 		totalRequests: 0,
-		currentRequestsPerSecond: 0,
 		statusCodes: [],
-		currentStatuses: [],
 		buckets: [],
+	};
+}
+
+export function getRequestStatsWindow(
+	range: RequestStatsRange,
+	now = new Date(),
+): {
+	start: Date;
+	end: Date;
+	durationMs: number;
+	stepSeconds: number;
+	stepLogSql: string;
+} {
+	const config = REQUEST_STATS_RANGE_OPTIONS[range];
+	const start =
+		"weekToDate" in config && config.weekToDate
+			? getStartOfUtcWeek(now)
+			: new Date(now.getTime() - config.durationMs);
+
+	return {
+		start,
+		end: now,
+		durationMs: Math.max(0, now.getTime() - start.getTime()),
+		stepSeconds: config.stepSeconds,
+		stepLogSql: config.stepLogSql,
 	};
 }
 
@@ -146,22 +169,6 @@ export function parseRequestStatsRows(text: string): RequestStatsRow[] {
 	}
 
 	return rows;
-}
-
-export function sumRequestStatsRows(rows: RequestStatsRow[]): {
-	requests: number;
-	statuses: Record<string, number>;
-} {
-	return rows.reduce<{ requests: number; statuses: Record<string, number> }>(
-		(acc, row) => {
-			const requests = parseStatNumber(row.requests);
-			const status = normalizeStatus(row.status);
-			acc.requests += requests;
-			acc.statuses[status] = (acc.statuses[status] ?? 0) + requests;
-			return acc;
-		},
-		{ requests: 0, statuses: {} },
-	);
 }
 
 export function buildRequestStatsBuckets(
@@ -217,52 +224,40 @@ export async function queryHttpRequestStats(options: {
 	range: RequestStatsRange;
 	now?: Date;
 }): Promise<HttpRequestStats> {
-	const config = REQUEST_STATS_RANGE_OPTIONS[options.range];
 	const now = options.now ?? new Date();
-	const start = new Date(now.getTime() - config.durationMs);
+	const window = getRequestStatsWindow(options.range, now);
 	const statusCodeLimit = 64;
 	const bucketLimit =
-		(Math.ceil(config.durationMs / (config.stepSeconds * 1000)) + 5) *
+		(Math.ceil(window.durationMs / (window.stepSeconds * 1000)) + 5) *
 		statusCodeLimit;
-	const baseFilter = `service_id:${options.serviceId} log_type:http`;
-	const bucketQuery = `${baseFilter} _time:${options.range} | stats by (_time:${config.stepLogSql}, status) count() as requests | sort by (_time)`;
-	const currentQuery = `${baseFilter} _time:5m | stats by (status) count() as requests`;
+	const baseFilter = [
+		formatLogSqlExactFilter("service_id", options.serviceId),
+		"log_type:http",
+		formatLogSqlTimeRange(window.start, window.end),
+	].join(" ");
+	const bucketQuery = `${baseFilter} | stats by (_time:${window.stepLogSql}, status) count() as requests | sort by (_time)`;
 
-	const [bucketText, currentText] = await Promise.all([
-		queryLogSql(bucketQuery, bucketLimit),
-		queryLogSql(currentQuery, statusCodeLimit),
-	]);
+	const bucketText = await queryLogSql(bucketQuery, bucketLimit);
 
 	const buckets = buildRequestStatsBuckets(parseRequestStatsRows(bucketText), {
-		start,
-		end: now,
-		stepSeconds: config.stepSeconds,
+		start: window.start,
+		end: window.end,
+		stepSeconds: window.stepSeconds,
 	});
-	const currentCounts = sumRequestStatsRows(parseRequestStatsRows(currentText));
 	const statusCodes = sortStatusCodes([
 		...buckets.flatMap((bucket) => Object.keys(bucket.statuses)),
-		...Object.keys(currentCounts.statuses),
 	]);
 
 	return {
 		range: options.range,
-		stepSeconds: config.stepSeconds,
-		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		windowStart: window.start.toISOString(),
+		windowEnd: window.end.toISOString(),
+		stepSeconds: window.stepSeconds,
 		totalRequests: buckets.reduce(
 			(sum, bucket) => sum + bucket.totalRequests,
 			0,
 		),
-		currentRequestsPerSecond:
-			currentCounts.requests / CURRENT_RATE_WINDOW_SECONDS,
 		statusCodes,
-		currentStatuses: statusCodes.map((status) => {
-			const requests = currentCounts.statuses[status] ?? 0;
-			return {
-				status,
-				requests,
-				requestsPerSecond: requests / CURRENT_RATE_WINDOW_SECONDS,
-			};
-		}),
 		buckets,
 	};
 }
@@ -333,6 +328,29 @@ function floorToStep(timestampMs: number, stepMs: number): number {
 	return Math.floor(timestampMs / stepMs) * stepMs;
 }
 
+function getStartOfUtcWeek(value: Date): Date {
+	const start = new Date(
+		Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+	);
+	const day = start.getUTCDay();
+	const daysSinceMonday = day === 0 ? 6 : day - 1;
+	start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+	return start;
+}
+
+function formatLogSqlExactFilter(field: string, value: string): string {
+	const trimmed = value.trim();
+	if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+		throw new Error(`Invalid ${field} filter value`);
+	}
+
+	return `${field}:${trimmed}`;
+}
+
+function formatLogSqlTimeRange(start: Date, end: Date): string {
+	return `_time:[${start.toISOString()}, ${end.toISOString()})`;
+}
+
 type QueryLogsByServiceOptions = {
 	serviceId: string;
 	limit: number;
@@ -352,7 +370,7 @@ export async function queryLogsByService(
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	let query = `service_id:${serviceId}`;
+	let query = formatLogSqlExactFilter("service_id", serviceId);
 	if (logType === "http") {
 		query += ` log_type:http`;
 	} else if (logType === "container") {
@@ -361,7 +379,7 @@ export async function queryLogsByService(
 		query += ` -log_type:build -log_type:rollout`;
 	}
 	if (serverId) {
-		query += ` server_id:${serverId}`;
+		query += ` ${formatLogSqlExactFilter("server_id", serverId)}`;
 	}
 	if (after) {
 		query += ` _time:>${after}`;
@@ -403,7 +421,7 @@ export async function queryLogsByDeployment(
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	let query = `deployment_id:${deploymentId}`;
+	let query = formatLogSqlExactFilter("deployment_id", deploymentId);
 	if (before) {
 		query += ` _time:<${before}`;
 	}
@@ -458,7 +476,7 @@ export async function queryLogsByServer(
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	let query = `server_id:${serverId} log_type:agent`;
+	let query = `${formatLogSqlExactFilter("server_id", serverId)} log_type:agent`;
 	if (before) {
 		query += ` _time:<${before}`;
 	}
@@ -540,7 +558,7 @@ export async function queryLogsByRollout(
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	const query = `rollout_id:${rolloutId} log_type:rollout | sort by (_time)`;
+	const query = `${formatLogSqlExactFilter("rollout_id", rolloutId)} log_type:rollout | sort by (_time)`;
 
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);

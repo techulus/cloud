@@ -10,7 +10,7 @@ import {
 	type LucideIcon,
 	Server,
 } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
 	CartesianGrid,
 	Line,
@@ -32,16 +32,11 @@ import { cn } from "@/lib/utils";
 type RequestStatsResponse = {
 	loggingEnabled: boolean;
 	range: string;
+	windowStart: string;
+	windowEnd: string;
 	stepSeconds: number;
-	currentWindowSeconds: number;
 	totalRequests: number;
-	currentRequestsPerSecond: number;
 	statusCodes: string[];
-	currentStatuses: Array<{
-		status: string;
-		requests: number;
-		requestsPerSecond: number;
-	}>;
 	buckets: Array<{
 		timestamp: string;
 		totalRequests: number;
@@ -93,11 +88,15 @@ type ChartRow = {
 	totalRequests: number;
 } & Record<string, string | number>;
 
+type RequestChartMode = "rate" | "total";
+
 type StatusSeries = {
 	status: string;
-	dataKey: string;
+	rateDataKey: string;
+	totalDataKey: string;
 	color: string;
-	currentRequestsPerSecond: number;
+	averageRequestsPerSecond: number;
+	totalRequests: number;
 };
 
 type RequestTooltipPayload = {
@@ -111,6 +110,7 @@ type RequestTooltipPayload = {
 type RequestTooltipProps = {
 	active?: boolean;
 	label?: string | number;
+	mode: RequestChartMode;
 	payload?: readonly RequestTooltipPayload[];
 };
 
@@ -148,7 +148,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 	);
 	const requestStatsUrl =
 		overview.publicHttpCount > 0
-			? `/api/services/${service.id}/request-stats?range=7d`
+			? `/api/services/${service.id}/request-stats?range=week`
 			: null;
 	const {
 		data: requestStats,
@@ -185,29 +185,64 @@ function RequestStatsPanel({
 	error?: unknown;
 	isLoading: boolean;
 }) {
+	const [chartMode, setChartMode] = useState<RequestChartMode>("rate");
 	const chartRows = useMemo(() => buildChartRows(stats), [stats]);
 	const statusSeries = useMemo(() => buildStatusSeries(stats), [stats]);
 	const hasChartData = chartRows.some((row) => row.totalRequests > 0);
 	const isUnavailable = Boolean(error) || stats?.loggingEnabled === false;
+	const hasMetricData = hasPublicHttp && stats && !isUnavailable;
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
 			<div className="flex items-start justify-between gap-3">
-				<div>
+				<div className="min-w-0">
 					{isLoading ? (
-						<Skeleton className="h-9 w-28" />
+						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+							<Skeleton className="h-9 w-28" />
+							<Skeleton className="h-7 w-20" />
+						</div>
+					) : hasPublicHttp ? (
+						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+							<div>
+								<p className="text-4xl font-semibold tabular-nums">
+									{hasMetricData
+										? formatCompactNumber(stats.totalRequests)
+										: "-"}
+								</p>
+								<p className="text-sm text-muted-foreground">
+									requests this week
+								</p>
+							</div>
+							<div>
+								<p className="text-2xl font-semibold tabular-nums">
+									{hasMetricData
+										? formatRate(getAverageRequestsPerSecond(stats))
+										: "-"}
+								</p>
+								<p className="text-sm text-muted-foreground">
+									avg RPS this week
+								</p>
+							</div>
+						</div>
 					) : (
-						<p className="text-4xl font-semibold tabular-nums">
-							{hasPublicHttp && stats && !isUnavailable
-								? formatCompactNumber(stats.totalRequests)
-								: "-"}
-						</p>
+						<>
+							<p className="text-4xl font-semibold tabular-nums">-</p>
+							<p className="text-sm text-muted-foreground">
+								no public HTTP ingress
+							</p>
+						</>
 					)}
-					<p className="text-sm text-muted-foreground">
-						{hasPublicHttp ? "requests this week" : "no public HTTP ingress"}
-					</p>
 				</div>
-				<p className="text-sm text-muted-foreground">{formatToday()}</p>
+				<div className="flex flex-col items-end gap-2">
+					<p className="text-sm text-muted-foreground">{formatToday()}</p>
+					<RequestChartModeToggle
+						value={chartMode}
+						onChange={setChartMode}
+						disabled={
+							!hasPublicHttp || isLoading || isUnavailable || !hasChartData
+						}
+					/>
+				</div>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
@@ -229,7 +264,12 @@ function RequestStatsPanel({
 					>
 						<LineChart
 							data={chartRows}
-							margin={{ top: 8, right: 4, left: -28, bottom: 0 }}
+							margin={{
+								top: 8,
+								right: 4,
+								left: chartMode === "rate" ? -28 : -20,
+								bottom: 0,
+							}}
 						>
 							<CartesianGrid
 								strokeDasharray="3 3"
@@ -247,7 +287,9 @@ function RequestStatsPanel({
 							<YAxis
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={formatRateTick}
+								tickFormatter={
+									chartMode === "rate" ? formatRateTick : formatRequestTick
+								}
 								className="text-xs"
 							/>
 							<Tooltip
@@ -255,6 +297,7 @@ function RequestStatsPanel({
 								content={(props) => (
 									<RequestStatsTooltip
 										{...(props as unknown as RequestTooltipProps)}
+										mode={chartMode}
 									/>
 								)}
 							/>
@@ -262,7 +305,11 @@ function RequestStatsPanel({
 								<Line
 									key={series.status}
 									type="monotone"
-									dataKey={series.dataKey}
+									dataKey={
+										chartMode === "rate"
+											? series.rateDataKey
+											: series.totalDataKey
+									}
 									name={series.status}
 									stroke={series.color}
 									strokeWidth={2}
@@ -282,16 +329,63 @@ function RequestStatsPanel({
 						<LegendMetric
 							key={series.status}
 							color={series.color}
-							label={`${series.status}/s`}
+							label={
+								chartMode === "rate" ? `${series.status}/s` : series.status
+							}
 							value={
 								stats && !isUnavailable
-									? formatRate(series.currentRequestsPerSecond)
+									? chartMode === "rate"
+										? formatRate(series.averageRequestsPerSecond)
+										: formatRequestCount(series.totalRequests)
 									: "-"
 							}
 						/>
 					))}
 				</div>
 			)}
+		</div>
+	);
+}
+
+function RequestChartModeToggle({
+	value,
+	onChange,
+	disabled,
+}: {
+	value: RequestChartMode;
+	onChange: (value: RequestChartMode) => void;
+	disabled: boolean;
+}) {
+	const options: Array<{ value: RequestChartMode; label: string }> = [
+		{ value: "rate", label: "RPS" },
+		{ value: "total", label: "Total" },
+	];
+
+	return (
+		<div className="inline-flex rounded-md border bg-muted/30 p-0.5">
+			{options.map((option) => {
+				const isSelected = value === option.value;
+
+				return (
+					<button
+						key={option.value}
+						type="button"
+						aria-pressed={isSelected}
+						disabled={disabled}
+						onClick={() => onChange(option.value)}
+						className={cn(
+							"rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors",
+							isSelected
+								? "bg-background text-foreground shadow-sm"
+								: "text-muted-foreground hover:text-foreground",
+							disabled &&
+								"cursor-not-allowed opacity-50 hover:text-muted-foreground",
+						)}
+					>
+						{option.label}
+					</button>
+				);
+			})}
 		</div>
 	);
 }
@@ -541,7 +635,12 @@ function RequestStatsState({ message }: { message: string }) {
 	);
 }
 
-function RequestStatsTooltip({ active, payload, label }: RequestTooltipProps) {
+function RequestStatsTooltip({
+	active,
+	payload,
+	label,
+	mode,
+}: RequestTooltipProps) {
 	if (!active || !payload?.length) return null;
 
 	const row = payload[0]?.payload;
@@ -565,14 +664,14 @@ function RequestStatsTooltip({ active, payload, label }: RequestTooltipProps) {
 							{item.name}
 						</span>
 						<span className="font-medium tabular-nums">
-							{formatRate(Number(item.value))}/s
+							{formatChartValue(Number(item.value), mode)}
 						</span>
 					</div>
 				))}
 			</div>
 			{row ? (
 				<p className="mt-1 text-muted-foreground">
-					{row.totalRequests} total requests
+					{formatRequestCount(row.totalRequests)} total requests
 				</p>
 			) : null}
 		</div>
@@ -726,8 +825,9 @@ function buildChartRows(stats?: RequestStatsResponse): ChartRow[] {
 			totalRequests: bucket.totalRequests,
 		};
 		for (const status of stats.statusCodes) {
-			row[getStatusDataKey(status)] =
-				(bucket.statuses[status] ?? 0) / stats.stepSeconds;
+			const requests = bucket.statuses[status] ?? 0;
+			row[getStatusRateDataKey(status)] = requests / stats.stepSeconds;
+			row[getStatusTotalDataKey(status)] = requests;
 		}
 		return row;
 	});
@@ -736,20 +836,35 @@ function buildChartRows(stats?: RequestStatsResponse): ChartRow[] {
 function buildStatusSeries(stats?: RequestStatsResponse): StatusSeries[] {
 	if (!stats) return [];
 
-	const currentByStatus = new Map(
-		stats.currentStatuses.map((status) => [status.status, status]),
-	);
+	const totalSeconds = getStatsDurationSeconds(stats);
 
-	return stats.statusCodes.map((status, index) => ({
-		status,
-		dataKey: getStatusDataKey(status),
-		color: getStatusColor(status, index),
-		currentRequestsPerSecond:
-			currentByStatus.get(status)?.requestsPerSecond ?? 0,
-	}));
+	return stats.statusCodes.map((status, index) => {
+		const totalRequests = stats.buckets.reduce(
+			(total, bucket) => total + (bucket.statuses[status] ?? 0),
+			0,
+		);
+
+		return {
+			status,
+			rateDataKey: getStatusRateDataKey(status),
+			totalDataKey: getStatusTotalDataKey(status),
+			color: getStatusColor(status, index),
+			averageRequestsPerSecond:
+				totalSeconds > 0 ? totalRequests / totalSeconds : 0,
+			totalRequests,
+		};
+	});
 }
 
-function getStatusDataKey(status: string): string {
+function getStatusRateDataKey(status: string): string {
+	return `${getStatusDataKeyBase(status)}_rate`;
+}
+
+function getStatusTotalDataKey(status: string): string {
+	return `${getStatusDataKeyBase(status)}_total`;
+}
+
+function getStatusDataKeyBase(status: string): string {
 	const normalized = status.replace(/[^a-zA-Z0-9]/g, "_");
 	return `status_${normalized || "unknown"}`;
 }
@@ -920,10 +1035,51 @@ function formatRate(value: number): string {
 	return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
+function getAverageRequestsPerSecond(stats: RequestStatsResponse): number {
+	const totalSeconds = getStatsDurationSeconds(stats);
+
+	if (totalSeconds <= 0) return 0;
+
+	return stats.totalRequests / totalSeconds;
+}
+
+function getStatsDurationSeconds(stats: RequestStatsResponse): number {
+	const windowStart = new Date(stats.windowStart).getTime();
+	const windowEnd = new Date(stats.windowEnd).getTime();
+
+	if (
+		Number.isFinite(windowStart) &&
+		Number.isFinite(windowEnd) &&
+		windowEnd > windowStart
+	) {
+		return (windowEnd - windowStart) / 1000;
+	}
+
+	return stats.buckets.length * stats.stepSeconds;
+}
+
+function formatChartValue(value: number, mode: RequestChartMode): string {
+	if (mode === "rate") return `${formatRate(value)}/s`;
+
+	return formatRequestCount(value);
+}
+
 function formatRateTick(value: number): string {
 	if (value >= 100) return value.toFixed(0);
 	if (value >= 10) return value.toFixed(0);
 	return value.toFixed(1);
+}
+
+function formatRequestTick(value: number): string {
+	return formatCompactNumber(value);
+}
+
+function formatRequestCount(value: number): string {
+	if (!Number.isFinite(value)) return "-";
+
+	return new Intl.NumberFormat(undefined, {
+		maximumFractionDigits: 0,
+	}).format(value);
 }
 
 function formatShortDate(value: string): string {

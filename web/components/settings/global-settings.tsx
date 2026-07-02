@@ -610,38 +610,6 @@ export function GlobalSettings({
 							</div>
 						)}
 
-						{upgradeState && upgradeState.status !== "idle" && (
-							<div className="rounded-md border p-3 text-sm">
-								<div className="flex flex-wrap items-center justify-between gap-2">
-									<div>
-										<p className="font-medium">
-											Upgrade status: {upgradeState.status}
-											{upgradeState.targetVersion
-												? ` (${upgradeState.targetVersion})`
-												: ""}
-										</p>
-										{upgradeState.error && (
-											<p className="text-destructive">{upgradeState.error}</p>
-										)}
-									</div>
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={handleRefreshUpgradeStatus}
-										disabled={isRefreshingUpgrade}
-									>
-										{isRefreshingUpgrade ? "Refreshing..." : "Refresh status"}
-									</Button>
-								</div>
-								{upgradeState.logs.length > 0 && (
-									<code className="mt-3 block max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs font-mono text-muted-foreground">
-										{upgradeState.logs.slice(-20).join("\n")}
-									</code>
-								)}
-							</div>
-						)}
-
 						<div className="flex flex-wrap items-center gap-2">
 							<Button
 								type="button"
@@ -733,6 +701,38 @@ export function GlobalSettings({
 						</div>
 					</div>
 				</div>
+
+				{upgradeState && upgradeState.status !== "idle" && (
+					<div className="rounded-lg border p-4 text-sm">
+						<div className="flex flex-wrap items-center justify-between gap-2">
+							<div>
+								<p className="font-medium">
+									Upgrade status: {upgradeState.status}
+									{upgradeState.targetVersion
+										? ` (${upgradeState.targetVersion})`
+										: ""}
+								</p>
+								{upgradeState.error && (
+									<p className="text-destructive">{upgradeState.error}</p>
+								)}
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={handleRefreshUpgradeStatus}
+								disabled={isRefreshingUpgrade}
+							>
+								{isRefreshingUpgrade ? "Refreshing..." : "Refresh status"}
+							</Button>
+						</div>
+						{upgradeState.logs.length > 0 && (
+							<code className="mt-3 block max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs font-mono text-muted-foreground">
+								{upgradeState.logs.slice(-20).join("\n")}
+							</code>
+						)}
+					</div>
+				)}
 			</TabsContent>
 		</Tabs>
 	);
