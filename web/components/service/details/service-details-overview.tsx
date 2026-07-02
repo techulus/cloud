@@ -68,8 +68,6 @@ type OverviewData = {
 	publicHttpCount: number;
 	serverSummaries: ServerSummary[];
 	runningDeployments: number;
-	configuredReplicas: number;
-	totalDeployments: number;
 	status: ServiceStatus;
 	source: SourceInfo;
 };
@@ -339,10 +337,6 @@ function InstancesItem({ overview }: { overview: OverviewData }) {
 						running
 						{serverCount > 0 ? ` across ${serverCount} ${serverLabel}` : ""}
 					</p>
-					<p className="text-xs text-muted-foreground">
-						{overview.configuredReplicas} configured ·{" "}
-						{overview.totalDeployments} total
-					</p>
 				</div>
 				<ServerList servers={overview.serverSummaries} />
 			</div>
@@ -544,11 +538,8 @@ function buildOverviewData(
 	const servers = new Map<string, ServerSummary>();
 	let publicHttpCount = 0;
 	let runningDeployments = 0;
-	let totalDeployments = 0;
-	let configuredReplicas = 0;
 
 	for (const replica of service.configuredReplicas || []) {
-		configuredReplicas += replica.count;
 		servers.set(replica.serverId, {
 			id: replica.serverId,
 			name: replica.serverName,
@@ -559,7 +550,6 @@ function buildOverviewData(
 	}
 
 	for (const deployment of service.deployments || []) {
-		totalDeployments++;
 		const serverId = deployment.serverId;
 		const summary = servers.get(serverId) ?? {
 			id: serverId,
@@ -623,8 +613,6 @@ function buildOverviewData(
 			a.name.localeCompare(b.name),
 		),
 		runningDeployments,
-		configuredReplicas,
-		totalDeployments,
 		status: getServiceStatus(service, runningDeployments),
 		source: getSourceInfo(service),
 	};
