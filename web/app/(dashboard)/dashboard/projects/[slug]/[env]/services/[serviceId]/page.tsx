@@ -18,13 +18,13 @@ import {
 	restartService,
 	stopService,
 } from "@/actions/projects";
-import { DeploymentCanvas } from "@/components/service/details/deployment-canvas";
 import {
 	DeploymentProgress,
 	getBarState,
 } from "@/components/service/details/deployment-progress";
 import { PendingChangesBanner } from "@/components/service/details/pending-changes-banner";
 import { RolloutHistory } from "@/components/service/details/rollout-history";
+import { ServiceDetailsOverview } from "@/components/service/details/service-details-overview";
 import { useService } from "@/components/service/service-layout-client";
 import {
 	AlertDialog,
@@ -155,7 +155,7 @@ export default function DeploymentsPage() {
 				barMode={barState.mode}
 			/>
 
-			<DeploymentCanvas service={service} />
+			<ServiceDetailsOverview service={service} />
 
 			<div className="mt-4">
 				<RolloutHistory

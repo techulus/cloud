@@ -133,6 +133,8 @@ export function GlobalSettings({
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [isRefreshingUpgrade, setIsRefreshingUpgrade] = useState(false);
+	const [controlPlaneUpgradeDialogOpen, setControlPlaneUpgradeDialogOpen] =
+		useState(false);
 
 	useEffect(() => {
 		const openedAbout = tab === "about" && previousTabRef.current !== "about";
@@ -260,6 +262,7 @@ export function GlobalSettings({
 		try {
 			await upgradeControlPlane(targetVersion);
 			toast.success("Control plane upgrade started");
+			setControlPlaneUpgradeDialogOpen(false);
 			router.refresh();
 		} catch (error) {
 			toast.error(
@@ -669,7 +672,10 @@ export function GlobalSettings({
 							)}
 
 							{updateState?.updateAvailable && updateState.latestVersion && (
-								<Dialog>
+								<Dialog
+									open={controlPlaneUpgradeDialogOpen}
+									onOpenChange={setControlPlaneUpgradeDialogOpen}
+								>
 									<DialogTrigger
 										render={
 											<Button variant="warning" disabled={upgradeRunning} />

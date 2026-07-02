@@ -1,11 +1,40 @@
 package output
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 )
+
+type Envelope struct {
+	OK      bool   `json:"ok"`
+	Data    any    `json:"data,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type ErrorEnvelope struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error"`
+}
+
+func JSON(w io.Writer, value any) error {
+	encoder := json.NewEncoder(w)
+	return encoder.Encode(value)
+}
+
+func OK(w io.Writer, data any, summary string) error {
+	return JSON(w, Envelope{OK: true, Data: data, Summary: summary})
+}
+
+func Error(w io.Writer, err error) error {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return JSON(w, ErrorEnvelope{OK: false, Error: message})
+}
 
 func Section(w io.Writer, title string) {
 	fmt.Fprintf(w, "\n%s\n%s\n", title, strings.Repeat("-", len(title)))

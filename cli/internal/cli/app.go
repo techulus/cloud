@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"techulus/cloud-cli/internal/api"
 	"techulus/cloud-cli/internal/auth"
@@ -32,6 +33,7 @@ const (
 
 type App struct {
 	Version       string
+	Args          []string
 	In            io.Reader
 	Out           io.Writer
 	Err           io.Writer
@@ -40,6 +42,29 @@ type App struct {
 	Now           func() time.Time
 	IsInteractive func() bool
 	GetCWD        func() (string, error)
+	flags         globalFlags
+}
+
+type globalFlags struct {
+	Agent bool
+	JSON  bool
+}
+
+type handledError struct {
+	err error
+}
+
+func (e handledError) Error() string {
+	return e.err.Error()
+}
+
+func (e handledError) Unwrap() error {
+	return e.err
+}
+
+func IsHandledError(err error) bool {
+	var handled handledError
+	return errors.As(err, &handled)
 }
 
 func Execute(version string, in io.Reader, out io.Writer, errOut io.Writer) error {
@@ -82,7 +107,17 @@ func (a *App) Execute() error {
 	cmd.SetIn(a.In)
 	cmd.SetOut(a.Out)
 	cmd.SetErr(a.Err)
-	return cmd.Execute()
+	if a.Args != nil {
+		cmd.SetArgs(a.Args)
+	}
+	if err := cmd.Execute(); err != nil {
+		if a.isMachineOutput() {
+			_ = a.writeError(err)
+			return handledError{err: err}
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *App) rootCommand() *cobra.Command {
@@ -91,7 +126,25 @@ func (a *App) rootCommand() *cobra.Command {
 		Short:         "Techulus Cloud CLI",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Annotations: map[string]string{
+			"agent_notes": "Use --help --agent on any command for structured command metadata.\nUse --agent for raw JSON data on success; failures are returned as {\"ok\":false,\"error\":\"...\"}.\nUse --json for an ok/data envelope.",
+		},
 	}
+
+	root.PersistentFlags().BoolVar(&a.flags.Agent, "agent", false, "Agent mode: raw JSON data on success and structured JSON errors")
+	root.PersistentFlags().BoolVar(&a.flags.JSON, "json", false, "Output an ok/data JSON envelope")
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if a.flags.Agent {
+			_ = a.writeRaw(agentHelpForCommand(cmd))
+			return
+		}
+		if a.flags.JSON {
+			_ = a.writeData(agentHelpForCommand(cmd), "Help")
+			return
+		}
+		defaultHelp(cmd, args)
+	})
 
 	root.AddCommand(a.authCommand())
 	root.AddCommand(a.initCommand())
@@ -110,6 +163,9 @@ func (a *App) authCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage CLI authentication",
+		Annotations: map[string]string{
+			"agent_notes": "Most commands require an existing login. Use auth whoami to inspect the saved session.",
+		},
 	}
 	cmd.AddCommand(a.authLoginCommand())
 	cmd.AddCommand(a.authLogoutCommand())
@@ -122,7 +178,13 @@ func (a *App) authLoginCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in with device login",
+		Annotations: map[string]string{
+			"agent_notes": "Device login requires browser approval and is not fully non-interactive.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.isMachineOutput() {
+				return errors.New("tc auth login requires human browser approval and does not support --agent or --json")
+			}
 			if host == "" {
 				existing, err := auth.ReadConfig()
 				if err != nil {
@@ -150,6 +212,9 @@ func (a *App) authLogoutCommand() *cobra.Command {
 			if err := auth.DeleteConfig(); err != nil {
 				return err
 			}
+			if a.isMachineOutput() {
+				return a.writeData(map[string]string{"config": "removed"}, "Signed out")
+			}
 			output.Section(a.Out, "Signed out")
 			output.Field(a.Out, "Config", "removed")
 			return nil
@@ -173,10 +238,17 @@ func (a *App) authWhoamiCommand() *cobra.Command {
 			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/cli/auth/whoami", nil, nil, &response); err != nil {
 				return err
 			}
+			result := authWhoamiOutput{
+				User: response.User,
+				Host: config.Host,
+			}
+			if a.isMachineOutput() {
+				return a.writeData(result, "Account")
+			}
 			output.Section(a.Out, "Account")
-			output.Field(a.Out, "User", response.User.Email)
-			output.Field(a.Out, "Name", response.User.Name)
-			output.Field(a.Out, "Host", config.Host)
+			output.Field(a.Out, "User", result.User.Email)
+			output.Field(a.Out, "Name", result.User.Name)
+			output.Field(a.Out, "Host", result.Host)
 			return nil
 		},
 	}
@@ -186,6 +258,9 @@ func (a *App) initCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Create a starter techulus.yml",
+		Annotations: map[string]string{
+			"agent_notes": "Creates techulus.yml in the current working directory. Fails if techulus.yml already exists.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := a.GetCWD()
 			if err != nil {
@@ -222,6 +297,9 @@ service:
 			if err := os.WriteFile(manifestPath, []byte(starter), 0o644); err != nil {
 				return err
 			}
+			if a.isMachineOutput() {
+				return a.writeData(initOutput{Manifest: manifestPath, Next: "tc apply"}, "Manifest created")
+			}
 			output.Section(a.Out, "Manifest")
 			output.Field(a.Out, "Created", manifestPath)
 			output.Next(a.Out, "tc apply")
@@ -235,7 +313,13 @@ func (a *App) linkCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "link",
 		Short: "Create techulus.yml from an existing service",
+		Annotations: map[string]string{
+			"agent_notes": "Requires an interactive terminal and does not support --agent or --json. Agents should usually pass --project, --environment, and --service to status/logs instead of linking.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.isMachineOutput() {
+				return errors.New("tc link requires an interactive terminal and does not support --agent or --json")
+			}
 			if !a.IsInteractive() {
 				return errors.New("tc link requires an interactive terminal")
 			}
@@ -303,6 +387,9 @@ func (a *App) applyCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply",
 		Short: "Apply techulus.yml to the linked service",
+		Annotations: map[string]string{
+			"agent_notes": "Requires techulus.yml in the current directory and sends the full desired manifest to the control plane.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config, err := requireConfig()
 			if err != nil {
@@ -317,6 +404,9 @@ func (a *App) applyCommand() *cobra.Command {
 			if err := client.RequestJSON(cmd.Context(), http.MethodPost, "/api/v1/manifest/apply", nil, loaded.Manifest, &result); err != nil {
 				return err
 			}
+			if a.isMachineOutput() {
+				return a.writeData(result, "Apply")
+			}
 			printApplyResult(a.Out, result)
 			return nil
 		},
@@ -327,6 +417,9 @@ func (a *App) deployCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "deploy",
 		Short: "Deploy the service described by techulus.yml",
+		Annotations: map[string]string{
+			"agent_notes": "Requires techulus.yml in the current directory and queues a deployment for that service.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config, err := requireConfig()
 			if err != nil {
@@ -341,6 +434,9 @@ func (a *App) deployCommand() *cobra.Command {
 			if err := client.RequestJSON(cmd.Context(), http.MethodPost, "/api/v1/manifest/deploy", nil, loaded.Manifest, &result); err != nil {
 				return err
 			}
+			if a.isMachineOutput() {
+				return a.writeData(result, "Deploy")
+			}
 			output.Section(a.Out, "Deploy")
 			output.Field(a.Out, "Service", output.ShortID(result.ServiceID))
 			output.Field(a.Out, "Status", output.Status(result.Status))
@@ -354,36 +450,53 @@ func (a *App) deployCommand() *cobra.Command {
 }
 
 func (a *App) statusCommand() *cobra.Command {
-	return &cobra.Command{
+	var target serviceTargetFlags
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show service rollout and deployment status",
+		Annotations: map[string]string{
+			"agent_notes": "Without explicit target flags, tc reads techulus.yml from the current directory.\nFor agent use outside a linked directory, pass --project, --environment, and --service together.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config, err := requireConfig()
 			if err != nil {
 				return err
 			}
-			loaded, err := a.ensureManifest()
+			value, err := a.resolveServiceTarget(target)
 			if err != nil {
 				return err
 			}
 			var status statusResponse
 			client := a.client(config)
-			query := manifestIdentityQuery(loaded.Manifest)
+			query := manifestIdentityQuery(value)
 			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/manifest/status", query, nil, &status); err != nil {
 				return err
 			}
-			printStatus(a.Out, loaded.Manifest, status)
+			result := statusOutput{
+				Target: serviceTargetFromManifest(value),
+				Status: status,
+			}
+			if a.isMachineOutput() {
+				return a.writeData(result, "Status")
+			}
+			printStatus(a.Out, value, status)
 			return nil
 		},
 	}
+	addServiceTargetFlags(cmd, &target)
+	return cmd
 }
 
 func (a *App) logsCommand() *cobra.Command {
 	var tail int
 	var follow bool
+	var target serviceTargetFlags
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "Show service logs",
+		Annotations: map[string]string{
+			"agent_notes": "Without explicit target flags, tc reads techulus.yml from the current directory.\nFor agent use outside a linked directory, pass --project, --environment, and --service together.\nIn --agent or --json mode, logs are one-shot JSON output; --follow=true is not supported.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if tail < 1 || tail > 1000 {
 				return errors.New("log line count must be between 1 and 1000")
@@ -392,19 +505,26 @@ func (a *App) logsCommand() *cobra.Command {
 			if tailChanged && !cmd.Flags().Changed("follow") {
 				follow = false
 			}
+			if a.isMachineOutput() {
+				if cmd.Flags().Changed("follow") && follow {
+					return errors.New("--follow=true is not supported with --agent or --json")
+				}
+				follow = false
+			}
 			config, err := requireConfig()
 			if err != nil {
 				return err
 			}
-			loaded, err := a.ensureManifest()
+			value, err := a.resolveServiceTarget(target)
 			if err != nil {
 				return err
 			}
-			return a.runLogs(cmd.Context(), config, loaded.Manifest, tail, follow)
+			return a.runLogs(cmd.Context(), config, value, tail, follow)
 		},
 	}
 	cmd.Flags().IntVarP(&tail, "tail", "n", defaultLogTail, "Number of log lines to fetch")
 	cmd.Flags().BoolVar(&follow, "follow", true, "Continue polling for new log lines")
+	addServiceTargetFlags(cmd, &target)
 	return cmd
 }
 
@@ -413,6 +533,9 @@ func (a *App) versionCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print the tc version",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.isMachineOutput() {
+				return a.writeData(map[string]string{"version": a.Version}, "Version")
+			}
 			fmt.Fprintln(a.Out, a.Version)
 			return nil
 		},
@@ -421,7 +544,7 @@ func (a *App) versionCommand() *cobra.Command {
 
 func (a *App) completionCommand(root *cobra.Command) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
+		Use:   "completion <bash|zsh|fish|powershell>",
 		Short: "Generate shell completion scripts",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -461,6 +584,202 @@ func (a *App) ensureManifest() (*manifest.Loaded, error) {
 		return nil, errors.New("no techulus.yml found in the current directory. Run `tc init` to create one")
 	}
 	return nil, fmt.Errorf("invalid techulus.yml: %w", err)
+}
+
+func (a *App) isMachineOutput() bool {
+	return a.flags.Agent || a.flags.JSON
+}
+
+func (a *App) writeData(data any, summary string) error {
+	if a.flags.Agent {
+		return a.writeRaw(data)
+	}
+	return output.OK(a.Out, data, summary)
+}
+
+func (a *App) writeRaw(data any) error {
+	return output.JSON(a.Out, data)
+}
+
+func (a *App) writeError(err error) error {
+	return output.Error(a.Out, err)
+}
+
+type agentHelpInfo struct {
+	Command        string            `json:"command"`
+	Path           string            `json:"path"`
+	Short          string            `json:"short"`
+	Long           string            `json:"long,omitempty"`
+	Usage          string            `json:"usage"`
+	Notes          []string          `json:"notes,omitempty"`
+	Args           []agentArg        `json:"args,omitempty"`
+	Subcommands    []agentSubcommand `json:"subcommands,omitempty"`
+	Flags          []agentFlag       `json:"flags,omitempty"`
+	InheritedFlags []agentFlag       `json:"inherited_flags,omitempty"`
+}
+
+type agentArg struct {
+	Name     string   `json:"name"`
+	Required bool     `json:"required"`
+	Choices  []string `json:"choices,omitempty"`
+}
+
+type agentSubcommand struct {
+	Name  string `json:"name"`
+	Short string `json:"short"`
+	Path  string `json:"path"`
+}
+
+type agentFlag struct {
+	Name      string `json:"name"`
+	Shorthand string `json:"shorthand,omitempty"`
+	Type      string `json:"type"`
+	Default   string `json:"default"`
+	Usage     string `json:"usage"`
+}
+
+func agentHelpForCommand(cmd *cobra.Command) agentHelpInfo {
+	info := agentHelpInfo{
+		Command: cmd.Name(),
+		Path:    cmd.CommandPath(),
+		Short:   cmd.Short,
+		Long:    cmd.Long,
+		Usage:   cmd.UseLine(),
+		Args:    parseAgentArgs(cmd),
+	}
+	if notes := strings.TrimSpace(cmd.Annotations["agent_notes"]); notes != "" {
+		for _, note := range strings.Split(notes, "\n") {
+			note = strings.TrimSpace(note)
+			if note != "" {
+				info.Notes = append(info.Notes, note)
+			}
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		if sub.IsAvailableCommand() || sub.Name() == "help" {
+			info.Subcommands = append(info.Subcommands, agentSubcommand{
+				Name:  sub.Name(),
+				Short: sub.Short,
+				Path:  sub.CommandPath(),
+			})
+		}
+	}
+	cmd.NonInheritedFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name != "help" {
+			info.Flags = append(info.Flags, agentFlagFor(flag))
+		}
+	})
+	cmd.InheritedFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name != "help" {
+			info.InheritedFlags = append(info.InheritedFlags, agentFlagFor(flag))
+		}
+	})
+	return info
+}
+
+func agentFlagFor(flag *pflag.Flag) agentFlag {
+	return agentFlag{
+		Name:      flag.Name,
+		Shorthand: flag.Shorthand,
+		Type:      flag.Value.Type(),
+		Default:   flag.DefValue,
+		Usage:     flag.Usage,
+	}
+}
+
+func parseAgentArgs(cmd *cobra.Command) []agentArg {
+	fields := strings.Fields(cmd.Use)
+	if len(fields) <= 1 {
+		return nil
+	}
+	args := make([]agentArg, 0, len(fields)-1)
+	for _, field := range fields[1:] {
+		required := strings.HasPrefix(field, "<") || (!strings.HasPrefix(field, "[") && !strings.HasSuffix(field, "]"))
+		name := strings.Trim(field, "[]<>")
+		if name == "" || name == "flags" {
+			continue
+		}
+		arg := agentArg{Name: name, Required: required}
+		if choices := parseAgentArgChoices(name); len(choices) > 0 {
+			arg.Name = agentChoiceArgName(cmd)
+			arg.Choices = choices
+		}
+		args = append(args, arg)
+	}
+	return args
+}
+
+func parseAgentArgChoices(name string) []string {
+	if !strings.Contains(name, "|") {
+		return nil
+	}
+	parts := strings.Split(name, "|")
+	choices := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil
+		}
+		choices = append(choices, part)
+	}
+	return choices
+}
+
+func agentChoiceArgName(cmd *cobra.Command) string {
+	if cmd.Name() == "completion" {
+		return "shell"
+	}
+	return "value"
+}
+
+type serviceTargetFlags struct {
+	Project     string
+	Environment string
+	Service     string
+}
+
+func addServiceTargetFlags(cmd *cobra.Command, target *serviceTargetFlags) {
+	cmd.Flags().StringVar(&target.Project, "project", "", "Project name or slug")
+	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment name")
+	cmd.Flags().StringVar(&target.Service, "service", "", "Service name")
+}
+
+func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest, error) {
+	project := strings.TrimSpace(target.Project)
+	environment := strings.TrimSpace(target.Environment)
+	service := strings.TrimSpace(target.Service)
+	explicitCount := 0
+	for _, value := range []string{project, environment, service} {
+		if value != "" {
+			explicitCount++
+		}
+	}
+	if explicitCount == 0 {
+		loaded, err := a.ensureManifest()
+		if err != nil {
+			return manifest.Manifest{}, err
+		}
+		return loaded.Manifest, nil
+	}
+	if explicitCount != 3 {
+		return manifest.Manifest{}, errors.New("provide --project, --environment, and --service together")
+	}
+	return manifest.Manifest{
+		APIVersion:  "v1",
+		Project:     project,
+		Environment: environment,
+		Service: manifest.Service{
+			Name: service,
+		},
+	}, nil
+}
+
+func serviceTargetFromManifest(value manifest.Manifest) serviceTargetOutput {
+	return serviceTargetOutput{
+		Project:     value.Project,
+		Environment: value.Environment,
+		Service:     value.Service.Name,
+	}
 }
 
 func requireConfig() (*auth.Config, error) {
@@ -584,6 +903,13 @@ func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.M
 	result, err := fetchLogs(ctx, client, value, tail, "")
 	if err != nil {
 		return err
+	}
+	if a.isMachineOutput() {
+		return a.writeData(logsOutput{
+			Target:         serviceTargetFromManifest(value),
+			LoggingEnabled: result.LoggingEnabled,
+			Logs:           result.Logs,
+		}, "Logs")
 	}
 	fmt.Fprintf(a.Out, "%s/%s/%s\n", value.Project, value.Environment, value.Service.Name)
 	if !result.LoggingEnabled {

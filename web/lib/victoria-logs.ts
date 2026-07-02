@@ -1,6 +1,30 @@
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
 
+export const REQUEST_STATS_RANGE_OPTIONS = {
+	"1h": { durationMs: 60 * 60 * 1000, stepSeconds: 60, stepLogSql: "1m" },
+	"6h": {
+		durationMs: 6 * 60 * 60 * 1000,
+		stepSeconds: 5 * 60,
+		stepLogSql: "5m",
+	},
+	"24h": {
+		durationMs: 24 * 60 * 60 * 1000,
+		stepSeconds: 5 * 60,
+		stepLogSql: "5m",
+	},
+	"7d": {
+		durationMs: 7 * 24 * 60 * 60 * 1000,
+		stepSeconds: 30 * 60,
+		stepLogSql: "30m",
+	},
+} as const;
+
+export type RequestStatsRange = keyof typeof REQUEST_STATS_RANGE_OPTIONS;
+
+export const DEFAULT_REQUEST_STATS_RANGE: RequestStatsRange = "7d";
+const CURRENT_RATE_WINDOW_SECONDS = 5 * 60;
+
 type EndpointConfig = {
 	url: string;
 	username?: string;
@@ -52,7 +76,261 @@ export type StoredLog = {
 };
 
 export function isLoggingEnabled(): boolean {
-	return !!VICTORIA_LOGS_URL;
+	return !!(VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL);
+}
+
+export type HttpRequestStatsBucket = {
+	timestamp: string;
+	totalRequests: number;
+	statuses: Record<string, number>;
+};
+
+export type HttpStatusCodeStats = {
+	status: string;
+	requests: number;
+	requestsPerSecond: number;
+};
+
+export type HttpRequestStats = {
+	range: RequestStatsRange;
+	stepSeconds: number;
+	currentWindowSeconds: number;
+	totalRequests: number;
+	currentRequestsPerSecond: number;
+	statusCodes: string[];
+	currentStatuses: HttpStatusCodeStats[];
+	buckets: HttpRequestStatsBucket[];
+};
+
+type RequestStatsRow = Record<string, unknown>;
+
+export function parseRequestStatsRange(
+	value: string | null | undefined,
+): RequestStatsRange {
+	if (value && value in REQUEST_STATS_RANGE_OPTIONS) {
+		return value as RequestStatsRange;
+	}
+	return DEFAULT_REQUEST_STATS_RANGE;
+}
+
+export function createEmptyHttpRequestStats(
+	range: RequestStatsRange = DEFAULT_REQUEST_STATS_RANGE,
+): HttpRequestStats {
+	const config = REQUEST_STATS_RANGE_OPTIONS[range];
+	return {
+		range,
+		stepSeconds: config.stepSeconds,
+		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		totalRequests: 0,
+		currentRequestsPerSecond: 0,
+		statusCodes: [],
+		currentStatuses: [],
+		buckets: [],
+	};
+}
+
+export function parseRequestStatsRows(text: string): RequestStatsRow[] {
+	const lines = text.trim().split("\n").filter(Boolean);
+	const rows: RequestStatsRow[] = [];
+
+	for (const line of lines) {
+		try {
+			const parsed = JSON.parse(line) as unknown;
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				rows.push(parsed as RequestStatsRow);
+			}
+		} catch {
+			// VictoriaLogs should return JSON lines, but a single malformed row should
+			// not break the service overview card.
+		}
+	}
+
+	return rows;
+}
+
+export function sumRequestStatsRows(rows: RequestStatsRow[]): {
+	requests: number;
+	statuses: Record<string, number>;
+} {
+	return rows.reduce<{ requests: number; statuses: Record<string, number> }>(
+		(acc, row) => {
+			const requests = parseStatNumber(row.requests);
+			const status = normalizeStatus(row.status);
+			acc.requests += requests;
+			acc.statuses[status] = (acc.statuses[status] ?? 0) + requests;
+			return acc;
+		},
+		{ requests: 0, statuses: {} },
+	);
+}
+
+export function buildRequestStatsBuckets(
+	rows: RequestStatsRow[],
+	options: { start: Date; end: Date; stepSeconds: number },
+): HttpRequestStatsBucket[] {
+	const stepMs = options.stepSeconds * 1000;
+	const startMs = floorToStep(options.start.getTime(), stepMs);
+	const endMs = floorToStep(options.end.getTime(), stepMs);
+
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) {
+		return [];
+	}
+
+	const byBucket = new Map<
+		number,
+		{ totalRequests: number; statuses: Record<string, number> }
+	>();
+	for (const row of rows) {
+		const timestamp = parseTimestamp(row._time ?? row.time ?? row.timestamp);
+		if (!timestamp) continue;
+
+		const bucketMs = floorToStep(timestamp.getTime(), stepMs);
+		const bucket = byBucket.get(bucketMs) ?? {
+			totalRequests: 0,
+			statuses: {},
+		};
+		const requests = parseStatNumber(row.requests);
+		const status = normalizeStatus(row.status);
+		bucket.totalRequests += requests;
+		bucket.statuses[status] = (bucket.statuses[status] ?? 0) + requests;
+		byBucket.set(bucketMs, bucket);
+	}
+
+	const buckets: HttpRequestStatsBucket[] = [];
+	for (let timestampMs = startMs; timestampMs <= endMs; timestampMs += stepMs) {
+		const bucket = byBucket.get(timestampMs) ?? {
+			totalRequests: 0,
+			statuses: {},
+		};
+		buckets.push({
+			timestamp: new Date(timestampMs).toISOString(),
+			totalRequests: bucket.totalRequests,
+			statuses: bucket.statuses,
+		});
+	}
+
+	return buckets;
+}
+
+export async function queryHttpRequestStats(options: {
+	serviceId: string;
+	range: RequestStatsRange;
+	now?: Date;
+}): Promise<HttpRequestStats> {
+	const config = REQUEST_STATS_RANGE_OPTIONS[options.range];
+	const now = options.now ?? new Date();
+	const start = new Date(now.getTime() - config.durationMs);
+	const statusCodeLimit = 64;
+	const bucketLimit =
+		(Math.ceil(config.durationMs / (config.stepSeconds * 1000)) + 5) *
+		statusCodeLimit;
+	const baseFilter = `service_id:${options.serviceId} log_type:http`;
+	const bucketQuery = `${baseFilter} _time:${options.range} | stats by (_time:${config.stepLogSql}, status) count() as requests | sort by (_time)`;
+	const currentQuery = `${baseFilter} _time:5m | stats by (status) count() as requests`;
+
+	const [bucketText, currentText] = await Promise.all([
+		queryLogSql(bucketQuery, bucketLimit),
+		queryLogSql(currentQuery, statusCodeLimit),
+	]);
+
+	const buckets = buildRequestStatsBuckets(parseRequestStatsRows(bucketText), {
+		start,
+		end: now,
+		stepSeconds: config.stepSeconds,
+	});
+	const currentCounts = sumRequestStatsRows(parseRequestStatsRows(currentText));
+	const statusCodes = sortStatusCodes([
+		...buckets.flatMap((bucket) => Object.keys(bucket.statuses)),
+		...Object.keys(currentCounts.statuses),
+	]);
+
+	return {
+		range: options.range,
+		stepSeconds: config.stepSeconds,
+		currentWindowSeconds: CURRENT_RATE_WINDOW_SECONDS,
+		totalRequests: buckets.reduce(
+			(sum, bucket) => sum + bucket.totalRequests,
+			0,
+		),
+		currentRequestsPerSecond:
+			currentCounts.requests / CURRENT_RATE_WINDOW_SECONDS,
+		statusCodes,
+		currentStatuses: statusCodes.map((status) => {
+			const requests = currentCounts.statuses[status] ?? 0;
+			return {
+				status,
+				requests,
+				requestsPerSecond: requests / CURRENT_RATE_WINDOW_SECONDS,
+			};
+		}),
+		buckets,
+	};
+}
+
+async function queryLogSql(query: string, limit: number): Promise<string> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("limit", String(limit));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query logs: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	return response.text();
+}
+
+function parseStatNumber(value: unknown): number {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === "string" && value.trim() !== "") {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	return 0;
+}
+
+function normalizeStatus(value: unknown): string {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return String(value);
+	}
+	if (typeof value === "string" && value.trim() !== "") {
+		return value.trim();
+	}
+	return "unknown";
+}
+
+function sortStatusCodes(statuses: string[]): string[] {
+	return Array.from(new Set(statuses)).sort((a, b) => {
+		const statusA = Number(a);
+		const statusB = Number(b);
+		if (Number.isFinite(statusA) && Number.isFinite(statusB)) {
+			return statusA - statusB;
+		}
+		return a.localeCompare(b);
+	});
+}
+
+function parseTimestamp(value: unknown): Date | null {
+	if (typeof value !== "string" && typeof value !== "number") {
+		return null;
+	}
+
+	const timestamp = new Date(value);
+	return Number.isFinite(timestamp.getTime()) ? timestamp : null;
+}
+
+function floorToStep(timestampMs: number, stepMs: number): number {
+	return Math.floor(timestampMs / stepMs) * stepMs;
 }
 
 type QueryLogsByServiceOptions = {
@@ -242,7 +520,7 @@ export async function ingestRolloutLog(
 		await fetch(url, {
 			...options,
 			method: "POST",
-			body: JSON.stringify(entry) + "\n",
+			body: `${JSON.stringify(entry)}\n`,
 			headers: {
 				...((options.headers as Record<string, string>) || {}),
 				"Content-Type": "application/json",
