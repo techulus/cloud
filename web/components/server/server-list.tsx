@@ -62,8 +62,10 @@ function formatOsArch(server: ServerWithResources): string | null {
 
 export function ServerList({
 	initialServers,
+	showHeader = true,
 }: {
 	initialServers: ServerWithResources[];
+	showHeader?: boolean;
 }) {
 	const { data: servers } = useSWR<ServerWithResources[]>(
 		"/api/servers",
@@ -76,16 +78,18 @@ export function ServerList({
 	);
 
 	return (
-		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<div>
-					<h2 className="text-lg font-semibold">Servers</h2>
-					<p className="text-sm text-muted-foreground">
-						Manage your server fleet
-					</p>
+		<div className={showHeader ? "space-y-6" : undefined}>
+			{showHeader && (
+				<div className="flex items-center justify-between">
+					<div>
+						<h2 className="text-lg font-semibold">Servers</h2>
+						<p className="text-sm text-muted-foreground">
+							Manage your server fleet
+						</p>
+					</div>
+					<CreateServerDialog />
 				</div>
-				<CreateServerDialog />
-			</div>
+			)}
 
 			{!servers || servers.length === 0 ? (
 				<Empty className="border py-10">

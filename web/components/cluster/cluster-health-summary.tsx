@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, Cpu, Network, Server } from "lucide-react";
+import { Activity, Network, Server } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,13 @@ type ClusterHealthData = {
 
 interface ClusterHealthSummaryProps {
 	initialData: ClusterHealthData;
+	showHeader?: boolean;
 	showMetricsLink?: boolean;
 }
 
 export function ClusterHealthSummary({
 	initialData,
+	showHeader = true,
 	showMetricsLink = true,
 }: ClusterHealthSummaryProps) {
 	const { data } = useSWR<ClusterHealthData>("/api/cluster-health", fetcher, {
@@ -41,13 +43,6 @@ export function ClusterHealthSummary({
 			subtitle: "online",
 			icon: Server,
 			healthy: summary.onlineServers === summary.totalServers,
-		},
-		{
-			label: "CPU",
-			value: `${summary.avgCpuUsage.toFixed(1)}%`,
-			subtitle: "avg usage",
-			icon: Cpu,
-			healthy: summary.avgCpuUsage < 80,
 		},
 		{
 			label: "Tunnels",
@@ -67,26 +62,27 @@ export function ClusterHealthSummary({
 
 	return (
 		<div className="space-y-4">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h2 className="text-lg font-semibold">Cluster Health</h2>
-					<p className="text-sm text-muted-foreground">
-						Real-time infrastructure status
-					</p>
+			{showHeader && (
+				<div className="flex items-center justify-between gap-3">
+					<div className="min-w-0">
+						<h2 className="text-lg font-semibold">Cluster Health</h2>
+						<p className="text-sm text-muted-foreground">
+							Real-time infrastructure status
+						</p>
+					</div>
+					{showMetricsLink && (
+						<Button
+							variant="outline"
+							size="sm"
+							nativeButton={false}
+							render={<Link href="/dashboard/metrics" />}
+						>
+							Metrics
+						</Button>
+					)}
 				</div>
-				{showMetricsLink && (
-					<Button
-						variant="outline"
-						size="sm"
-						nativeButton={false}
-						render={<Link href="/dashboard/metrics" />}
-					>
-						<BarChart3 className="size-3.5" />
-						Metrics
-					</Button>
-				)}
-			</div>
-			<div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+			)}
+			<div className="grid gap-4 sm:grid-cols-3">
 				{stats.map((stat) => (
 					<Card key={stat.label} size="sm">
 						<CardContent className="flex items-center gap-3">
