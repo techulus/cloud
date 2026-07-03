@@ -404,11 +404,11 @@ function ServiceConfigPanel({
 			<div className="grid gap-3 sm:grid-cols-2">
 				<SummaryItem icon={Activity} label="Status">
 					<StatusValue status={overview.status} />
-				</SummaryItem>
-				<SummaryItem icon={Server} label="Instances">
 					<p className="text-base font-medium">
 						{formatInstanceSummary(overview)}
 					</p>
+				</SummaryItem>
+				<SummaryItem icon={Server} label="Instances">
 					<ServerList servers={overview.serverSummaries} />
 				</SummaryItem>
 
