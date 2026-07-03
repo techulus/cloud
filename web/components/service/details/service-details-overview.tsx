@@ -1,5 +1,6 @@
 "use client";
 
+import cronstrue from "cronstrue";
 import {
 	Activity,
 	Box,
@@ -1007,9 +1008,20 @@ function formatBackupLabel(service: Service): string {
 }
 
 function formatDeployScheduleLabel(service: Service): string {
-	return service.deploymentSchedule
-		? `Deploy ${service.deploymentSchedule}`
-		: "Manual Deploy";
+	if (!service.deploymentSchedule) return "Manual Deploy";
+
+	try {
+		const scheduleDescription = cronstrue.toString(service.deploymentSchedule, {
+			verbose: true,
+		});
+		return `Deploy ${lowercaseFirstLetter(scheduleDescription)}`;
+	} catch {
+		return "Scheduled Deploy";
+	}
+}
+
+function lowercaseFirstLetter(value: string): string {
+	return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function formatCount(count: number, singular: string): string {

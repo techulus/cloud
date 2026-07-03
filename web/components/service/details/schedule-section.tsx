@@ -32,7 +32,10 @@ export const ScheduleSection = memo(function ScheduleSection({
 			return { description: null, error: null };
 		}
 		try {
-			return { description: cronstrue.toString(schedule), error: null };
+			return {
+				description: cronstrue.toString(schedule, { verbose: true }),
+				error: null,
+			};
 		} catch {
 			return { description: null, error: "Invalid cron expression" };
 		}
