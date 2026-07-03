@@ -78,7 +78,13 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 
 			healthStatus := "none"
 			if c.State == "running" {
-				healthStatus = container.GetHealthStatus(c.ID)
+				healthStatus = c.HealthStatus
+				if healthStatus == "" {
+					healthStatus = container.GetHealthStatus(c.ID)
+				}
+			}
+			if healthStatus == "" {
+				healthStatus = "none"
 			}
 
 			report.Containers = append(report.Containers, agenthttp.ContainerStatus{

@@ -52,6 +52,7 @@ type Container struct {
 	Name         string            `json:"Name"`
 	Image        string            `json:"Image"`
 	State        string            `json:"State"`
+	HealthStatus string            `json:"HealthStatus"`
 	Created      int64             `json:"Created"`
 	Labels       map[string]string `json:"Labels"`
 	DeploymentID string

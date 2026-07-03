@@ -465,6 +465,7 @@ type podmanContainer struct {
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
 	State   string            `json:"State"`
+	Status  *string           `json:"Status"`
 	Created int64             `json:"Created"`
 	Labels  map[string]string `json:"Labels"`
 }
@@ -476,6 +477,15 @@ func List() ([]Container, error) {
 		return nil, fmt.Errorf("failed to list containers: %s: %w", string(output), err)
 	}
 
+	containers, err := parseContainerList(output)
+	if err != nil {
+		return nil, err
+	}
+
+	return containers, nil
+}
+
+func parseContainerList(output []byte) ([]Container, error) {
 	var podmanContainers []podmanContainer
 	if err := json.Unmarshal(output, &podmanContainers); err != nil {
 		return nil, fmt.Errorf("failed to parse container list: %w", err)
@@ -492,6 +502,7 @@ func List() ([]Container, error) {
 			Name:         name,
 			Image:        pc.Image,
 			State:        pc.State,
+			HealthStatus: normalizeHealthStatus(pc.Status),
 			Created:      pc.Created,
 			Labels:       pc.Labels,
 			DeploymentID: pc.Labels["techulus.deployment.id"],
@@ -500,6 +511,22 @@ func List() ([]Container, error) {
 	}
 
 	return containers, nil
+}
+
+func normalizeHealthStatus(status *string) string {
+	if status == nil {
+		return ""
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(*status))
+	switch normalized {
+	case "healthy", "unhealthy", "starting":
+		return normalized
+	case "", "<nil>", "<no value>", "none", "null", "unconfigured":
+		return "none"
+	default:
+		return ""
+	}
 }
 
 func EnsureNetwork(subnetId int) error {
