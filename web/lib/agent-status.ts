@@ -80,11 +80,13 @@ async function applyDeploymentErrors(
 				serviceId: deployments.serviceId,
 				rolloutId: deployments.rolloutId,
 				status: deployments.status,
+				serverlessEnabled: services.serverlessEnabled,
 				rolloutStatus: rollouts.status,
 				serverName: servers.name,
 			})
 			.from(deployments)
 			.innerJoin(servers, eq(deployments.serverId, servers.id))
+			.innerJoin(services, eq(deployments.serviceId, services.id))
 			.leftJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
 			.where(
 				and(
@@ -98,10 +100,11 @@ async function applyDeploymentErrors(
 			continue;
 		}
 
+		const isServerlessWakeDeployment = deployment.status === "waking";
 		const isActiveRolloutDeployment =
-			deployment.rolloutId && deployment.rolloutStatus === "in_progress";
-		const isServerlessWakeDeployment =
-			!deployment.rolloutId && deployment.status === "waking";
+			!isServerlessWakeDeployment &&
+			deployment.rolloutId &&
+			deployment.rolloutStatus === "in_progress";
 
 		if (!isActiveRolloutDeployment && !isServerlessWakeDeployment) {
 			continue;
@@ -111,12 +114,22 @@ async function applyDeploymentErrors(
 			.update(deployments)
 			.set(
 				isServerlessWakeDeployment
-					? {
-							...markDeploymentUndesired("failed"),
-							failedStage: "serverless_wake",
-							healthStatus: null,
-							serverlessWakeStartedAt: null,
-						}
+					? deployment.serverlessEnabled
+						? {
+								status: "sleeping",
+								desired: true,
+								containerId: null,
+								failedStage: null,
+								healthStatus: null,
+								serverlessWakeStartedAt: null,
+							}
+						: {
+								...markDeploymentUndesired("failed"),
+								containerId: null,
+								failedStage: "serverless_wake",
+								healthStatus: null,
+								serverlessWakeStartedAt: null,
+							}
 					: { status: "failed", failedStage: "deploying" },
 			)
 			.where(
@@ -278,7 +291,6 @@ export async function applyStatusReport(
 		.filter((id) => id !== "");
 
 	const activeStatuses = [
-		"waking",
 		"starting",
 		"healthy",
 		"running",

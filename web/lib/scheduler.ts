@@ -329,9 +329,9 @@ export async function checkAndSleepIdleServerlessServices(): Promise<void> {
 			`[scheduler] slept ${result.deploymentsSlept} serverless deployment(s) across ${result.servicesSlept} service(s)`,
 		);
 	}
-	if (result.wakingDeploymentsFailed > 0) {
+	if (result.wakingDeploymentsReset > 0) {
 		console.log(
-			`[scheduler] failed ${result.wakingDeploymentsFailed} timed-out serverless wake deployment(s)`,
+			`[scheduler] reset ${result.wakingDeploymentsReset} timed-out serverless wake deployment(s)`,
 		);
 	}
 }

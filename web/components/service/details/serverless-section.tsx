@@ -2,6 +2,7 @@
 
 import { Moon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { updateServiceServerlessSettings } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +82,13 @@ export const ServerlessSection = memo(function ServerlessSection({
 				minReadyReplicas: parsed.minReadyReplicas,
 			});
 			onUpdate();
+			toast.success("Serverless settings updated");
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Failed to update serverless settings",
+			);
 		} finally {
 			setIsSaving(false);
 		}

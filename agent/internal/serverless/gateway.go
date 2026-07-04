@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,16 +19,35 @@ import (
 const (
 	GatewayPort               = 18080
 	activityHeartbeatInterval = 60 * time.Second
+	upstreamCacheTTL          = 10 * time.Second
 )
 
 type Gateway struct {
-	client  *agenthttp.Client
-	counter uint64
-	server  *http.Server
+	client        *agenthttp.Client
+	counter       uint64
+	server        *http.Server
+	mu            sync.Mutex
+	upstreamCache map[string]cachedUpstreams
+	wakeCalls     map[string]*wakeCall
+}
+
+type cachedUpstreams struct {
+	upstreams []agenthttp.ServerlessUpstream
+	expiresAt time.Time
+}
+
+type wakeCall struct {
+	done   chan struct{}
+	result *agenthttp.ServerlessWakeResult
+	err    error
 }
 
 func NewGateway(client *agenthttp.Client) *Gateway {
-	return &Gateway{client: client}
+	return &Gateway{
+		client:        client,
+		upstreamCache: map[string]cachedUpstreams{},
+		wakeCalls:     map[string]*wakeCall{},
+	}
 }
 
 func (g *Gateway) Start(ctx context.Context) error {
@@ -68,15 +88,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wakeResult, err := g.client.WakeServerlessService(host)
+	upstreams, err := g.getUpstreams(host)
 	if err != nil {
 		log.Printf("[serverless-gateway] wake failed for host %s: %v", host, err)
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	if len(wakeResult.Upstreams) == 0 {
-		log.Printf("[serverless-gateway] no upstreams for host %s after wake (status=%s)", host, wakeResult.Status)
+	if len(upstreams) == 0 {
+		log.Printf("[serverless-gateway] no upstreams for host %s after wake", host)
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -93,7 +113,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	upstream := wakeResult.Upstreams[g.nextIndex(len(wakeResult.Upstreams))]
+	upstream := upstreams[g.nextIndex(len(upstreams))]
 	target, err := url.Parse("http://" + upstream.Url)
 	if err != nil {
 		log.Printf("[serverless-gateway] invalid upstream %q for host %s: %v", upstream.Url, host, err)
@@ -112,9 +132,86 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
 		log.Printf("[serverless-gateway] proxy error for host %s to %s: %v", host, upstream.Url, err)
+		g.evictUpstreams(host)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+func (g *Gateway) getUpstreams(host string) ([]agenthttp.ServerlessUpstream, error) {
+	if upstreams, ok := g.cachedUpstreams(host); ok {
+		return upstreams, nil
+	}
+
+	call, owner := g.beginWake(host)
+	if owner {
+		result, err := g.client.WakeServerlessService(host)
+		g.finishWake(host, call, result, err)
+	}
+
+	<-call.done
+	if call.err != nil {
+		return nil, call.err
+	}
+	if call.result == nil || len(call.result.Upstreams) == 0 {
+		status := ""
+		if call.result != nil {
+			status = call.result.Status
+		}
+		return nil, fmt.Errorf("no upstreams returned after wake (status=%s)", status)
+	}
+
+	return cloneUpstreams(call.result.Upstreams), nil
+}
+
+func (g *Gateway) cachedUpstreams(host string) ([]agenthttp.ServerlessUpstream, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	cached, ok := g.upstreamCache[host]
+	if !ok || time.Now().After(cached.expiresAt) {
+		if ok {
+			delete(g.upstreamCache, host)
+		}
+		return nil, false
+	}
+
+	return cloneUpstreams(cached.upstreams), true
+}
+
+func (g *Gateway) beginWake(host string) (*wakeCall, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if call, ok := g.wakeCalls[host]; ok {
+		return call, false
+	}
+
+	call := &wakeCall{done: make(chan struct{})}
+	g.wakeCalls[host] = call
+	return call, true
+}
+
+func (g *Gateway) finishWake(host string, call *wakeCall, result *agenthttp.ServerlessWakeResult, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	call.result = result
+	call.err = err
+	if err == nil && result != nil && len(result.Upstreams) > 0 {
+		g.upstreamCache[host] = cachedUpstreams{
+			upstreams: cloneUpstreams(result.Upstreams),
+			expiresAt: time.Now().Add(upstreamCacheTTL),
+		}
+	}
+	delete(g.wakeCalls, host)
+	close(call.done)
+}
+
+func (g *Gateway) evictUpstreams(host string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.upstreamCache, host)
 }
 
 func (g *Gateway) recordActivityHeartbeats(host string, done <-chan struct{}) {
@@ -131,6 +228,10 @@ func (g *Gateway) recordActivityHeartbeats(host string, done <-chan struct{}) {
 			return
 		}
 	}
+}
+
+func cloneUpstreams(upstreams []agenthttp.ServerlessUpstream) []agenthttp.ServerlessUpstream {
+	return append([]agenthttp.ServerlessUpstream(nil), upstreams...)
 }
 
 func (g *Gateway) nextIndex(length int) int {

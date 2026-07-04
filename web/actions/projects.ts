@@ -1084,7 +1084,9 @@ export async function updateServiceServerlessSettings(
 				.update(deployments)
 				.set({
 					status: "waking",
+					containerId: null,
 					healthStatus: null,
+					unhealthyReportCount: 0,
 					serverlessWakeStartedAt: now,
 				})
 				.where(
@@ -1249,8 +1251,10 @@ export async function updateServiceConfig(
 			.delete(serviceReplicas)
 			.where(eq(serviceReplicas.serviceId, serviceId));
 
+		let totalReplicas = 0;
 		for (const replica of config.replicas) {
 			if (replica.count > 0) {
+				totalReplicas += replica.count;
 				await db.insert(serviceReplicas).values({
 					id: randomUUID(),
 					serviceId,
@@ -1259,6 +1263,15 @@ export async function updateServiceConfig(
 				});
 			}
 		}
+
+		await db
+			.update(services)
+			.set({
+				serverlessMinReadyReplicas: sql`LEAST(${services.serverlessMinReadyReplicas}, ${Math.max(1, totalReplicas)})`,
+			})
+			.where(
+				and(eq(services.id, serviceId), eq(services.serverlessEnabled, true)),
+			);
 	}
 
 	return { success: true };

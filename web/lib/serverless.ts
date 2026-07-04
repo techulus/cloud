@@ -17,6 +17,7 @@ import {
 	serverlessServiceActivity,
 	servers,
 	servicePorts,
+	serviceReplicas,
 	services,
 	workQueue,
 } from "@/db/schema";
@@ -82,12 +83,15 @@ export type ServerlessSleepResult = {
 	servicesChecked: number;
 	servicesSlept: number;
 	deploymentsSlept: number;
-	wakingDeploymentsFailed: number;
+	wakingDeploymentsReset: number;
 };
 
 type ServerlessService = typeof services.$inferSelect;
 type DeploymentRow = typeof deployments.$inferSelect;
-type DbExecutor = Pick<typeof db, "execute" | "insert" | "select" | "update">;
+type DbExecutor = Pick<
+	typeof db,
+	"delete" | "execute" | "insert" | "select" | "update"
+>;
 
 type ServerlessTarget = {
 	serviceId: string;
@@ -329,12 +333,18 @@ export async function wakeServerlessService({
 			.limit(1);
 
 		if (!service) return emptyWakeResult("not_found", serviceId);
-		const unsupported = await getServerlessUnsupportedReason(tx, service);
+		const inServerlessTransition = await hasDesiredWakeTransitionState(
+			tx,
+			serviceId,
+		);
+		const unsupported = await getServerlessUnsupportedReason(tx, service, {
+			allowDisabledTransition: inServerlessTransition,
+		});
 		if (unsupported) return emptyWakeResult(unsupported, serviceId);
 
 		await touchServerlessActivity(tx, { serviceId, proxyServerId, now });
 
-		const minReadyReplicas = getMinReadyReplicas(service);
+		const minReadyReplicas = await getEffectiveMinReadyReplicas(tx, service);
 		const targetPort = port ?? (await getDefaultHttpPort(tx, serviceId));
 		if (!targetPort) return emptyWakeResult("unsupported", serviceId);
 
@@ -387,11 +397,13 @@ export async function wakeServerlessService({
 				.update(deployments)
 				.set({
 					status: "waking",
+					containerId: null,
 					healthStatus: null,
 					unhealthyReportCount: 0,
 					serverlessWakeStartedAt: now,
 				})
 				.where(inArray(deployments.id, wakeableIds));
+			await deletePendingSleepWorkItems(tx, wakeableDeployments);
 		}
 
 		const queuedWakeServers = await enqueueWakeReconcilers(
@@ -468,26 +480,18 @@ export async function sleepIdleServerlessServices({
 }: {
 	now?: Date;
 } = {}): Promise<ServerlessSleepResult> {
-	const candidates = await db
-		.select()
-		.from(services)
-		.where(
-			and(
-				eq(services.serverlessEnabled, true),
-				eq(services.stateful, false),
-				isNull(services.deletedAt),
-			),
-		);
+	const candidates = await getServerlessSleepCandidates();
 
 	let servicesSlept = 0;
 	let deploymentsSlept = 0;
-	let wakingDeploymentsFailed = 0;
+	let wakingDeploymentsReset = 0;
 
 	for (const service of candidates) {
-		wakingDeploymentsFailed += await failTimedOutWakingDeployments({
+		wakingDeploymentsReset += await resetTimedOutWakingDeployments({
 			service,
 			now,
 		});
+		if (!service.serverlessEnabled) continue;
 		if (!(await hasPublicHttpEndpoint(db, service.id))) continue;
 		if (!(await isServiceIdle(db, service, now))) continue;
 
@@ -505,7 +509,7 @@ export async function sleepIdleServerlessServices({
 		servicesChecked: candidates.length,
 		servicesSlept,
 		deploymentsSlept,
-		wakingDeploymentsFailed,
+		wakingDeploymentsReset,
 	};
 }
 
@@ -550,6 +554,7 @@ export async function sleepServerlessService({
 			.update(deployments)
 			.set({
 				status: "sleeping",
+				containerId: null,
 				healthStatus: null,
 				serverlessWakeStartedAt: null,
 			})
@@ -581,8 +586,14 @@ export async function sleepServerlessService({
 async function getServerlessUnsupportedReason(
 	executor: DbExecutor,
 	service: ServerlessService,
+	{
+		allowDisabledTransition = false,
+	}: {
+		allowDisabledTransition?: boolean;
+	} = {},
 ): Promise<"not_serverless" | "unsupported" | null> {
-	if (!service.serverlessEnabled) return "not_serverless";
+	if (!service.serverlessEnabled && !allowDisabledTransition)
+		return "not_serverless";
 	if (service.stateful) return "unsupported";
 	if (!(await hasPublicHttpEndpoint(executor, service.id)))
 		return "unsupported";
@@ -604,6 +615,75 @@ async function hasPublicHttpEndpoint(executor: DbExecutor, serviceId: string) {
 		.limit(1);
 
 	return Boolean(port);
+}
+
+async function getServerlessSleepCandidates(): Promise<ServerlessService[]> {
+	const [enabledServices, wakingTransitionRows] = await Promise.all([
+		db
+			.select()
+			.from(services)
+			.where(
+				and(
+					eq(services.serverlessEnabled, true),
+					eq(services.stateful, false),
+					isNull(services.deletedAt),
+				),
+			),
+		db
+			.select({ serviceId: deployments.serviceId })
+			.from(deployments)
+			.where(
+				and(eq(deployments.desired, true), eq(deployments.status, "waking")),
+			),
+	]);
+	const wakingServiceIds = unique(
+		wakingTransitionRows.map((row) => row.serviceId),
+	);
+	const wakingTransitionServices =
+		wakingServiceIds.length > 0
+			? await db
+					.select()
+					.from(services)
+					.where(
+						and(
+							inArray(services.id, wakingServiceIds),
+							eq(services.stateful, false),
+							isNull(services.deletedAt),
+						),
+					)
+			: [];
+
+	const servicesById = new Map<string, ServerlessService>();
+	for (const service of enabledServices) {
+		servicesById.set(service.id, service);
+	}
+	for (const service of wakingTransitionServices) {
+		servicesById.set(service.id, service);
+	}
+	return [...servicesById.values()];
+}
+
+async function hasDesiredWakeTransitionState(
+	executor: DbExecutor,
+	serviceId: string,
+) {
+	const [deployment] = await executor
+		.select({ id: deployments.id })
+		.from(deployments)
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.desired, true),
+				inArray(deployments.status, [
+					"sleeping",
+					"waking",
+					...READY_DEPLOYMENT_STATUSES,
+				]),
+			),
+		)
+		.limit(1);
+
+	return Boolean(deployment);
 }
 
 export async function isProxyServer(serverId: string) {
@@ -695,7 +775,7 @@ async function isServiceIdle(
 	return idleMs >= service.serverlessSleepAfterSeconds * 1000;
 }
 
-async function failTimedOutWakingDeployments({
+async function resetTimedOutWakingDeployments({
 	service,
 	now,
 }: {
@@ -712,12 +792,7 @@ async function failTimedOutWakingDeployments({
 		);
 		const timedOut = await tx
 			.update(deployments)
-			.set({
-				...markDeploymentUndesired("failed"),
-				failedStage: "serverless_wake_timeout",
-				healthStatus: null,
-				serverlessWakeStartedAt: null,
-			})
+			.set(getTimedOutWakeUpdate(service))
 			.where(
 				and(
 					eq(deployments.serviceId, service.id),
@@ -736,6 +811,27 @@ async function failTimedOutWakingDeployments({
 
 		return timedOut.length;
 	});
+}
+
+function getTimedOutWakeUpdate(service: ServerlessService) {
+	if (service.serverlessEnabled) {
+		return {
+			status: "sleeping" as const,
+			desired: true,
+			containerId: null,
+			failedStage: null,
+			healthStatus: null,
+			serverlessWakeStartedAt: null,
+		};
+	}
+
+	return {
+		...markDeploymentUndesired("failed"),
+		containerId: null,
+		failedStage: "serverless_wake_timeout",
+		healthStatus: null,
+		serverlessWakeStartedAt: null,
+	};
 }
 
 async function touchServerlessActivity(
@@ -866,6 +962,29 @@ async function resetStaleActiveRequests(
 		);
 }
 
+async function deletePendingSleepWorkItems(
+	executor: DbExecutor,
+	wakeableDeployments: DeploymentRow[],
+) {
+	if (wakeableDeployments.length === 0) return;
+	const serviceId = wakeableDeployments[0]?.serviceId;
+	const serverIds = unique(
+		wakeableDeployments.map((deployment) => deployment.serverId),
+	);
+	if (!serviceId || serverIds.length === 0) return;
+
+	await executor
+		.delete(workQueue)
+		.where(
+			and(
+				eq(workQueue.type, "sleep"),
+				eq(workQueue.status, "pending"),
+				inArray(workQueue.serverId, serverIds),
+				sql`${workQueue.payload}::jsonb ->> 'serviceId' = ${serviceId}`,
+			),
+		);
+}
+
 function buildUpstreams(
 	deployments: ServerlessDeployment[],
 	port: number,
@@ -919,6 +1038,42 @@ function getMinReadyReplicas(service: ServerlessService) {
 	return Math.max(1, service.serverlessMinReadyReplicas ?? 1);
 }
 
+async function getEffectiveMinReadyReplicas(
+	executor: DbExecutor,
+	service: ServerlessService,
+) {
+	const [configuredReplicas, desiredDeployments] = await Promise.all([
+		getConfiguredReplicaCount(executor, service.id),
+		countDesiredDeployments(executor, service.id),
+	]);
+	const capacity = Math.max(1, desiredDeployments || configuredReplicas);
+	return Math.min(getMinReadyReplicas(service), capacity);
+}
+
+async function getConfiguredReplicaCount(
+	executor: DbExecutor,
+	serviceId: string,
+) {
+	const rows = await executor
+		.select({ count: serviceReplicas.count })
+		.from(serviceReplicas)
+		.where(eq(serviceReplicas.serviceId, serviceId));
+	return rows.reduce((total, row) => total + row.count, 0);
+}
+
+async function countDesiredDeployments(
+	executor: DbExecutor,
+	serviceId: string,
+) {
+	const rows = await executor
+		.select({ id: deployments.id })
+		.from(deployments)
+		.where(
+			and(eq(deployments.serviceId, serviceId), eq(deployments.desired, true)),
+		);
+	return rows.length;
+}
+
 function getWakeTimeoutSecondsForService(service: ServerlessService) {
 	return Math.max(1, service.serverlessWakeTimeoutSeconds ?? 300);
 }
@@ -938,6 +1093,10 @@ function normalizeHost(host: string | undefined) {
 function maxDate(values: Date[]) {
 	if (values.length === 0) return null;
 	return values.reduce((max, value) => (value > max ? value : max), values[0]);
+}
+
+function unique<T>(items: T[]) {
+	return Array.from(new Set(items));
 }
 
 function sleep(ms: number) {

@@ -270,7 +270,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 			actualContainer := act
 
 			if desiredContainerState(exp) == "stopped" {
-				if act.State == "running" || act.State == "paused" {
+				if shouldStopDesiredStoppedContainer(act.State) {
 					actions = append(actions, reconcileAction{
 						Kind:         actionStopExpectedContainer,
 						Description:  fmt.Sprintf("STOP %s (desired state: stopped)", exp.Name),
@@ -412,6 +412,15 @@ func desiredContainerState(container agenthttp.ExpectedContainer) string {
 		return "stopped"
 	}
 	return "running"
+}
+
+func shouldStopDesiredStoppedContainer(state string) bool {
+	switch state {
+	case "created", "exited", "stopped":
+		return false
+	default:
+		return true
+	}
 }
 
 func (a *Agent) applyReconcileAction(action reconcileAction) error {

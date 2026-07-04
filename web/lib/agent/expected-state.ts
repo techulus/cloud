@@ -311,30 +311,47 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 	if (!server.isProxy) return emptyConfig;
 
 	const serviceIds = allServices.map((service) => service.id);
-	const [ports, routableDeployments] = await Promise.all([
-		serviceIds.length > 0
-			? db
-					.select()
-					.from(servicePorts)
-					.where(inArray(servicePorts.serviceId, serviceIds))
-			: Promise.resolve([]),
-		serviceIds.length > 0
-			? db
-					.select({
-						serviceId: deployments.serviceId,
-						ipAddress: deployments.ipAddress,
-						serverId: deployments.serverId,
-					})
-					.from(deployments)
-					.where(
-						and(
-							inArray(deployments.serviceId, serviceIds),
-							eq(deployments.desired, true),
-							inArray(deployments.status, routableDeploymentStatuses),
-						),
-					)
-			: Promise.resolve([]),
-	]);
+	const [ports, routableDeployments, wakeRoutedDeployments] = await Promise.all(
+		[
+			serviceIds.length > 0
+				? db
+						.select()
+						.from(servicePorts)
+						.where(inArray(servicePorts.serviceId, serviceIds))
+				: Promise.resolve([]),
+			serviceIds.length > 0
+				? db
+						.select({
+							serviceId: deployments.serviceId,
+							ipAddress: deployments.ipAddress,
+							serverId: deployments.serverId,
+						})
+						.from(deployments)
+						.where(
+							and(
+								inArray(deployments.serviceId, serviceIds),
+								eq(deployments.desired, true),
+								inArray(deployments.status, routableDeploymentStatuses),
+							),
+						)
+				: Promise.resolve([]),
+			serviceIds.length > 0
+				? db
+						.select({ serviceId: deployments.serviceId })
+						.from(deployments)
+						.where(
+							and(
+								inArray(deployments.serviceId, serviceIds),
+								eq(deployments.desired, true),
+								inArray(deployments.status, ["sleeping", "waking"]),
+							),
+						)
+				: Promise.resolve([]),
+		],
+	);
+	const wakeRoutedServiceIds = new Set(
+		wakeRoutedDeployments.map((deployment) => deployment.serviceId),
+	);
 
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
@@ -342,7 +359,11 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		routableDeployments,
 		serverlessServiceIds: new Set(
 			allServices
-				.filter((service) => service.serverlessEnabled && !service.stateful)
+				.filter(
+					(service) =>
+						!service.stateful &&
+						(service.serverlessEnabled || wakeRoutedServiceIds.has(service.id)),
+				)
 				.map((service) => service.id),
 		),
 	});
