@@ -12,6 +12,7 @@ import { ReplicasSection } from "@/components/service/details/replicas-section";
 import { ResourceLimitsSection } from "@/components/service/details/resource-limits-section";
 import { ScheduleSection } from "@/components/service/details/schedule-section";
 import { SecretsSection } from "@/components/service/details/secrets-section";
+import { ServerlessSection } from "@/components/service/details/serverless-section";
 import { SourceSection } from "@/components/service/details/source-section";
 import { StartCommandSection } from "@/components/service/details/start-command-section";
 import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
@@ -97,6 +98,8 @@ export default function ConfigurationPage() {
 			<HealthCheckSection service={service} onUpdate={handleConfigSave} />
 
 			<ResourceLimitsSection service={service} onUpdate={handleConfigSave} />
+
+			<ServerlessSection service={service} onUpdate={handleConfigSave} />
 
 			<StartCommandSection service={service} onUpdate={handleConfigSave} />
 

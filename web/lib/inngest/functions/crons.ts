@@ -8,6 +8,7 @@ import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
 import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
+	checkAndSleepIdleServerlessServices,
 	cleanupStaleItems,
 	failTimedOutAgentUpgrades,
 } from "@/lib/scheduler";
@@ -120,6 +121,19 @@ export const staleItemsCleanup = inngest.createFunction(
 		await step.run("cleanup-stale-items", async () => {
 			console.log("[cron] cleaning up stale items");
 			await cleanupStaleItems();
+		});
+	},
+);
+
+export const serverlessSleepCheck = inngest.createFunction(
+	{
+		id: "cron-serverless-sleep-check",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("sleep-idle-serverless-services", async () => {
+			await checkAndSleepIdleServerlessServices();
 		});
 	},
 );

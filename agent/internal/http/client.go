@@ -22,6 +22,7 @@ type Client struct {
 	keyPair    *crypto.KeyPair
 	client     *http.Client
 	longClient *http.Client
+	wakeClient *http.Client
 	dataDir    string
 }
 
@@ -36,6 +37,9 @@ func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string
 		},
 		longClient: &http.Client{
 			Timeout: 40 * time.Second,
+		},
+		wakeClient: &http.Client{
+			Timeout: 16 * time.Minute,
 		},
 	}
 }
@@ -73,6 +77,7 @@ type ExpectedContainer struct {
 	ServiceID             string            `json:"serviceId"`
 	ServiceName           string            `json:"serviceName"`
 	Name                  string            `json:"name"`
+	DesiredState          string            `json:"desiredState"`
 	Image                 string            `json:"image"`
 	IPAddress             string            `json:"ipAddress"`
 	Ports                 []PortMapping     `json:"ports"`
@@ -92,6 +97,19 @@ type DnsRecord struct {
 type Upstream struct {
 	Url    string `json:"url"`
 	Weight int    `json:"weight"`
+}
+
+type ServerlessUpstream struct {
+	Url string `json:"url"`
+}
+
+type ServerlessWakeResult struct {
+	Status            string               `json:"status"`
+	ServiceID         string               `json:"serviceId"`
+	Upstreams         []ServerlessUpstream `json:"upstreams"`
+	WakingDeployments int                  `json:"wakingDeployments"`
+	QueuedWakeServers int                  `json:"queuedWakeServers"`
+	MinReadyReplicas  int                  `json:"minReadyReplicas"`
 }
 
 type TraefikRoute struct {
@@ -418,6 +436,81 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 	}
 
 	return &statusResponse, nil
+}
+
+func (c *Client) WakeServerlessService(host string) (*ServerlessWakeResult, error) {
+	payload := map[string]interface{}{
+		"host": host,
+		"wait": true,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal serverless wake request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/serverless/wake", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create serverless wake request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.wakeClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wake serverless service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var response struct {
+		OK     bool                 `json:"ok"`
+		Error  string               `json:"error"`
+		Result ServerlessWakeResult `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode serverless wake response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if response.Error != "" {
+			return nil, fmt.Errorf("serverless wake failed with status %d: %s", resp.StatusCode, response.Error)
+		}
+		return nil, fmt.Errorf("serverless wake failed with status %d", resp.StatusCode)
+	}
+
+	return &response.Result, nil
+}
+
+func (c *Client) RecordServerlessActivity(host, event string) error {
+	payload := map[string]string{
+		"host":  host,
+		"event": event,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal serverless activity request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/serverless/activity", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create serverless activity request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to record serverless activity: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("serverless activity failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }
 
 func (c *Client) GetBuildStatus(buildID string) (string, error) {

@@ -379,6 +379,16 @@ export const services = pgTable("services", {
 	startCommand: text("start_command"),
 	resourceCpuLimit: real("resource_cpu_limit").default(2),
 	resourceMemoryLimitMb: integer("resource_memory_limit_mb").default(1024),
+	serverlessEnabled: boolean("serverless_enabled").notNull().default(false),
+	serverlessSleepAfterSeconds: integer("serverless_sleep_after_seconds")
+		.notNull()
+		.default(300),
+	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
+		.notNull()
+		.default(300),
+	serverlessMinReadyReplicas: integer("serverless_min_ready_replicas")
+		.notNull()
+		.default(1),
 	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
@@ -526,9 +536,11 @@ export const deployments = pgTable(
 				"pending",
 				"pulling",
 				"starting",
+				"waking",
 				"healthy",
 				"running",
 				"draining",
+				"sleeping",
 				"stopping",
 				"stopped",
 				"failed",
@@ -554,6 +566,9 @@ export const deployments = pgTable(
 		rolloutId: text("rollout_id"),
 		previousDeploymentId: text("previous_deployment_id"),
 		failedStage: text("failed_stage"),
+		serverlessWakeStartedAt: timestamp("serverless_wake_started_at", {
+			withTimezone: true,
+		}),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -564,6 +579,9 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_server_id_idx").on(table.serverId),
 		index("deployments_status_idx").on(table.status),
+		index("deployments_serverless_wake_started_at_idx").on(
+			table.serverlessWakeStartedAt,
+		),
 	],
 );
 
@@ -621,6 +639,8 @@ export const workQueue = pgTable(
 				"backup_volume",
 				"restore_volume",
 				"create_manifest",
+				"sleep",
+				"wake",
 				"upgrade_agent",
 			],
 		}).notNull(),
@@ -643,6 +663,33 @@ export const workQueue = pgTable(
 			.where(
 				sql`${table.type} = 'upgrade_agent' AND ${table.status} IN ('pending', 'processing')`,
 			),
+	],
+);
+
+export const serverlessServiceActivity = pgTable(
+	"serverless_service_activity",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		proxyServerId: text("proxy_server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		lastRequestAt: timestamp("last_request_at", { withTimezone: true }),
+		activeRequests: integer("active_requests").notNull().default(0),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull()
+			.$onUpdate(() => new Date()),
+	},
+	(table) => [
+		uniqueIndex("serverless_service_activity_service_proxy_idx").on(
+			table.serviceId,
+			table.proxyServerId,
+		),
+		index("serverless_service_activity_service_idx").on(table.serviceId),
+		index("serverless_service_activity_updated_at_idx").on(table.updatedAt),
 	],
 );
 

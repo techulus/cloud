@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/serverless"
 )
 
 func (a *Agent) Run(ctx context.Context) {
@@ -30,6 +31,13 @@ func (a *Agent) Run(ctx context.Context) {
 
 	if a.IsProxy && a.TraefikLogCollector != nil {
 		a.TraefikLogCollector.Start()
+	}
+
+	if a.IsProxy {
+		gateway := serverless.NewGateway(a.Client)
+		if err := gateway.Start(ctx); err != nil {
+			log.Printf("[serverless-gateway] failed to start: %v", err)
+		}
 	}
 
 	var cleanupTickerC <-chan time.Time

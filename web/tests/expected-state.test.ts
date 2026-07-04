@@ -19,11 +19,13 @@ describe("expected-state pure builders", () => {
 					id: "dep_bbbbbbbb",
 					serviceId: "svc_1",
 					ipAddress: "10.0.0.2",
+					status: "sleeping",
 				},
 				{
 					id: "dep_aaaaaaaa",
 					serviceId: "svc_1",
 					ipAddress: "10.0.0.1",
+					status: "running",
 				},
 			] as any,
 			services: [
@@ -61,6 +63,7 @@ describe("expected-state pure builders", () => {
 		]);
 		expect(containers[0]).toMatchObject({
 			name: "svc_1-dep_aaaa",
+			desiredState: "running",
 			image: "docker.io/library/nginx",
 			ports: [
 				{ containerPort: 80, hostPort: 80 },
@@ -79,6 +82,10 @@ describe("expected-state pure builders", () => {
 			retries: 3,
 			startPeriod: 30,
 		});
+		expect(containers[1]).toMatchObject({
+			deploymentId: "dep_bbbbbbbb",
+			desiredState: "stopped",
+		});
 	});
 
 	it("keeps HTTP local upstreams before remote upstreams", () => {
@@ -95,7 +102,11 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			routableDeployments: [
-				{ serviceId: "svc_1", serverId: "server_remote", ipAddress: "10.0.0.2" },
+				{
+					serviceId: "svc_1",
+					serverId: "server_remote",
+					ipAddress: "10.0.0.2",
+				},
 				{ serviceId: "svc_1", serverId: "server_local", ipAddress: "10.0.0.3" },
 				{ serviceId: "svc_1", serverId: "server_local", ipAddress: "10.0.0.1" },
 			] as any,
@@ -111,6 +122,33 @@ describe("expected-state pure builders", () => {
 					{ url: "10.0.0.3:3000", weight: 5 },
 					{ url: "10.0.0.2:3000", weight: 1 },
 				],
+			},
+		]);
+	});
+
+	it("routes serverless HTTP services through the local wake gateway", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "server_local",
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_serverless",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "sleepy.example.com",
+				},
+			] as any,
+			routableDeployments: [],
+			serverlessServiceIds: new Set(["svc_serverless"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([
+			{
+				id: "sleepy.example.com",
+				domain: "sleepy.example.com",
+				serviceId: "svc_serverless",
+				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
 			},
 		]);
 	});

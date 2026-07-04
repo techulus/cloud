@@ -23,6 +23,7 @@ const (
 	actionStopUnexpectedContainer    reconcileActionKind = "stop_unexpected_container"
 	actionRemoveUnexpectedContainer  reconcileActionKind = "remove_unexpected_container"
 	actionDeployMissingContainer     reconcileActionKind = "deploy_missing_container"
+	actionStopExpectedContainer      reconcileActionKind = "stop_expected_container"
 	actionStartContainer             reconcileActionKind = "start_container"
 	actionRedeployContainer          reconcileActionKind = "redeploy_container"
 	actionUpdateDNS                  reconcileActionKind = "update_dns"
@@ -250,6 +251,9 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 
 	for id, exp := range expectedMap {
 		if _, exists := actualMap[id]; !exists {
+			if desiredContainerState(exp) == "stopped" {
+				continue
+			}
 			expectedContainer := exp
 			actions = append(actions, reconcileAction{
 				Kind:         actionDeployMissingContainer,
@@ -264,7 +268,29 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 		if act, exists := actualMap[id]; exists {
 			expectedContainer := exp
 			actualContainer := act
-			if act.State == "created" || act.State == "exited" {
+
+			if desiredContainerState(exp) == "stopped" {
+				if act.State == "running" || act.State == "paused" {
+					actions = append(actions, reconcileAction{
+						Kind:         actionStopExpectedContainer,
+						Description:  fmt.Sprintf("STOP %s (desired state: stopped)", exp.Name),
+						DeploymentID: id,
+						Expected:     &expectedContainer,
+						Actual:       &actualContainer,
+					})
+				}
+				continue
+			}
+
+			if normalizeImage(exp.Image) != normalizeImage(act.Image) {
+				actions = append(actions, reconcileAction{
+					Kind:         actionRedeployContainer,
+					Description:  fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image),
+					DeploymentID: id,
+					Expected:     &expectedContainer,
+					Actual:       &actualContainer,
+				})
+			} else if act.State == "created" || act.State == "exited" {
 				actions = append(actions, reconcileAction{
 					Kind:         actionStartContainer,
 					Description:  fmt.Sprintf("START %s (state: %s)", exp.Name, act.State),
@@ -276,14 +302,6 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 				actions = append(actions, reconcileAction{
 					Kind:         actionRedeployContainer,
 					Description:  fmt.Sprintf("REDEPLOY %s (state: %s)", exp.Name, act.State),
-					DeploymentID: id,
-					Expected:     &expectedContainer,
-					Actual:       &actualContainer,
-				})
-			} else if normalizeImage(exp.Image) != normalizeImage(act.Image) {
-				actions = append(actions, reconcileAction{
-					Kind:         actionRedeployContainer,
-					Description:  fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image),
 					DeploymentID: id,
 					Expected:     &expectedContainer,
 					Actual:       &actualContainer,
@@ -389,16 +407,23 @@ func normalizeImage(image string) string {
 	return image + digest
 }
 
+func desiredContainerState(container agenthttp.ExpectedContainer) string {
+	if container.DesiredState == "stopped" {
+		return "stopped"
+	}
+	return "running"
+}
+
 func (a *Agent) applyReconcileAction(action reconcileAction) error {
 	log.Printf("[reconcile] %s", action.Description)
 
 	switch action.Kind {
-	case actionStopOrphanNoDeploymentID, actionStopUnexpectedContainer:
+	case actionStopOrphanNoDeploymentID, actionStopUnexpectedContainer, actionStopExpectedContainer:
 		if action.Actual == nil {
 			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
 		if err := container.Stop(action.Actual.ID); err != nil {
-			return fmt.Errorf("failed to stop orphan container: %w", err)
+			return fmt.Errorf("failed to stop container: %w", err)
 		}
 		return nil
 

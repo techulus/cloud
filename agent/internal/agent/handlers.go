@@ -56,6 +56,29 @@ func (a *Agent) ProcessStop(item agenthttp.WorkQueueItem) error {
 	return nil
 }
 
+func (a *Agent) ProcessSleep(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		DeploymentID string `json:"deploymentId"`
+		ContainerID  string `json:"containerId"`
+	}
+
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return fmt.Errorf("failed to parse sleep payload: %w", err)
+	}
+
+	if payload.ContainerID == "" {
+		return fmt.Errorf("sleep payload missing containerId")
+	}
+
+	log.Printf("[sleep] removing container %s for deployment %s", Truncate(payload.ContainerID, 12), Truncate(payload.DeploymentID, 8))
+
+	if err := container.ForceRemove(payload.ContainerID); err != nil {
+		return fmt.Errorf("failed to remove sleeping container: %w", err)
+	}
+
+	return nil
+}
+
 func (a *Agent) ProcessForceCleanup(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		ServiceID    string   `json:"serviceId"`

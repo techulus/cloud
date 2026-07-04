@@ -9,6 +9,7 @@ export {
 	oldBackupsCleanup,
 	scheduledBackupsCheck,
 	scheduledDeploymentsCheck,
+	serverlessSleepCheck,
 	staleItemsCleanup,
 	staleServerCheck,
 } from "./crons";

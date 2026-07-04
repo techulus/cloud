@@ -18,6 +18,7 @@ import {
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
+import { sleepIdleServerlessServices } from "./serverless";
 
 const STALE_THRESHOLD_MS = 75_000; // 75 seconds
 
@@ -317,6 +318,20 @@ export async function cleanupStaleItems(): Promise<void> {
 	if (deletedWorkItems.length > 0) {
 		console.log(
 			`[scheduler] deleted ${deletedWorkItems.length} old work queue items`,
+		);
+	}
+}
+
+export async function checkAndSleepIdleServerlessServices(): Promise<void> {
+	const result = await sleepIdleServerlessServices();
+	if (result.deploymentsSlept > 0) {
+		console.log(
+			`[scheduler] slept ${result.deploymentsSlept} serverless deployment(s) across ${result.servicesSlept} service(s)`,
+		);
+	}
+	if (result.wakingDeploymentsFailed > 0) {
+		console.log(
+			`[scheduler] failed ${result.wakingDeploymentsFailed} timed-out serverless wake deployment(s)`,
 		);
 	}
 }

@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
@@ -1009,6 +1009,108 @@ export async function updateServiceSchedule(
 		.update(services)
 		.set({ deploymentSchedule: schedule })
 		.where(eq(services.id, serviceId));
+
+	return { success: true };
+}
+
+const serverlessSettingsSchema = z.object({
+	enabled: z.boolean(),
+	sleepAfterSeconds: z.number().int().min(60).max(86_400),
+	wakeTimeoutSeconds: z.number().int().min(10).max(900),
+	minReadyReplicas: z.number().int().min(1).max(10),
+});
+
+export async function updateServiceServerlessSettings(
+	serviceId: string,
+	settings: {
+		enabled: boolean;
+		sleepAfterSeconds: number;
+		wakeTimeoutSeconds: number;
+		minReadyReplicas: number;
+	},
+) {
+	await requireDeveloperRole();
+	const validated = serverlessSettingsSchema.parse(settings);
+
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+
+		const [service] = await tx
+			.select()
+			.from(services)
+			.where(eq(services.id, serviceId))
+			.limit(1);
+
+		if (!service || service.deletedAt) {
+			throw new Error("Service not found");
+		}
+		if (service.stateful && validated.enabled) {
+			throw new Error("Serverless is only supported for stateless services");
+		}
+
+		if (validated.enabled) {
+			const configuredReplicas = await tx
+				.select({ count: serviceReplicas.count })
+				.from(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, serviceId));
+			const totalConfiguredReplicas = configuredReplicas.reduce(
+				(total, replica) => total + replica.count,
+				0,
+			);
+
+			if (totalConfiguredReplicas < 1) {
+				throw new Error("Serverless services require at least one replica");
+			}
+			if (validated.minReadyReplicas > totalConfiguredReplicas) {
+				throw new Error(
+					"Minimum ready replicas cannot exceed configured replicas",
+				);
+			}
+		}
+
+		await tx
+			.update(services)
+			.set({
+				serverlessEnabled: validated.enabled,
+				serverlessSleepAfterSeconds: validated.sleepAfterSeconds,
+				serverlessWakeTimeoutSeconds: validated.wakeTimeoutSeconds,
+				serverlessMinReadyReplicas: validated.minReadyReplicas,
+			})
+			.where(eq(services.id, serviceId));
+
+		if (!validated.enabled) {
+			const now = new Date();
+			const wakingDeployments = await tx
+				.update(deployments)
+				.set({
+					status: "waking",
+					healthStatus: null,
+					serverlessWakeStartedAt: now,
+				})
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.status, "sleeping"),
+					),
+				)
+				.returning({ serverId: deployments.serverId });
+
+			const serverIds = new Set(
+				wakingDeployments.map((deployment) => deployment.serverId),
+			);
+			for (const serverId of serverIds) {
+				await tx.insert(workQueue).values({
+					id: randomUUID(),
+					serverId,
+					type: "wake",
+					payload: JSON.stringify({
+						reason: "serverless_disabled",
+						serviceId,
+					}),
+				});
+			}
+		}
+	});
 
 	return { success: true };
 }

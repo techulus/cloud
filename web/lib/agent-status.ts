@@ -79,12 +79,13 @@ async function applyDeploymentErrors(
 				id: deployments.id,
 				serviceId: deployments.serviceId,
 				rolloutId: deployments.rolloutId,
+				status: deployments.status,
 				rolloutStatus: rollouts.status,
 				serverName: servers.name,
 			})
 			.from(deployments)
 			.innerJoin(servers, eq(deployments.serverId, servers.id))
-			.innerJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
+			.leftJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
 			.where(
 				and(
 					eq(deployments.id, error.deploymentId),
@@ -93,26 +94,62 @@ async function applyDeploymentErrors(
 			)
 			.then((rows) => rows[0]);
 
-		if (
-			!deployment ||
-			!deployment.rolloutId ||
-			deployment.rolloutStatus !== "in_progress"
-		) {
+		if (!deployment) {
+			continue;
+		}
+
+		const isActiveRolloutDeployment =
+			deployment.rolloutId && deployment.rolloutStatus === "in_progress";
+		const isServerlessWakeDeployment =
+			!deployment.rolloutId && deployment.status === "waking";
+
+		if (!isActiveRolloutDeployment && !isServerlessWakeDeployment) {
 			continue;
 		}
 
 		const updated = await db
 			.update(deployments)
-			.set({ status: "failed", failedStage: "deploying" })
+			.set(
+				isServerlessWakeDeployment
+					? {
+							...markDeploymentUndesired("failed"),
+							failedStage: "serverless_wake",
+							healthStatus: null,
+							serverlessWakeStartedAt: null,
+						}
+					: { status: "failed", failedStage: "deploying" },
+			)
 			.where(
 				and(
 					eq(deployments.id, deployment.id),
-					inArray(deployments.status, ["pending", "pulling", "starting"]),
+					inArray(
+						deployments.status,
+						isServerlessWakeDeployment
+							? ["waking"]
+							: ["pending", "pulling", "starting"],
+					),
 				),
 			)
 			.returning({ id: deployments.id });
 
 		if (updated.length === 0) continue;
+
+		if (isServerlessWakeDeployment) {
+			console.log(
+				`[serverless:wake] deployment ${deployment.id} failed on server ${deployment.serverName}: ${formatDeploymentError(error.message)}`,
+			);
+			await inngest.send(
+				inngestEvents.resourceStatusChanged.create({
+					type: "deployment",
+					id: deployment.id,
+					parentType: "service",
+					parentId: deployment.serviceId,
+				}),
+			);
+			continue;
+		}
+
+		if (!deployment.rolloutId) continue;
 
 		await ingestRolloutLog(
 			deployment.rolloutId,
@@ -241,6 +278,7 @@ export async function applyStatusReport(
 		.filter((id) => id !== "");
 
 	const activeStatuses = [
+		"waking",
 		"starting",
 		"healthy",
 		"running",
@@ -302,7 +340,7 @@ export async function applyStatusReport(
 		}
 
 		if (!deployment) {
-			const stuckStatuses = ["pending", "pulling"] as const;
+			const stuckStatuses = ["pending", "pulling", "waking"] as const;
 			const [stuckDeployment] = await db
 				.select()
 				.from(deployments)
@@ -334,6 +372,7 @@ export async function applyStatusReport(
 						containerId: container.containerId,
 						status: newStatus,
 						healthStatus: hasHealthCheck ? "starting" : "none",
+						serverlessWakeStartedAt: null,
 					})
 					.where(eq(deployments.id, stuckDeployment.id));
 
@@ -370,6 +409,23 @@ export async function applyStatusReport(
 			continue;
 		}
 
+		if (deployment.status === "sleeping") {
+			const updateFields: Record<string, unknown> = {};
+			if (deployment.containerId !== container.containerId) {
+				updateFields.containerId = container.containerId;
+			}
+			if (deployment.healthStatus !== null) {
+				updateFields.healthStatus = null;
+			}
+			if (Object.keys(updateFields).length > 0) {
+				await db
+					.update(deployments)
+					.set(updateFields)
+					.where(eq(deployments.id, deployment.id));
+			}
+			continue;
+		}
+
 		const updateFields: Record<string, unknown> = { healthStatus };
 		let autohealRestartPayload: Record<string, unknown> | null = null;
 		let autohealRecreatePayload: Record<string, unknown> | null = null;
@@ -379,7 +435,11 @@ export async function applyStatusReport(
 			updateFields.containerId = container.containerId;
 		}
 
-		if (deployment.status === "pending" || deployment.status === "pulling") {
+		if (
+			deployment.status === "pending" ||
+			deployment.status === "pulling" ||
+			deployment.status === "waking"
+		) {
 			if (container.status !== "running") {
 				continue;
 			}
@@ -393,6 +453,9 @@ export async function applyStatusReport(
 			const hasHealthCheck = service?.healthCheckCmd != null;
 			const newStatus = hasHealthCheck ? "starting" : "healthy";
 			updateFields.status = newStatus;
+			if (deployment.status === "waking") {
+				updateFields.serverlessWakeStartedAt = null;
+			}
 			if (hasHealthCheck) {
 				updateFields.healthStatus = "starting";
 			}

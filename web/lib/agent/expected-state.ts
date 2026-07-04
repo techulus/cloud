@@ -22,12 +22,14 @@ type Server = typeof servers.$inferSelect;
 type Service = typeof services.$inferSelect;
 type Deployment = typeof deployments.$inferSelect;
 type ServicePort = typeof servicePorts.$inferSelect;
+const SERVERLESS_GATEWAY_PORT = 18080;
 
 export type ExpectedContainer = {
 	deploymentId: string;
 	serviceId: string;
 	serviceName: string;
 	name: string;
+	desiredState: "running" | "stopped";
 	image: string;
 	ipAddress: string | null;
 	ports: Array<{ containerPort: number; hostPort: number }>;
@@ -152,29 +154,33 @@ async function buildExpectedContainers(
 	const serviceIds = unique(serverDeployments.map((dep) => dep.serviceId));
 	if (serviceIds.length === 0) return [];
 
-	const [activeServices, depPorts, serviceSecrets, volumes] = await Promise.all([
-		db
-			.select()
-			.from(services)
-			.where(and(inArray(services.id, serviceIds), isNull(services.deletedAt))),
-		fetchDeploymentPorts(serverDeployments.map((dep) => dep.id)),
-		db
-			.select({
-				serviceId: secrets.serviceId,
-				key: secrets.key,
-				encryptedValue: secrets.encryptedValue,
-			})
-			.from(secrets)
-			.where(inArray(secrets.serviceId, serviceIds)),
-		db
-			.select({
-				serviceId: serviceVolumes.serviceId,
-				name: serviceVolumes.name,
-				containerPath: serviceVolumes.containerPath,
-			})
-			.from(serviceVolumes)
-			.where(inArray(serviceVolumes.serviceId, serviceIds)),
-	]);
+	const [activeServices, depPorts, serviceSecrets, volumes] = await Promise.all(
+		[
+			db
+				.select()
+				.from(services)
+				.where(
+					and(inArray(services.id, serviceIds), isNull(services.deletedAt)),
+				),
+			fetchDeploymentPorts(serverDeployments.map((dep) => dep.id)),
+			db
+				.select({
+					serviceId: secrets.serviceId,
+					key: secrets.key,
+					encryptedValue: secrets.encryptedValue,
+				})
+				.from(secrets)
+				.where(inArray(secrets.serviceId, serviceIds)),
+			db
+				.select({
+					serviceId: serviceVolumes.serviceId,
+					name: serviceVolumes.name,
+					containerPath: serviceVolumes.containerPath,
+				})
+				.from(serviceVolumes)
+				.where(inArray(serviceVolumes.serviceId, serviceIds)),
+		],
+	);
 
 	return buildExpectedContainersFromRows({
 		deployments: serverDeployments,
@@ -212,8 +218,13 @@ export function buildExpectedContainersFromRows({
 	secrets: SecretRow[];
 	volumes: VolumeRow[];
 }): ExpectedContainer[] {
-	const servicesById = new Map(serviceRows.map((service) => [service.id, service]));
-	const portsByDeploymentId = groupBy(deploymentPortRows, (port) => port.deploymentId);
+	const servicesById = new Map(
+		serviceRows.map((service) => [service.id, service]),
+	);
+	const portsByDeploymentId = groupBy(
+		deploymentPortRows,
+		(port) => port.deploymentId,
+	);
 	const secretsByServiceId = groupBy(secretRows, (secret) => secret.serviceId);
 	const volumesByServiceId = groupBy(volumeRows, (volume) => volume.serviceId);
 
@@ -230,6 +241,7 @@ export function buildExpectedContainersFromRows({
 					serviceId: dep.serviceId,
 					serviceName: service.name,
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
+					desiredState: dep.status === "sleeping" ? "stopped" : "running",
 					image: normalizeImage(service.image),
 					ipAddress: dep.ipAddress,
 					ports: (portsByDeploymentId.get(dep.id) ?? [])
@@ -274,7 +286,10 @@ async function buildDnsRecords(allServices: Service[]) {
 			),
 		);
 
-	const ipsByServiceId = groupBy(dnsDeployments, (deployment) => deployment.serviceId);
+	const ipsByServiceId = groupBy(
+		dnsDeployments,
+		(deployment) => deployment.serviceId,
+	);
 
 	return allServices
 		.flatMap((service) => {
@@ -325,6 +340,11 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		serverId: server.id,
 		ports,
 		routableDeployments,
+		serverlessServiceIds: new Set(
+			allServices
+				.filter((service) => service.serverlessEnabled && !service.stateful)
+				.map((service) => service.id),
+		),
 	});
 	const routedDomains = routes.httpRoutes.map((r) => r.domain);
 	const certificates = await getAllCertificatesForDomains(routedDomains);
@@ -347,10 +367,12 @@ export function buildTraefikRoutes({
 	serverId,
 	ports,
 	routableDeployments,
+	serverlessServiceIds = new Set<string>(),
 }: {
 	serverId: string;
 	ports: ServicePort[];
 	routableDeployments: RoutableDeploymentRow[];
+	serverlessServiceIds?: Set<string>;
 }) {
 	const httpRoutes: HttpRoute[] = [];
 	const tcpRoutes: TcpRoute[] = [];
@@ -364,6 +386,18 @@ export function buildTraefikRoutes({
 		const serviceDeployments = deploymentsByServiceId.get(port.serviceId) ?? [];
 
 		if (port.isPublic && port.protocol === "http" && port.domain) {
+			if (serverlessServiceIds.has(port.serviceId)) {
+				httpRoutes.push({
+					id: port.domain,
+					domain: port.domain,
+					upstreams: [
+						{ url: `127.0.0.1:${SERVERLESS_GATEWAY_PORT}`, weight: 1 },
+					],
+					serviceId: port.serviceId,
+				});
+				continue;
+			}
+
 			const localDeployments = serviceDeployments.filter(
 				(d) => d.serverId === serverId && d.ipAddress,
 			);
@@ -372,14 +406,18 @@ export function buildTraefikRoutes({
 			);
 
 			const upstreams = [
-				...localDeployments.map((d) => ({
-					url: `${d.ipAddress}:${port.port}`,
-					weight: 5,
-				})).sort((a, b) => a.url.localeCompare(b.url)),
-				...remoteDeployments.map((d) => ({
-					url: `${d.ipAddress}:${port.port}`,
-					weight: 1,
-				})).sort((a, b) => a.url.localeCompare(b.url)),
+				...localDeployments
+					.map((d) => ({
+						url: `${d.ipAddress}:${port.port}`,
+						weight: 5,
+					}))
+					.sort((a, b) => a.url.localeCompare(b.url)),
+				...remoteDeployments
+					.map((d) => ({
+						url: `${d.ipAddress}:${port.port}`,
+						weight: 1,
+					}))
+					.sort((a, b) => a.url.localeCompare(b.url)),
 			];
 
 			if (upstreams.length > 0) {
@@ -433,7 +471,9 @@ function buildHealthCheck(service: Service): ExpectedContainer["healthCheck"] {
 
 function buildEnv(secretRows: SecretRow[]) {
 	const env: Record<string, string> = {};
-	for (const secret of secretRows.slice().sort((a, b) => a.key.localeCompare(b.key))) {
+	for (const secret of secretRows
+		.slice()
+		.sort((a, b) => a.key.localeCompare(b.key))) {
 		env[secret.key] = secret.encryptedValue;
 	}
 	return env;
