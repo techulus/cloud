@@ -128,6 +128,66 @@ describe("expected-state pure builders", () => {
 		]);
 	});
 
+	it("keeps non-public serverless deployments running in expected state", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_sleeping",
+					serviceId: "svc_private",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+				},
+			] as any,
+			services: [
+				{
+					id: "svc_private",
+					name: "private-api",
+					image: "nginx",
+					serverlessEnabled: true,
+				},
+			] as any,
+			deploymentPorts: [],
+			secrets: [],
+			volumes: [],
+			serverlessRoutableServiceIds: new Set(),
+		});
+
+		expect(containers[0]).toMatchObject({
+			deploymentId: "dep_sleeping",
+			desiredState: "running",
+		});
+	});
+
+	it("marks public serverless deployments stopped while sleeping", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_sleeping",
+					serviceId: "svc_public",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+				},
+			] as any,
+			services: [
+				{
+					id: "svc_public",
+					name: "public-api",
+					image: "nginx",
+					serverlessEnabled: true,
+				},
+			] as any,
+			deploymentPorts: [],
+			secrets: [],
+			volumes: [],
+			serverlessRoutableServiceIds: new Set(["svc_public"]),
+		});
+
+		expect(containers[0]).toMatchObject({
+			deploymentId: "dep_sleeping",
+			desiredState: "stopped",
+		});
+	});
+
 	it("routes serverless HTTP services through the local wake gateway", () => {
 		const routes = buildTraefikRoutes({
 			serverId: "server_local",

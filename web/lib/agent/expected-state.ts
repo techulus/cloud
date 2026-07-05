@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -218,6 +218,8 @@ async function buildExpectedContainers(
 				.where(inArray(serviceVolumes.serviceId, serviceIds)),
 		],
 	);
+	const serverlessRoutableServiceIds =
+		await fetchPublicHttpServiceIds(serviceIds);
 
 	return buildExpectedContainersFromRows({
 		deployments: serverDeployments,
@@ -226,6 +228,7 @@ async function buildExpectedContainers(
 		secrets: serviceSecrets,
 		volumes,
 		serverIsProxy,
+		serverlessRoutableServiceIds,
 	});
 }
 
@@ -243,6 +246,24 @@ async function fetchDeploymentPorts(deploymentIds: string[]) {
 		.where(inArray(deploymentPorts.deploymentId, deploymentIds));
 }
 
+async function fetchPublicHttpServiceIds(serviceIds: string[]) {
+	if (serviceIds.length === 0) return new Set<string>();
+
+	const rows = await db
+		.select({ serviceId: servicePorts.serviceId })
+		.from(servicePorts)
+		.where(
+			and(
+				inArray(servicePorts.serviceId, serviceIds),
+				eq(servicePorts.isPublic, true),
+				eq(servicePorts.protocol, "http"),
+				isNotNull(servicePorts.domain),
+			),
+		);
+
+	return new Set(rows.map((row) => row.serviceId));
+}
+
 export function buildExpectedContainersFromRows({
 	deployments: deploymentRows,
 	services: serviceRows,
@@ -250,6 +271,7 @@ export function buildExpectedContainersFromRows({
 	secrets: secretRows,
 	volumes: volumeRows,
 	serverIsProxy = true,
+	serverlessRoutableServiceIds,
 }: {
 	deployments: Deployment[];
 	services: Service[];
@@ -257,10 +279,18 @@ export function buildExpectedContainersFromRows({
 	secrets: SecretRow[];
 	volumes: VolumeRow[];
 	serverIsProxy?: boolean;
+	serverlessRoutableServiceIds?: Set<string>;
 }): ExpectedContainer[] {
 	const servicesById = new Map(
 		serviceRows.map((service) => [service.id, service]),
 	);
+	const sleepableServiceIds =
+		serverlessRoutableServiceIds ??
+		new Set(
+			serviceRows
+				.filter((service) => service.serverlessEnabled)
+				.map((service) => service.id),
+		);
 	const portsByDeploymentId = groupBy(
 		deploymentPortRows,
 		(port) => port.deploymentId,
@@ -284,6 +314,7 @@ export function buildExpectedContainersFromRows({
 					desiredState:
 						serverIsProxy &&
 						service.serverlessEnabled &&
+						sleepableServiceIds.has(service.id) &&
 						dep.status === "sleeping"
 							? "stopped"
 							: "running",

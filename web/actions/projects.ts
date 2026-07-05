@@ -1049,6 +1049,25 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
+			const publicHttpPorts = await tx
+				.select({ id: servicePorts.id })
+				.from(servicePorts)
+				.where(
+					and(
+						eq(servicePorts.serviceId, serviceId),
+						eq(servicePorts.isPublic, true),
+						eq(servicePorts.protocol, "http"),
+						isNotNull(servicePorts.domain),
+					),
+				)
+				.limit(1);
+
+			if (publicHttpPorts.length === 0) {
+				throw new Error(
+					"Serverless services require a public HTTP port with a domain",
+				);
+			}
+
 			const configuredReplicas = await tx
 				.select({ count: serviceReplicas.count })
 				.from(serviceReplicas)

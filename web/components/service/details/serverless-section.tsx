@@ -28,6 +28,19 @@ export const ServerlessSection = memo(function ServerlessSection({
 	const [minReadyReplicas, setMinReadyReplicas] = useState(
 		String(service.serverlessMinReadyReplicas ?? 1),
 	);
+	const hasPublicHttpEndpoint = useMemo(
+		() =>
+			service.ports.some(
+				(port) => port.isPublic && port.protocol === "http" && !!port.domain,
+			),
+		[service.ports],
+	);
+	const unavailableReason = service.stateful
+		? "Serverless is only supported for stateless services"
+		: !hasPublicHttpEndpoint
+			? "Add a public HTTP port with a domain to enable serverless"
+			: null;
+	const optionsDisabled = !!unavailableReason || isSaving;
 
 	const parsed = useMemo(
 		() => ({
@@ -39,8 +52,8 @@ export const ServerlessSection = memo(function ServerlessSection({
 	);
 
 	const validationError = useMemo(() => {
-		if (service.stateful && enabled) {
-			return "Serverless is only supported for stateless services";
+		if (unavailableReason && enabled) {
+			return unavailableReason;
 		}
 		if (
 			!Number.isInteger(parsed.sleepAfterSeconds) ||
@@ -64,7 +77,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 			return "Minimum ready replicas must be between 1 and 10";
 		}
 		return null;
-	}, [enabled, parsed, service.stateful]);
+	}, [enabled, parsed, unavailableReason]);
 
 	const hasChanges =
 		enabled !== service.serverlessEnabled ||
@@ -108,7 +121,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 				<Switch
 					checked={enabled}
 					onCheckedChange={setEnabled}
-					disabled={service.stateful || isSaving}
+					disabled={(!!unavailableReason && !enabled) || isSaving}
 				/>
 			</Item>
 			<div className="space-y-4 p-4">
@@ -127,6 +140,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 							max="86400"
 							step="30"
 							value={sleepAfterSeconds}
+							disabled={optionsDisabled}
 							onChange={(event) => setSleepAfterSeconds(event.target.value)}
 						/>
 					</div>
@@ -144,6 +158,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 							max="900"
 							step="10"
 							value={wakeTimeoutSeconds}
+							disabled={optionsDisabled}
 							onChange={(event) => setWakeTimeoutSeconds(event.target.value)}
 						/>
 					</div>
@@ -161,6 +176,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 							max="10"
 							step="1"
 							value={minReadyReplicas}
+							disabled={optionsDisabled}
 							onChange={(event) => setMinReadyReplicas(event.target.value)}
 						/>
 					</div>
@@ -170,6 +186,10 @@ export const ServerlessSection = memo(function ServerlessSection({
 					Containers scale down to zero when idle and wake on traffic. Requests
 					while sleeping are queued and served after the container is ready.
 				</p>
+
+				{unavailableReason && !enabled && (
+					<p className="text-xs text-muted-foreground">{unavailableReason}.</p>
+				)}
 
 				{validationError && (
 					<p className="text-xs text-destructive">{validationError}</p>
