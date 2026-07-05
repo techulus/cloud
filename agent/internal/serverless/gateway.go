@@ -185,11 +185,16 @@ func (g *Gateway) getUpstreams(ctx context.Context, host string) ([]agenthttp.Se
 		return upstreams, nil
 	}
 
-	call, owner := g.beginWake(host)
+	route := findRoute(g.runtime.ExpectedState(), host)
+	if route == nil {
+		return nil, fmt.Errorf("no serverless route metadata for host %s", host)
+	}
+	wakeKey := routeWakeKey(route)
+	call, owner := g.beginWake(wakeKey)
 	if owner {
 		go func() {
 			upstreams, err := g.resolveUpstreams(host)
-			g.finishWake(host, call, upstreams, err)
+			g.finishWake(wakeKey, call, upstreams, err)
 		}()
 	}
 
@@ -202,7 +207,11 @@ func (g *Gateway) getUpstreams(ctx context.Context, host string) ([]agenthttp.Se
 	if call.err != nil {
 		return nil, call.err
 	}
-	return cloneUpstreams(call.upstreams), nil
+	upstreams := cloneUpstreams(call.upstreams)
+	if len(upstreams) > 0 {
+		g.cacheUpstreams(host, upstreams)
+	}
+	return upstreams, nil
 }
 
 func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream, error) {
@@ -496,33 +505,36 @@ func (g *Gateway) cachedUpstreams(host string) ([]agenthttp.ServerlessUpstream, 
 	return cloneUpstreams(cached.upstreams), true
 }
 
-func (g *Gateway) beginWake(host string) (*wakeCall, bool) {
+func (g *Gateway) beginWake(wakeKey string) (*wakeCall, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if call, ok := g.wakeCalls[host]; ok {
+	if call, ok := g.wakeCalls[wakeKey]; ok {
 		return call, false
 	}
 
 	call := &wakeCall{done: make(chan struct{})}
-	g.wakeCalls[host] = call
+	g.wakeCalls[wakeKey] = call
 	return call, true
 }
 
-func (g *Gateway) finishWake(host string, call *wakeCall, upstreams []agenthttp.ServerlessUpstream, err error) {
+func (g *Gateway) finishWake(wakeKey string, call *wakeCall, upstreams []agenthttp.ServerlessUpstream, err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	call.upstreams = cloneUpstreams(upstreams)
 	call.err = err
-	if err == nil && len(upstreams) > 0 {
-		g.upstreamCache[host] = cachedUpstreams{
-			upstreams: cloneUpstreams(upstreams),
-			expiresAt: time.Now().Add(upstreamCacheTTL),
-		}
-	}
-	delete(g.wakeCalls, host)
+	delete(g.wakeCalls, wakeKey)
 	close(call.done)
+}
+
+func (g *Gateway) cacheUpstreams(host string, upstreams []agenthttp.ServerlessUpstream) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.upstreamCache[host] = cachedUpstreams{
+		upstreams: cloneUpstreams(upstreams),
+		expiresAt: time.Now().Add(upstreamCacheTTL),
+	}
 }
 
 func (g *Gateway) evictUpstreams(host string) {
@@ -828,6 +840,17 @@ func localDeploymentIDsForService(state *agenthttp.ExpectedState, serviceID stri
 	}
 	sort.Strings(deploymentIDs)
 	return deploymentIDs
+}
+
+func routeWakeKey(route *agenthttp.ServerlessRoute) string {
+	deploymentIDs := append([]string(nil), route.LocalDeploymentIDs...)
+	sort.Strings(deploymentIDs)
+	return fmt.Sprintf(
+		"%s:%d:%s",
+		route.ServiceID,
+		route.Port,
+		strings.Join(deploymentIDs, ","),
+	)
 }
 
 func expectedContainersByDeploymentID(state *agenthttp.ExpectedState) map[string]agenthttp.ExpectedContainer {

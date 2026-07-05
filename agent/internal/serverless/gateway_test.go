@@ -12,15 +12,18 @@ import (
 )
 
 type fakeRuntime struct {
-	mu           sync.Mutex
-	state        *agenthttp.ExpectedState
-	containers   []container.Container
-	transitions  []agenthttp.ServerlessTransition
-	removed      []string
-	deployCalls  int
-	deployErr    error
-	afterList    func()
-	healthStatus string
+	mu                sync.Mutex
+	state             *agenthttp.ExpectedState
+	containers        []container.Container
+	transitions       []agenthttp.ServerlessTransition
+	removed           []string
+	deployCalls       int
+	deployErr         error
+	afterList         func()
+	healthStatus      string
+	deployStarted     chan struct{}
+	deployStartedOnce sync.Once
+	allowDeploy       chan struct{}
 }
 
 func (f *fakeRuntime) ExpectedState() *agenthttp.ExpectedState {
@@ -30,6 +33,14 @@ func (f *fakeRuntime) ExpectedState() *agenthttp.ExpectedState {
 }
 
 func (f *fakeRuntime) DeployServerlessContainer(expected agenthttp.ExpectedContainer) error {
+	if f.deployStarted != nil {
+		f.deployStartedOnce.Do(func() {
+			close(f.deployStarted)
+		})
+	}
+	if f.allowDeploy != nil {
+		<-f.allowDeploy
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deployCalls += 1
@@ -90,15 +101,60 @@ func (f *fakeRuntime) snapshot() ([]agenthttp.ServerlessTransition, []string, in
 }
 
 func TestGetUpstreamsReturnsWhenFollowerContextIsCancelled(t *testing.T) {
-	g := NewGateway(&fakeRuntime{})
-	g.wakeCalls["sleepy.example.com"] = &wakeCall{done: make(chan struct{})}
+	state := testExpectedState("stopped")
+	g := NewGateway(&fakeRuntime{state: state})
+	g.wakeCalls[routeWakeKey(&state.Serverless.Routes[0])] = &wakeCall{done: make(chan struct{})}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := g.getUpstreams(ctx, "sleepy.example.com")
+	_, err := g.getUpstreams(ctx, "app.example.com")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestConcurrentDomainsShareOneWakeAttempt(t *testing.T) {
+	state := testExpectedState("stopped")
+	state.Serverless.Routes[0].Upstreams = nil
+	secondRoute := state.Serverless.Routes[0]
+	secondRoute.Domain = "api.example.com"
+	state.Serverless.Routes = append(state.Serverless.Routes, secondRoute)
+	runtime := &fakeRuntime{
+		state:         state,
+		deployStarted: make(chan struct{}),
+		allowDeploy:   make(chan struct{}),
+	}
+	gateway := NewGateway(runtime)
+
+	errs := make(chan error, 2)
+	go func() {
+		_, err := gateway.getUpstreams(context.Background(), "app.example.com")
+		errs <- err
+	}()
+	select {
+	case <-runtime.deployStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first wake to start")
+	}
+	go func() {
+		_, err := gateway.getUpstreams(context.Background(), "api.example.com")
+		errs <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	close(runtime.allowDeploy)
+
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("getUpstreams failed: %v", err)
+		}
+	}
+	transitions, _, deployCalls := runtime.snapshot()
+	if deployCalls != 1 {
+		t.Fatalf("deployCalls = %d, want 1", deployCalls)
+	}
+	if len(transitions) != 1 || transitions[0].Type != "wake_started" {
+		t.Fatalf("transitions = %+v, want one wake_started", transitions)
 	}
 }
 

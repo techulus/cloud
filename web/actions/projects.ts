@@ -1264,31 +1264,31 @@ export async function updateServiceConfig(
 
 export async function stopService(serviceId: string) {
 	await requireDeveloperRole();
-	const runningDeployments = await db
+	const desiredDeployments = await db
 		.select()
 		.from(deployments)
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
+				eq(deployments.desired, true),
 			),
 		);
 
-	for (const dep of runningDeployments) {
-		if (!dep.containerId) continue;
-
+	for (const dep of desiredDeployments) {
+		const nextStatus = dep.containerId ? "stopping" : "stopped";
 		await db
 			.update(deployments)
-			.set(markDeploymentUndesired("stopping"))
+			.set(markDeploymentUndesired(nextStatus))
 			.where(eq(deployments.id, dep.id));
 
+		if (!dep.containerId) continue;
 		await enqueueWork(dep.serverId, "stop", {
 			deploymentId: dep.id,
 			containerId: dep.containerId,
 		});
 	}
 
-	return { success: true, count: runningDeployments.length };
+	return { success: true, count: desiredDeployments.length };
 }
 
 export async function restartService(serviceId: string) {
