@@ -16,7 +16,7 @@ type fakeRuntime struct {
 	state             *agenthttp.ExpectedState
 	containers        []container.Container
 	transitions       []agenthttp.ServerlessTransition
-	removed           []string
+	stopped           []string
 	deployCalls       int
 	deployErr         error
 	afterList         func()
@@ -47,6 +47,12 @@ func (f *fakeRuntime) DeployServerlessContainer(expected agenthttp.ExpectedConta
 	if f.deployErr != nil {
 		return f.deployErr
 	}
+	for i, actual := range f.containers {
+		if actual.DeploymentID == expected.DeploymentID {
+			f.containers[i].State = "running"
+			return nil
+		}
+	}
 	f.containers = append(f.containers, container.Container{
 		ID:           "ctr-" + expected.DeploymentID,
 		State:        "running",
@@ -56,17 +62,15 @@ func (f *fakeRuntime) DeployServerlessContainer(expected agenthttp.ExpectedConta
 	return nil
 }
 
-func (f *fakeRuntime) RemoveServerlessContainer(containerID string) error {
+func (f *fakeRuntime) StopServerlessContainer(containerID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.removed = append(f.removed, containerID)
-	next := f.containers[:0]
-	for _, actual := range f.containers {
-		if actual.ID != containerID {
-			next = append(next, actual)
+	f.stopped = append(f.stopped, containerID)
+	for i, actual := range f.containers {
+		if actual.ID == containerID {
+			f.containers[i].State = "exited"
 		}
 	}
-	f.containers = next
 	return nil
 }
 
@@ -97,7 +101,13 @@ func (f *fakeRuntime) QueueServerlessTransition(transition agenthttp.ServerlessT
 func (f *fakeRuntime) snapshot() ([]agenthttp.ServerlessTransition, []string, int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]agenthttp.ServerlessTransition(nil), f.transitions...), append([]string(nil), f.removed...), f.deployCalls
+	return append([]agenthttp.ServerlessTransition(nil), f.transitions...), append([]string(nil), f.stopped...), f.deployCalls
+}
+
+func (f *fakeRuntime) snapshotContainers() []container.Container {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]container.Container(nil), f.containers...)
 }
 
 func TestGetUpstreamsReturnsWhenFollowerContextIsCancelled(t *testing.T) {
@@ -211,7 +221,46 @@ func TestSleepingLocalDeploymentWakesAndReturnsLocalUpstream(t *testing.T) {
 	}
 }
 
-func TestSleepHostRemovesLocalContainerAndReportsSleep(t *testing.T) {
+func TestSleepingLocalDeploymentStartsExistingStoppedContainer(t *testing.T) {
+	previousPoll := wakePollInterval
+	wakePollInterval = time.Millisecond
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+	})
+
+	state := testExpectedState("stopped")
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{
+		state: state,
+		containers: []container.Container{
+			{
+				ID:           "ctr-existing",
+				State:        "exited",
+				DeploymentID: "dep_local",
+				ServiceID:    "svc_1",
+			},
+		},
+	}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "10.0.0.10:3000" {
+		t.Fatalf("upstreams = %+v, want local upstream", upstreams)
+	}
+
+	containers := runtime.snapshotContainers()
+	if len(containers) != 1 {
+		t.Fatalf("containers = %+v, want existing container only", containers)
+	}
+	if containers[0].ID != "ctr-existing" || containers[0].State != "running" {
+		t.Fatalf("container = %+v, want existing container running", containers[0])
+	}
+}
+
+func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -223,9 +272,9 @@ func TestSleepHostRemovesLocalContainerAndReportsSleep(t *testing.T) {
 
 	gateway.sleepHost("app.example.com")
 
-	transitions, removed, _ := runtime.snapshot()
-	if len(removed) != 1 || removed[0] != "ctr-local" {
-		t.Fatalf("removed = %+v, want ctr-local", removed)
+	transitions, stopped, _ := runtime.snapshot()
+	if len(stopped) != 1 || stopped[0] != "ctr-local" {
+		t.Fatalf("stopped = %+v, want ctr-local", stopped)
 	}
 	if len(transitions) != 1 {
 		t.Fatalf("transitions = %+v, want one sleep transition", transitions)
@@ -235,7 +284,7 @@ func TestSleepHostRemovesLocalContainerAndReportsSleep(t *testing.T) {
 	}
 }
 
-func TestSleepHostRechecksActivityBeforeRemovingContainer(t *testing.T) {
+func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -250,9 +299,9 @@ func TestSleepHostRechecksActivityBeforeRemovingContainer(t *testing.T) {
 
 	gateway.sleepHost("app.example.com")
 
-	transitions, removed, _ := runtime.snapshot()
-	if len(removed) != 0 {
-		t.Fatalf("removed = %+v, want no removals while request is active", removed)
+	transitions, stopped, _ := runtime.snapshot()
+	if len(stopped) != 0 {
+		t.Fatalf("stopped = %+v, want no stops while request is active", stopped)
 	}
 	if len(transitions) != 0 {
 		t.Fatalf("transitions = %+v, want no sleep transition while request is active", transitions)
@@ -275,9 +324,9 @@ func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
 
 	gateway.sleepHost("api.example.com")
 
-	transitions, removed, _ := runtime.snapshot()
-	if len(removed) != 0 {
-		t.Fatalf("removed = %+v, want no removals while sibling domain is active", removed)
+	transitions, stopped, _ := runtime.snapshot()
+	if len(stopped) != 0 {
+		t.Fatalf("stopped = %+v, want no stops while sibling domain is active", stopped)
 	}
 	if len(transitions) != 0 {
 		t.Fatalf("transitions = %+v, want no sleep transition while sibling domain is active", transitions)

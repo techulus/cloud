@@ -44,7 +44,7 @@ type Gateway struct {
 type Runtime interface {
 	ExpectedState() *agenthttp.ExpectedState
 	DeployServerlessContainer(agenthttp.ExpectedContainer) error
-	RemoveServerlessContainer(containerID string) error
+	StopServerlessContainer(containerID string) error
 	ListServerlessContainers() ([]container.Container, error)
 	GetServerlessContainerHealth(containerID string) string
 	QueueServerlessTransition(agenthttp.ServerlessTransition)
@@ -747,13 +747,13 @@ func (g *Gateway) sleepService(serviceID string) {
 			})
 		} else {
 			log.Printf(
-				"[serverless-gateway] sleep cleanup starting service=%s deployment=%s container=%s reason=already_expected_stopped",
+				"[serverless-gateway] sleep stop starting service=%s deployment=%s container=%s reason=already_expected_stopped",
 				serviceID,
 				deploymentID,
 				actual.ID,
 			)
 		}
-		if err := g.runtime.RemoveServerlessContainer(actual.ID); err != nil {
+		if err := g.runtime.StopServerlessContainer(actual.ID); err != nil {
 			activity.mu.Unlock()
 			log.Printf(
 				"[serverless-gateway] sleep failed service=%s deployment=%s container=%s latency=%s error=%v",

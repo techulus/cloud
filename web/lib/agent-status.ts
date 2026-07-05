@@ -243,7 +243,6 @@ async function applyServerlessTransitions(
 				.update(deployments)
 				.set({
 					status: "sleeping",
-					containerId: null,
 					healthStatus: null,
 					failedStage: null,
 				})
@@ -275,7 +274,6 @@ async function applyServerlessTransitions(
 				.update(deployments)
 				.set({
 					status: "waking",
-					containerId: null,
 					healthStatus: null,
 					failedStage: null,
 				})

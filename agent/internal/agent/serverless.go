@@ -21,7 +21,43 @@ func (a *Agent) ExpectedState() *agenthttp.ExpectedState {
 }
 
 func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) error {
-	return a.DeployExpectedContainer(expected)
+	return a.withDeploymentDeployLock(expected.DeploymentID, func() error {
+		containers, err := container.List()
+		if err == nil {
+			for _, actual := range containers {
+				if actual.DeploymentID != expected.DeploymentID {
+					continue
+				}
+				if normalizeImage(actual.Image) != normalizeImage(expected.Image) {
+					log.Printf(
+						"[serverless] recreate deployment %s because image changed (%s -> %s)",
+						Truncate(expected.DeploymentID, 8),
+						actual.Image,
+						expected.Image,
+					)
+					return a.Reconciler.Deploy(expected)
+				}
+				if actual.State == "running" {
+					return nil
+				}
+				log.Printf(
+					"[serverless] starting stopped container %s for deployment %s",
+					Truncate(actual.ID, 12),
+					Truncate(expected.DeploymentID, 8),
+				)
+				if err := container.Start(actual.ID); err != nil {
+					log.Printf(
+						"[serverless] start failed for deployment %s, recreating: %v",
+						Truncate(expected.DeploymentID, 8),
+						err,
+					)
+					return a.Reconciler.Deploy(expected)
+				}
+				return nil
+			}
+		}
+		return a.Reconciler.Deploy(expected)
+	})
 }
 
 func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) error {
@@ -58,8 +94,8 @@ func (a *Agent) withDeploymentDeployLock(deploymentID string, fn func() error) e
 	return fn()
 }
 
-func (a *Agent) RemoveServerlessContainer(containerID string) error {
-	return container.ForceRemove(containerID)
+func (a *Agent) StopServerlessContainer(containerID string) error {
+	return container.Stop(containerID)
 }
 
 func (a *Agent) ListServerlessContainers() ([]container.Container, error) {
