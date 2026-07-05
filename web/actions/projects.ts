@@ -34,6 +34,7 @@ import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
 import {
 	containerPathSchema,
@@ -1356,15 +1357,7 @@ export async function abortRollout(serviceId: string) {
 		);
 	}
 
-	await db
-		.update(deployments)
-		.set({ status: "running" })
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "draining"),
-			),
-		);
+	await restoreDrainingDeploymentsForRollback(serviceId);
 
 	const rolloutDeployments =
 		activeRolloutIds.length > 0

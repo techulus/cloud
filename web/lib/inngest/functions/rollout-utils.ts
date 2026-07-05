@@ -31,6 +31,39 @@ export function shouldRestoreDrainingDeploymentAsSleeping(
 	);
 }
 
+export async function restoreDrainingDeploymentsForRollback(serviceId: string) {
+	const service = await db
+		.select()
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.then((rows) => rows[0]);
+
+	if (
+		shouldRestoreDrainingDeploymentAsSleeping({ containerId: null }, service)
+	) {
+		await db
+			.update(deployments)
+			.set({ status: "sleeping", healthStatus: null })
+			.where(
+				and(
+					eq(deployments.serviceId, serviceId),
+					eq(deployments.status, "draining"),
+					isNull(deployments.containerId),
+				),
+			);
+	}
+
+	await db
+		.update(deployments)
+		.set({ status: "running" })
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.status, "draining"),
+			),
+		);
+}
+
 export async function handleRolloutFailure(
 	rolloutId: string,
 	serviceId: string,
@@ -68,39 +101,7 @@ export async function handleRolloutFailure(
 	const serverId = rolloutDeployments[0].serverId;
 
 	if (isRollingUpdate) {
-		const service = await db
-			.select()
-			.from(services)
-			.where(eq(services.id, serviceId))
-			.then((rows) => rows[0]);
-
-		if (
-			shouldRestoreDrainingDeploymentAsSleeping(
-				{ containerId: null },
-				service,
-			)
-		) {
-			await db
-				.update(deployments)
-				.set({ status: "sleeping", healthStatus: null })
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						eq(deployments.status, "draining"),
-						isNull(deployments.containerId),
-					),
-				);
-		}
-
-		await db
-			.update(deployments)
-			.set({ status: "running" })
-			.where(
-				and(
-					eq(deployments.serviceId, serviceId),
-					eq(deployments.status, "draining"),
-				),
-			);
+		await restoreDrainingDeploymentsForRollback(serviceId);
 	}
 
 	await db
