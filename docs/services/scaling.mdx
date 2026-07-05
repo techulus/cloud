@@ -9,6 +9,30 @@ Each service can run multiple replicas across your cluster. Configure how many r
 
 Replica count ranges from 1 to 10 per service.
 
+## Serverless scaling
+
+Stateless HTTP services can be configured to sleep when idle. A sleeping
+deployment keeps its desired replica record, but the container is stopped on the
+agent. The next public HTTP request wakes the service and is held until an
+upstream is ready or the wake timeout is reached.
+
+Serverless settings are configured per service:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Enable serverless | Off | Allows stateless HTTP deployments to sleep and wake on request |
+| Sleep after | `300s` | Idle period before running containers are stopped |
+| Wake timeout | `300s` | Maximum time the wake gateway waits for ready upstreams |
+| Min Ready | `1` | Preferred number of ready deployments before queued requests resume |
+
+`Min Ready` does not cap how many replicas are started. A cold wake starts all
+desired sleeping replicas. `Min Ready` only controls when the held request can
+resume. If fewer replicas become ready and no wake is still in progress, the
+gateway serves the ready upstreams that exist instead of failing the request.
+
+Serverless services require at least one configured replica. `Min Ready` must be
+between `1` and `10`, and cannot exceed the configured replica count.
+
 ## Placement
 
 Services use manual placement. Select the target servers and replica counts explicitly before deploying.
@@ -27,3 +51,7 @@ You can also manually lock any service to a specific server by setting the locke
 - Stateful services are always pinned to their locked server.
 - Stateful services do not automatically fail over to another server.
 - Maximum 10 replicas per service.
+- Serverless scaling is supported only for stateless HTTP services with a public domain.
+- Upgrade agents before enabling serverless. Older container-hosting agents treat
+  wake and sleep work as unknown commands, so sleep becomes a no-op until the
+  agent is updated.

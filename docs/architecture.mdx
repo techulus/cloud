@@ -203,6 +203,61 @@ Proxy nodes receive routes and certificates from the control plane:
 
 Worker nodes do not run Traefik.
 
+### Serverless Containers
+
+Stateless HTTP services can be configured as serverless. Serverless deployments
+scale to zero by stopping their containers after an idle period, then wake on the
+next public request.
+
+Serverless uses the same declarative expected-state model as normal
+deployments:
+
+- A sleeping deployment remains `desired: true`.
+- Expected state advertises the container with `desiredState: "stopped"`.
+- The agent reconciles that state by stopping the local Podman container.
+- A later wake changes the deployment back to `waking`, which makes expected
+  state advertise `desiredState: "running"` again.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Traefik
+    participant Gateway as Agent wake gateway
+    participant CP as Control plane
+    participant Agent
+    participant Container
+
+    User->>Traefik: Request service domain
+    Traefik->>Gateway: Route to 127.0.0.1:18080
+    Gateway->>CP: Wake service and wait
+    CP->>CP: Mark sleeping deployments waking
+    CP->>Agent: Lease wake/reconcile work
+    Agent->>Container: Start Podman container
+    Agent->>CP: Report healthy deployment
+    CP->>Gateway: Return ready upstreams
+    Gateway->>Container: Proxy original request
+```
+
+The route to the local wake gateway is emitted only when the proxy agent reports
+the `serverless_gateway` capability. Older proxy agents keep normal direct
+routes and are not pointed at `127.0.0.1:18080`.
+
+The wake gateway keeps the incoming request open while the control plane waits
+for enough replicas to become ready. `Min Ready` controls how many ready
+deployments are preferred before releasing queued requests. If fewer replicas
+become ready and no wake is still in progress, the gateway serves any available
+ready upstream instead of returning a 503.
+
+Sleep is driven by a scheduled control-plane check. A service is eligible to
+sleep when it has no fresh active requests, no rollout in progress, no busy
+deployments, and its last request or newest deployment is older than the
+configured idle timeout.
+
+Wake failures are bounded. Transient failures return a deployment to `sleeping`
+so a later request can retry. After repeated failures, the deployment is parked
+as `failed` with a visible failed stage until a redeploy creates fresh
+deployments.
+
 ### Multiple Proxy Nodes
 
 The platform supports geographically distributed proxy nodes with proximity steering:

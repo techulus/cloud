@@ -75,3 +75,25 @@ reports, the command can be retried up to the fixed attempt limit.
 | `force_cleanup` | Force remove containers for a service |
 | `cleanup_volumes` | Remove volume directories for a service |
 | `deploy` | Handled through expected-state reconciliation |
+| `wake` | Reconcile sleeping serverless deployments back to running |
+| `sleep` | Remove a stopped serverless container after confirming fresh expected state |
+
+## Serverless Gateway
+
+Proxy agents run a local HTTP wake gateway on `127.0.0.1:18080`. The control
+plane only emits Traefik routes to this gateway after the proxy reports the
+`serverless_gateway` capability in its health status.
+
+For serverless service traffic, Traefik forwards the public request to the local
+gateway. The gateway asks the control plane to wake the target service, waits for
+ready upstreams, then proxies the original request to the selected container over
+the WireGuard mesh.
+
+The gateway keeps a short upstream cache and collapses concurrent wake requests
+for the same host. Request cancellation is respected while waiting for a shared
+wake result.
+
+Sleep work is intentionally conservative. Before removing a local container, the
+agent fetches fresh expected state and verifies that the deployment still wants
+`desiredState: "stopped"`. Cached expected state is not enough to remove a
+container.
