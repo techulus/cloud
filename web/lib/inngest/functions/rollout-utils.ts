@@ -1,8 +1,35 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, rollouts } from "@/db/schema";
+import { deployments, rollouts, services } from "@/db/schema";
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
+import { isDeployedServerlessService } from "@/lib/service-config";
+
+const ROLLOUT_FAILURE_CLEANUP_STATUSES = [
+	"pending",
+	"pulling",
+	"starting",
+	"healthy",
+	"running",
+	"sleeping",
+	"waking",
+	"failed",
+] as const;
+
+export function shouldRollBackDeploymentStatus(status: string) {
+	return ROLLOUT_FAILURE_CLEANUP_STATUSES.includes(
+		status as (typeof ROLLOUT_FAILURE_CLEANUP_STATUSES)[number],
+	);
+}
+
+export function shouldRestoreDrainingDeploymentAsSleeping(
+	deployment: { containerId: string | null },
+	service: Parameters<typeof isDeployedServerlessService>[0] | null | undefined,
+) {
+	return (
+		!deployment.containerId && !!service && isDeployedServerlessService(service)
+	);
+}
 
 export async function handleRolloutFailure(
 	rolloutId: string,
@@ -41,6 +68,30 @@ export async function handleRolloutFailure(
 	const serverId = rolloutDeployments[0].serverId;
 
 	if (isRollingUpdate) {
+		const service = await db
+			.select()
+			.from(services)
+			.where(eq(services.id, serviceId))
+			.then((rows) => rows[0]);
+
+		if (
+			shouldRestoreDrainingDeploymentAsSleeping(
+				{ containerId: null },
+				service,
+			)
+		) {
+			await db
+				.update(deployments)
+				.set({ status: "sleeping", healthStatus: null })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.status, "draining"),
+						isNull(deployments.containerId),
+					),
+				);
+		}
+
 		await db
 			.update(deployments)
 			.set({ status: "running" })
@@ -58,14 +109,7 @@ export async function handleRolloutFailure(
 		.where(
 			and(
 				eq(deployments.rolloutId, rolloutId),
-				inArray(deployments.status, [
-					"pending",
-					"pulling",
-					"starting",
-					"healthy",
-					"running",
-					"failed",
-				]),
+				inArray(deployments.status, ROLLOUT_FAILURE_CLEANUP_STATUSES),
 			),
 		);
 
