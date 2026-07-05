@@ -95,7 +95,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 				minReadyReplicas: parsed.minReadyReplicas,
 			});
 			onUpdate();
-			toast.success("Serverless settings updated");
+			toast.success("Serverless settings saved. Deploy to apply.");
 		} catch (error) {
 			toast.error(
 				error instanceof Error

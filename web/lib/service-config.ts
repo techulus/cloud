@@ -44,15 +44,24 @@ export type PlacementConfig = {
 	replicas: number;
 };
 
+export type ServerlessConfig = {
+	enabled: boolean;
+	sleepAfterSeconds: number;
+	wakeTimeoutSeconds: number;
+	minReadyReplicas: number;
+};
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	hostname?: string;
+	stateful?: boolean;
 	placement?: PlacementConfig;
 	replicas: ReplicaConfig[];
 	healthCheck: HealthCheckConfig | null;
 	startCommand?: string | null;
 	resourceLimits?: ResourceLimitsConfig;
 	ports: PortConfig[];
+	serverless?: ServerlessConfig;
 	secretKeys?: string[];
 	secrets?: SecretConfig[];
 	volumes?: VolumeConfig[];
@@ -77,9 +86,20 @@ export function buildCurrentConfig(
 		resourceCpuLimit: number | null;
 		resourceMemoryLimitMb: number | null;
 		replicas: number;
+		stateful?: boolean | null;
+		serverlessEnabled?: boolean | null;
+		serverlessSleepAfterSeconds?: number | null;
+		serverlessWakeTimeoutSeconds?: number | null;
+		serverlessMinReadyReplicas?: number | null;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
-	ports: { port: number; isPublic: boolean; domain: string | null }[],
+	ports: {
+		port: number;
+		isPublic: boolean;
+		domain: string | null;
+		protocol?: "http" | "tcp" | "udp" | null;
+		tlsPassthrough?: boolean | null;
+	}[],
 	secrets?: { key: string; updatedAt: Date | string }[],
 	volumes?: { name: string; containerPath: string }[],
 ): DeployedConfig {
@@ -92,6 +112,7 @@ export function buildCurrentConfig(
 			image: service.image,
 		},
 		hostname: service.hostname ?? undefined,
+		stateful: service.stateful ?? false,
 		placement: {
 			replicas: replicas.reduce((sum, r) => sum + r.count, 0),
 		},
@@ -120,7 +141,15 @@ export function buildCurrentConfig(
 			port: p.port,
 			isPublic: p.isPublic,
 			domain: p.domain,
+			protocol: p.protocol ?? "http",
+			tlsPassthrough: p.tlsPassthrough ?? undefined,
 		})),
+		serverless: {
+			enabled: service.serverlessEnabled ?? false,
+			sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
+			wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
+			minReadyReplicas: service.serverlessMinReadyReplicas ?? 1,
+		},
 		secrets: (secrets ?? []).map((s) => ({
 			key: s.key,
 			updatedAt:
@@ -182,6 +211,21 @@ export function diffConfigs(
 				to: `${current.resourceLimits.memoryMb} MB`,
 			});
 		}
+		if (current.stateful) {
+			changes.push({
+				field: "Service type",
+				from: "(not deployed)",
+				to: "Stateful",
+			});
+		}
+		const currentServerless = normalizeServerlessConfig(current.serverless);
+		if (currentServerless.enabled) {
+			changes.push({
+				field: "Serverless",
+				from: "(not deployed)",
+				to: "Enabled",
+			});
+		}
 		for (const port of current.ports) {
 			const portType = port.isPublic ? "public" : "internal";
 			changes.push({
@@ -205,6 +249,56 @@ export function diffConfigs(
 			});
 		}
 		return changes;
+	}
+
+	if ((deployed.stateful ?? false) !== (current.stateful ?? false)) {
+		changes.push({
+			field: "Service type",
+			from: deployed.stateful ? "Stateful" : "Stateless",
+			to: current.stateful ? "Stateful" : "Stateless",
+		});
+	}
+
+	const deployedServerless = normalizeServerlessConfig(deployed.serverless);
+	const currentServerless = normalizeServerlessConfig(current.serverless);
+	if (deployedServerless.enabled !== currentServerless.enabled) {
+		changes.push({
+			field: "Serverless",
+			from: deployedServerless.enabled ? "Enabled" : "Disabled",
+			to: currentServerless.enabled ? "Enabled" : "Disabled",
+		});
+	}
+	if (deployedServerless.enabled && currentServerless.enabled) {
+		if (
+			deployedServerless.sleepAfterSeconds !==
+			currentServerless.sleepAfterSeconds
+		) {
+			changes.push({
+				field: "Serverless sleep timeout",
+				from: `${deployedServerless.sleepAfterSeconds}s`,
+				to: `${currentServerless.sleepAfterSeconds}s`,
+			});
+		}
+		if (
+			deployedServerless.wakeTimeoutSeconds !==
+			currentServerless.wakeTimeoutSeconds
+		) {
+			changes.push({
+				field: "Serverless wake timeout",
+				from: `${deployedServerless.wakeTimeoutSeconds}s`,
+				to: `${currentServerless.wakeTimeoutSeconds}s`,
+			});
+		}
+		if (
+			deployedServerless.minReadyReplicas !==
+			currentServerless.minReadyReplicas
+		) {
+			changes.push({
+				field: "Serverless min ready",
+				from: String(deployedServerless.minReadyReplicas),
+				to: String(currentServerless.minReadyReplicas),
+			});
+		}
 	}
 
 	if (deployed.source.image !== current.source.image) {
@@ -465,4 +559,80 @@ export function parseDeployedConfig(
 	} catch {
 		return null;
 	}
+}
+
+export function normalizeServerlessConfig(
+	config: ServerlessConfig | undefined,
+): ServerlessConfig {
+	return {
+		enabled: config?.enabled ?? false,
+		sleepAfterSeconds: config?.sleepAfterSeconds ?? 300,
+		wakeTimeoutSeconds: config?.wakeTimeoutSeconds ?? 300,
+		minReadyReplicas: config?.minReadyReplicas ?? 1,
+	};
+}
+
+export function getCurrentServerlessConfig(service: {
+	serverlessEnabled?: boolean | null;
+	serverlessSleepAfterSeconds?: number | null;
+	serverlessWakeTimeoutSeconds?: number | null;
+	serverlessMinReadyReplicas?: number | null;
+}): ServerlessConfig {
+	return {
+		enabled: service.serverlessEnabled ?? false,
+		sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
+		wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
+		minReadyReplicas: service.serverlessMinReadyReplicas ?? 1,
+	};
+}
+
+export function getDeployedServerlessConfig(service: {
+	deployedConfig?: string | null;
+	serverlessEnabled?: boolean | null;
+	serverlessSleepAfterSeconds?: number | null;
+	serverlessWakeTimeoutSeconds?: number | null;
+	serverlessMinReadyReplicas?: number | null;
+}): ServerlessConfig {
+	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
+	return deployed?.serverless
+		? normalizeServerlessConfig(deployed.serverless)
+		: getCurrentServerlessConfig(service);
+}
+
+export function getDeployedStateful(service: {
+	deployedConfig?: string | null;
+	stateful?: boolean | null;
+}) {
+	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
+	return deployed?.stateful ?? service.stateful ?? false;
+}
+
+export function isDeployedServerlessService(service: {
+	deployedConfig?: string | null;
+	stateful?: boolean | null;
+	serverlessEnabled?: boolean | null;
+	serverlessSleepAfterSeconds?: number | null;
+	serverlessWakeTimeoutSeconds?: number | null;
+	serverlessMinReadyReplicas?: number | null;
+}) {
+	return (
+		getDeployedServerlessConfig(service).enabled && !getDeployedStateful(service)
+	);
+}
+
+export function getDeployedServicePorts(
+	service: { id: string; deployedConfig?: string | null },
+	livePorts: PortConfig[],
+): PortConfig[] {
+	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
+	if (!deployed?.ports) {
+		return livePorts;
+	}
+	return deployed.ports.map((port) => ({
+		port: port.port,
+		isPublic: port.isPublic,
+		domain: port.domain,
+		protocol: port.protocol ?? "http",
+		tlsPassthrough: port.tlsPassthrough,
+	}));
 }

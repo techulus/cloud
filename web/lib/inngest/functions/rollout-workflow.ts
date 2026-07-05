@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
+import { isDeployedServerlessService } from "@/lib/service-config";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -385,23 +386,6 @@ export const rolloutWorkflow = inngest.createFunction(
 			return result;
 		});
 
-		await step.run("save-deployed-config", async () => {
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
-
-			const serverMap = await validateServers(placements);
-
-			await saveDeployedConfig(serviceId, {
-				service,
-				placements,
-				serverMap,
-				totalReplicas,
-				isRollingUpdate,
-			});
-		});
-
 		await step.run("start-health-check", async () => {
 			const service = await getService(serviceId);
 			const hasHealthCheck = service?.healthCheckCmd != null;
@@ -509,7 +493,7 @@ export const rolloutWorkflow = inngest.createFunction(
 			if (!service) {
 				throw new Error("Service not found");
 			}
-			const oldActiveStatuses = service.serverlessEnabled
+			const oldActiveStatuses = isDeployedServerlessService(service)
 				? (["running", "healthy", "sleeping", "waking"] as const)
 				: (["running", "healthy"] as const);
 
@@ -642,6 +626,23 @@ export const rolloutWorkflow = inngest.createFunction(
 				}
 			});
 		}
+
+		await step.run("save-deployed-config", async () => {
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+
+			const serverMap = await validateServers(placements);
+
+			await saveDeployedConfig(serviceId, {
+				service,
+				placements,
+				serverMap,
+				totalReplicas,
+				isRollingUpdate,
+			});
+		});
 
 		await step.run("complete-rollout", async () => {
 			await db

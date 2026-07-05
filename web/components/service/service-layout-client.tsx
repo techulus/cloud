@@ -87,6 +87,8 @@ export function ServiceLayoutClient({
 			port: p.port,
 			isPublic: p.isPublic,
 			domain: p.domain,
+			protocol: p.protocol,
+			tlsPassthrough: p.tlsPassthrough,
 		}));
 		const current = buildCurrentConfig(
 			service,

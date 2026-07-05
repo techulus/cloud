@@ -6,9 +6,6 @@ vi.mock("@/lib/acme-manager", () => ({
 	getCertificate: vi.fn(),
 	issueCertificate: vi.fn(),
 }));
-vi.mock("@/lib/service-config", () => ({
-	buildCurrentConfig: vi.fn(),
-}));
 vi.mock("@/lib/wireguard", () => ({
 	assignContainerIp: vi.fn(),
 }));
@@ -20,6 +17,20 @@ import { isActiveDeploymentForRollout } from "@/lib/inngest/functions/rollout-he
 
 describe("rollout helpers", () => {
 	it("treats sleeping and waking serverless deployments as active rollout versions", () => {
+		const deployedServerlessConfig = JSON.stringify({
+			source: { type: "image", image: "nginx" },
+			stateful: false,
+			replicas: [],
+			healthCheck: null,
+			ports: [],
+			serverless: {
+				enabled: true,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				minReadyReplicas: 1,
+			},
+		});
+
 		expect(
 			isActiveDeploymentForRollout(
 				{ status: "sleeping" },
@@ -35,7 +46,31 @@ describe("rollout helpers", () => {
 		expect(
 			isActiveDeploymentForRollout(
 				{ status: "sleeping" },
-				{ serverlessEnabled: false },
+				{
+					serverlessEnabled: false,
+					deployedConfig: deployedServerlessConfig,
+				},
+			),
+		).toBe(true);
+		expect(
+			isActiveDeploymentForRollout(
+				{ status: "sleeping" },
+				{
+					serverlessEnabled: false,
+					deployedConfig: JSON.stringify({
+						source: { type: "image", image: "nginx" },
+						stateful: false,
+						replicas: [],
+						healthCheck: null,
+						ports: [],
+						serverless: {
+							enabled: false,
+							sleepAfterSeconds: 300,
+							wakeTimeoutSeconds: 120,
+							minReadyReplicas: 1,
+						},
+					}),
+				},
 			),
 		).toBe(false);
 		expect(

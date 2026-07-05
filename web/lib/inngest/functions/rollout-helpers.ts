@@ -13,7 +13,11 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
-import { buildCurrentConfig } from "@/lib/service-config";
+import {
+	buildCurrentConfig,
+	getDeployedStateful,
+	isDeployedServerlessService,
+} from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -35,13 +39,20 @@ export type DeploymentContext = {
 
 export function isActiveDeploymentForRollout(
 	deployment: { status: string },
-	service: { serverlessEnabled?: boolean | null },
+	service: {
+		deployedConfig?: string | null;
+		stateful?: boolean | null;
+		serverlessEnabled?: boolean | null;
+		serverlessSleepAfterSeconds?: number | null;
+		serverlessWakeTimeoutSeconds?: number | null;
+		serverlessMinReadyReplicas?: number | null;
+	},
 ) {
 	if (deployment.status === "running" || deployment.status === "healthy") {
 		return true;
 	}
 	return (
-		service.serverlessEnabled === true &&
+		isDeployedServerlessService(service) &&
 		(deployment.status === "sleeping" || deployment.status === "waking")
 	);
 }
@@ -449,6 +460,8 @@ export async function saveDeployedConfig(
 		port: p.port,
 		isPublic: p.isPublic,
 		domain: p.domain,
+		protocol: p.protocol,
+		tlsPassthrough: p.tlsPassthrough,
 	}));
 
 	const updatedService = await getService(serviceId);
@@ -472,7 +485,7 @@ export async function checkForRollingUpdate(
 	serviceId: string,
 ): Promise<boolean> {
 	const service = await getService(serviceId);
-	if (!service || service.stateful) {
+	if (!service || getDeployedStateful(service)) {
 		return false;
 	}
 

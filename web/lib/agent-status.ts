@@ -22,6 +22,10 @@ import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
+import {
+	getDeployedServerlessConfig,
+	getDeployedStateful,
+} from "@/lib/service-config";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -92,6 +96,11 @@ async function applyDeploymentErrors(
 				status: deployments.status,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
 				serverlessEnabled: services.serverlessEnabled,
+				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
+				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
+				serverlessMinReadyReplicas: services.serverlessMinReadyReplicas,
+				stateful: services.stateful,
+				deployedConfig: services.deployedConfig,
 				rolloutStatus: rollouts.status,
 				serverName: servers.name,
 			})
@@ -126,7 +135,8 @@ async function applyDeploymentErrors(
 			.set(
 				isServerlessWakeDeployment
 					? getServerlessWakeFailureUpdate({
-							serverlessEnabled: deployment.serverlessEnabled,
+							serverlessEnabled:
+								getDeployedServerlessConfig(deployment).enabled,
 							currentFailureCount: deployment.serverlessWakeFailureCount,
 							failedStage: "serverless_wake",
 						})
@@ -202,7 +212,11 @@ async function applyServerlessTransitions(
 				desired: deployments.desired,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
 				serverlessEnabled: services.serverlessEnabled,
+				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
+				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
+				serverlessMinReadyReplicas: services.serverlessMinReadyReplicas,
 				stateful: services.stateful,
+				deployedConfig: services.deployedConfig,
 				serverIsProxy: servers.isProxy,
 				serverName: servers.name,
 			})
@@ -291,7 +305,7 @@ async function applyServerlessTransitions(
 			.update(deployments)
 			.set(
 				getServerlessWakeFailureUpdate({
-					serverlessEnabled: deployment.serverlessEnabled,
+					serverlessEnabled: getDeployedServerlessConfig(deployment).enabled,
 					currentFailureCount: deployment.serverlessWakeFailureCount,
 					failedStage: "serverless_wake",
 				}),
@@ -352,7 +366,11 @@ function getInvalidServerlessTransitionReason({
 				status: string;
 				desired: boolean;
 				serverlessEnabled: boolean;
+				serverlessSleepAfterSeconds: number;
+				serverlessWakeTimeoutSeconds: number;
+				serverlessMinReadyReplicas: number;
 				stateful: boolean;
+				deployedConfig: string | null;
 				serverIsProxy: boolean;
 		  }
 		| undefined;
@@ -360,8 +378,10 @@ function getInvalidServerlessTransitionReason({
 	if (!deployment) return "deployment not found";
 	if (deployment.serverId !== serverId) return "deployment belongs to another server";
 	if (!deployment.serverIsProxy) return "server is not a proxy";
-	if (!deployment.serverlessEnabled) return "service is not serverless";
-	if (deployment.stateful) return "service is stateful";
+	if (!getDeployedServerlessConfig(deployment).enabled) {
+		return "service is not serverless";
+	}
+	if (getDeployedStateful(deployment)) return "service is stateful";
 	if (!deployment.desired) return "deployment is not desired";
 
 	if (transition.type === "sleep") {

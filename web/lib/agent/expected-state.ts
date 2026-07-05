@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -15,6 +15,11 @@ import {
 	expectedDeploymentStatuses,
 	routableDeploymentStatuses,
 } from "@/lib/deployment-status";
+import {
+	getDeployedServerlessConfig,
+	getDeployedServicePorts,
+	isDeployedServerlessService,
+} from "@/lib/service-config";
 import { slugify } from "@/lib/utils";
 import { getWireGuardPeers } from "@/lib/wireguard";
 
@@ -23,6 +28,18 @@ type Service = typeof services.$inferSelect;
 type Deployment = typeof deployments.$inferSelect;
 type ServicePort = typeof servicePorts.$inferSelect;
 const SERVERLESS_GATEWAY_PORT = 18080;
+
+type RouteServicePort = Pick<
+	ServicePort,
+	| "id"
+	| "serviceId"
+	| "port"
+	| "isPublic"
+	| "domain"
+	| "protocol"
+	| "externalPort"
+	| "tlsPassthrough"
+>;
 
 export type ExpectedContainer = {
 	deploymentId: string;
@@ -191,8 +208,8 @@ async function buildExpectedContainers(
 	const serviceIds = unique(serverDeployments.map((dep) => dep.serviceId));
 	if (serviceIds.length === 0) return [];
 
-	const [activeServices, depPorts, serviceSecrets, volumes] = await Promise.all(
-		[
+	const [activeServices, depPorts, serviceSecrets, volumes, servicePortRows] =
+		await Promise.all([
 			db
 				.select()
 				.from(services)
@@ -216,10 +233,12 @@ async function buildExpectedContainers(
 				})
 				.from(serviceVolumes)
 				.where(inArray(serviceVolumes.serviceId, serviceIds)),
-		],
+			fetchServicePorts(serviceIds),
+		]);
+	const serverlessRoutableServiceIds = getServerlessRoutableServiceIds(
+		activeServices,
+		servicePortRows,
 	);
-	const serverlessRoutableServiceIds =
-		await fetchPublicHttpServiceIds(serviceIds);
 
 	return buildExpectedContainersFromRows({
 		deployments: serverDeployments,
@@ -246,22 +265,13 @@ async function fetchDeploymentPorts(deploymentIds: string[]) {
 		.where(inArray(deploymentPorts.deploymentId, deploymentIds));
 }
 
-async function fetchPublicHttpServiceIds(serviceIds: string[]) {
-	if (serviceIds.length === 0) return new Set<string>();
+async function fetchServicePorts(serviceIds: string[]) {
+	if (serviceIds.length === 0) return [];
 
-	const rows = await db
-		.select({ serviceId: servicePorts.serviceId })
+	return db
+		.select()
 		.from(servicePorts)
-		.where(
-			and(
-				inArray(servicePorts.serviceId, serviceIds),
-				eq(servicePorts.isPublic, true),
-				eq(servicePorts.protocol, "http"),
-				isNotNull(servicePorts.domain),
-			),
-		);
-
-	return new Set(rows.map((row) => row.serviceId));
+		.where(inArray(servicePorts.serviceId, serviceIds));
 }
 
 export function buildExpectedContainersFromRows({
@@ -288,7 +298,7 @@ export function buildExpectedContainersFromRows({
 		serverlessRoutableServiceIds ??
 		new Set(
 			serviceRows
-				.filter((service) => service.serverlessEnabled)
+				.filter((service) => isDeployedServerlessService(service))
 				.map((service) => service.id),
 		);
 	const portsByDeploymentId = groupBy(
@@ -313,7 +323,7 @@ export function buildExpectedContainersFromRows({
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
 					desiredState:
 						serverIsProxy &&
-						service.serverlessEnabled &&
+						isDeployedServerlessService(service) &&
 						sleepableServiceIds.has(service.id) &&
 						(dep.status === "sleeping" ||
 							(dep.status === "draining" && !dep.containerId))
@@ -354,9 +364,7 @@ async function buildServerlessExpectedState(
 		return { routes: [] };
 	}
 
-	const serverlessServices = allServices.filter(
-		(service) => service.serverlessEnabled && !service.stateful,
-	);
+	const serverlessServices = allServices.filter(isDeployedServerlessService);
 	if (serverlessServices.length === 0) return { routes: [] };
 
 	const serviceIds = serverlessServices.map((service) => service.id);
@@ -405,33 +413,33 @@ export function buildServerlessRoutesFromRows({
 }: {
 	serverId: string;
 	services: Service[];
-	ports: ServicePort[];
+	ports: RouteServicePort[];
 	deployments: ServerlessDeploymentRow[];
 	containers: ExpectedContainer[];
 }): ServerlessRoute[] {
-	const servicesById = new Map(
-		serviceRows.map((service) => [service.id, service]),
-	);
 	const deploymentsByServiceId = groupBy(
 		deploymentRows,
 		(deployment) => deployment.serviceId,
 	);
+	const portsByServiceId = groupBy(ports, (port) => port.serviceId);
 	const expectedDeploymentIds = new Set(
 		containers.map((container) => container.deploymentId),
 	);
 
-	return ports
-		.slice()
-		.sort(compareServicePorts)
-		.flatMap((port) => {
+	return serviceRows
+		.flatMap((service) =>
+			getRuntimeServicePortsForRoutes(
+				service,
+				portsByServiceId.get(service.id) ?? [],
+			).map((port) => ({ service, port })),
+		)
+		.sort((a, b) => compareServicePorts(a.port, b.port))
+		.flatMap(({ service, port }) => {
 			if (!port.isPublic || port.protocol !== "http" || !port.domain) {
 				return [];
 			}
 
-			const service = servicesById.get(port.serviceId);
-			if (!service) return [];
-
-			const serviceDeployments = deploymentsByServiceId.get(port.serviceId) ?? [];
+			const serviceDeployments = deploymentsByServiceId.get(service.id) ?? [];
 			if (!serviceDeployments.some((deployment) => deployment.serverIsProxy)) {
 				return [];
 			}
@@ -467,9 +475,14 @@ export function buildServerlessRoutesFromRows({
 					serviceId: service.id,
 					domain: port.domain,
 					port: port.port,
-					sleepAfterSeconds: service.serverlessSleepAfterSeconds,
-					wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds,
-					minReadyReplicas: Math.max(1, service.serverlessMinReadyReplicas ?? 1),
+					sleepAfterSeconds:
+						getDeployedServerlessConfig(service).sleepAfterSeconds,
+					wakeTimeoutSeconds:
+						getDeployedServerlessConfig(service).wakeTimeoutSeconds,
+					minReadyReplicas: Math.max(
+						1,
+						getDeployedServerlessConfig(service).minReadyReplicas,
+					),
 					localDeploymentIds,
 					upstreams,
 				},
@@ -580,8 +593,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		allServices
 			.filter(
 				(service) =>
-					!service.stateful &&
-					service.serverlessEnabled &&
+					isDeployedServerlessService(service) &&
 					proxyHostedServerlessServiceIds.has(service.id),
 			)
 			.map((service) => service.id),
@@ -600,7 +612,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
-		ports,
+		ports: buildRuntimeRoutePorts(allServices, ports),
 		routableDeployments,
 		serverlessServiceIds,
 		serverlessRouteSuppressedServiceIds,
@@ -634,7 +646,7 @@ export function buildTraefikRoutes({
 	serverlessRouteSuppressedServiceIds = new Set<string>(),
 }: {
 	serverId: string;
-	ports: ServicePort[];
+	ports: RouteServicePort[];
 	routableDeployments: RoutableDeploymentRow[];
 	serverlessServiceIds?: Set<string>;
 	serverlessRouteSuppressedServiceIds?: Set<string>;
@@ -789,7 +801,70 @@ function groupBy<T, K>(items: T[], keyFn: (item: T) => K) {
 	return groups;
 }
 
-function compareServicePorts(a: ServicePort, b: ServicePort) {
+export function buildRuntimeRoutePorts(
+	serviceRows: Service[],
+	portRows: ServicePort[],
+): RouteServicePort[] {
+	const portsByServiceId = groupBy(portRows, (port) => port.serviceId);
+	return serviceRows.flatMap((service) =>
+		getRuntimeServicePortsForRoutes(
+			service,
+			portsByServiceId.get(service.id) ?? [],
+		),
+	);
+}
+
+function getRuntimeServicePortsForRoutes(
+	service: Service,
+	livePorts: RouteServicePort[],
+): RouteServicePort[] {
+	const ports = isDeployedServerlessService(service)
+		? getDeployedServicePorts(service, livePorts)
+		: livePorts;
+	return ports.map((port, index) => {
+		const routePort = port as Partial<RouteServicePort>;
+		return {
+			id:
+				typeof routePort.id === "string"
+					? routePort.id
+					: `${service.id}:deployed:${index}`,
+			serviceId: service.id,
+			port: port.port,
+			isPublic: port.isPublic,
+			domain: port.domain,
+			protocol: port.protocol ?? "http",
+			externalPort:
+				typeof routePort.externalPort === "number"
+					? routePort.externalPort
+					: null,
+			tlsPassthrough: routePort.tlsPassthrough ?? false,
+		};
+	});
+}
+
+function getServerlessRoutableServiceIds(
+	serviceRows: Service[],
+	portRows: RouteServicePort[],
+) {
+	return new Set(
+		serviceRows
+			.filter((service) => hasDeployedPublicHttpPort(service, portRows))
+			.map((service) => service.id),
+	);
+}
+
+function hasDeployedPublicHttpPort(
+	service: Service,
+	portRows: RouteServicePort[],
+) {
+	if (!isDeployedServerlessService(service)) return false;
+	const livePorts = portRows.filter((port) => port.serviceId === service.id);
+	return getRuntimeServicePortsForRoutes(service, livePorts).some(
+		(port) => port.isPublic && port.protocol === "http" && !!port.domain,
+	);
+}
+
+function compareServicePorts(a: RouteServicePort, b: RouteServicePort) {
 	return (
 		a.serviceId.localeCompare(b.serviceId) ||
 		a.protocol.localeCompare(b.protocol) ||

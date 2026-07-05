@@ -8,11 +8,33 @@ vi.mock("@/lib/wireguard", () => ({ getWireGuardPeers: vi.fn() }));
 
 import {
 	buildExpectedContainersFromRows,
+	buildRuntimeRoutePorts,
 	buildServerlessRoutesFromRows,
 	buildTraefikRoutes,
 } from "@/lib/agent/expected-state";
 
 describe("expected-state pure builders", () => {
+	const deployedServerlessConfig = JSON.stringify({
+		source: { type: "image", image: "nginx" },
+		stateful: false,
+		replicas: [],
+		healthCheck: null,
+		ports: [
+			{
+				port: 3000,
+				isPublic: true,
+				domain: "sleepy.example.com",
+				protocol: "http",
+			},
+		],
+		serverless: {
+			enabled: true,
+			sleepAfterSeconds: 300,
+			wakeTimeoutSeconds: 120,
+			minReadyReplicas: 1,
+		},
+	});
+
 	it("groups container inputs by deployment and service deterministically", () => {
 		const containers = buildExpectedContainersFromRows({
 			deployments: [
@@ -174,6 +196,37 @@ describe("expected-state pure builders", () => {
 					name: "public-api",
 					image: "nginx",
 					serverlessEnabled: true,
+				},
+			] as any,
+			deploymentPorts: [],
+			secrets: [],
+			volumes: [],
+			serverlessRoutableServiceIds: new Set(["svc_public"]),
+		});
+
+		expect(containers[0]).toMatchObject({
+			deploymentId: "dep_sleeping",
+			desiredState: "stopped",
+		});
+	});
+
+	it("keeps deployed serverless sleeping while live serverless settings are disabled", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_sleeping",
+					serviceId: "svc_public",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+				},
+			] as any,
+			services: [
+				{
+					id: "svc_public",
+					name: "public-api",
+					image: "nginx",
+					serverlessEnabled: false,
+					deployedConfig: deployedServerlessConfig,
 				},
 			] as any,
 			deploymentPorts: [],
@@ -478,6 +531,80 @@ describe("expected-state pure builders", () => {
 		expect(routes[0]?.localDeploymentIds).toEqual(["dep_new"]);
 		expect(routes[0]?.upstreams.map((upstream) => upstream.deploymentId)).toEqual([
 			"dep_new",
+		]);
+	});
+
+	it("keeps wake metadata from deployed serverless config while live settings are disabled", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				{
+					id: "svc_1",
+					serverlessEnabled: false,
+					stateful: false,
+					serverlessSleepAfterSeconds: 60,
+					serverlessWakeTimeoutSeconds: 60,
+					serverlessMinReadyReplicas: 1,
+					deployedConfig: deployedServerlessConfig,
+				},
+			] as any,
+			ports: [],
+			deployments: [
+				{
+					id: "dep_sleeping",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+					serverIsProxy: true,
+				},
+			] as any,
+			containers: [
+				{ deploymentId: "dep_sleeping", desiredState: "stopped" },
+			] as any,
+		});
+
+		expect(routes).toEqual([
+			{
+				serviceId: "svc_1",
+				domain: "sleepy.example.com",
+				port: 3000,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				minReadyReplicas: 1,
+				localDeploymentIds: ["dep_sleeping"],
+				upstreams: [],
+			},
+		]);
+	});
+
+	it("keeps Traefik gateway route from deployed serverless ports while live ports are removed", () => {
+		const ports = buildRuntimeRoutePorts(
+			[
+				{
+					id: "svc_public",
+					serverlessEnabled: false,
+					stateful: false,
+					deployedConfig: deployedServerlessConfig,
+				},
+			] as any,
+			[],
+		);
+
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_1",
+			ports,
+			routableDeployments: [],
+			serverlessServiceIds: new Set(["svc_public"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([
+			{
+				id: "sleepy.example.com",
+				domain: "sleepy.example.com",
+				serviceId: "svc_public",
+				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
+			},
 		]);
 	});
 
