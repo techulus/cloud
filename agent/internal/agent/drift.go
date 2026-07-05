@@ -472,7 +472,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		if action.Expected == nil {
 			return fmt.Errorf("missing expected container for %s", action.Kind)
 		}
-		if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+		if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 			return fmt.Errorf("failed to deploy container: %w", err)
 		}
 		return nil
@@ -486,7 +486,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 			if err := container.Stop(action.Actual.ID); err != nil {
 				log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 			}
-			if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+			if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 				return fmt.Errorf("failed to redeploy container: %w", err)
 			}
 		}
@@ -499,7 +499,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		if err := container.Stop(action.Actual.ID); err != nil {
 			log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 		}
-		if err := a.Reconciler.Deploy(*action.Expected); err != nil {
+		if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 			return fmt.Errorf("failed to redeploy container: %w", err)
 		}
 		return nil

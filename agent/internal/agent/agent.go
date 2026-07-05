@@ -61,6 +61,8 @@ type Agent struct {
 	pendingWorkResults           []agenthttp.CompletedWorkItem
 	deploymentErrorMutex         sync.Mutex
 	pendingDeploymentErrors      []agenthttp.DeploymentError
+	deployLockMutex              sync.Mutex
+	deploymentDeployLocks        map[string]*sync.Mutex
 	serverlessMutex              sync.Mutex
 	pendingServerlessTransitions []agenthttp.ServerlessTransition
 	pendingServerlessSleep       map[string]struct{}
@@ -115,6 +117,7 @@ func NewAgent(
 		Builder:                builder,
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,
+		deploymentDeployLocks:  map[string]*sync.Mutex{},
 		pendingServerlessSleep: map[string]struct{}{},
 		pendingServerlessWake:  map[string]struct{}{},
 	}

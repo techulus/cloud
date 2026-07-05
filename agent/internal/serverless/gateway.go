@@ -24,7 +24,10 @@ const (
 	upstreamCacheTTL = 10 * time.Second
 )
 
-var wakePollInterval = 500 * time.Millisecond
+var (
+	wakePollInterval      = 500 * time.Millisecond
+	idleTimerSeedInterval = 15 * time.Second
+)
 
 type Gateway struct {
 	runtime    Runtime
@@ -102,6 +105,20 @@ func (g *Gateway) Start(ctx context.Context) error {
 		}
 	}()
 
+	go func() {
+		g.seedIdleTimers()
+		ticker := time.NewTicker(idleTimerSeedInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.seedIdleTimers()
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -112,8 +129,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	g.beginActivity(host)
-	defer g.endActivity(host)
+	route := findRoute(g.runtime.ExpectedState(), host)
+	if route == nil {
+		log.Printf("[serverless-gateway] no route metadata for host %s", host)
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	activityKey := serviceActivityKey(route.ServiceID)
+	g.beginActivity(activityKey)
+	defer g.endActivity(activityKey, route.ServiceID, route.SleepAfterSeconds)
 
 	upstreams, err := g.getUpstreams(r.Context(), host)
 	if err != nil {
@@ -207,7 +231,12 @@ func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream,
 			len(sleepingLocalIDs),
 			len(ready),
 		)
-		go g.wakeLocalDeployments(route, state, sleepingLocalIDs)
+		go func() {
+			startedIDs := g.wakeLocalDeployments(route, state, sleepingLocalIDs)
+			if len(startedIDs) > 0 {
+				g.waitForWokenDeployments(route, route.WakeTimeoutSeconds, wakeStartedAt, startedIDs)
+			}
+		}()
 		return ready, nil
 	}
 
@@ -218,8 +247,11 @@ func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream,
 		len(ready),
 		wakeTimeout(route.WakeTimeoutSeconds),
 	)
-	g.wakeLocalDeployments(route, state, sleepingLocalIDs)
-	return g.waitForReadyUpstreams(route, route.WakeTimeoutSeconds, wakeStartedAt)
+	startedIDs := g.wakeLocalDeployments(route, state, sleepingLocalIDs)
+	if len(startedIDs) == 0 {
+		return nil, fmt.Errorf("failed to start local serverless wake")
+	}
+	return g.waitForReadyUpstreams(route, route.WakeTimeoutSeconds, wakeStartedAt, startedIDs)
 }
 
 func (g *Gateway) readyUpstreams(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState) ([]agenthttp.ServerlessUpstream, []string, error) {
@@ -274,8 +306,9 @@ func (g *Gateway) readyUpstreams(route *agenthttp.ServerlessRoute, state *agenth
 	return upstreams, sleepingLocalIDs, nil
 }
 
-func (g *Gateway) wakeLocalDeployments(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState, deploymentIDs []string) {
+func (g *Gateway) wakeLocalDeployments(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState, deploymentIDs []string) []string {
 	expectedByDeploymentID := expectedContainersByDeploymentID(state)
+	startedIDs := []string{}
 	for _, deploymentID := range deploymentIDs {
 		expected, ok := expectedByDeploymentID[deploymentID]
 		if !ok {
@@ -314,6 +347,7 @@ func (g *Gateway) wakeLocalDeployments(route *agenthttp.ServerlessRoute, state *
 			})
 			continue
 		}
+		startedIDs = append(startedIDs, deploymentID)
 		log.Printf(
 			"[serverless-gateway] wake container started host=%s deployment=%s service=%s latency=%s",
 			route.Domain,
@@ -323,11 +357,12 @@ func (g *Gateway) wakeLocalDeployments(route *agenthttp.ServerlessRoute, state *
 		)
 	}
 	g.evictUpstreams(route.Domain)
+	return startedIDs
 }
 
-func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTimeoutSeconds int, startedAt time.Time) ([]agenthttp.ServerlessUpstream, error) {
+func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTimeoutSeconds int, startedAt time.Time, wokenDeploymentIDs []string) ([]agenthttp.ServerlessUpstream, error) {
 	timeout := wakeTimeout(wakeTimeoutSeconds)
-	deadline := time.Now().Add(timeout)
+	deadline := startedAt.Add(timeout)
 
 	for {
 		state := g.runtime.ExpectedState()
@@ -336,6 +371,10 @@ func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTi
 			return nil, err
 		}
 		if len(ready) >= max(1, route.MinReadyReplicas) || (len(ready) > 0 && len(sleepingLocalIDs) == 0) {
+			pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+			if len(pendingIDs) > 0 {
+				go g.waitForWokenDeployments(route, route.WakeTimeoutSeconds, startedAt, pendingIDs)
+			}
 			log.Printf(
 				"[serverless-gateway] wake ready host=%s upstreams=%d latency=%s",
 				route.Domain,
@@ -345,6 +384,8 @@ func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTi
 			return ready, nil
 		}
 		if time.Now().After(deadline) {
+			pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+			g.queueWakeTimeouts(route, pendingIDs, startedAt)
 			if len(ready) > 0 {
 				log.Printf(
 					"[serverless-gateway] wake partially ready host=%s upstreams=%d latency=%s",
@@ -362,6 +403,70 @@ func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTi
 			return nil, fmt.Errorf("timed out waiting for local serverless wake")
 		}
 		time.Sleep(wakePollInterval)
+	}
+}
+
+func (g *Gateway) waitForWokenDeployments(route *agenthttp.ServerlessRoute, wakeTimeoutSeconds int, startedAt time.Time, wokenDeploymentIDs []string) {
+	timeout := wakeTimeout(wakeTimeoutSeconds)
+	deadline := startedAt.Add(timeout)
+
+	for {
+		state := g.runtime.ExpectedState()
+		ready, _, err := g.readyUpstreams(route, state)
+		if err != nil {
+			log.Printf("[serverless-gateway] wake monitor failed host=%s error=%v", route.Domain, err)
+			return
+		}
+		pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+		if len(pendingIDs) == 0 {
+			log.Printf(
+				"[serverless-gateway] wake ready host=%s deployments=%d latency=%s",
+				route.Domain,
+				len(wokenDeploymentIDs),
+				roundDuration(time.Since(startedAt)),
+			)
+			return
+		}
+		if time.Now().After(deadline) {
+			g.queueWakeTimeouts(route, pendingIDs, startedAt)
+			return
+		}
+		time.Sleep(wakePollInterval)
+	}
+}
+
+func pendingWakeDeploymentIDs(wokenDeploymentIDs []string, ready []agenthttp.ServerlessUpstream) []string {
+	readyIDs := map[string]struct{}{}
+	for _, upstream := range ready {
+		if upstream.Local {
+			readyIDs[upstream.DeploymentID] = struct{}{}
+		}
+	}
+
+	pendingIDs := []string{}
+	for _, deploymentID := range wokenDeploymentIDs {
+		if _, ok := readyIDs[deploymentID]; !ok {
+			pendingIDs = append(pendingIDs, deploymentID)
+		}
+	}
+	return pendingIDs
+}
+
+func (g *Gateway) queueWakeTimeouts(route *agenthttp.ServerlessRoute, deploymentIDs []string, startedAt time.Time) {
+	for _, deploymentID := range deploymentIDs {
+		errMessage := fmt.Sprintf("timed out waiting %s for local serverless wake", roundDuration(time.Since(startedAt)))
+		log.Printf(
+			"[serverless-gateway] wake timed out host=%s deployment=%s service=%s latency=%s",
+			route.Domain,
+			deploymentID,
+			route.ServiceID,
+			roundDuration(time.Since(startedAt)),
+		)
+		g.runtime.QueueServerlessTransition(agenthttp.ServerlessTransition{
+			Type:         "wake_failed",
+			DeploymentID: deploymentID,
+			Error:        errMessage,
+		})
 	}
 }
 
@@ -426,20 +531,72 @@ func (g *Gateway) evictUpstreams(host string) {
 	delete(g.upstreamCache, host)
 }
 
-func (g *Gateway) activity(host string) *activityState {
+func (g *Gateway) evictServiceUpstreams(serviceID string) {
+	state := g.runtime.ExpectedState()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if state == nil {
+		g.upstreamCache = map[string]cachedUpstreams{}
+		return
+	}
+	for _, route := range state.Serverless.Routes {
+		if route.ServiceID == serviceID {
+			delete(g.upstreamCache, normalizeHost(route.Domain))
+		}
+	}
+}
+
+func (g *Gateway) seedIdleTimers() {
+	state := g.runtime.ExpectedState()
+	if state == nil {
+		return
+	}
+	actualContainers, err := g.runtime.ListServerlessContainers()
+	if err != nil {
+		log.Printf("[serverless-gateway] failed to seed idle timers: %v", err)
+		return
+	}
+	actualByDeploymentID := actualContainersByDeploymentID(actualContainers)
+	seenServices := map[string]struct{}{}
+	for _, route := range state.Serverless.Routes {
+		if _, seen := seenServices[route.ServiceID]; seen {
+			continue
+		}
+		seenServices[route.ServiceID] = struct{}{}
+		if !hasRunningLocalDeployment(route.LocalDeploymentIDs, actualByDeploymentID) {
+			continue
+		}
+		g.scheduleSleepTimer(serviceActivityKey(route.ServiceID), route.ServiceID, route.SleepAfterSeconds)
+	}
+}
+
+func (g *Gateway) scheduleSleepTimer(key string, serviceID string, sleepAfterSeconds int) {
+	activity := g.activity(key)
+	activity.mu.Lock()
+	defer activity.mu.Unlock()
+	if activity.activeRequests > 0 || activity.sleepTimer != nil {
+		return
+	}
+	delay := sleepDelay(sleepAfterSeconds)
+	activity.sleepTimer = time.AfterFunc(delay, func() {
+		g.sleepService(serviceID)
+	})
+}
+
+func (g *Gateway) activity(key string) *activityState {
 	g.activityMu.Lock()
 	defer g.activityMu.Unlock()
 
-	activity, ok := g.activities[host]
+	activity, ok := g.activities[key]
 	if !ok {
 		activity = &activityState{}
-		g.activities[host] = activity
+		g.activities[key] = activity
 	}
 	return activity
 }
 
-func (g *Gateway) beginActivity(host string) {
-	activity := g.activity(host)
+func (g *Gateway) beginActivity(key string) {
+	activity := g.activity(key)
 	activity.mu.Lock()
 	defer activity.mu.Unlock()
 
@@ -450,8 +607,8 @@ func (g *Gateway) beginActivity(host string) {
 	activity.activeRequests += 1
 }
 
-func (g *Gateway) endActivity(host string) {
-	activity := g.activity(host)
+func (g *Gateway) endActivity(key string, serviceID string, sleepAfterSeconds int) {
+	activity := g.activity(key)
 	activity.mu.Lock()
 	defer activity.mu.Unlock()
 
@@ -462,31 +619,34 @@ func (g *Gateway) endActivity(host string) {
 		return
 	}
 
-	route := findRoute(g.runtime.ExpectedState(), host)
-	if route == nil {
-		return
-	}
-	delay := time.Duration(route.SleepAfterSeconds) * time.Second
-	if delay <= 0 {
-		delay = 5 * time.Minute
-	}
 	if activity.sleepTimer != nil {
 		activity.sleepTimer.Stop()
 	}
+	delay := sleepDelay(sleepAfterSeconds)
 	activity.sleepTimer = time.AfterFunc(delay, func() {
-		g.sleepHost(host)
+		g.sleepService(serviceID)
 	})
 }
 
 func (g *Gateway) sleepHost(host string) {
-	activity := g.activity(host)
+	route := findRoute(g.runtime.ExpectedState(), host)
+	if route == nil {
+		log.Printf("[serverless-gateway] sleep skipped host=%s reason=missing_route_metadata", host)
+		return
+	}
+	g.sleepService(route.ServiceID)
+}
+
+func (g *Gateway) sleepService(serviceID string) {
+	activityKey := serviceActivityKey(serviceID)
+	activity := g.activity(activityKey)
 	activity.mu.Lock()
 	if activity.activeRequests > 0 {
 		activeRequests := activity.activeRequests
 		activity.mu.Unlock()
 		log.Printf(
-			"[serverless-gateway] sleep skipped host=%s reason=active_requests active=%d",
-			host,
+			"[serverless-gateway] sleep skipped service=%s reason=active_requests active=%d",
+			serviceID,
 			activeRequests,
 		)
 		return
@@ -495,31 +655,32 @@ func (g *Gateway) sleepHost(host string) {
 	activity.mu.Unlock()
 
 	state := g.runtime.ExpectedState()
-	route := findRoute(state, host)
+	route := findRouteByServiceID(state, serviceID)
 	if route == nil {
-		log.Printf("[serverless-gateway] sleep skipped host=%s reason=missing_route_metadata", host)
+		log.Printf("[serverless-gateway] sleep skipped service=%s reason=missing_route_metadata", serviceID)
 		return
 	}
+	localDeploymentIDs := localDeploymentIDsForService(state, serviceID)
 	log.Printf(
-		"[serverless-gateway] sleep timer fired host=%s deployments=%d",
-		host,
-		len(route.LocalDeploymentIDs),
+		"[serverless-gateway] sleep timer fired service=%s deployments=%d",
+		serviceID,
+		len(localDeploymentIDs),
 	)
 
 	actualContainers, err := g.runtime.ListServerlessContainers()
 	if err != nil {
-		log.Printf("[serverless-gateway] failed to list containers before sleep for %s: %v", host, err)
+		log.Printf("[serverless-gateway] failed to list containers before sleep for service %s: %v", serviceID, err)
 		return
 	}
 
 	expectedByDeploymentID := expectedContainersByDeploymentID(state)
 	actualByDeploymentID := actualContainersByDeploymentID(actualContainers)
-	for _, deploymentID := range route.LocalDeploymentIDs {
+	for _, deploymentID := range localDeploymentIDs {
 		expected, ok := expectedByDeploymentID[deploymentID]
 		if !ok {
 			log.Printf(
-				"[serverless-gateway] sleep skipped host=%s deployment=%s reason=missing_expected_state",
-				host,
+				"[serverless-gateway] sleep skipped service=%s deployment=%s reason=missing_expected_state",
+				serviceID,
 				deploymentID,
 			)
 			continue
@@ -531,10 +692,18 @@ func (g *Gateway) sleepHost(host string) {
 				reason = "container_not_running"
 			}
 			log.Printf(
-				"[serverless-gateway] sleep skipped host=%s deployment=%s reason=%s",
-				host,
+				"[serverless-gateway] sleep skipped service=%s deployment=%s reason=%s",
+				serviceID,
 				deploymentID,
 				reason,
+			)
+			continue
+		}
+		if expected.DesiredState != "stopped" && !g.isContainerReady(actual, expected) {
+			log.Printf(
+				"[serverless-gateway] sleep skipped service=%s deployment=%s reason=container_not_ready",
+				serviceID,
+				deploymentID,
 			)
 			continue
 		}
@@ -544,8 +713,8 @@ func (g *Gateway) sleepHost(host string) {
 			activeRequests := activity.activeRequests
 			activity.mu.Unlock()
 			log.Printf(
-				"[serverless-gateway] sleep skipped host=%s deployment=%s reason=active_requests active=%d",
-				host,
+				"[serverless-gateway] sleep skipped service=%s deployment=%s reason=active_requests active=%d",
+				serviceID,
 				deploymentID,
 				activeRequests,
 			)
@@ -554,10 +723,9 @@ func (g *Gateway) sleepHost(host string) {
 		sleepStartedAt := time.Now()
 		if expected.DesiredState != "stopped" {
 			log.Printf(
-				"[serverless-gateway] sleep starting host=%s deployment=%s service=%s container=%s",
-				host,
+				"[serverless-gateway] sleep starting service=%s deployment=%s container=%s",
+				serviceID,
 				deploymentID,
-				expected.ServiceID,
 				actual.ID,
 			)
 			g.runtime.QueueServerlessTransition(agenthttp.ServerlessTransition{
@@ -567,38 +735,35 @@ func (g *Gateway) sleepHost(host string) {
 			})
 		} else {
 			log.Printf(
-				"[serverless-gateway] sleep cleanup starting host=%s deployment=%s service=%s container=%s reason=already_expected_stopped",
-				host,
+				"[serverless-gateway] sleep cleanup starting service=%s deployment=%s container=%s reason=already_expected_stopped",
+				serviceID,
 				deploymentID,
-				expected.ServiceID,
 				actual.ID,
 			)
 		}
 		if err := g.runtime.RemoveServerlessContainer(actual.ID); err != nil {
 			activity.mu.Unlock()
 			log.Printf(
-				"[serverless-gateway] sleep failed host=%s deployment=%s service=%s container=%s latency=%s error=%v",
-				host,
+				"[serverless-gateway] sleep failed service=%s deployment=%s container=%s latency=%s error=%v",
+				serviceID,
 				deploymentID,
-				expected.ServiceID,
 				actual.ID,
 				roundDuration(time.Since(sleepStartedAt)),
 				err,
 			)
 			continue
 		}
-		g.evictUpstreams(host)
+		g.evictServiceUpstreams(serviceID)
 		activity.mu.Unlock()
 		log.Printf(
-			"[serverless-gateway] sleep complete host=%s deployment=%s service=%s container=%s latency=%s",
-			host,
+			"[serverless-gateway] sleep complete service=%s deployment=%s container=%s latency=%s",
+			serviceID,
 			deploymentID,
-			expected.ServiceID,
 			actual.ID,
 			roundDuration(time.Since(sleepStartedAt)),
 		)
 	}
-	g.evictUpstreams(host)
+	g.evictServiceUpstreams(serviceID)
 }
 
 func (g *Gateway) stopAllActivities() {
@@ -630,6 +795,39 @@ func findRoute(state *agenthttp.ExpectedState, host string) *agenthttp.Serverles
 		}
 	}
 	return nil
+}
+
+func findRouteByServiceID(state *agenthttp.ExpectedState, serviceID string) *agenthttp.ServerlessRoute {
+	if state == nil {
+		return nil
+	}
+	for i := range state.Serverless.Routes {
+		if state.Serverless.Routes[i].ServiceID == serviceID {
+			return &state.Serverless.Routes[i]
+		}
+	}
+	return nil
+}
+
+func localDeploymentIDsForService(state *agenthttp.ExpectedState, serviceID string) []string {
+	if state == nil {
+		return nil
+	}
+	ids := map[string]struct{}{}
+	for _, route := range state.Serverless.Routes {
+		if route.ServiceID != serviceID {
+			continue
+		}
+		for _, deploymentID := range route.LocalDeploymentIDs {
+			ids[deploymentID] = struct{}{}
+		}
+	}
+	deploymentIDs := make([]string, 0, len(ids))
+	for deploymentID := range ids {
+		deploymentIDs = append(deploymentIDs, deploymentID)
+	}
+	sort.Strings(deploymentIDs)
+	return deploymentIDs
 }
 
 func expectedContainersByDeploymentID(state *agenthttp.ExpectedState) map[string]agenthttp.ExpectedContainer {
@@ -683,6 +881,15 @@ func hasAlwaysOnUpstream(upstreams []agenthttp.ServerlessUpstream) bool {
 	return false
 }
 
+func hasRunningLocalDeployment(deploymentIDs []string, actualByDeploymentID map[string]container.Container) bool {
+	for _, deploymentID := range deploymentIDs {
+		if actual, ok := actualByDeploymentID[deploymentID]; ok && actual.State == "running" {
+			return true
+		}
+	}
+	return false
+}
+
 func sortUpstreams(upstreams []agenthttp.ServerlessUpstream) {
 	sort.Slice(upstreams, func(i, j int) bool {
 		return compareUpstream(upstreams[i], upstreams[j]) < 0
@@ -711,6 +918,18 @@ func wakeTimeout(wakeTimeoutSeconds int) time.Duration {
 		return 5 * time.Minute
 	}
 	return timeout
+}
+
+func sleepDelay(sleepAfterSeconds int) time.Duration {
+	delay := time.Duration(sleepAfterSeconds) * time.Second
+	if delay <= 0 {
+		return 5 * time.Minute
+	}
+	return delay
+}
+
+func serviceActivityKey(serviceID string) string {
+	return "service:" + serviceID
 }
 
 func roundDuration(duration time.Duration) time.Duration {

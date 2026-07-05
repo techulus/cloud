@@ -2,6 +2,7 @@ package agent
 
 import (
 	"log"
+	"sync"
 
 	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
@@ -20,7 +21,41 @@ func (a *Agent) ExpectedState() *agenthttp.ExpectedState {
 }
 
 func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) error {
-	return a.Reconciler.Deploy(expected)
+	return a.DeployExpectedContainer(expected)
+}
+
+func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) error {
+	return a.withDeploymentDeployLock(expected.DeploymentID, func() error {
+		containers, err := container.List()
+		if err == nil {
+			for _, actual := range containers {
+				if actual.DeploymentID != expected.DeploymentID || actual.State != "running" {
+					continue
+				}
+				if normalizeImage(actual.Image) == normalizeImage(expected.Image) {
+					return nil
+				}
+			}
+		}
+		return a.Reconciler.Deploy(expected)
+	})
+}
+
+func (a *Agent) withDeploymentDeployLock(deploymentID string, fn func() error) error {
+	a.deployLockMutex.Lock()
+	if a.deploymentDeployLocks == nil {
+		a.deploymentDeployLocks = map[string]*sync.Mutex{}
+	}
+	lock, ok := a.deploymentDeployLocks[deploymentID]
+	if !ok {
+		lock = &sync.Mutex{}
+		a.deploymentDeployLocks[deploymentID] = lock
+	}
+	a.deployLockMutex.Unlock()
+
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
 }
 
 func (a *Agent) RemoveServerlessContainer(containerID string) error {
