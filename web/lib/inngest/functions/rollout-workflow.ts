@@ -505,6 +505,14 @@ export const rolloutWorkflow = inngest.createFunction(
 		}
 
 		await step.run("start-dns-sync", async () => {
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+			const oldActiveStatuses = service.serverlessEnabled
+				? (["running", "healthy", "sleeping", "waking"] as const)
+				: (["running", "healthy"] as const);
+
 			await db
 				.update(rollouts)
 				.set({ currentStage: "dns_sync" })
@@ -526,7 +534,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				.where(
 					and(
 						eq(deployments.serviceId, serviceId),
-						inArray(deployments.status, ["running", "healthy"]),
+						inArray(deployments.status, oldActiveStatuses),
 						or(
 							ne(deployments.rolloutId, rolloutId),
 							isNull(deployments.rolloutId),
@@ -598,7 +606,19 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (isRollingUpdate) {
 			await step.run("stop-old-deployments", async () => {
-				const stoppedDeployments = await db
+				const stoppedDeploymentsWithoutContainers = await db
+					.update(deployments)
+					.set({ status: "stopped", desired: false })
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.status, "draining"),
+							isNull(deployments.containerId),
+						),
+					)
+					.returning({ id: deployments.id });
+
+				const stoppingDeployments = await db
 					.update(deployments)
 					.set({ status: "stopping", desired: false })
 					.where(
@@ -609,12 +629,15 @@ export const rolloutWorkflow = inngest.createFunction(
 					)
 					.returning({ id: deployments.id });
 
-				if (stoppedDeployments.length > 0) {
+				const stoppedCount =
+					stoppedDeploymentsWithoutContainers.length +
+					stoppingDeployments.length;
+				if (stoppedCount > 0) {
 					await ingestRolloutLog(
 						rolloutId,
 						serviceId,
 						"dns_sync",
-						`Stopping ${stoppedDeployments.length} old deployment(s) after DNS sync`,
+						`Stopping ${stoppedCount} old deployment(s) after DNS sync`,
 					);
 				}
 			});

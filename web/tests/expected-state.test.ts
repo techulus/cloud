@@ -188,6 +188,37 @@ describe("expected-state pure builders", () => {
 		});
 	});
 
+	it("keeps drained serverless deployments without containers stopped", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_draining",
+					serviceId: "svc_public",
+					ipAddress: "10.0.0.10",
+					status: "draining",
+					containerId: null,
+				},
+			] as any,
+			services: [
+				{
+					id: "svc_public",
+					name: "public-api",
+					image: "nginx",
+					serverlessEnabled: true,
+				},
+			] as any,
+			deploymentPorts: [],
+			secrets: [],
+			volumes: [],
+			serverlessRoutableServiceIds: new Set(["svc_public"]),
+		});
+
+		expect(containers[0]).toMatchObject({
+			deploymentId: "dep_draining",
+			desiredState: "stopped",
+		});
+	});
+
 	it("routes owner proxy serverless HTTP services through the local wake gateway", () => {
 		const routes = buildTraefikRoutes({
 			serverId: "server_local",
@@ -394,6 +425,59 @@ describe("expected-state pure builders", () => {
 					},
 				],
 			},
+		]);
+	});
+
+	it("does not include draining serverless deployments as wakeable local deployments", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				{
+					id: "svc_1",
+					serverlessEnabled: true,
+					stateful: false,
+					serverlessSleepAfterSeconds: 300,
+					serverlessWakeTimeoutSeconds: 120,
+					serverlessMinReadyReplicas: 1,
+				},
+			] as any,
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_1",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "app.example.com",
+				},
+			] as any,
+			deployments: [
+				{
+					id: "dep_old",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					status: "draining",
+					serverIsProxy: true,
+				},
+				{
+					id: "dep_new",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.11",
+					status: "running",
+					serverIsProxy: true,
+				},
+			] as any,
+			containers: [
+				{ deploymentId: "dep_old", desiredState: "stopped" },
+				{ deploymentId: "dep_new", desiredState: "running" },
+			] as any,
+		});
+
+		expect(routes[0]?.localDeploymentIds).toEqual(["dep_new"]);
+		expect(routes[0]?.upstreams.map((upstream) => upstream.deploymentId)).toEqual([
+			"dep_new",
 		]);
 	});
 

@@ -33,6 +33,19 @@ export type DeploymentContext = {
 	isRollingUpdate: boolean;
 };
 
+export function isActiveDeploymentForRollout(
+	deployment: { status: string },
+	service: { serverlessEnabled?: boolean | null },
+) {
+	if (deployment.status === "running" || deployment.status === "healthy") {
+		return true;
+	}
+	return (
+		service.serverlessEnabled === true &&
+		(deployment.status === "sleeping" || deployment.status === "waking")
+	);
+}
+
 export function normalizeImage(image: string): string {
 	if (!image.includes("/")) {
 		return `docker.io/library/${image}`;
@@ -167,13 +180,18 @@ export async function validateServers(
 export async function prepareRollingUpdate(
 	serviceId: string,
 ): Promise<{ deploymentIds: string[] }> {
+	const service = await getService(serviceId);
+	if (!service) {
+		return { deploymentIds: [] };
+	}
+
 	const existingDeployments = await db
 		.select()
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
 	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" || d.status === "healthy",
+		(d) => isActiveDeploymentForRollout(d, service),
 	);
 
 	return { deploymentIds: runningDeployments.map((d) => d.id) };
@@ -464,7 +482,7 @@ export async function checkForRollingUpdate(
 		.where(eq(deployments.serviceId, serviceId));
 
 	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" || d.status === "healthy",
+		(d) => isActiveDeploymentForRollout(d, service),
 	);
 
 	return runningDeployments.length > 0;

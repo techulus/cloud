@@ -315,7 +315,8 @@ export function buildExpectedContainersFromRows({
 						serverIsProxy &&
 						service.serverlessEnabled &&
 						sleepableServiceIds.has(service.id) &&
-						dep.status === "sleeping"
+						(dep.status === "sleeping" ||
+							(dep.status === "draining" && !dep.containerId))
 							? "stopped"
 							: "running",
 					image: normalizeImage(service.image),
@@ -440,6 +441,7 @@ export function buildServerlessRoutesFromRows({
 					(deployment) =>
 						deployment.serverId === serverId &&
 						deployment.serverIsProxy &&
+						deployment.status !== "draining" &&
 						expectedDeploymentIds.has(deployment.id),
 				)
 				.map((deployment) => deployment.id)
