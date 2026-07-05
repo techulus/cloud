@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -111,6 +112,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	g.beginActivity(host)
+	defer g.endActivity(host)
+
 	upstreams, err := g.getUpstreams(r.Context(), host)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -126,9 +130,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-
-	g.beginActivity(host)
-	defer g.endActivity(host)
 
 	upstream := upstreams[g.nextIndex(len(upstreams))]
 	target, err := url.Parse("http://" + upstream.Url)
@@ -537,6 +538,19 @@ func (g *Gateway) sleepHost(host string) {
 			)
 			continue
 		}
+
+		activity.mu.Lock()
+		if activity.activeRequests > 0 {
+			activeRequests := activity.activeRequests
+			activity.mu.Unlock()
+			log.Printf(
+				"[serverless-gateway] sleep skipped host=%s deployment=%s reason=active_requests active=%d",
+				host,
+				deploymentID,
+				activeRequests,
+			)
+			return
+		}
 		sleepStartedAt := time.Now()
 		if expected.DesiredState != "stopped" {
 			log.Printf(
@@ -561,6 +575,7 @@ func (g *Gateway) sleepHost(host string) {
 			)
 		}
 		if err := g.runtime.RemoveServerlessContainer(actual.ID); err != nil {
+			activity.mu.Unlock()
 			log.Printf(
 				"[serverless-gateway] sleep failed host=%s deployment=%s service=%s container=%s latency=%s error=%v",
 				host,
@@ -572,6 +587,8 @@ func (g *Gateway) sleepHost(host string) {
 			)
 			continue
 		}
+		g.evictUpstreams(host)
+		activity.mu.Unlock()
 		log.Printf(
 			"[serverless-gateway] sleep complete host=%s deployment=%s service=%s container=%s latency=%s",
 			host,
@@ -667,13 +684,9 @@ func hasAlwaysOnUpstream(upstreams []agenthttp.ServerlessUpstream) bool {
 }
 
 func sortUpstreams(upstreams []agenthttp.ServerlessUpstream) {
-	for i := 0; i < len(upstreams); i++ {
-		for j := i + 1; j < len(upstreams); j++ {
-			if compareUpstream(upstreams[j], upstreams[i]) < 0 {
-				upstreams[i], upstreams[j] = upstreams[j], upstreams[i]
-			}
-		}
-	}
+	sort.Slice(upstreams, func(i, j int) bool {
+		return compareUpstream(upstreams[i], upstreams[j]) < 0
+	})
 }
 
 func compareUpstream(a, b agenthttp.ServerlessUpstream) int {

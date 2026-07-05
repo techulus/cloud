@@ -19,6 +19,7 @@ type fakeRuntime struct {
 	removed     []string
 	deployCalls int
 	deployErr   error
+	afterList   func()
 }
 
 func (f *fakeRuntime) ExpectedState() *agenthttp.ExpectedState {
@@ -59,8 +60,13 @@ func (f *fakeRuntime) RemoveServerlessContainer(containerID string) error {
 
 func (f *fakeRuntime) ListServerlessContainers() ([]container.Container, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]container.Container(nil), f.containers...), nil
+	containers := append([]container.Container(nil), f.containers...)
+	afterList := f.afterList
+	f.mu.Unlock()
+	if afterList != nil {
+		afterList()
+	}
+	return containers, nil
 }
 
 func (f *fakeRuntime) GetServerlessContainerHealth(containerID string) string {
@@ -166,6 +172,30 @@ func TestSleepHostRemovesLocalContainerAndReportsSleep(t *testing.T) {
 	}
 	if transitions[0].Type != "sleep" || transitions[0].DeploymentID != "dep_local" || transitions[0].ContainerID != "ctr-local" {
 		t.Fatalf("transition = %+v, want sleep for dep_local/ctr-local", transitions[0])
+	}
+}
+
+func TestSleepHostRechecksActivityBeforeRemovingContainer(t *testing.T) {
+	state := testExpectedState("running")
+	runtime := &fakeRuntime{
+		state: state,
+		containers: []container.Container{
+			{ID: "ctr-local", State: "running", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+	}
+	gateway := NewGateway(runtime)
+	runtime.afterList = func() {
+		gateway.beginActivity("app.example.com")
+	}
+
+	gateway.sleepHost("app.example.com")
+
+	transitions, removed, _ := runtime.snapshot()
+	if len(removed) != 0 {
+		t.Fatalf("removed = %+v, want no removals while request is active", removed)
+	}
+	if len(transitions) != 0 {
+		t.Fatalf("transitions = %+v, want no sleep transition while request is active", transitions)
 	}
 }
 

@@ -41,10 +41,21 @@ func (a *Agent) QueueServerlessTransition(transition agenthttp.ServerlessTransit
 	}
 
 	a.serverlessMutex.Lock()
-	if transition.Type == "sleep" {
+	if a.pendingServerlessSleep == nil {
+		a.pendingServerlessSleep = map[string]struct{}{}
+	}
+	if a.pendingServerlessWake == nil {
+		a.pendingServerlessWake = map[string]struct{}{}
+	}
+	switch transition.Type {
+	case "sleep":
 		a.pendingServerlessSleep[transition.DeploymentID] = struct{}{}
-	} else if transition.Type == "wake_started" {
+		delete(a.pendingServerlessWake, transition.DeploymentID)
+	case "wake_started":
 		delete(a.pendingServerlessSleep, transition.DeploymentID)
+		a.pendingServerlessWake[transition.DeploymentID] = struct{}{}
+	case "wake_failed":
+		delete(a.pendingServerlessWake, transition.DeploymentID)
 	}
 	a.pendingServerlessTransitions = append(
 		a.pendingServerlessTransitions,
@@ -81,8 +92,23 @@ func (a *Agent) HasPendingServerlessSleep(deploymentID string) bool {
 	return ok
 }
 
+func (a *Agent) HasPendingServerlessWake(deploymentID string) bool {
+	a.serverlessMutex.Lock()
+	defer a.serverlessMutex.Unlock()
+	_, ok := a.pendingServerlessWake[deploymentID]
+	return ok
+}
+
 func (a *Agent) ShouldSuppressServerlessContainerReport(deploymentID string) bool {
-	if a.HasPendingServerlessSleep(deploymentID) {
+	a.serverlessMutex.Lock()
+	_, pendingSleep := a.pendingServerlessSleep[deploymentID]
+	_, pendingWake := a.pendingServerlessWake[deploymentID]
+	a.serverlessMutex.Unlock()
+
+	if pendingWake {
+		return false
+	}
+	if pendingSleep {
 		return true
 	}
 
@@ -99,7 +125,7 @@ func (a *Agent) ShouldSuppressServerlessContainerReport(deploymentID string) boo
 	return false
 }
 
-func (a *Agent) ReconcilePendingServerlessSleepWithExpected(state *agenthttp.ExpectedState, fromCache bool) {
+func (a *Agent) ReconcilePendingServerlessTransitionsWithExpected(state *agenthttp.ExpectedState, fromCache bool) {
 	if state == nil || fromCache {
 		return
 	}
@@ -112,9 +138,13 @@ func (a *Agent) ReconcilePendingServerlessSleepWithExpected(state *agenthttp.Exp
 	a.serverlessMutex.Lock()
 	defer a.serverlessMutex.Unlock()
 	pendingSleepTransitions := map[string]struct{}{}
+	pendingWakeTransitions := map[string]struct{}{}
 	for _, transition := range a.pendingServerlessTransitions {
-		if transition.Type == "sleep" {
+		switch transition.Type {
+		case "sleep":
 			pendingSleepTransitions[transition.DeploymentID] = struct{}{}
+		case "wake_started":
+			pendingWakeTransitions[transition.DeploymentID] = struct{}{}
 		}
 	}
 
@@ -128,16 +158,15 @@ func (a *Agent) ReconcilePendingServerlessSleepWithExpected(state *agenthttp.Exp
 			log.Printf("[serverless] sleep transition for deployment %s is not reflected in expected state; allowing reconcile", Truncate(deploymentID, 8))
 		}
 	}
-}
 
-func (a *Agent) QueueServerlessWakeFailure(deploymentID string, err error) {
-	if err == nil {
-		return
+	for deploymentID := range a.pendingServerlessWake {
+		if _, stillReporting := pendingWakeTransitions[deploymentID]; stillReporting {
+			continue
+		}
+		delete(a.pendingServerlessWake, deploymentID)
+		desiredState, ok := desiredByDeploymentID[deploymentID]
+		if !ok || desiredState != "running" {
+			log.Printf("[serverless] wake transition for deployment %s is not reflected in expected state; allowing reconcile", Truncate(deploymentID, 8))
+		}
 	}
-	log.Printf("[serverless] wake failed for deployment %s: %v", Truncate(deploymentID, 8), err)
-	a.QueueServerlessTransition(agenthttp.ServerlessTransition{
-		Type:         "wake_failed",
-		DeploymentID: deploymentID,
-		Error:        err.Error(),
-	})
 }
