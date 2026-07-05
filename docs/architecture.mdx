@@ -242,9 +242,15 @@ sequenceDiagram
     Gateway->>Container: Proxy original request
 ```
 
-Proxy Traefik routes point to the local wake gateway only when a service has at
-least one proxy-hosted serverless deployment. Worker-only serverless services use
-normal direct routes because there is nothing local to wake.
+Proxy Traefik routes point to the local wake gateway only on proxy nodes that
+host a local proxy deployment for that serverless service. Non-owner proxies do
+not emit a public HTTP route for that service, even when always-on worker
+upstreams exist. Worker-only serverless services use normal direct routes because
+there is nothing local to wake.
+
+Public DNS or external load balancers must therefore send serverless traffic only
+to proxy nodes that own a local proxy replica for that service. Cross-proxy wake
+coordination is intentionally out of scope.
 
 The wake gateway keeps the incoming request open while it starts local proxy
 replicas, unless an always-on worker upstream is already ready. `Min Ready`

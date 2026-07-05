@@ -188,7 +188,7 @@ describe("expected-state pure builders", () => {
 		});
 	});
 
-	it("routes serverless HTTP services through the local wake gateway", () => {
+	it("routes owner proxy serverless HTTP services through the local wake gateway", () => {
 		const routes = buildTraefikRoutes({
 			serverId: "server_local",
 			ports: [
@@ -213,6 +213,117 @@ describe("expected-state pure builders", () => {
 				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
 			},
 		]);
+	});
+
+	it("omits serverless HTTP routes on non-owner proxies", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_2",
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_serverless",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "sleepy.example.com",
+				},
+			] as any,
+			routableDeployments: [],
+			serverlessRouteSuppressedServiceIds: new Set(["svc_serverless"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([]);
+	});
+
+	it("keeps worker-only serverless services on direct routes", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_1",
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_worker_only",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "worker-only.example.com",
+				},
+			] as any,
+			routableDeployments: [
+				{
+					serviceId: "svc_worker_only",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.20",
+				},
+			] as any,
+		});
+
+		expect(routes.httpRoutes).toEqual([
+			{
+				id: "worker-only.example.com",
+				domain: "worker-only.example.com",
+				serviceId: "svc_worker_only",
+				upstreams: [{ url: "10.0.0.20:3000", weight: 1 }],
+			},
+		]);
+	});
+
+	it("routes mixed serverless services through the gateway on owner proxies", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_1",
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_mixed",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "mixed.example.com",
+				},
+			] as any,
+			routableDeployments: [
+				{
+					serviceId: "svc_mixed",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.30",
+				},
+			] as any,
+			serverlessServiceIds: new Set(["svc_mixed"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([
+			{
+				id: "mixed.example.com",
+				domain: "mixed.example.com",
+				serviceId: "svc_mixed",
+				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
+			},
+		]);
+	});
+
+	it("does not emit worker-direct fallback routes for non-owner mixed serverless services", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_2",
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_mixed",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "mixed.example.com",
+				},
+			] as any,
+			routableDeployments: [
+				{
+					serviceId: "svc_mixed",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.30",
+				},
+			] as any,
+			serverlessRouteSuppressedServiceIds: new Set(["svc_mixed"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([]);
 	});
 
 	it("builds proxy-local serverless metadata with always-on worker upstreams", () => {

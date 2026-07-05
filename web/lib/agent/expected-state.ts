@@ -547,9 +547,12 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 							),
 						)
 				: Promise.resolve([]),
-			supportsServerlessGateway && serviceIds.length > 0
+			serviceIds.length > 0
 				? db
-						.select({ serviceId: deployments.serviceId })
+						.select({
+							serviceId: deployments.serviceId,
+							serverId: deployments.serverId,
+						})
 						.from(deployments)
 						.innerJoin(servers, eq(deployments.serverId, servers.id))
 						.where(
@@ -566,24 +569,39 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 	const proxyHostedServerlessServiceIds = new Set(
 		proxyHostedServerlessDeployments.map((deployment) => deployment.serviceId),
 	);
-	const serverlessServiceIds = supportsServerlessGateway
-		? new Set(
-				allServices
-					.filter(
-						(service) =>
-							!service.stateful &&
-							service.serverlessEnabled &&
-							proxyHostedServerlessServiceIds.has(service.id),
-					)
-					.map((service) => service.id),
+	const localProxyHostedServerlessServiceIds = new Set(
+		proxyHostedServerlessDeployments
+			.filter((deployment) => deployment.serverId === server.id)
+			.map((deployment) => deployment.serviceId),
+	);
+	const serverlessProxyRoutedServiceIds = new Set(
+		allServices
+			.filter(
+				(service) =>
+					!service.stateful &&
+					service.serverlessEnabled &&
+					proxyHostedServerlessServiceIds.has(service.id),
 			)
-		: new Set<string>();
+			.map((service) => service.id),
+	);
+	const serverlessServiceIds = new Set(
+		[...serverlessProxyRoutedServiceIds].filter((serviceId) =>
+			supportsServerlessGateway &&
+			localProxyHostedServerlessServiceIds.has(serviceId),
+		),
+	);
+	const serverlessRouteSuppressedServiceIds = new Set(
+		[...serverlessProxyRoutedServiceIds].filter(
+			(serviceId) => !serverlessServiceIds.has(serviceId),
+		),
+	);
 
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
 		ports,
 		routableDeployments,
 		serverlessServiceIds,
+		serverlessRouteSuppressedServiceIds,
 	});
 	const routedDomains = routes.httpRoutes.map((r) => r.domain);
 	const certificates = await getAllCertificatesForDomains(routedDomains);
@@ -611,11 +629,13 @@ export function buildTraefikRoutes({
 	ports,
 	routableDeployments,
 	serverlessServiceIds = new Set<string>(),
+	serverlessRouteSuppressedServiceIds = new Set<string>(),
 }: {
 	serverId: string;
 	ports: ServicePort[];
 	routableDeployments: RoutableDeploymentRow[];
 	serverlessServiceIds?: Set<string>;
+	serverlessRouteSuppressedServiceIds?: Set<string>;
 }) {
 	const httpRoutes: HttpRoute[] = [];
 	const tcpRoutes: TcpRoute[] = [];
@@ -638,6 +658,10 @@ export function buildTraefikRoutes({
 					],
 					serviceId: port.serviceId,
 				});
+				continue;
+			}
+
+			if (serverlessRouteSuppressedServiceIds.has(port.serviceId)) {
 				continue;
 			}
 

@@ -79,9 +79,15 @@ reports, the command can be retried up to the fixed attempt limit.
 ## Serverless Gateway
 
 Proxy agents run a local HTTP wake gateway on `127.0.0.1:18080`. The control
-plane emits Traefik routes to this gateway only when the service has a
-proxy-hosted serverless deployment. Worker-only serverless services keep normal
-direct routes because worker deployments do not sleep.
+plane emits Traefik routes to this gateway only on proxy nodes that host a local
+proxy deployment for that serverless service. Proxies without a local
+proxy-hosted deployment do not emit a public HTTP route for that service.
+Worker-only serverless services keep normal direct routes because worker
+deployments do not sleep.
+
+This means public DNS or external load balancers must route a serverless
+service's traffic only to proxy nodes that own a local proxy replica for that
+service.
 
 For serverless service traffic, Traefik forwards the public request to the local
 gateway. The gateway resolves the host from expected-state serverless metadata,

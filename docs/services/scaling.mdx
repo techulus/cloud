@@ -22,6 +22,11 @@ worker replicas, it stays always on and routes directly. If a service has both
 proxy and worker replicas, proxy replicas may sleep while worker replicas remain
 routable.
 
+For services with proxy-hosted serverless replicas, public traffic must be sent
+only to proxy nodes that host a local proxy replica for that service. Non-owner
+proxies do not emit a public HTTP route for the service, so DNS or the external
+load balancer must avoid those proxies for that service's domains.
+
 Serverless settings are configured per service:
 
 | Setting | Default | Description |
@@ -59,4 +64,5 @@ You can also manually lock any service to a specific server by setting the locke
 - Maximum 10 replicas per service.
 - Serverless scaling is supported only for stateless HTTP services with a public domain.
 - Sleep and wake are proxy-local. Worker replicas are intentionally always on.
+- Serverless traffic must be routed only to proxy nodes that own a local proxy replica for that service.
 - Proxy agents report sleep and wake transitions through normal status reports.
