@@ -567,9 +567,6 @@ export const deployments = pgTable(
 		rolloutId: text("rollout_id"),
 		previousDeploymentId: text("previous_deployment_id"),
 		failedStage: text("failed_stage"),
-		serverlessWakeStartedAt: timestamp("serverless_wake_started_at", {
-			withTimezone: true,
-		}),
 		serverlessWakeFailureCount: integer("serverless_wake_failure_count")
 			.notNull()
 			.default(0),
@@ -583,9 +580,6 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_server_id_idx").on(table.serverId),
 		index("deployments_status_idx").on(table.status),
-		index("deployments_serverless_wake_started_at_idx").on(
-			table.serverlessWakeStartedAt,
-		),
 	],
 );
 
@@ -643,8 +637,6 @@ export const workQueue = pgTable(
 				"backup_volume",
 				"restore_volume",
 				"create_manifest",
-				"sleep",
-				"wake",
 				"upgrade_agent",
 			],
 		}).notNull(),

@@ -231,7 +231,6 @@ async function applyServerlessTransitions(
 					status: "sleeping",
 					containerId: null,
 					healthStatus: null,
-					serverlessWakeStartedAt: null,
 					failedStage: null,
 				})
 				.where(
@@ -264,7 +263,6 @@ async function applyServerlessTransitions(
 					status: "waking",
 					containerId: null,
 					healthStatus: null,
-					serverlessWakeStartedAt: new Date(),
 					failedStage: null,
 				})
 				.where(
@@ -607,7 +605,6 @@ export async function applyStatusReport(
 						containerId: container.containerId,
 						status: newStatus,
 						healthStatus: hasHealthCheck ? "starting" : "none",
-						serverlessWakeStartedAt: null,
 						serverlessWakeFailureCount: 0,
 					})
 					.where(eq(deployments.id, stuckDeployment.id));
@@ -669,7 +666,6 @@ export async function applyStatusReport(
 			const newStatus = hasHealthCheck ? "starting" : "healthy";
 			updateFields.status = newStatus;
 			if (deployment.status === "waking") {
-				updateFields.serverlessWakeStartedAt = null;
 				updateFields.serverlessWakeFailureCount = 0;
 			}
 			if (hasHealthCheck) {

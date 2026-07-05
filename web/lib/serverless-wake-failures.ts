@@ -15,7 +15,6 @@ export function getServerlessWakeFailureUpdate({
 	const baseUpdate = {
 		containerId: null,
 		healthStatus: null,
-		serverlessWakeStartedAt: null,
 		serverlessWakeFailureCount: nextFailureCount,
 	};
 
