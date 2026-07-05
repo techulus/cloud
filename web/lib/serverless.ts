@@ -853,8 +853,9 @@ async function resetTimedOutWakingDeployments({
 				),
 			);
 
+		let resetCount = 0;
 		for (const deployment of timedOutDeployments) {
-			await tx
+			const updated = await tx
 				.update(deployments)
 				.set(
 					getServerlessWakeFailureUpdate({
@@ -863,10 +864,18 @@ async function resetTimedOutWakingDeployments({
 						failedStage: "serverless_wake_timeout",
 					}),
 				)
-				.where(eq(deployments.id, deployment.id));
+				.where(
+					and(
+						eq(deployments.id, deployment.id),
+						eq(deployments.status, "waking"),
+						eq(deployments.desired, true),
+					),
+				)
+				.returning({ id: deployments.id });
+			resetCount += updated.length;
 		}
 
-		return timedOutDeployments.length;
+		return resetCount;
 	});
 }
 
