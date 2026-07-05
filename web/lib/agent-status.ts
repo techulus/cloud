@@ -42,6 +42,10 @@ export type ServerlessTransition =
 	| { type: "wake_started"; deploymentId: string }
 	| { type: "wake_failed"; deploymentId: string; error: string };
 
+export function shouldAttachReportedContainer(status: string) {
+	return status === "pending" || status === "pulling" || status === "waking";
+}
+
 function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
@@ -650,12 +654,7 @@ export async function applyStatusReport(
 			updateFields.containerId = container.containerId;
 		}
 
-		if (
-			deployment.status === "pending" ||
-			deployment.status === "pulling" ||
-			deployment.status === "waking" ||
-			deployment.status === "sleeping"
-		) {
+		if (shouldAttachReportedContainer(deployment.status)) {
 			if (container.status !== "running") {
 				continue;
 			}
