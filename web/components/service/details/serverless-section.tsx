@@ -166,6 +166,11 @@ export const ServerlessSection = memo(function ServerlessSection({
 					</div>
 				</div>
 
+				<p className="text-sm text-muted-foreground">
+					Containers scale down to zero when idle and wake on traffic. Requests
+					while sleeping are queued and served after the container is ready.
+				</p>
+
 				{validationError && (
 					<p className="text-xs text-destructive">{validationError}</p>
 				)}
