@@ -18,18 +18,25 @@ import (
 )
 
 const (
-	GatewayPort               = 18080
-	activityHeartbeatInterval = 60 * time.Second
-	upstreamCacheTTL          = 10 * time.Second
+	GatewayPort      = 18080
+	upstreamCacheTTL = 10 * time.Second
+)
+
+var (
+	activityFinishDebounceInterval = 30 * time.Second
+	activityHeartbeatInterval      = 60 * time.Second
 )
 
 type Gateway struct {
-	client        *agenthttp.Client
-	counter       uint64
-	server        *http.Server
-	mu            sync.Mutex
+	client     controlPlaneClient
+	counter    uint64
+	server     *http.Server
+	mu         sync.Mutex
+	activityMu sync.Mutex
+
 	upstreamCache map[string]cachedUpstreams
 	wakeCalls     map[string]*wakeCall
+	activities    map[string]*activityState
 }
 
 type cachedUpstreams struct {
@@ -43,11 +50,25 @@ type wakeCall struct {
 	err    error
 }
 
-func NewGateway(client *agenthttp.Client) *Gateway {
+type controlPlaneClient interface {
+	WakeServerlessService(host string) (*agenthttp.ServerlessWakeResult, error)
+	RecordServerlessActivity(host, event string) error
+}
+
+type activityState struct {
+	mu             sync.Mutex
+	activeRequests int
+	started        bool
+	finishTimer    *time.Timer
+	stopHeartbeat  chan struct{}
+}
+
+func NewGateway(client controlPlaneClient) *Gateway {
 	return &Gateway{
 		client:        client,
 		upstreamCache: map[string]cachedUpstreams{},
 		wakeCalls:     map[string]*wakeCall{},
+		activities:    map[string]*activityState{},
 	}
 }
 
@@ -65,6 +86,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+		g.stopAllActivities()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := g.server.Shutdown(shutdownCtx); err != nil {
@@ -105,16 +127,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := g.client.RecordServerlessActivity(host, "start"); err != nil {
-		log.Printf("[serverless-gateway] failed to record request start for %s: %v", host, err)
+	if err := g.beginActivity(host); err != nil {
+		log.Printf("[serverless-gateway] failed to record activity start for %s: %v", host, err)
 	}
-	activityDone := make(chan struct{})
-	go g.recordActivityHeartbeats(host, activityDone)
 	defer func() {
-		close(activityDone)
-		if err := g.client.RecordServerlessActivity(host, "finish"); err != nil {
-			log.Printf("[serverless-gateway] failed to record request finish for %s: %v", host, err)
-		}
+		g.endActivity(host)
 	}()
 
 	upstream := upstreams[g.nextIndex(len(upstreams))]
@@ -223,6 +240,96 @@ func (g *Gateway) evictUpstreams(host string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.upstreamCache, host)
+}
+
+func (g *Gateway) activity(host string) *activityState {
+	g.activityMu.Lock()
+	defer g.activityMu.Unlock()
+
+	activity, ok := g.activities[host]
+	if !ok {
+		activity = &activityState{}
+		g.activities[host] = activity
+	}
+	return activity
+}
+
+func (g *Gateway) beginActivity(host string) error {
+	activity := g.activity(host)
+	activity.mu.Lock()
+	defer activity.mu.Unlock()
+
+	if activity.finishTimer != nil {
+		activity.finishTimer.Stop()
+		activity.finishTimer = nil
+	}
+
+	activity.activeRequests += 1
+	if activity.started {
+		return nil
+	}
+
+	activity.started = true
+	activity.stopHeartbeat = make(chan struct{})
+	go g.recordActivityHeartbeats(host, activity.stopHeartbeat)
+
+	return g.client.RecordServerlessActivity(host, "start")
+}
+
+func (g *Gateway) endActivity(host string) {
+	activity := g.activity(host)
+	activity.mu.Lock()
+	defer activity.mu.Unlock()
+
+	if activity.activeRequests > 0 {
+		activity.activeRequests -= 1
+	}
+	if activity.activeRequests > 0 || !activity.started {
+		return
+	}
+
+	if activity.finishTimer != nil {
+		activity.finishTimer.Stop()
+	}
+	activity.finishTimer = time.AfterFunc(activityFinishDebounceInterval, func() {
+		g.finishActivity(host, activity)
+	})
+}
+
+func (g *Gateway) finishActivity(host string, activity *activityState) {
+	var err error
+
+	activity.mu.Lock()
+	if activity.activeRequests > 0 || !activity.started {
+		activity.mu.Unlock()
+		return
+	}
+
+	activity.finishTimer = nil
+	if activity.stopHeartbeat != nil {
+		close(activity.stopHeartbeat)
+		activity.stopHeartbeat = nil
+	}
+	activity.started = false
+	err = g.client.RecordServerlessActivity(host, "finish")
+	activity.mu.Unlock()
+
+	if err != nil {
+		log.Printf("[serverless-gateway] failed to record activity finish for %s: %v", host, err)
+	}
+}
+
+func (g *Gateway) stopAllActivities() {
+	g.activityMu.Lock()
+	activities := make(map[string]*activityState, len(g.activities))
+	for host, activity := range g.activities {
+		activities[host] = activity
+	}
+	g.activityMu.Unlock()
+
+	for host, activity := range activities {
+		g.finishActivity(host, activity)
+	}
 }
 
 func (g *Gateway) recordActivityHeartbeats(host string, done <-chan struct{}) {

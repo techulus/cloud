@@ -93,6 +93,12 @@ The gateway keeps a short upstream cache and collapses concurrent wake requests
 for the same host. Request cancellation is respected while waiting for a shared
 wake result.
 
+The gateway also debounces request activity before reporting it to the control
+plane. It records one `start` when a host enters an active traffic window,
+heartbeats while the window remains active, and records `finish` only after a
+short quiet period. Individual proxied requests do not each write start and
+finish activity rows.
+
 Sleep work is intentionally conservative. Before removing a local container, the
 agent fetches fresh expected state and verifies that the deployment still wants
 `desiredState: "stopped"`. Cached expected state is not enough to remove a
