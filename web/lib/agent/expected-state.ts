@@ -88,6 +88,7 @@ type DeploymentPortRow = {
 	hostPort: number;
 	containerPort: number;
 };
+const SERVERLESS_GATEWAY_CAPABILITY = "serverless_gateway";
 
 type SecretRow = {
 	serviceId: string;
@@ -311,6 +312,10 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 	if (!server.isProxy) return emptyConfig;
 
 	const serviceIds = allServices.map((service) => service.id);
+	const supportsServerlessGateway = hasAgentCapability(
+		server,
+		SERVERLESS_GATEWAY_CAPABILITY,
+	);
 	const [ports, routableDeployments, wakeRoutedDeployments] = await Promise.all(
 		[
 			serviceIds.length > 0
@@ -335,7 +340,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 							),
 						)
 				: Promise.resolve([]),
-			serviceIds.length > 0
+			supportsServerlessGateway && serviceIds.length > 0
 				? db
 						.select({ serviceId: deployments.serviceId })
 						.from(deployments)
@@ -352,20 +357,24 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 	const wakeRoutedServiceIds = new Set(
 		wakeRoutedDeployments.map((deployment) => deployment.serviceId),
 	);
+	const serverlessServiceIds = supportsServerlessGateway
+		? new Set(
+				allServices
+					.filter(
+						(service) =>
+							!service.stateful &&
+							(service.serverlessEnabled ||
+								wakeRoutedServiceIds.has(service.id)),
+					)
+					.map((service) => service.id),
+			)
+		: new Set<string>();
 
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
 		ports,
 		routableDeployments,
-		serverlessServiceIds: new Set(
-			allServices
-				.filter(
-					(service) =>
-						!service.stateful &&
-						(service.serverlessEnabled || wakeRoutedServiceIds.has(service.id)),
-				)
-				.map((service) => service.id),
-		),
+		serverlessServiceIds,
 	});
 	const routedDomains = routes.httpRoutes.map((r) => r.domain);
 	const certificates = await getAllCertificatesForDomains(routedDomains);
@@ -382,6 +391,10 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		certificates,
 		challengeRoute: controlPlaneUrl ? { controlPlaneUrl } : undefined,
 	};
+}
+
+function hasAgentCapability(server: Server, capability: string) {
+	return server.agentHealth?.capabilities?.includes(capability) === true;
 }
 
 export function buildTraefikRoutes({

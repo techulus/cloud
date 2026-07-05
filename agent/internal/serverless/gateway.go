@@ -2,6 +2,7 @@ package serverless
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -88,8 +89,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreams, err := g.getUpstreams(host)
+	upstreams, err := g.getUpstreams(r.Context(), host)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
 		log.Printf("[serverless-gateway] wake failed for host %s: %v", host, err)
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
@@ -138,18 +142,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-func (g *Gateway) getUpstreams(host string) ([]agenthttp.ServerlessUpstream, error) {
+func (g *Gateway) getUpstreams(ctx context.Context, host string) ([]agenthttp.ServerlessUpstream, error) {
 	if upstreams, ok := g.cachedUpstreams(host); ok {
 		return upstreams, nil
 	}
 
 	call, owner := g.beginWake(host)
 	if owner {
-		result, err := g.client.WakeServerlessService(host)
-		g.finishWake(host, call, result, err)
+		go func() {
+			result, err := g.client.WakeServerlessService(host)
+			g.finishWake(host, call, result, err)
+		}()
 	}
 
-	<-call.done
+	select {
+	case <-call.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	if call.err != nil {
 		return nil, call.err
 	}

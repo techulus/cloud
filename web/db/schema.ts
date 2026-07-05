@@ -272,6 +272,7 @@ export type ContainerHealth = {
 export type AgentHealth = {
 	version: string;
 	uptimeSecs: number;
+	capabilities?: string[];
 };
 
 export type AgentUpgradeStatus =
@@ -569,6 +570,9 @@ export const deployments = pgTable(
 		serverlessWakeStartedAt: timestamp("serverless_wake_started_at", {
 			withTimezone: true,
 		}),
+		serverlessWakeFailureCount: integer("serverless_wake_failure_count")
+			.notNull()
+			.default(0),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

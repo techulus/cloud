@@ -21,7 +21,7 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 
 const READY_DEPLOYMENT_STATUSES = ["healthy", "running"] as const;
 const WAKE_IN_PROGRESS_STATUSES = [
@@ -371,18 +371,29 @@ export async function wakeServerlessService({
 					eq(deployments.status, "sleeping"),
 				),
 			);
+		const currentWakingDeployments = await countWakeInProgressDeployments(
+			tx,
+			serviceId,
+		);
 
-		if (readyDeployments.length === 0 && wakeableDeployments.length === 0) {
-			const wakingDeployments = await countWakeInProgressDeployments(
-				tx,
-				serviceId,
-			);
+		if (wakeableDeployments.length === 0) {
+			if (readyDeployments.length > 0 && currentWakingDeployments === 0) {
+				return {
+					status: "ready",
+					serviceId,
+					readyDeployments,
+					upstreams: buildUpstreams(readyDeployments, targetPort),
+					wakingDeployments: 0,
+					queuedWakeServers: 0,
+					minReadyReplicas,
+				};
+			}
 			return {
-				status: wakingDeployments > 0 ? "waking" : "no_deployments",
+				status: currentWakingDeployments > 0 ? "waking" : "no_deployments",
 				serviceId,
 				readyDeployments,
 				upstreams: [],
-				wakingDeployments,
+				wakingDeployments: currentWakingDeployments,
 				queuedWakeServers: 0,
 				minReadyReplicas,
 			};
@@ -470,6 +481,37 @@ export async function wakeAndWaitForServerlessService({
 				timedOut: false,
 			};
 		}
+		const wakingDeployments = await countWakeInProgressDeployments(
+			db,
+			serviceId,
+		);
+		if (targetPort && readyDeployments.length > 0 && wakingDeployments === 0) {
+			return {
+				...wakeResult,
+				status: "ready",
+				readyDeployments,
+				upstreams: buildUpstreams(readyDeployments, targetPort),
+				wakingDeployments,
+				timedOut: false,
+			};
+		}
+	}
+
+	const readyDeployments = await getReadyDeployments(db, serviceId);
+	if (targetPort && readyDeployments.length > 0) {
+		return {
+			...wakeResult,
+			status: "ready",
+			readyDeployments,
+			upstreams: buildUpstreams(readyDeployments, targetPort),
+			wakingDeployments: await countWakeInProgressDeployments(db, serviceId),
+			timedOut: false,
+		};
+	}
+
+	const service = await getServerlessService(db, serviceId);
+	if (service) {
+		await resetTimedOutWakingDeployments({ service, now: new Date() });
 	}
 
 	return { ...wakeResult, timedOut: true };
@@ -790,9 +832,12 @@ async function resetTimedOutWakingDeployments({
 		const timeoutCutoff = new Date(
 			now.getTime() - getWakeTimeoutSecondsForService(service) * 1000,
 		);
-		const timedOut = await tx
-			.update(deployments)
-			.set(getTimedOutWakeUpdate(service))
+		const timedOutDeployments = await tx
+			.select({
+				id: deployments.id,
+				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
+			})
+			.from(deployments)
 			.where(
 				and(
 					eq(deployments.serviceId, service.id),
@@ -806,32 +851,23 @@ async function resetTimedOutWakingDeployments({
 						),
 					),
 				),
-			)
-			.returning({ id: deployments.id });
+			);
 
-		return timedOut.length;
+		for (const deployment of timedOutDeployments) {
+			await tx
+				.update(deployments)
+				.set(
+					getServerlessWakeFailureUpdate({
+						serverlessEnabled: service.serverlessEnabled,
+						currentFailureCount: deployment.serverlessWakeFailureCount,
+						failedStage: "serverless_wake_timeout",
+					}),
+				)
+				.where(eq(deployments.id, deployment.id));
+		}
+
+		return timedOutDeployments.length;
 	});
-}
-
-function getTimedOutWakeUpdate(service: ServerlessService) {
-	if (service.serverlessEnabled) {
-		return {
-			status: "sleeping" as const,
-			desired: true,
-			containerId: null,
-			failedStage: null,
-			healthStatus: null,
-			serverlessWakeStartedAt: null,
-		};
-	}
-
-	return {
-		...markDeploymentUndesired("failed"),
-		containerId: null,
-		failedStage: "serverless_wake_timeout",
-		healthStatus: null,
-		serverlessWakeStartedAt: null,
-	};
 }
 
 async function touchServerlessActivity(

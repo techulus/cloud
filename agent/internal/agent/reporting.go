@@ -18,6 +18,8 @@ import (
 
 var Version = "dev"
 
+const serverlessGatewayCapability = "serverless_gateway"
+
 var (
 	agentStartTime    = time.Now()
 	lastHealthCollect time.Time
@@ -51,8 +53,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
 		report.AgentHealth = &agenthttp.AgentHealth{
-			Version:    Version,
-			UptimeSecs: int64(time.Since(agentStartTime).Seconds()),
+			Version:      Version,
+			UptimeSecs:   int64(time.Since(agentStartTime).Seconds()),
+			Capabilities: a.agentCapabilities(),
 		}
 		lastHealthCollect = time.Now()
 		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
@@ -93,6 +96,13 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 	report.DeploymentErrors = a.SnapshotDeploymentErrors()
 
 	return report
+}
+
+func (a *Agent) agentCapabilities() []string {
+	if !a.IsProxy {
+		return nil
+	}
+	return []string{serverlessGatewayCapability}
 }
 
 func (a *Agent) RecordDeploymentError(deploymentID string, err error) {

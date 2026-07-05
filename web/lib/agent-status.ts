@@ -21,6 +21,7 @@ import {
 import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -80,6 +81,7 @@ async function applyDeploymentErrors(
 				serviceId: deployments.serviceId,
 				rolloutId: deployments.rolloutId,
 				status: deployments.status,
+				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
 				serverlessEnabled: services.serverlessEnabled,
 				rolloutStatus: rollouts.status,
 				serverName: servers.name,
@@ -114,22 +116,11 @@ async function applyDeploymentErrors(
 			.update(deployments)
 			.set(
 				isServerlessWakeDeployment
-					? deployment.serverlessEnabled
-						? {
-								status: "sleeping",
-								desired: true,
-								containerId: null,
-								failedStage: null,
-								healthStatus: null,
-								serverlessWakeStartedAt: null,
-							}
-						: {
-								...markDeploymentUndesired("failed"),
-								containerId: null,
-								failedStage: "serverless_wake",
-								healthStatus: null,
-								serverlessWakeStartedAt: null,
-							}
+					? getServerlessWakeFailureUpdate({
+							serverlessEnabled: deployment.serverlessEnabled,
+							currentFailureCount: deployment.serverlessWakeFailureCount,
+							failedStage: "serverless_wake",
+						})
 					: { status: "failed", failedStage: "deploying" },
 			)
 			.where(
@@ -385,6 +376,7 @@ export async function applyStatusReport(
 						status: newStatus,
 						healthStatus: hasHealthCheck ? "starting" : "none",
 						serverlessWakeStartedAt: null,
+						serverlessWakeFailureCount: 0,
 					})
 					.where(eq(deployments.id, stuckDeployment.id));
 
@@ -467,6 +459,7 @@ export async function applyStatusReport(
 			updateFields.status = newStatus;
 			if (deployment.status === "waking") {
 				updateFields.serverlessWakeStartedAt = null;
+				updateFields.serverlessWakeFailureCount = 0;
 			}
 			if (hasHealthCheck) {
 				updateFields.healthStatus = "starting";
@@ -626,6 +619,7 @@ export async function applyStatusReport(
 					status: "healthy",
 					autohealRestartCount: 0,
 					autohealRecreateCount: 0,
+					serverlessWakeFailureCount: 0,
 				})
 				.where(eq(deployments.id, deployment.id));
 

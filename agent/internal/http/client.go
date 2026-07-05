@@ -263,8 +263,9 @@ type Resources struct {
 }
 
 type AgentHealth struct {
-	Version    string `json:"version"`
-	UptimeSecs int64  `json:"uptimeSecs"`
+	Version      string   `json:"version"`
+	UptimeSecs   int64    `json:"uptimeSecs"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type StatusReport struct {
