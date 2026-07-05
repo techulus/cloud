@@ -56,55 +56,6 @@ func (a *Agent) ProcessStop(item agenthttp.WorkQueueItem) error {
 	return nil
 }
 
-func (a *Agent) ProcessSleep(item agenthttp.WorkQueueItem) error {
-	var payload struct {
-		DeploymentID string `json:"deploymentId"`
-		ContainerID  string `json:"containerId"`
-	}
-
-	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
-		return fmt.Errorf("failed to parse sleep payload: %w", err)
-	}
-
-	if payload.ContainerID == "" {
-		return fmt.Errorf("sleep payload missing containerId")
-	}
-
-	expectedState, fromCache, err := a.Client.GetExpectedStateWithFallback()
-	if err != nil {
-		log.Printf("[sleep] skipping container %s because expected state could not be verified: %v", Truncate(payload.ContainerID, 12), err)
-		return nil
-	}
-	if fromCache {
-		log.Printf("[sleep] skipping container %s because expected state came from cache", Truncate(payload.ContainerID, 12))
-		return nil
-	}
-	if !deploymentWantsSleep(expectedState, payload.DeploymentID) {
-		log.Printf("[sleep] skipping stale sleep item for deployment %s", Truncate(payload.DeploymentID, 8))
-		return nil
-	}
-
-	log.Printf("[sleep] removing container %s for deployment %s", Truncate(payload.ContainerID, 12), Truncate(payload.DeploymentID, 8))
-
-	if err := container.ForceRemove(payload.ContainerID); err != nil {
-		return fmt.Errorf("failed to remove sleeping container: %w", err)
-	}
-
-	return nil
-}
-
-func deploymentWantsSleep(state *agenthttp.ExpectedState, deploymentID string) bool {
-	if state == nil || deploymentID == "" {
-		return false
-	}
-	for _, expected := range state.Containers {
-		if expected.DeploymentID == deploymentID {
-			return expected.DesiredState == "stopped"
-		}
-	}
-	return false
-}
-
 func (a *Agent) ProcessForceCleanup(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		ServiceID    string   `json:"serviceId"`

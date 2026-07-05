@@ -8,6 +8,7 @@ vi.mock("@/lib/wireguard", () => ({ getWireGuardPeers: vi.fn() }));
 
 import {
 	buildExpectedContainersFromRows,
+	buildServerlessRoutesFromRows,
 	buildTraefikRoutes,
 } from "@/lib/agent/expected-state";
 
@@ -41,6 +42,7 @@ describe("expected-state pure builders", () => {
 					healthCheckStartPeriod: null,
 					resourceCpuLimit: 1,
 					resourceMemoryLimitMb: 512,
+					serverlessEnabled: true,
 				},
 			] as any,
 			deploymentPorts: [
@@ -151,5 +153,115 @@ describe("expected-state pure builders", () => {
 				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
 			},
 		]);
+	});
+
+	it("builds proxy-local serverless metadata with always-on worker upstreams", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				{
+					id: "svc_1",
+					serverlessEnabled: true,
+					stateful: false,
+					serverlessSleepAfterSeconds: 300,
+					serverlessWakeTimeoutSeconds: 120,
+					serverlessMinReadyReplicas: 1,
+				},
+			] as any,
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_1",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "app.example.com",
+				},
+			] as any,
+			deployments: [
+				{
+					id: "dep_proxy",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+					serverIsProxy: true,
+				},
+				{
+					id: "dep_worker",
+					serviceId: "svc_1",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.20",
+					status: "healthy",
+					serverIsProxy: false,
+				},
+			] as any,
+			containers: [
+				{
+					deploymentId: "dep_proxy",
+					desiredState: "stopped",
+				},
+			] as any,
+		});
+
+		expect(routes).toEqual([
+			{
+				serviceId: "svc_1",
+				domain: "app.example.com",
+				port: 3000,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				minReadyReplicas: 1,
+				localDeploymentIds: ["dep_proxy"],
+				upstreams: [
+					{
+						deploymentId: "dep_worker",
+						serverId: "worker_1",
+						url: "10.0.0.20:3000",
+						local: false,
+						alwaysOn: true,
+					},
+				],
+			},
+		]);
+	});
+
+	it("omits serverless metadata for worker-only services", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				{
+					id: "svc_1",
+					serverlessEnabled: true,
+					stateful: false,
+					serverlessSleepAfterSeconds: 300,
+					serverlessWakeTimeoutSeconds: 120,
+					serverlessMinReadyReplicas: 1,
+				},
+			] as any,
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_1",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "app.example.com",
+				},
+			] as any,
+			deployments: [
+				{
+					id: "dep_worker",
+					serviceId: "svc_1",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.20",
+					status: "healthy",
+					serverIsProxy: false,
+				},
+			] as any,
+			containers: [],
+		});
+
+		expect(routes).toEqual([]);
 	});
 });

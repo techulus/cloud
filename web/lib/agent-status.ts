@@ -37,6 +37,11 @@ type DeploymentError = {
 	message: string;
 };
 
+export type ServerlessTransition =
+	| { type: "sleep"; deploymentId: string; containerId: string }
+	| { type: "wake_started"; deploymentId: string }
+	| { type: "wake_failed"; deploymentId: string; error: string };
+
 function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
@@ -173,6 +178,227 @@ async function applyDeploymentErrors(
 	}
 }
 
+async function applyServerlessTransitions(
+	serverId: string,
+	transitions: ServerlessTransition[],
+) {
+	for (const transition of transitions) {
+		if (!isValidServerlessTransition(transition)) {
+			console.log(`[serverless:status] rejected malformed transition`);
+			continue;
+		}
+
+		const deployment = await db
+			.select({
+				id: deployments.id,
+				serviceId: deployments.serviceId,
+				serverId: deployments.serverId,
+				containerId: deployments.containerId,
+				status: deployments.status,
+				desired: deployments.desired,
+				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
+				serverlessEnabled: services.serverlessEnabled,
+				stateful: services.stateful,
+				serverIsProxy: servers.isProxy,
+				serverName: servers.name,
+			})
+			.from(deployments)
+			.innerJoin(services, eq(deployments.serviceId, services.id))
+			.innerJoin(servers, eq(deployments.serverId, servers.id))
+			.where(eq(deployments.id, transition.deploymentId))
+			.then((rows) => rows[0]);
+
+		const invalidReason = getInvalidServerlessTransitionReason({
+			serverId,
+			transition,
+			deployment,
+		});
+		if (invalidReason || !deployment) {
+			console.log(
+				`[serverless:status] rejected ${transition.type} for deployment ${transition.deploymentId}: ${invalidReason}`,
+			);
+			continue;
+		}
+
+		if (transition.type === "sleep") {
+			const updated = await db
+				.update(deployments)
+				.set({
+					status: "sleeping",
+					containerId: null,
+					healthStatus: null,
+					serverlessWakeStartedAt: null,
+					failedStage: null,
+				})
+				.where(
+					and(
+						eq(deployments.id, transition.deploymentId),
+						eq(deployments.serverId, serverId),
+						eq(deployments.containerId, transition.containerId),
+						eq(deployments.desired, true),
+						inArray(deployments.status, ["healthy", "running"]),
+					),
+				)
+				.returning({ id: deployments.id });
+
+			if (updated.length > 0) {
+				console.log(
+					`[serverless:status] deployment ${transition.deploymentId} slept on proxy ${deployment.serverName}`,
+				);
+				await emitDeploymentStatusChanged(
+					transition.deploymentId,
+					deployment.serviceId,
+				);
+			}
+			continue;
+		}
+
+		if (transition.type === "wake_started") {
+			const updated = await db
+				.update(deployments)
+				.set({
+					status: "waking",
+					containerId: null,
+					healthStatus: null,
+					serverlessWakeStartedAt: new Date(),
+					failedStage: null,
+				})
+				.where(
+					and(
+						eq(deployments.id, transition.deploymentId),
+						eq(deployments.serverId, serverId),
+						eq(deployments.desired, true),
+						eq(deployments.status, "sleeping"),
+					),
+				)
+				.returning({ id: deployments.id });
+
+			if (updated.length > 0) {
+				console.log(
+					`[serverless:status] deployment ${transition.deploymentId} wake started on proxy ${deployment.serverName}`,
+				);
+				await emitDeploymentStatusChanged(
+					transition.deploymentId,
+					deployment.serviceId,
+				);
+			}
+			continue;
+		}
+
+		const updated = await db
+			.update(deployments)
+			.set(
+				getServerlessWakeFailureUpdate({
+					serverlessEnabled: deployment.serverlessEnabled,
+					currentFailureCount: deployment.serverlessWakeFailureCount,
+					failedStage: "serverless_wake",
+				}),
+			)
+			.where(
+				and(
+					eq(deployments.id, transition.deploymentId),
+					eq(deployments.serverId, serverId),
+					eq(deployments.desired, true),
+					inArray(deployments.status, ["sleeping", "waking"]),
+				),
+			)
+			.returning({ id: deployments.id });
+
+		if (updated.length > 0) {
+			console.log(
+				`[serverless:status] deployment ${transition.deploymentId} wake failed on proxy ${deployment.serverName}: ${formatDeploymentError(transition.error)}`,
+			);
+			await emitDeploymentStatusChanged(
+				transition.deploymentId,
+				deployment.serviceId,
+			);
+		}
+	}
+}
+
+function isValidServerlessTransition(
+	transition: unknown,
+): transition is ServerlessTransition {
+	if (!transition || typeof transition !== "object") return false;
+	const candidate = transition as ServerlessTransition;
+	if (typeof candidate.deploymentId !== "string" || !candidate.deploymentId) {
+		return false;
+	}
+	if (candidate.type === "sleep") {
+		return typeof candidate.containerId === "string" && !!candidate.containerId;
+	}
+	if (candidate.type === "wake_started") {
+		return true;
+	}
+	if (candidate.type === "wake_failed") {
+		return typeof candidate.error === "string" && !!candidate.error.trim();
+	}
+	return false;
+}
+
+function getInvalidServerlessTransitionReason({
+	serverId,
+	transition,
+	deployment,
+}: {
+	serverId: string;
+	transition: ServerlessTransition;
+	deployment:
+		| {
+				serverId: string;
+				containerId: string | null;
+				status: string;
+				desired: boolean;
+				serverlessEnabled: boolean;
+				stateful: boolean;
+				serverIsProxy: boolean;
+		  }
+		| undefined;
+}) {
+	if (!deployment) return "deployment not found";
+	if (deployment.serverId !== serverId) return "deployment belongs to another server";
+	if (!deployment.serverIsProxy) return "server is not a proxy";
+	if (!deployment.serverlessEnabled) return "service is not serverless";
+	if (deployment.stateful) return "service is stateful";
+	if (!deployment.desired) return "deployment is not desired";
+
+	if (transition.type === "sleep") {
+		if (!["healthy", "running"].includes(deployment.status)) {
+			return `deployment is not sleepable from ${deployment.status}`;
+		}
+		if (deployment.containerId !== transition.containerId) {
+			return "stale containerId";
+		}
+	}
+
+	if (
+		transition.type === "wake_started" &&
+		deployment.status !== "sleeping"
+	) {
+		return `deployment is not sleeping (${deployment.status})`;
+	}
+
+	if (
+		transition.type === "wake_failed" &&
+		!["sleeping", "waking"].includes(deployment.status)
+	) {
+		return `deployment is not waking or sleeping (${deployment.status})`;
+	}
+
+	return null;
+}
+
+async function emitDeploymentStatusChanged(deploymentId: string, serviceId: string) {
+	await inngest.send(
+		inngestEvents.resourceStatusChanged.create({
+			type: "deployment",
+			id: deploymentId,
+			parentType: "service",
+			parentId: serviceId,
+		}),
+	);
+}
+
 function formatDeploymentError(message: string): string {
 	return message.trim().replace(/\s+/g, " ").slice(0, 1000);
 }
@@ -197,6 +423,7 @@ export type StatusReport = {
 export async function applyStatusReport(
 	serverId: string,
 	report: StatusReport,
+	serverlessTransitions: ServerlessTransition[] = [],
 ) {
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
@@ -276,6 +503,7 @@ export async function applyStatusReport(
 	};
 
 	await applyDeploymentErrors(serverId, report.deploymentErrors || []);
+	await applyServerlessTransitions(serverId, serverlessTransitions);
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)
@@ -413,23 +641,6 @@ export async function applyStatusReport(
 			continue;
 		}
 
-		if (deployment.status === "sleeping") {
-			const updateFields: Record<string, unknown> = {};
-			if (deployment.containerId !== container.containerId) {
-				updateFields.containerId = container.containerId;
-			}
-			if (deployment.healthStatus !== null) {
-				updateFields.healthStatus = null;
-			}
-			if (Object.keys(updateFields).length > 0) {
-				await db
-					.update(deployments)
-					.set(updateFields)
-					.where(eq(deployments.id, deployment.id));
-			}
-			continue;
-		}
-
 		const updateFields: Record<string, unknown> = { healthStatus };
 		let autohealRestartPayload: Record<string, unknown> | null = null;
 		let autohealRecreatePayload: Record<string, unknown> | null = null;
@@ -442,7 +653,8 @@ export async function applyStatusReport(
 		if (
 			deployment.status === "pending" ||
 			deployment.status === "pulling" ||
-			deployment.status === "waking"
+			deployment.status === "waking" ||
+			deployment.status === "sleeping"
 		) {
 			if (container.status !== "running") {
 				continue;

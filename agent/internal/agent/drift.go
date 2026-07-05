@@ -103,6 +103,8 @@ func (a *Agent) handleIdle() {
 	if fromCache {
 		log.Printf("[idle] using cached state (CP unreachable)")
 	}
+	a.SetLatestExpectedState(expected)
+	a.ReconcilePendingServerlessSleepWithExpected(expected, fromCache)
 
 	actual, err := a.getActualState()
 	if err != nil {
@@ -251,7 +253,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 
 	for id, exp := range expectedMap {
 		if _, exists := actualMap[id]; !exists {
-			if desiredContainerState(exp) == "stopped" {
+			if desiredContainerState(exp) == "stopped" || a.HasPendingServerlessSleep(id) {
 				continue
 			}
 			expectedContainer := exp
@@ -269,7 +271,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 			expectedContainer := exp
 			actualContainer := act
 
-			if desiredContainerState(exp) == "stopped" {
+			if desiredContainerState(exp) == "stopped" || a.HasPendingServerlessSleep(id) {
 				if shouldStopDesiredStoppedContainer(act.State) {
 					actions = append(actions, reconcileAction{
 						Kind:         actionStopExpectedContainer,

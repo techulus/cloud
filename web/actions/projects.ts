@@ -1078,40 +1078,6 @@ export async function updateServiceServerlessSettings(
 			})
 			.where(eq(services.id, serviceId));
 
-		if (!validated.enabled) {
-			const now = new Date();
-			const wakingDeployments = await tx
-				.update(deployments)
-				.set({
-					status: "waking",
-					containerId: null,
-					healthStatus: null,
-					unhealthyReportCount: 0,
-					serverlessWakeStartedAt: now,
-				})
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						eq(deployments.status, "sleeping"),
-					),
-				)
-				.returning({ serverId: deployments.serverId });
-
-			const serverIds = new Set(
-				wakingDeployments.map((deployment) => deployment.serverId),
-			);
-			for (const serverId of serverIds) {
-				await tx.insert(workQueue).values({
-					id: randomUUID(),
-					serverId,
-					type: "wake",
-					payload: JSON.stringify({
-						reason: "serverless_disabled",
-						serviceId,
-					}),
-				});
-			}
-		}
 	});
 
 	return { success: true };

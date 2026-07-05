@@ -9,7 +9,6 @@ import type {
 	projects,
 	rollouts,
 	secrets,
-	serverlessServiceActivity,
 	servers,
 	servicePorts,
 	serviceReplicas,
@@ -28,8 +27,6 @@ export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;
 export type ServiceReplica = typeof serviceReplicas.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
-export type ServerlessServiceActivity =
-	typeof serverlessServiceActivity.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
 export type Rollout = typeof rollouts.$inferSelect;

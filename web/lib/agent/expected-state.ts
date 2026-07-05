@@ -69,10 +69,30 @@ type UdpRoute = {
 	externalPort: number;
 };
 
+export type ServerlessRouteUpstream = {
+	deploymentId: string;
+	serverId: string;
+	url: string;
+	local: boolean;
+	alwaysOn: boolean;
+};
+
+export type ServerlessRoute = {
+	serviceId: string;
+	domain: string;
+	port: number;
+	sleepAfterSeconds: number;
+	wakeTimeoutSeconds: number;
+	minReadyReplicas: number;
+	localDeploymentIds: string[];
+	upstreams: ServerlessRouteUpstream[];
+};
+
 export type AgentExpectedState = {
 	serverName: string;
 	containers: ExpectedContainer[];
 	dns: { records: Array<{ name: string; ips: string[] }> };
+	serverless: { routes: ServerlessRoute[] };
 	traefik: {
 		httpRoutes: HttpRoute[];
 		tcpRoutes: TcpRoute[];
@@ -108,6 +128,15 @@ type RoutableDeploymentRow = {
 	serverId: string;
 };
 
+type ServerlessDeploymentRow = {
+	id: string;
+	serviceId: string;
+	serverId: string;
+	ipAddress: string | null;
+	status: Deployment["status"];
+	serverIsProxy: boolean;
+};
+
 export async function getServer(serverId: string) {
 	return db
 		.select()
@@ -120,15 +149,21 @@ export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
 	const allServices = await getActiveServices();
-	const containers = await buildExpectedContainers(server.id);
+	const containers = await buildExpectedContainers(server.id, server.isProxy);
 	const dnsRecords = await buildDnsRecords(allServices);
 	const traefikConfig = await buildTraefikConfig(server, allServices);
+	const serverless = await buildServerlessExpectedState(
+		server,
+		allServices,
+		containers,
+	);
 	const wireguardPeers = await getWireGuardPeers(server.id, server.privateIp);
 
 	return {
 		serverName: server.name,
 		containers,
 		dns: { records: dnsRecords },
+		serverless,
 		traefik: traefikConfig,
 		wireguard: { peers: wireguardPeers },
 	};
@@ -140,6 +175,7 @@ async function getActiveServices() {
 
 async function buildExpectedContainers(
 	serverId: string,
+	serverIsProxy: boolean,
 ): Promise<ExpectedContainer[]> {
 	const serverDeployments = await db
 		.select()
@@ -189,6 +225,7 @@ async function buildExpectedContainers(
 		deploymentPorts: depPorts,
 		secrets: serviceSecrets,
 		volumes,
+		serverIsProxy,
 	});
 }
 
@@ -212,12 +249,14 @@ export function buildExpectedContainersFromRows({
 	deploymentPorts: deploymentPortRows,
 	secrets: secretRows,
 	volumes: volumeRows,
+	serverIsProxy = true,
 }: {
 	deployments: Deployment[];
 	services: Service[];
 	deploymentPorts: DeploymentPortRow[];
 	secrets: SecretRow[];
 	volumes: VolumeRow[];
+	serverIsProxy?: boolean;
 }): ExpectedContainer[] {
 	const servicesById = new Map(
 		serviceRows.map((service) => [service.id, service]),
@@ -242,7 +281,12 @@ export function buildExpectedContainersFromRows({
 					serviceId: dep.serviceId,
 					serviceName: service.name,
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
-					desiredState: dep.status === "sleeping" ? "stopped" : "running",
+					desiredState:
+						serverIsProxy &&
+						service.serverlessEnabled &&
+						dep.status === "sleeping"
+							? "stopped"
+							: "running",
 					image: normalizeImage(service.image),
 					ipAddress: dep.ipAddress,
 					ports: (portsByDeploymentId.get(dep.id) ?? [])
@@ -264,6 +308,137 @@ export function buildExpectedContainersFromRows({
 						})),
 					resourceCpuLimit: service.resourceCpuLimit,
 					resourceMemoryLimitMb: service.resourceMemoryLimitMb,
+				},
+			];
+	});
+}
+
+async function buildServerlessExpectedState(
+	server: Server,
+	allServices: Service[],
+	containers: ExpectedContainer[],
+): Promise<{ routes: ServerlessRoute[] }> {
+	if (!server.isProxy || !hasAgentCapability(server, SERVERLESS_GATEWAY_CAPABILITY)) {
+		return { routes: [] };
+	}
+
+	const serverlessServices = allServices.filter(
+		(service) => service.serverlessEnabled && !service.stateful,
+	);
+	if (serverlessServices.length === 0) return { routes: [] };
+
+	const serviceIds = serverlessServices.map((service) => service.id);
+	const [ports, deploymentRows] = await Promise.all([
+		db
+			.select()
+			.from(servicePorts)
+			.where(inArray(servicePorts.serviceId, serviceIds)),
+		db
+			.select({
+				id: deployments.id,
+				serviceId: deployments.serviceId,
+				serverId: deployments.serverId,
+				ipAddress: deployments.ipAddress,
+				status: deployments.status,
+				serverIsProxy: servers.isProxy,
+			})
+			.from(deployments)
+			.innerJoin(servers, eq(deployments.serverId, servers.id))
+			.where(
+				and(
+					inArray(deployments.serviceId, serviceIds),
+					eq(deployments.desired, true),
+					inArray(deployments.status, expectedDeploymentStatuses),
+				),
+			),
+	]);
+
+	return {
+		routes: buildServerlessRoutesFromRows({
+			serverId: server.id,
+			services: serverlessServices,
+			ports,
+			deployments: deploymentRows,
+			containers,
+		}),
+	};
+}
+
+export function buildServerlessRoutesFromRows({
+	serverId,
+	services: serviceRows,
+	ports,
+	deployments: deploymentRows,
+	containers,
+}: {
+	serverId: string;
+	services: Service[];
+	ports: ServicePort[];
+	deployments: ServerlessDeploymentRow[];
+	containers: ExpectedContainer[];
+}): ServerlessRoute[] {
+	const servicesById = new Map(
+		serviceRows.map((service) => [service.id, service]),
+	);
+	const deploymentsByServiceId = groupBy(
+		deploymentRows,
+		(deployment) => deployment.serviceId,
+	);
+	const expectedDeploymentIds = new Set(
+		containers.map((container) => container.deploymentId),
+	);
+
+	return ports
+		.slice()
+		.sort(compareServicePorts)
+		.flatMap((port) => {
+			if (!port.isPublic || port.protocol !== "http" || !port.domain) {
+				return [];
+			}
+
+			const service = servicesById.get(port.serviceId);
+			if (!service) return [];
+
+			const serviceDeployments = deploymentsByServiceId.get(port.serviceId) ?? [];
+			if (!serviceDeployments.some((deployment) => deployment.serverIsProxy)) {
+				return [];
+			}
+
+			const localDeploymentIds = serviceDeployments
+				.filter(
+					(deployment) =>
+						deployment.serverId === serverId &&
+						deployment.serverIsProxy &&
+						expectedDeploymentIds.has(deployment.id),
+				)
+				.map((deployment) => deployment.id)
+				.sort();
+
+			const upstreams = serviceDeployments
+				.filter(
+					(deployment) =>
+						deployment.ipAddress &&
+						routableDeploymentStatuses.includes(deployment.status),
+				)
+				.map((deployment) => ({
+					deploymentId: deployment.id,
+					serverId: deployment.serverId,
+					url: `${deployment.ipAddress}:${port.port}`,
+					local: deployment.serverId === serverId,
+					alwaysOn: !deployment.serverIsProxy,
+				}))
+				.sort(compareServerlessUpstreams);
+
+			return [
+				{
+					serviceId: service.id,
+					domain: port.domain,
+					port: port.port,
+					sleepAfterSeconds: service.serverlessSleepAfterSeconds,
+					wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds,
+					minReadyReplicas: Math.max(1, service.serverlessMinReadyReplicas ?? 1),
+					localDeploymentIds,
+					upstreams,
 				},
 			];
 		});
@@ -316,7 +491,8 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		server,
 		SERVERLESS_GATEWAY_CAPABILITY,
 	);
-	const [ports, routableDeployments, wakeRoutedDeployments] = await Promise.all(
+	const [ports, routableDeployments, proxyHostedServerlessDeployments] =
+		await Promise.all(
 		[
 			serviceIds.length > 0
 				? db
@@ -344,18 +520,20 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 				? db
 						.select({ serviceId: deployments.serviceId })
 						.from(deployments)
+						.innerJoin(servers, eq(deployments.serverId, servers.id))
 						.where(
 							and(
 								inArray(deployments.serviceId, serviceIds),
 								eq(deployments.desired, true),
-								inArray(deployments.status, ["sleeping", "waking"]),
+								eq(servers.isProxy, true),
+								inArray(deployments.status, expectedDeploymentStatuses),
 							),
 						)
 				: Promise.resolve([]),
 		],
 	);
-	const wakeRoutedServiceIds = new Set(
-		wakeRoutedDeployments.map((deployment) => deployment.serviceId),
+	const proxyHostedServerlessServiceIds = new Set(
+		proxyHostedServerlessDeployments.map((deployment) => deployment.serviceId),
 	);
 	const serverlessServiceIds = supportsServerlessGateway
 		? new Set(
@@ -363,8 +541,8 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 					.filter(
 						(service) =>
 							!service.stateful &&
-							(service.serverlessEnabled ||
-								wakeRoutedServiceIds.has(service.id)),
+							service.serverlessEnabled &&
+							proxyHostedServerlessServiceIds.has(service.id),
 					)
 					.map((service) => service.id),
 			)
@@ -519,6 +697,15 @@ function upstreamUrls(deployments: RoutableDeploymentRow[], port: number) {
 		.filter((ip): ip is string => ip !== null)
 		.map((ip) => `${ip}:${port}`)
 		.sort();
+}
+
+function compareServerlessUpstreams(
+	a: ServerlessRouteUpstream,
+	b: ServerlessRouteUpstream,
+) {
+	if (a.local !== b.local) return a.local ? -1 : 1;
+	if (a.alwaysOn !== b.alwaysOn) return a.alwaysOn ? -1 : 1;
+	return a.url.localeCompare(b.url);
 }
 
 function normalizeImage(image: string) {

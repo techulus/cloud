@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
+import {
+	applyStatusReport,
+	type ServerlessTransition,
+	type StatusReport,
+} from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimNextWorkItem,
@@ -13,6 +17,7 @@ type StatusRequestBody = {
 	statusReport?: StatusReport;
 	completedWorkItems?: WorkItemResult[];
 	activeWorkItems?: ActiveWorkItem[];
+	serverlessTransitions?: ServerlessTransition[];
 };
 
 export async function POST(request: NextRequest) {
@@ -38,7 +43,11 @@ export async function POST(request: NextRequest) {
 
 	const { serverId } = auth;
 
-	await applyStatusReport(serverId, data.statusReport);
+	const serverlessTransitions = Array.isArray(data.serverlessTransitions)
+		? data.serverlessTransitions
+		: [];
+
+	await applyStatusReport(serverId, data.statusReport, serverlessTransitions);
 
 	const completedWorkItems = Array.isArray(data.completedWorkItems)
 		? data.completedWorkItems.filter(isValidWorkItemResult)

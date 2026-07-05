@@ -71,6 +71,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 			if c.DeploymentID == "" {
 				continue
 			}
+			if a.ShouldSuppressServerlessContainerReport(c.DeploymentID) {
+				continue
+			}
 
 			status := "stopped"
 			if c.State == "running" {

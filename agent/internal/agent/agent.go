@@ -50,35 +50,40 @@ type ActualState struct {
 }
 
 type Agent struct {
-	state                       AgentState
-	stateMutex                  sync.RWMutex
-	reconcileRequested          chan struct{}
-	statusReportRequested       chan string
-	refreshMutex                sync.Mutex
-	pendingExpectedStateRefresh bool
-	workMutex                   sync.Mutex
-	activeWorkItem              *agenthttp.WorkQueueItem
-	pendingWorkResults          []agenthttp.CompletedWorkItem
-	deploymentErrorMutex        sync.Mutex
-	pendingDeploymentErrors     []agenthttp.DeploymentError
-	Client                      *agenthttp.Client
-	Reconciler                  *reconcile.Reconciler
-	Config                      *Config
-	PublicIP                    string
-	PrivateIP                   string
-	DataDir                     string
-	expectedState               *agenthttp.ExpectedState
-	processingStart             time.Time
-	LogCollector                *logs.Collector
-	TraefikLogCollector         *logs.TraefikCollector
-	MetricsSender               MetricsSender
-	Builder                     *build.Builder
-	isBuilding                  bool
-	buildMutex                  sync.Mutex
-	currentBuildID              string
-	IsProxy                     bool
-	dnsInSync                   bool
-	DisableDNS                  bool
+	state                        AgentState
+	stateMutex                   sync.RWMutex
+	reconcileRequested           chan struct{}
+	statusReportRequested        chan string
+	refreshMutex                 sync.Mutex
+	pendingExpectedStateRefresh  bool
+	workMutex                    sync.Mutex
+	activeWorkItem               *agenthttp.WorkQueueItem
+	pendingWorkResults           []agenthttp.CompletedWorkItem
+	deploymentErrorMutex         sync.Mutex
+	pendingDeploymentErrors      []agenthttp.DeploymentError
+	serverlessMutex              sync.Mutex
+	pendingServerlessTransitions []agenthttp.ServerlessTransition
+	pendingServerlessSleep       map[string]struct{}
+	expectedStateMutex           sync.RWMutex
+	latestExpectedState          *agenthttp.ExpectedState
+	Client                       *agenthttp.Client
+	Reconciler                   *reconcile.Reconciler
+	Config                       *Config
+	PublicIP                     string
+	PrivateIP                    string
+	DataDir                      string
+	expectedState                *agenthttp.ExpectedState
+	processingStart              time.Time
+	LogCollector                 *logs.Collector
+	TraefikLogCollector          *logs.TraefikCollector
+	MetricsSender                MetricsSender
+	Builder                      *build.Builder
+	isBuilding                   bool
+	buildMutex                   sync.Mutex
+	currentBuildID               string
+	IsProxy                      bool
+	dnsInSync                    bool
+	DisableDNS                   bool
 }
 
 func NewAgent(
@@ -94,21 +99,22 @@ func NewAgent(
 	disableDNS bool,
 ) *Agent {
 	return &Agent{
-		state:                 StateIdle,
-		reconcileRequested:    make(chan struct{}, 1),
-		statusReportRequested: make(chan string, 1),
-		Client:                client,
-		Reconciler:            reconciler,
-		Config:                config,
-		PublicIP:              publicIP,
-		PrivateIP:             privateIP,
-		DataDir:               dataDir,
-		LogCollector:          logCollector,
-		TraefikLogCollector:   traefikLogCollector,
-		MetricsSender:         metricsSender,
-		Builder:               builder,
-		IsProxy:               isProxy,
-		DisableDNS:            disableDNS,
+		state:                  StateIdle,
+		reconcileRequested:     make(chan struct{}, 1),
+		statusReportRequested:  make(chan string, 1),
+		Client:                 client,
+		Reconciler:             reconciler,
+		Config:                 config,
+		PublicIP:               publicIP,
+		PrivateIP:              privateIP,
+		DataDir:                dataDir,
+		LogCollector:           logCollector,
+		TraefikLogCollector:    traefikLogCollector,
+		MetricsSender:          metricsSender,
+		Builder:                builder,
+		IsProxy:                isProxy,
+		DisableDNS:             disableDNS,
+		pendingServerlessSleep: map[string]struct{}{},
 	}
 }
 

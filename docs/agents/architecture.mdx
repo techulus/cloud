@@ -75,31 +75,31 @@ reports, the command can be retried up to the fixed attempt limit.
 | `force_cleanup` | Force remove containers for a service |
 | `cleanup_volumes` | Remove volume directories for a service |
 | `deploy` | Handled through expected-state reconciliation |
-| `wake` | Reconcile sleeping serverless deployments back to running |
-| `sleep` | Remove a stopped serverless container after confirming fresh expected state |
 
 ## Serverless Gateway
 
 Proxy agents run a local HTTP wake gateway on `127.0.0.1:18080`. The control
-plane only emits Traefik routes to this gateway after the proxy reports the
-`serverless_gateway` capability in its health status.
+plane emits Traefik routes to this gateway only when the service has a
+proxy-hosted serverless deployment. Worker-only serverless services keep normal
+direct routes because worker deployments do not sleep.
 
 For serverless service traffic, Traefik forwards the public request to the local
-gateway. The gateway asks the control plane to wake the target service, waits for
-ready upstreams, then proxies the original request to the selected container over
-the WireGuard mesh.
+gateway. The gateway resolves the host from expected-state serverless metadata,
+queues `wake_started` as a status transition, starts local proxy-hosted
+containers from expected-state config, waits for ready upstreams, then proxies
+the original request to the selected container over the WireGuard mesh.
 
 The gateway keeps a short upstream cache and collapses concurrent wake requests
 for the same host. Request cancellation is respected while waiting for a shared
 wake result.
 
-The gateway also debounces request activity before reporting it to the control
-plane. It records one `start` when a host enters an active traffic window,
-heartbeats while the window remains active, and records `finish` only after a
-short quiet period. Individual proxied requests do not each write start and
-finish activity rows.
+The gateway tracks request activity in memory. When a host stays idle for the
+service's configured sleep timeout, the proxy agent removes only its local
+proxy-hosted containers and queues a `sleep` status transition. The control plane
+records the transition and updates dashboard/routing state; it does not run the
+idle timer.
 
-Sleep work is intentionally conservative. Before removing a local container, the
-agent fetches fresh expected state and verifies that the deployment still wants
-`desiredState: "stopped"`. Cached expected state is not enough to remove a
-container.
+If a status report fails, pending serverless transitions stay queued in memory
+and are retried. A locally slept deployment is also guarded from immediate
+reconcile until a fresh expected-state fetch confirms the control plane recorded
+the sleep or rejects it by continuing to advertise `desiredState: "running"`.

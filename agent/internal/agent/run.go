@@ -34,7 +34,7 @@ func (a *Agent) Run(ctx context.Context) {
 	}
 
 	if a.IsProxy {
-		gateway := serverless.NewGateway(a.Client)
+		gateway := serverless.NewGateway(a)
 		if err := gateway.Start(ctx); err != nil {
 			log.Printf("[serverless-gateway] failed to start: %v", err)
 		}
@@ -117,12 +117,14 @@ func (a *Agent) reportStatus(reason string) {
 	report := a.BuildStatusReport(true)
 	reportedDeploymentErrorCount := len(report.DeploymentErrors)
 	completed, active := a.SnapshotWorkStatus()
-	response, err := a.Client.ReportStatus(report, completed, active)
+	serverlessTransitions := a.SnapshotServerlessTransitions()
+	response, err := a.Client.ReportStatus(report, completed, active, serverlessTransitions)
 	if err != nil {
 		log.Printf("[status] failed to report (%s): %v", reason, err)
 		return
 	}
 	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
+	a.ClearReportedServerlessTransitions(len(serverlessTransitions))
 	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)

@@ -205,53 +205,57 @@ Worker nodes do not run Traefik.
 
 ### Serverless Containers
 
-Stateless HTTP services can be configured as serverless. Serverless deployments
-scale to zero by stopping their containers after an idle period, then wake on the
-next public request.
+Stateless HTTP services can be configured as serverless. Serverless scale-to-zero
+is proxy-local: deployments placed on proxy nodes may sleep after an idle period,
+then wake on the next public request handled by that proxy. Deployments placed on
+worker nodes stay always on and remain routable.
 
 Serverless uses the same declarative expected-state model as normal
-deployments:
+deployments, but proxy agents own the local lifecycle decision:
 
 - A sleeping deployment remains `desired: true`.
-- Expected state advertises the container with `desiredState: "stopped"`.
-- The agent reconciles that state by stopping the local Podman container.
-- A later wake changes the deployment back to `waking`, which makes expected
-  state advertise `desiredState: "running"` again.
+- Expected state advertises proxy-hosted sleeping containers with
+  `desiredState: "stopped"` so normal reconciliation does not restart them.
+- Expected state advertises worker-hosted deployments with
+  `desiredState: "running"` even when the service is serverless-enabled.
+- The proxy gateway wakes local sleeping deployments from expected-state
+  metadata and reports `wake_started` through the next status report.
+- The proxy agent reports local sleep with a `sleep` status transition after it
+  removes the local container.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Traefik
     participant Gateway as Agent wake gateway
-    participant CP as Control plane
     participant Agent
+    participant CP as Control plane
     participant Container
 
     User->>Traefik: Request service domain
     Traefik->>Gateway: Route to 127.0.0.1:18080
-    Gateway->>CP: Wake service and wait
-    CP->>CP: Mark sleeping deployments waking
-    CP->>Agent: Lease wake/reconcile work
-    Agent->>Container: Start Podman container
-    Agent->>CP: Report healthy deployment
-    CP->>Gateway: Return ready upstreams
+    Gateway->>Gateway: Resolve host from expected-state metadata
+    Gateway->>Agent: Queue wake_started status transition
+    Agent->>Container: Start local Podman container
+    Agent->>CP: Report wake_started and container status
+    CP->>CP: Record waking/healthy state
     Gateway->>Container: Proxy original request
 ```
 
-The route to the local wake gateway is emitted only when the proxy agent reports
-the `serverless_gateway` capability. Older proxy agents keep normal direct
-routes and are not pointed at `127.0.0.1:18080`.
+Proxy Traefik routes point to the local wake gateway only when a service has at
+least one proxy-hosted serverless deployment. Worker-only serverless services use
+normal direct routes because there is nothing local to wake.
 
-The wake gateway keeps the incoming request open while the control plane waits
-for enough replicas to become ready. `Min Ready` controls how many ready
-deployments are preferred before releasing queued requests. If fewer replicas
-become ready and no wake is still in progress, the gateway serves any available
-ready upstream instead of returning a 503.
+The wake gateway keeps the incoming request open while it starts local proxy
+replicas, unless an always-on worker upstream is already ready. `Min Ready`
+controls how many ready upstreams are preferred before releasing queued requests.
+If fewer replicas become ready and no local wake is still in progress, the
+gateway serves any available ready upstream instead of returning a 503.
 
-Sleep is driven by a scheduled control-plane check. A service is eligible to
-sleep when it has no fresh active requests, no rollout in progress, no busy
-deployments, and its last request or newest deployment is older than the
-configured idle timeout.
+Sleep is driven by the proxy gateway's in-memory activity timer. The control
+plane does not scan request activity and does not enqueue sleep work. It accepts
+validated `sleep`, `wake_started`, and `wake_failed` transitions through the
+existing agent status endpoint.
 
 Wake failures are bounded. Transient failures return a deployment to `sleeping`
 so a later request can retry. After repeated failures, the deployment is parked

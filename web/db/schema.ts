@@ -670,33 +670,6 @@ export const workQueue = pgTable(
 	],
 );
 
-export const serverlessServiceActivity = pgTable(
-	"serverless_service_activity",
-	{
-		id: text("id").primaryKey(),
-		serviceId: text("service_id")
-			.notNull()
-			.references(() => services.id, { onDelete: "cascade" }),
-		proxyServerId: text("proxy_server_id")
-			.notNull()
-			.references(() => servers.id, { onDelete: "cascade" }),
-		lastRequestAt: timestamp("last_request_at", { withTimezone: true }),
-		activeRequests: integer("active_requests").notNull().default(0),
-		updatedAt: timestamp("updated_at", { withTimezone: true })
-			.defaultNow()
-			.notNull()
-			.$onUpdate(() => new Date()),
-	},
-	(table) => [
-		uniqueIndex("serverless_service_activity_service_proxy_idx").on(
-			table.serviceId,
-			table.proxyServerId,
-		),
-		index("serverless_service_activity_service_idx").on(table.serviceId),
-		index("serverless_service_activity_updated_at_idx").on(table.updatedAt),
-	],
-);
-
 export const githubInstallations = pgTable("github_installations", {
 	id: text("id").primaryKey(),
 	installationId: integer("installation_id").notNull().unique(),
