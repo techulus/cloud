@@ -1,13 +1,10 @@
 "use client";
 
-import cronstrue from "cronstrue";
 import {
 	Activity,
 	Box,
-	Cpu,
 	Github,
 	Globe,
-	HardDrive,
 	type LucideIcon,
 	Server,
 } from "lucide-react";
@@ -186,7 +183,7 @@ function RequestStatsPanel({
 	error?: unknown;
 	isLoading: boolean;
 }) {
-	const [chartMode, setChartMode] = useState<RequestChartMode>("rate");
+	const [chartMode, setChartMode] = useState<RequestChartMode>("total");
 	const chartRows = useMemo(() => buildChartRows(stats), [stats]);
 	const statusSeries = useMemo(() => buildStatusSeries(stats), [stats]);
 	const hasChartData = chartRows.some((row) => row.totalRequests > 0);
@@ -358,8 +355,8 @@ function RequestChartModeToggle({
 	disabled: boolean;
 }) {
 	const options: Array<{ value: RequestChartMode; label: string }> = [
-		{ value: "rate", label: "RPS" },
 		{ value: "total", label: "Total" },
+		{ value: "rate", label: "RPS" },
 	];
 
 	return (
@@ -411,6 +408,7 @@ function ServiceConfigPanel({
 				</SummaryItem>
 				<SummaryItem icon={Server} label="Instances">
 					<ServerList servers={overview.serverSummaries} />
+					<ConfigChip>{formatResources(service)}</ConfigChip>
 				</SummaryItem>
 
 				<ConfigDigestItem
@@ -433,38 +431,14 @@ function ServiceConfigPanel({
 				</ConfigDigestItem>
 
 				<ConfigDigestItem
-					icon={Cpu}
-					label="Capacity"
-					primary={formatResources(service)}
-				>
-					<ConfigChip>{formatReplicaCompact(overview)}</ConfigChip>
-					<ConfigChip>{formatPlacementLabel(service)}</ConfigChip>
-					{overview.serverSummaries.length > 0 ? (
-						<ConfigChip>
-							{formatCount(overview.serverSummaries.length, "server")}
-						</ConfigChip>
-					) : null}
-				</ConfigDigestItem>
-
-				<ConfigDigestItem
 					icon={Globe}
 					label="Network"
 					primary={<EndpointPrimary endpoint={primaryEndpoint} />}
 				>
-					<ConfigChip>{formatEndpointCount(overview.endpoints)}</ConfigChip>
 					<ConfigChip>{formatPortSummary(service.ports || [])}</ConfigChip>
 					{primaryEndpoint.kind !== "private" ? (
 						<ConfigChip>{`${service.hostname || service.name}.internal`}</ConfigChip>
 					) : null}
-				</ConfigDigestItem>
-
-				<ConfigDigestItem
-					icon={HardDrive}
-					label="Data & ops"
-					primary={formatDataSummary(service)}
-				>
-					<ConfigChip>{formatBackupLabel(service)}</ConfigChip>
-					<ConfigChip>{formatDeployScheduleLabel(service)}</ConfigChip>
 				</ConfigDigestItem>
 			</div>
 		</div>
@@ -922,18 +896,6 @@ function formatInstanceSummary(overview: OverviewData): string {
 	return `${overview.runningDeployments}/${configured} Running Across ${formatCount(serverCount, "server")}`;
 }
 
-function getLockedServerLabel(service: Service): string | null {
-	if (!service.lockedServerId) return null;
-
-	return (
-		service.lockedServer?.name ??
-		service.configuredReplicas.find(
-			(replica) => replica.serverId === service.lockedServerId,
-		)?.serverName ??
-		service.lockedServerId
-	);
-}
-
 function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
 	return (
 		endpoints.find((endpoint) => endpoint.kind === "public") ??
@@ -948,34 +910,6 @@ function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
 	);
 }
 
-function formatReplicaCompact(overview: OverviewData): string {
-	const configured = getConfiguredReplicaCount(overview);
-
-	if (configured === 0) return "No Replicas";
-
-	return `${overview.runningDeployments}/${configured} Running`;
-}
-
-function formatPlacementLabel(service: Service): string {
-	const lockedServer = getLockedServerLabel(service);
-
-	if (service.stateful) {
-		return lockedServer ? `Stateful on ${lockedServer}` : "Stateful";
-	}
-
-	return lockedServer ? `Pinned to ${lockedServer}` : "Stateless";
-}
-
-function formatEndpointCount(endpoints: EndpointItem[]): string {
-	const publicCount = endpoints.filter(
-		(endpoint) => endpoint.kind !== "private",
-	).length;
-
-	if (publicCount === 0) return "Private Only";
-
-	return `${formatCount(publicCount, "public endpoint")} + Private`;
-}
-
 function formatPortSummary(ports: Service["ports"]): string {
 	if (ports.length === 0) return "No Ports";
 	if (ports.length === 1) return formatPortLabel(ports[0]);
@@ -988,43 +922,6 @@ function formatPortLabel(port: Service["ports"][number]): string {
 	const external = port.externalPort ? ` -> :${port.externalPort}` : "";
 
 	return `${protocol} :${port.port}${external}`;
-}
-
-function formatDataSummary(service: Service): string {
-	const volumeCount = service.volumes?.length ?? 0;
-	const secretCount = service.secrets?.length ?? 0;
-	const parts = [];
-
-	if (volumeCount > 0) parts.push(formatCount(volumeCount, "volume"));
-	if (secretCount > 0) parts.push(formatCount(secretCount, "secret"));
-
-	return parts.length > 0 ? parts.join(" · ") : "No Volumes or Secrets";
-}
-
-function formatBackupLabel(service: Service): string {
-	if ((service.volumes?.length ?? 0) === 0) return "No Backups";
-	if (!service.backupEnabled) return "Manual Backups";
-
-	return service.backupSchedule
-		? `Backup ${service.backupSchedule}`
-		: "Backups On";
-}
-
-function formatDeployScheduleLabel(service: Service): string {
-	if (!service.deploymentSchedule) return "Manual Deploy";
-
-	try {
-		const scheduleDescription = cronstrue.toString(service.deploymentSchedule, {
-			verbose: true,
-		});
-		return `Deploy ${lowercaseFirstLetter(scheduleDescription)}`;
-	} catch {
-		return "Scheduled Deploy";
-	}
-}
-
-function lowercaseFirstLetter(value: string): string {
-	return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function formatCount(count: number, singular: string): string {
