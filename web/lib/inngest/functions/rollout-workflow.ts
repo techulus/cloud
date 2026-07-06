@@ -385,23 +385,6 @@ export const rolloutWorkflow = inngest.createFunction(
 			return result;
 		});
 
-		await step.run("save-deployed-config", async () => {
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
-
-			const serverMap = await validateServers(placements);
-
-			await saveDeployedConfig(serviceId, {
-				service,
-				placements,
-				serverMap,
-				totalReplicas,
-				isRollingUpdate,
-			});
-		});
-
 		await step.run("start-health-check", async () => {
 			const service = await getService(serviceId);
 			const hasHealthCheck = service?.healthCheckCmd != null;
@@ -431,7 +414,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					.where(
 						and(
 							inArray(deployments.id, deploymentIds),
-							inArray(deployments.status, ["healthy", "running"]),
+							inArray(deployments.observedPhase, ["healthy", "running"]),
 						),
 					);
 
@@ -460,7 +443,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				const deploymentStates = await db
 					.select({
 						id: deployments.id,
-						status: deployments.status,
+						observedPhase: deployments.observedPhase,
 						serverName: servers.name,
 					})
 					.from(deployments)
@@ -469,7 +452,8 @@ export const rolloutWorkflow = inngest.createFunction(
 
 				return deploymentStates.filter(
 					(deployment) =>
-						deployment.status !== "healthy" && deployment.status !== "running",
+						deployment.observedPhase !== "healthy" &&
+						deployment.observedPhase !== "running",
 				);
 			},
 		);
@@ -505,34 +489,37 @@ export const rolloutWorkflow = inngest.createFunction(
 		}
 
 		await step.run("start-dns-sync", async () => {
-			await db
-				.update(rollouts)
-				.set({ currentStage: "dns_sync" })
-				.where(eq(rollouts.id, rolloutId));
+			await db.transaction(async (tx) => {
+				await tx
+					.update(rollouts)
+					.set({ currentStage: "dns_sync" })
+					.where(eq(rollouts.id, rolloutId));
 
-			await db
-				.update(deployments)
-				.set({ status: "running" })
-				.where(
-					and(
-						eq(deployments.rolloutId, rolloutId),
-						eq(deployments.status, "healthy"),
-					),
-				);
-
-			await db
-				.update(deployments)
-				.set({ status: "draining" })
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						inArray(deployments.status, ["running", "healthy"]),
-						or(
-							ne(deployments.rolloutId, rolloutId),
-							isNull(deployments.rolloutId),
+				await tx
+					.update(deployments)
+					.set({ trafficState: "active" })
+					.where(
+						and(
+							eq(deployments.rolloutId, rolloutId),
+							eq(deployments.trafficState, "candidate"),
+							inArray(deployments.observedPhase, ["healthy", "running"]),
 						),
-					),
-				);
+					);
+
+				await tx
+					.update(deployments)
+					.set({ trafficState: "draining" })
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.trafficState, "active"),
+							or(
+								ne(deployments.rolloutId, rolloutId),
+								isNull(deployments.rolloutId),
+							),
+						),
+					);
+			});
 
 			await ingestRolloutLog(
 				rolloutId,
@@ -598,27 +585,65 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (isRollingUpdate) {
 			await step.run("stop-old-deployments", async () => {
-				const stoppedDeployments = await db
+				const stoppedDeploymentsWithoutContainers = await db
 					.update(deployments)
-					.set({ status: "stopping", desired: false })
+					.set({
+						runtimeDesiredState: "removed",
+						trafficState: "inactive",
+					})
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							eq(deployments.status, "draining"),
+							eq(deployments.trafficState, "draining"),
+							isNull(deployments.containerId),
 						),
 					)
 					.returning({ id: deployments.id });
 
-				if (stoppedDeployments.length > 0) {
+				const stoppingDeployments = await db
+					.update(deployments)
+					.set({
+						runtimeDesiredState: "removed",
+						trafficState: "inactive",
+					})
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.trafficState, "draining"),
+						),
+					)
+					.returning({ id: deployments.id });
+
+				const stoppedCount =
+					stoppedDeploymentsWithoutContainers.length +
+					stoppingDeployments.length;
+				if (stoppedCount > 0) {
 					await ingestRolloutLog(
 						rolloutId,
 						serviceId,
 						"dns_sync",
-						`Stopping ${stoppedDeployments.length} old deployment(s) after DNS sync`,
+						`Stopping ${stoppedCount} old deployment(s) after DNS sync`,
 					);
 				}
 			});
 		}
+
+		await step.run("save-deployed-config", async () => {
+			const service = await getService(serviceId);
+			if (!service) {
+				throw new Error("Service not found");
+			}
+
+			const serverMap = await validateServers(placements);
+
+			await saveDeployedConfig(serviceId, {
+				service,
+				placements,
+				serverMap,
+				totalReplicas,
+				isRollingUpdate,
+			});
+		});
 
 		await step.run("complete-rollout", async () => {
 			await db

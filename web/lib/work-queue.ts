@@ -347,8 +347,8 @@ async function runForceCleanupCompletionSideEffects(
 			.update(deployments)
 			.set({
 				containerId: null,
-				status: "pending",
-				desired: true,
+				runtimeDesiredState: "running",
+				observedPhase: "pending",
 				healthStatus: null,
 				unhealthyReportCount: 0,
 				autohealRestartCount: 0,
@@ -357,7 +357,7 @@ async function runForceCleanupCompletionSideEffects(
 			.where(
 				and(
 					eq(deployments.id, payload.deploymentId),
-					eq(deployments.status, "failed"),
+					eq(deployments.observedPhase, "failed"),
 					eq(deployments.failedStage, "autoheal_recreate"),
 				),
 			);

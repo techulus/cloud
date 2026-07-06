@@ -13,7 +13,7 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
-import { buildCurrentConfig } from "@/lib/service-config";
+import { buildCurrentConfig, getDeployedStateful } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -32,6 +32,21 @@ export type DeploymentContext = {
 	totalReplicas: number;
 	isRollingUpdate: boolean;
 };
+
+export function isActiveDeploymentForRollout(
+	deployment: { trafficState: string },
+	service: {
+		deployedConfig?: string | null;
+		stateful?: boolean | null;
+		serverlessEnabled?: boolean | null;
+		serverlessSleepAfterSeconds?: number | null;
+		serverlessWakeTimeoutSeconds?: number | null;
+		serverlessMinReadyReplicas?: number | null;
+	},
+) {
+	void service;
+	return deployment.trafficState === "active";
+}
 
 export function normalizeImage(image: string): string {
 	if (!image.includes("/")) {
@@ -167,13 +182,18 @@ export async function validateServers(
 export async function prepareRollingUpdate(
 	serviceId: string,
 ): Promise<{ deploymentIds: string[] }> {
+	const service = await getService(serviceId);
+	if (!service) {
+		return { deploymentIds: [] };
+	}
+
 	const existingDeployments = await db
 		.select()
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
 	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" || d.status === "healthy",
+		(d) => isActiveDeploymentForRollout(d, service),
 	);
 
 	return { deploymentIds: runningDeployments.map((d) => d.id) };
@@ -188,7 +208,7 @@ export async function cleanupTerminalDeployments(
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.status, ["rolled_back", "stopped", "failed"]),
+				eq(deployments.runtimeDesiredState, "removed"),
 			),
 		);
 
@@ -344,7 +364,9 @@ export async function createDeploymentRecords(
 				serviceId,
 				serverId: server.id,
 				ipAddress,
-				status: "pending",
+				runtimeDesiredState: "running",
+				trafficState: "candidate",
+				observedPhase: "pending",
 				rolloutId,
 			});
 
@@ -431,6 +453,8 @@ export async function saveDeployedConfig(
 		port: p.port,
 		isPublic: p.isPublic,
 		domain: p.domain,
+		protocol: p.protocol,
+		tlsPassthrough: p.tlsPassthrough,
 	}));
 
 	const updatedService = await getService(serviceId);
@@ -454,7 +478,7 @@ export async function checkForRollingUpdate(
 	serviceId: string,
 ): Promise<boolean> {
 	const service = await getService(serviceId);
-	if (!service || service.stateful) {
+	if (!service || getDeployedStateful(service)) {
 		return false;
 	}
 
@@ -464,7 +488,7 @@ export async function checkForRollingUpdate(
 		.where(eq(deployments.serviceId, serviceId));
 
 	const runningDeployments = existingDeployments.filter(
-		(d) => d.status === "running" || d.status === "healthy",
+		(d) => isActiveDeploymentForRollout(d, service),
 	);
 
 	return runningDeployments.length > 0;

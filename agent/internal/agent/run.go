@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/serverless"
 )
 
 func (a *Agent) Run(ctx context.Context) {
@@ -30,6 +31,15 @@ func (a *Agent) Run(ctx context.Context) {
 
 	if a.IsProxy && a.TraefikLogCollector != nil {
 		a.TraefikLogCollector.Start()
+	}
+
+	if a.IsProxy {
+		gateway := serverless.NewGateway(a)
+		if err := gateway.Start(ctx); err != nil {
+			log.Printf("[serverless-gateway] failed to start: %v", err)
+		} else {
+			a.serverlessGatewayRunning.Store(true)
+		}
 	}
 
 	var cleanupTickerC <-chan time.Time
@@ -109,12 +119,14 @@ func (a *Agent) reportStatus(reason string) {
 	report := a.BuildStatusReport(true)
 	reportedDeploymentErrorCount := len(report.DeploymentErrors)
 	completed, active := a.SnapshotWorkStatus()
-	response, err := a.Client.ReportStatus(report, completed, active)
+	serverlessTransitions := a.SnapshotServerlessTransitions()
+	response, err := a.Client.ReportStatus(report, completed, active, serverlessTransitions)
 	if err != nil {
 		log.Printf("[status] failed to report (%s): %v", reason, err)
 		return
 	}
 	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
+	a.ClearReportedServerlessTransitions(len(serverlessTransitions))
 	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)

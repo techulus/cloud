@@ -66,15 +66,26 @@ export function getStatusColor(status: string): StatusColors {
 }
 
 export function getStatusColorFromDeployments(
-	deployments: { status: string }[],
+	deployments: { observedPhase: string; runtimeDesiredState?: string }[],
 ): StatusColors {
-	const hasRunning = deployments.some((d) => d.status === "running");
-	const hasPending = deployments.some(
-		(d) => d.status === "pending" || d.status === "pulling",
+	const hasRunning = deployments.some(
+		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
 	);
-	const hasFailed = deployments.some((d) => d.status === "failed");
-	const hasStopped = deployments.some((d) => d.status === "stopped");
-	const hasUnknown = deployments.some((d) => d.status === "unknown");
+	const hasPending = deployments.some(
+		(d) =>
+			d.observedPhase === "pending" ||
+			d.observedPhase === "pulling" ||
+			d.observedPhase === "starting" ||
+			d.observedPhase === "waking",
+	);
+	const hasFailed = deployments.some((d) => d.observedPhase === "failed");
+	const hasStopped = deployments.some(
+		(d) =>
+			d.observedPhase === "stopped" ||
+			d.observedPhase === "sleeping" ||
+			d.runtimeDesiredState === "removed",
+	);
+	const hasUnknown = deployments.some((d) => d.observedPhase === "unknown");
 
 	if (hasRunning) return statusColorMap.running;
 	if (hasPending) return statusColorMap.pending;

@@ -75,3 +75,37 @@ reports, the command can be retried up to the fixed attempt limit.
 | `force_cleanup` | Force remove containers for a service |
 | `cleanup_volumes` | Remove volume directories for a service |
 | `deploy` | Handled through expected-state reconciliation |
+
+## Serverless Gateway
+
+Proxy agents run a local HTTP wake gateway on `127.0.0.1:18080`. The control
+plane emits Traefik routes to this gateway only on proxy nodes that host a local
+proxy deployment for that serverless service. Proxies without a local
+proxy-hosted deployment do not emit a public HTTP route for that service.
+Worker-only serverless services keep normal direct routes because worker
+deployments do not sleep.
+
+This means public DNS or external load balancers must route a serverless
+service's traffic only to proxy nodes that own a local proxy replica for that
+service.
+
+For serverless service traffic, Traefik forwards the public request to the local
+gateway. The gateway resolves the host from expected-state serverless metadata,
+queues `wake_started` as a status transition, starts local proxy-hosted
+containers from expected-state config, waits for ready upstreams, then proxies
+the original request to the selected container over the WireGuard mesh.
+
+The gateway keeps a short upstream cache and collapses concurrent wake requests
+for the same host. Request cancellation is respected while waiting for a shared
+wake result.
+
+The gateway tracks request activity in memory. When a host stays idle for the
+service's configured sleep timeout, the proxy agent removes only its local
+proxy-hosted containers and queues a `sleep` status transition. The control plane
+records the transition and updates dashboard/routing state; it does not run the
+idle timer.
+
+If a status report fails, pending serverless transitions stay queued in memory
+and are retried. A locally slept deployment is also guarded from immediate
+reconcile until a fresh expected-state fetch confirms the control plane recorded
+the sleep or rejects it by continuing to advertise `desiredState: "running"`.
