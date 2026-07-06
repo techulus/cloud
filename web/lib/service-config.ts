@@ -615,9 +615,7 @@ export function isDeployedServerlessService(service: {
 	serverlessWakeTimeoutSeconds?: number | null;
 	serverlessMinReadyReplicas?: number | null;
 }) {
-	return (
-		getDeployedServerlessConfig(service).enabled && !getDeployedStateful(service)
-	);
+	return getDeployedServerlessConfig(service).enabled;
 }
 
 export function getDeployedServicePorts(

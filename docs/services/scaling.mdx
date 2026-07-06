@@ -11,7 +11,7 @@ Replica count ranges from 1 to 10 per service.
 
 ## Serverless scaling
 
-Stateless HTTP services can be configured to sleep when idle on proxy nodes. A
+Public HTTP services can be configured to sleep when idle on proxy nodes. A
 sleeping deployment keeps its desired replica record, but the proxy agent removes
 the local container. The next public HTTP request wakes local proxy-hosted
 deployments and is held until an upstream is ready or the wake timeout is
@@ -31,7 +31,7 @@ Serverless settings are configured per service:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| Enable serverless | Off | Allows stateless HTTP deployments to sleep and wake on request |
+| Enable serverless | Off | Allows proxy-hosted HTTP deployments to sleep and wake on request |
 | Sleep after | `300s` | Idle period before running containers are stopped |
 | Wake timeout | `300s` | Maximum time the wake gateway waits for ready upstreams |
 | Min Ready | `1` | Preferred number of ready deployments before queued requests resume |
@@ -62,7 +62,7 @@ You can also manually lock any service to a specific server by setting the locke
 - Stateful services are always pinned to their locked server.
 - Stateful services do not automatically fail over to another server.
 - Maximum 10 replicas per service.
-- Serverless scaling is supported only for stateless HTTP services with a public domain.
+- Serverless scaling requires a public HTTP service domain.
 - Sleep and wake are proxy-local. Worker replicas are intentionally always on.
 - Serverless traffic must be routed only to proxy nodes that own a local proxy replica for that service.
 - Proxy agents report sleep and wake transitions through normal status reports.

@@ -1035,9 +1035,6 @@ export async function updateServiceServerlessSettings(
 		if (!service || service.deletedAt) {
 			throw new Error("Service not found");
 		}
-		if (service.stateful && validated.enabled) {
-			throw new Error("Serverless is only supported for stateless services");
-		}
 
 		if (validated.enabled) {
 			const publicHttpPorts = await tx

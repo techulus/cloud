@@ -44,6 +44,19 @@ describe("service config", () => {
 		expect(isDeployedServerlessService(service)).toBe(true);
 	});
 
+	it("allows deployed stateful services to be serverless", () => {
+		const service = {
+			serverlessEnabled: true,
+			stateful: true,
+			serverlessSleepAfterSeconds: 300,
+			serverlessWakeTimeoutSeconds: 120,
+			serverlessMinReadyReplicas: 1,
+			deployedConfig: JSON.stringify(deployedConfig({ stateful: true })),
+		};
+
+		expect(isDeployedServerlessService(service)).toBe(true);
+	});
+
 	it("reports serverless changes as pending config", () => {
 		const changes = diffConfigs(deployedConfig(), {
 			source: { type: "image", image: "nginx" },

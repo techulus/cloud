@@ -481,6 +481,61 @@ describe("expected-state pure builders", () => {
 		]);
 	});
 
+	it("builds proxy-local serverless metadata for stateful services", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				{
+					id: "svc_stateful",
+					serverlessEnabled: true,
+					stateful: true,
+					serverlessSleepAfterSeconds: 300,
+					serverlessWakeTimeoutSeconds: 120,
+					serverlessMinReadyReplicas: 1,
+				},
+			] as any,
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_stateful",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "db.example.com",
+				},
+			] as any,
+			deployments: [
+				{
+					id: "dep_stateful",
+					serviceId: "svc_stateful",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					status: "sleeping",
+					serverIsProxy: true,
+				},
+			] as any,
+			containers: [
+				{
+					deploymentId: "dep_stateful",
+					desiredState: "stopped",
+				},
+			] as any,
+		});
+
+		expect(routes).toEqual([
+			{
+				serviceId: "svc_stateful",
+				domain: "db.example.com",
+				port: 3000,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				minReadyReplicas: 1,
+				localDeploymentIds: ["dep_stateful"],
+				upstreams: [],
+			},
+		]);
+	});
+
 	it("does not include draining serverless deployments as wakeable local deployments", () => {
 		const routes = buildServerlessRoutesFromRows({
 			serverId: "proxy_1",

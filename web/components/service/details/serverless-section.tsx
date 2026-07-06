@@ -35,11 +35,9 @@ export const ServerlessSection = memo(function ServerlessSection({
 			),
 		[service.ports],
 	);
-	const unavailableReason = service.stateful
-		? "Serverless is only supported for stateless services"
-		: !hasPublicHttpEndpoint
-			? "Add a public HTTP port with a domain to enable serverless"
-			: null;
+	const unavailableReason = !hasPublicHttpEndpoint
+		? "Add a public HTTP port with a domain to enable serverless"
+		: null;
 	const optionsDisabled = !!unavailableReason || isSaving;
 
 	const parsed = useMemo(

@@ -22,10 +22,7 @@ import { markDeploymentUndesired } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
-import {
-	getDeployedServerlessConfig,
-	getDeployedStateful,
-} from "@/lib/service-config";
+import { getDeployedServerlessConfig } from "@/lib/service-config";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -367,7 +364,6 @@ function getInvalidServerlessTransitionReason({
 				serverlessSleepAfterSeconds: number;
 				serverlessWakeTimeoutSeconds: number;
 				serverlessMinReadyReplicas: number;
-				stateful: boolean;
 				deployedConfig: string | null;
 				serverIsProxy: boolean;
 		  }
@@ -379,7 +375,6 @@ function getInvalidServerlessTransitionReason({
 	if (!getDeployedServerlessConfig(deployment).enabled) {
 		return "service is not serverless";
 	}
-	if (getDeployedStateful(deployment)) return "service is stateful";
 	if (!deployment.desired) return "deployment is not desired";
 
 	if (transition.type === "sleep") {
