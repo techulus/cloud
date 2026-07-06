@@ -2,7 +2,6 @@ import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import {
 	applyStatusReport,
-	type ServerlessTransition,
 	type StatusReport,
 } from "@/lib/agent-status";
 import {
@@ -17,7 +16,7 @@ type StatusRequestBody = {
 	statusReport?: StatusReport;
 	completedWorkItems?: WorkItemResult[];
 	activeWorkItems?: ActiveWorkItem[];
-	serverlessTransitions?: ServerlessTransition[];
+	serverlessTransitions?: unknown[];
 };
 
 export async function POST(request: NextRequest) {
@@ -47,7 +46,11 @@ export async function POST(request: NextRequest) {
 		? data.serverlessTransitions
 		: [];
 
-	await applyStatusReport(serverId, data.statusReport, serverlessTransitions);
+	const { serverlessTransitionResults } = await applyStatusReport(
+		serverId,
+		data.statusReport,
+		serverlessTransitions,
+	);
 
 	const completedWorkItems = Array.isArray(data.completedWorkItems)
 		? data.completedWorkItems.filter(isValidWorkItemResult)
@@ -71,6 +74,7 @@ export async function POST(request: NextRequest) {
 		acceptedWorkItemResults: accepted,
 		rejectedWorkItemResults: rejected,
 		rejectedActiveWorkItems: rejectedActive,
+		serverlessTransitionResults,
 		workItems: nextWorkItem ? [nextWorkItem] : [],
 	});
 }

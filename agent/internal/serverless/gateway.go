@@ -27,6 +27,8 @@ const (
 var (
 	wakePollInterval      = 500 * time.Millisecond
 	idleTimerSeedInterval = 15 * time.Second
+	upstreamDialTimeout   = 250 * time.Millisecond
+	checkUpstreamReady    = tcpUpstreamReady
 )
 
 type Gateway struct {
@@ -48,6 +50,7 @@ type Runtime interface {
 	ListServerlessContainers() ([]container.Container, error)
 	GetServerlessContainerHealth(containerID string) string
 	QueueServerlessTransition(agenthttp.ServerlessTransition)
+	HasPendingServerlessSleep(deploymentID string) bool
 }
 
 type cachedUpstreams struct {
@@ -293,11 +296,13 @@ func (g *Gateway) readyUpstreams(route *agenthttp.ServerlessRoute, state *agenth
 		actual, isRunning := actualByDeploymentID[deploymentID]
 		if isRunning && g.isContainerReady(actual, expected) {
 			if upstream, ok := localUpstream(route, expected); ok {
-				upstreamsByURL[upstream.Url] = upstream
+				if checkUpstreamReady(upstream.Url) {
+					upstreamsByURL[upstream.Url] = upstream
+				}
 			}
 			continue
 		}
-		if expected.DesiredState == "stopped" {
+		if expected.DesiredState == "stopped" || g.runtime.HasPendingServerlessSleep(deploymentID) {
 			sleepingLocalIDs = append(sleepingLocalIDs, deploymentID)
 		}
 	}
@@ -488,6 +493,15 @@ func (g *Gateway) isContainerReady(actual container.Container, expected agenthtt
 	}
 	health := g.runtime.GetServerlessContainerHealth(actual.ID)
 	return health == "healthy" || health == "none"
+}
+
+func tcpUpstreamReady(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, upstreamDialTimeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func (g *Gateway) cachedUpstreams(host string) ([]agenthttp.ServerlessUpstream, bool) {

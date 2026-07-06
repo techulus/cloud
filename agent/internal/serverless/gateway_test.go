@@ -11,6 +11,10 @@ import (
 	agenthttp "techulus/cloud-agent/internal/http"
 )
 
+func init() {
+	checkUpstreamReady = func(string) bool { return true }
+}
+
 type fakeRuntime struct {
 	mu                sync.Mutex
 	state             *agenthttp.ExpectedState
@@ -24,6 +28,7 @@ type fakeRuntime struct {
 	deployStarted     chan struct{}
 	deployStartedOnce sync.Once
 	allowDeploy       chan struct{}
+	pendingSleeps     map[string]bool
 }
 
 func (f *fakeRuntime) ExpectedState() *agenthttp.ExpectedState {
@@ -96,6 +101,21 @@ func (f *fakeRuntime) QueueServerlessTransition(transition agenthttp.ServerlessT
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.transitions = append(f.transitions, transition)
+	if transition.Type == "sleep" {
+		if f.pendingSleeps == nil {
+			f.pendingSleeps = map[string]bool{}
+		}
+		f.pendingSleeps[transition.DeploymentID] = true
+	}
+	if transition.Type == "wake_started" {
+		delete(f.pendingSleeps, transition.DeploymentID)
+	}
+}
+
+func (f *fakeRuntime) HasPendingServerlessSleep(deploymentID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pendingSleeps[deploymentID]
 }
 
 func (f *fakeRuntime) snapshot() ([]agenthttp.ServerlessTransition, []string, int) {
@@ -333,6 +353,38 @@ func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
 	}
 }
 
+func TestPendingSleepCanWakeBeforeExpectedStateSettles(t *testing.T) {
+	state := testExpectedState("running")
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{
+		state: state,
+		containers: []container.Container{
+			{ID: "ctr-local", State: "exited", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+		pendingSleeps: map[string]bool{"dep_local": true},
+	}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams returned error: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].DeploymentID != "dep_local" {
+		t.Fatalf("upstreams = %+v, want local dep_local", upstreams)
+	}
+
+	transitions, _, deployCalls := runtime.snapshot()
+	if deployCalls != 1 {
+		t.Fatalf("deployCalls = %d, want 1", deployCalls)
+	}
+	if len(transitions) != 1 || transitions[0].Type != "wake_started" {
+		t.Fatalf("transitions = %+v, want one wake_started transition", transitions)
+	}
+	if runtime.HasPendingServerlessSleep("dep_local") {
+		t.Fatal("pending sleep was not cleared by wake_started")
+	}
+}
+
 func TestWakeTimeoutQueuesWakeFailedTransition(t *testing.T) {
 	previousPoll := wakePollInterval
 	wakePollInterval = time.Millisecond
@@ -372,6 +424,39 @@ func TestWakeTimeoutQueuesWakeFailedTransition(t *testing.T) {
 	}
 	if transitions[1].DeploymentID != "dep_local" || transitions[1].Error == "" {
 		t.Fatalf("wake_failed transition = %+v, want dep_local with error", transitions[1])
+	}
+}
+
+func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(string) bool { return false }
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Serverless.Routes[0].Upstreams = nil
+	state.Serverless.Routes[0].WakeTimeoutSeconds = 1
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	_, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err == nil {
+		t.Fatal("getUpstreams succeeded, want timeout error")
+	}
+
+	transitions, _, deployCalls := runtime.snapshot()
+	if deployCalls != 1 {
+		t.Fatalf("deployCalls = %d, want 1", deployCalls)
+	}
+	if len(transitions) != 2 {
+		t.Fatalf("transitions = %+v, want wake_started and wake_failed", transitions)
+	}
+	if transitions[0].Type != "wake_started" || transitions[1].Type != "wake_failed" {
+		t.Fatalf("transitions = %+v, want wake_started then wake_failed", transitions)
 	}
 }
 
