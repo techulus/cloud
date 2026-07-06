@@ -157,7 +157,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 	});
 
 	return (
-		<Card className="gap-0 py-0">
+		<Card className="gap-0 border border-border py-0 ring-0">
 			<div className="grid items-stretch lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
 				<RequestStatsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
@@ -360,7 +360,7 @@ function RequestChartModeToggle({
 	];
 
 	return (
-		<div className="inline-flex rounded-md border bg-muted/30 p-0.5">
+		<div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
 			{options.map((option) => {
 				const isSelected = value === option.value;
 
@@ -398,7 +398,7 @@ function ServiceConfigPanel({
 	const primaryEndpoint = getPrimaryEndpoint(overview.endpoints);
 
 	return (
-		<div className="min-w-0 border-t p-4 lg:border-t-0 lg:border-l">
+		<div className="min-w-0 border-border border-t p-4 lg:border-t-0 lg:border-l">
 			<div className="grid gap-3 sm:grid-cols-2">
 				<SummaryItem icon={Activity} label="Status">
 					<StatusValue status={overview.status} />
@@ -457,7 +457,12 @@ function SummaryItem({
 	className?: string;
 }) {
 	return (
-		<div className={cn("min-w-0 rounded-md border bg-muted/20 p-4", className)}>
+		<div
+			className={cn(
+				"min-w-0 rounded-md border border-border bg-muted/20 p-4",
+				className,
+			)}
+		>
 			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
 				<Icon className="size-4" />
 				<span>{label}</span>
@@ -483,7 +488,12 @@ function ConfigDigestItem({
 	className?: string;
 }) {
 	return (
-		<div className={cn("min-w-0 rounded-md border bg-muted/20 p-4", className)}>
+		<div
+			className={cn(
+				"min-w-0 rounded-md border border-border bg-muted/20 p-4",
+				className,
+			)}
+		>
 			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
 				<Icon className="size-4" />
 				<span>{label}</span>
@@ -604,7 +614,7 @@ function LegendMetric({
 
 function RequestStatsState({ message }: { message: string }) {
 	return (
-		<div className="flex h-full items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+		<div className="flex h-full items-center justify-center rounded-lg border border-border border-dashed text-sm text-muted-foreground">
 			{message}
 		</div>
 	);
@@ -623,7 +633,7 @@ function RequestStatsTooltip({
 	const items = visiblePayload.length > 0 ? visiblePayload : payload;
 
 	return (
-		<div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
+		<div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
 			<p className="mb-1 font-medium">{formatTooltipDate(String(label))}</p>
 			<div className="space-y-1">
 				{items.map((item) => (
