@@ -37,6 +37,8 @@ func (a *Agent) Run(ctx context.Context) {
 		gateway := serverless.NewGateway(a)
 		if err := gateway.Start(ctx); err != nil {
 			log.Printf("[serverless-gateway] failed to start: %v", err)
+		} else {
+			a.serverlessGatewayRunning.Store(true)
 		}
 	}
 

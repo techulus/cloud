@@ -102,7 +102,7 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 }
 
 func (a *Agent) agentCapabilities() []string {
-	if !a.IsProxy {
+	if !a.IsProxy || !a.serverlessGatewayRunning.Load() {
 		return nil
 	}
 	return []string{serverlessGatewayCapability}

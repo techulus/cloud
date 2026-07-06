@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 
 	"techulus/cloud-agent/internal/container"
@@ -42,6 +43,24 @@ func TestPendingServerlessWakeDoesNotStopStaleStoppedExpectedContainer(t *testin
 		if action.DeploymentID == "dep_serverless" {
 			t.Fatalf("planReconcile returned action for pending wake: %+v", action)
 		}
+	}
+}
+
+func TestServerlessGatewayCapabilityRequiresStartedGateway(t *testing.T) {
+	agent := &Agent{IsProxy: true}
+
+	if slices.Contains(agent.agentCapabilities(), serverlessGatewayCapability) {
+		t.Fatal("proxy reported serverless gateway capability before gateway start")
+	}
+
+	agent.serverlessGatewayRunning.Store(true)
+	if !slices.Contains(agent.agentCapabilities(), serverlessGatewayCapability) {
+		t.Fatal("proxy did not report serverless gateway capability after gateway start")
+	}
+
+	agent.IsProxy = false
+	if slices.Contains(agent.agentCapabilities(), serverlessGatewayCapability) {
+		t.Fatal("worker reported serverless gateway capability")
 	}
 }
 

@@ -36,6 +36,7 @@ import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
+import { blocksProjectDeletion } from "@/lib/project-deletion";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -263,24 +264,13 @@ export async function deleteProject(id: string) {
 		.from(services)
 		.where(eq(services.projectId, id));
 
-	const activeStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-		"stopping",
-	];
-
 	for (const service of projectServices) {
 		const activeDeployments = await db
 			.select()
 			.from(deployments)
 			.where(eq(deployments.serviceId, service.id));
 
-		const hasActiveDeployments = activeDeployments.some((d) =>
-			activeStatuses.includes(d.status),
-		);
+		const hasActiveDeployments = activeDeployments.some(blocksProjectDeletion);
 
 		if (hasActiveDeployments) {
 			throw new Error(

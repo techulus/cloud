@@ -2,6 +2,7 @@ package agent
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"techulus/cloud-agent/internal/build"
@@ -85,6 +86,7 @@ type Agent struct {
 	buildMutex                   sync.Mutex
 	currentBuildID               string
 	IsProxy                      bool
+	serverlessGatewayRunning     atomic.Bool
 	dnsInSync                    bool
 	DisableDNS                   bool
 }
