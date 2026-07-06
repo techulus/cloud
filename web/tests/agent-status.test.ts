@@ -18,6 +18,8 @@ vi.mock("@/lib/work-queue", () => ({
 }));
 
 import {
+	getSleepTransitionDeploymentIds,
+	getStaleStoppedServerlessReportUpdate,
 	getStoppedContainerReportUpdate,
 	shouldAttachReportedContainer,
 } from "@/lib/agent-status";
@@ -46,5 +48,55 @@ describe("agent status serverless attachment", () => {
 			observedPhase: "stopped",
 			healthStatus: "none",
 		});
+	});
+
+	it("restores stale stopped serverless observations from live running reports", () => {
+		expect(
+			getStaleStoppedServerlessReportUpdate({
+				hasHealthCheck: false,
+				healthStatus: "none",
+			}),
+		).toEqual({
+			observedPhase: "healthy",
+			healthStatus: "none",
+			serverlessWakeFailureCount: 0,
+		});
+
+		expect(
+			getStaleStoppedServerlessReportUpdate({
+				hasHealthCheck: true,
+				healthStatus: "starting",
+			}),
+		).toEqual({
+			observedPhase: "starting",
+			healthStatus: "starting",
+			serverlessWakeFailureCount: 0,
+		});
+
+		expect(
+			getStaleStoppedServerlessReportUpdate({
+				hasHealthCheck: true,
+				healthStatus: "healthy",
+			}),
+		).toEqual({
+			observedPhase: "healthy",
+			healthStatus: "healthy",
+			serverlessWakeFailureCount: 0,
+		});
+	});
+
+	it("extracts sleep transition ids without trusting raw payload shape", () => {
+		expect(
+			Array.from(
+				getSleepTransitionDeploymentIds([
+					null,
+					42,
+					{ type: "sleep", deploymentId: "", containerId: "ctr_empty" },
+					{ type: "sleep", deploymentId: "dep_sleep", containerId: "ctr_sleep" },
+					{ type: "wake_started", deploymentId: "dep_wake" },
+					{ type: "sleep", deploymentId: "dep_missing_container" },
+				]),
+			),
+		).toEqual(["dep_sleep"]);
 	});
 });

@@ -66,8 +66,8 @@ type Agent struct {
 	deploymentDeployLocks        map[string]*sync.Mutex
 	serverlessMutex              sync.Mutex
 	pendingServerlessTransitions []agenthttp.ServerlessTransition
-	pendingServerlessSleep       map[string]struct{}
-	pendingServerlessWake        map[string]struct{}
+	pendingServerlessSleep       map[string]serverlessTransitionGuard
+	pendingServerlessWake        map[string]serverlessTransitionGuard
 	expectedStateMutex           sync.RWMutex
 	latestExpectedState          *agenthttp.ExpectedState
 	Client                       *agenthttp.Client
@@ -120,8 +120,8 @@ func NewAgent(
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,
 		deploymentDeployLocks:  map[string]*sync.Mutex{},
-		pendingServerlessSleep: map[string]struct{}{},
-		pendingServerlessWake:  map[string]struct{}{},
+		pendingServerlessSleep: map[string]serverlessTransitionGuard{},
+		pendingServerlessWake:  map[string]serverlessTransitionGuard{},
 	}
 }
 

@@ -126,7 +126,7 @@ func (a *Agent) reportStatus(reason string) {
 		return
 	}
 	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
-	a.ClearReportedServerlessTransitions(len(serverlessTransitions))
+	a.AcknowledgeServerlessTransitions(response.ServerlessTransitionResults, len(serverlessTransitions))
 	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)

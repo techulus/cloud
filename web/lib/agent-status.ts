@@ -46,9 +46,17 @@ type DeploymentError = {
 };
 
 export type ServerlessTransition =
-	| { type: "sleep"; deploymentId: string; containerId: string }
-	| { type: "wake_started"; deploymentId: string }
-	| { type: "wake_failed"; deploymentId: string; error: string };
+	| { id?: string; type: "sleep"; deploymentId: string; containerId: string }
+	| { id?: string; type: "wake_started"; deploymentId: string }
+	| { id?: string; type: "wake_failed"; deploymentId: string; error: string };
+
+export type ServerlessTransitionResult = {
+	id?: string;
+	type?: ServerlessTransition["type"];
+	deploymentId?: string;
+	outcome: "applied" | "already_applied" | "rejected";
+	reason?: string;
+};
 
 export function shouldAttachReportedContainer(observedPhase: ObservedPhase) {
 	return (observedStartingPhases as readonly ObservedPhase[]).includes(
@@ -70,6 +78,26 @@ export function getStoppedContainerReportUpdate(deployment: {
 	return {
 		observedPhase: "stopped" as const,
 		healthStatus: "none" as const,
+	};
+}
+
+export function getStaleStoppedServerlessReportUpdate({
+	hasHealthCheck,
+	healthStatus,
+}: {
+	hasHealthCheck: boolean;
+	healthStatus: ContainerStatus["healthStatus"];
+}) {
+	const recovered = healthStatus === "healthy" || healthStatus === "none";
+
+	return {
+		observedPhase: recovered ? ("healthy" as const) : ("starting" as const),
+		healthStatus: hasHealthCheck
+			? recovered
+				? healthStatus
+				: ("starting" as const)
+			: ("none" as const),
+		serverlessWakeFailureCount: 0,
 	};
 }
 
@@ -217,13 +245,28 @@ async function applyDeploymentErrors(
 
 async function applyServerlessTransitions(
 	serverId: string,
-	transitions: ServerlessTransition[],
-) {
-	for (const transition of transitions) {
-		if (!isValidServerlessTransition(transition)) {
+	transitions: unknown[],
+): Promise<ServerlessTransitionResult[]> {
+	const results: ServerlessTransitionResult[] = [];
+
+	for (const transitionValue of transitions) {
+		const resultBase = getServerlessTransitionResultBase(transitionValue);
+		if (!isValidServerlessTransition(transitionValue)) {
 			console.log(`[serverless:status] rejected malformed transition`);
+			results.push({
+				...resultBase,
+				outcome: "rejected",
+				reason: "malformed transition",
+			});
 			continue;
 		}
+		const transition = transitionValue;
+
+		const validResultBase = {
+			id: transition.id,
+			type: transition.type,
+			deploymentId: transition.deploymentId,
+		};
 
 		const deployment = await db
 			.select({
@@ -259,6 +302,13 @@ async function applyServerlessTransitions(
 			console.log(
 				`[serverless:status] rejected ${transition.type} for deployment ${transition.deploymentId}: ${invalidReason}`,
 			);
+			results.push({
+				...validResultBase,
+				outcome: isAlreadyAppliedServerlessTransition(transition, deployment)
+					? "already_applied"
+					: "rejected",
+				reason: invalidReason ?? "deployment not found",
+			});
 			continue;
 		}
 
@@ -291,6 +341,22 @@ async function applyServerlessTransitions(
 					transition.deploymentId,
 					deployment.serviceId,
 				);
+				results.push({ ...validResultBase, outcome: "applied" });
+			} else {
+				const outcome = isAlreadyAppliedServerlessTransition(
+					transition,
+					deployment,
+				)
+					? "already_applied"
+					: "rejected";
+				const reason =
+					outcome === "already_applied"
+						? "sleep already applied"
+						: "sleep update matched zero rows";
+				console.log(
+					`[serverless:status] ${outcome} ${transition.type} for deployment ${transition.deploymentId}: ${reason}`,
+				);
+				results.push({ ...validResultBase, outcome, reason });
 			}
 			continue;
 		}
@@ -323,6 +389,22 @@ async function applyServerlessTransitions(
 					transition.deploymentId,
 					deployment.serviceId,
 				);
+				results.push({ ...validResultBase, outcome: "applied" });
+			} else {
+				const outcome = isAlreadyAppliedServerlessTransition(
+					transition,
+					deployment,
+				)
+					? "already_applied"
+					: "rejected";
+				const reason =
+					outcome === "already_applied"
+						? "wake already applied"
+						: "wake update matched zero rows";
+				console.log(
+					`[serverless:status] ${outcome} ${transition.type} for deployment ${transition.deploymentId}: ${reason}`,
+				);
+				results.push({ ...validResultBase, outcome, reason });
 			}
 			continue;
 		}
@@ -354,8 +436,92 @@ async function applyServerlessTransitions(
 				transition.deploymentId,
 				deployment.serviceId,
 			);
+			results.push({ ...validResultBase, outcome: "applied" });
+		} else {
+			const outcome = isAlreadyAppliedServerlessTransition(
+				transition,
+				deployment,
+			)
+				? "already_applied"
+				: "rejected";
+			const reason =
+				outcome === "already_applied"
+					? "wake failure already applied"
+					: "wake_failed update matched zero rows";
+			console.log(
+				`[serverless:status] ${outcome} ${transition.type} for deployment ${transition.deploymentId}: ${reason}`,
+			);
+			results.push({ ...validResultBase, outcome, reason });
 		}
 	}
+
+	return results;
+}
+
+function getServerlessTransitionResultBase(
+	transition: unknown,
+): Omit<ServerlessTransitionResult, "outcome" | "reason"> {
+	if (!transition || typeof transition !== "object") {
+		return {};
+	}
+	const candidate = transition as Record<string, unknown>;
+	return {
+		id: typeof candidate.id === "string" ? candidate.id : undefined,
+		type: isServerlessTransitionType(candidate.type)
+			? candidate.type
+			: undefined,
+		deploymentId:
+			typeof candidate.deploymentId === "string"
+				? candidate.deploymentId
+				: undefined,
+	};
+}
+
+function isServerlessTransitionType(
+	value: unknown,
+): value is ServerlessTransition["type"] {
+	return value === "sleep" || value === "wake_started" || value === "wake_failed";
+}
+
+export function getSleepTransitionDeploymentIds(
+	transitions: unknown[],
+): Set<string> {
+	return new Set(
+		transitions
+			.filter(isValidServerlessTransition)
+			.filter((transition) => transition.type === "sleep")
+			.map((transition) => transition.deploymentId),
+	);
+}
+
+function isAlreadyAppliedServerlessTransition(
+	transition: ServerlessTransition,
+	deployment:
+		| {
+				runtimeDesiredState: string;
+				observedPhase: string;
+		  }
+		| undefined,
+) {
+	if (!deployment) return false;
+	if (transition.type === "sleep") {
+		return (
+			deployment.runtimeDesiredState === "stopped" &&
+			deployment.observedPhase === "sleeping"
+		);
+	}
+	if (transition.type === "wake_started") {
+		return (
+			deployment.runtimeDesiredState === "running" &&
+			["waking", "starting", "healthy", "running"].includes(
+				deployment.observedPhase,
+			)
+		);
+	}
+	if (transition.type === "wake_failed") {
+		return ["sleeping", "failed"].includes(deployment.observedPhase);
+	}
+	return false;
 }
 
 function isValidServerlessTransition(
@@ -479,7 +645,7 @@ export type StatusReport = {
 export async function applyStatusReport(
 	serverId: string,
 	report: StatusReport,
-	serverlessTransitions: ServerlessTransition[] = [],
+	serverlessTransitions: unknown[] = [],
 ) {
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
@@ -559,7 +725,12 @@ export async function applyStatusReport(
 	};
 
 	await applyDeploymentErrors(serverId, report.deploymentErrors || []);
-	await applyServerlessTransitions(serverId, serverlessTransitions);
+	const serverlessTransitionResults = await applyServerlessTransitions(
+		serverId,
+		serverlessTransitions,
+	);
+	const sleepTransitionDeploymentIds =
+		getSleepTransitionDeploymentIds(serverlessTransitions);
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)
@@ -590,7 +761,10 @@ export async function applyStatusReport(
 					.delete(deploymentPorts)
 					.where(eq(deploymentPorts.deploymentId, dep.id));
 				await db.delete(deployments).where(eq(deployments.id, dep.id));
-			} else if (isObservedActiveContainer(dep.observedPhase)) {
+			} else if (
+				isObservedActiveContainer(dep.observedPhase) &&
+				!sleepTransitionDeploymentIds.has(dep.id)
+			) {
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,
 				);
@@ -725,6 +899,31 @@ export async function applyStatusReport(
 				);
 			}
 			continue;
+		}
+
+		if (
+			container.status === "running" &&
+			deployment.runtimeDesiredState === "running" &&
+			["sleeping", "stopped"].includes(deployment.observedPhase)
+		) {
+			const service = await db
+				.select()
+				.from(services)
+				.where(eq(services.id, deployment.serviceId))
+				.then((r) => r[0]);
+
+			if (service && getDeployedServerlessConfig(service).enabled) {
+				Object.assign(
+					updateFields,
+					getStaleStoppedServerlessReportUpdate({
+						hasHealthCheck: service.healthCheckCmd != null,
+						healthStatus,
+					}),
+				);
+				console.log(
+					`[health:restore] serverless deployment ${deployment.id} restored from ${deployment.observedPhase} to ${updateFields.observedPhase}`,
+				);
+			}
 		}
 
 		if (shouldAttachReportedContainer(deployment.observedPhase)) {
@@ -1025,6 +1224,8 @@ export async function applyStatusReport(
 			);
 		}
 	}
+
+	return { serverlessTransitionResults };
 }
 
 function prepareAutohealRecreatePayload({

@@ -299,6 +299,7 @@ type ActiveWorkItem struct {
 }
 
 type ServerlessTransition struct {
+	ID           string `json:"id,omitempty"`
 	Type         string `json:"type"`
 	DeploymentID string `json:"deploymentId"`
 	ContainerID  string `json:"containerId,omitempty"`
@@ -401,11 +402,20 @@ type RejectedWorkItemResult struct {
 }
 
 type StatusResponse struct {
-	OK                      bool                     `json:"ok"`
-	AcceptedWorkItemResults []string                 `json:"acceptedWorkItemResults"`
-	RejectedWorkItemResults []RejectedWorkItemResult `json:"rejectedWorkItemResults"`
-	RejectedActiveWorkItems []RejectedWorkItemResult `json:"rejectedActiveWorkItems"`
-	WorkItems               []WorkQueueItem          `json:"workItems"`
+	OK                          bool                         `json:"ok"`
+	AcceptedWorkItemResults     []string                     `json:"acceptedWorkItemResults"`
+	RejectedWorkItemResults     []RejectedWorkItemResult     `json:"rejectedWorkItemResults"`
+	RejectedActiveWorkItems     []RejectedWorkItemResult     `json:"rejectedActiveWorkItems"`
+	ServerlessTransitionResults []ServerlessTransitionResult `json:"serverlessTransitionResults"`
+	WorkItems                   []WorkQueueItem              `json:"workItems"`
+}
+
+type ServerlessTransitionResult struct {
+	ID           string `json:"id,omitempty"`
+	Type         string `json:"type,omitempty"`
+	DeploymentID string `json:"deploymentId,omitempty"`
+	Outcome      string `json:"outcome"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkItem, active []ActiveWorkItem, serverlessTransitions []ServerlessTransition) (*StatusResponse, error) {
