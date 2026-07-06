@@ -73,6 +73,7 @@ type ExpectedContainer struct {
 	ServiceID             string            `json:"serviceId"`
 	ServiceName           string            `json:"serviceName"`
 	Name                  string            `json:"name"`
+	DesiredState          string            `json:"desiredState"`
 	Image                 string            `json:"image"`
 	IPAddress             string            `json:"ipAddress"`
 	Ports                 []PortMapping     `json:"ports"`
@@ -92,6 +93,25 @@ type DnsRecord struct {
 type Upstream struct {
 	Url    string `json:"url"`
 	Weight int    `json:"weight"`
+}
+
+type ServerlessUpstream struct {
+	DeploymentID string `json:"deploymentId"`
+	ServerID     string `json:"serverId"`
+	Url          string `json:"url"`
+	Local        bool   `json:"local"`
+	AlwaysOn     bool   `json:"alwaysOn"`
+}
+
+type ServerlessRoute struct {
+	ServiceID          string               `json:"serviceId"`
+	Domain             string               `json:"domain"`
+	Port               int                  `json:"port"`
+	SleepAfterSeconds  int                  `json:"sleepAfterSeconds"`
+	WakeTimeoutSeconds int                  `json:"wakeTimeoutSeconds"`
+	MinReadyReplicas   int                  `json:"minReadyReplicas"`
+	LocalDeploymentIDs []string             `json:"localDeploymentIds"`
+	Upstreams          []ServerlessUpstream `json:"upstreams"`
 }
 
 type TraefikRoute struct {
@@ -138,6 +158,9 @@ type ExpectedState struct {
 	Dns        struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
+	Serverless struct {
+		Routes []ServerlessRoute `json:"routes"`
+	} `json:"serverless"`
 	Traefik struct {
 		HttpRoutes     []TraefikRoute        `json:"httpRoutes"`
 		TCPRoutes      []TraefikTCPRoute     `json:"tcpRoutes"`
@@ -245,8 +268,9 @@ type Resources struct {
 }
 
 type AgentHealth struct {
-	Version    string `json:"version"`
-	UptimeSecs int64  `json:"uptimeSecs"`
+	Version      string   `json:"version"`
+	UptimeSecs   int64    `json:"uptimeSecs"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type StatusReport struct {
@@ -272,6 +296,13 @@ type CompletedWorkItem struct {
 type ActiveWorkItem struct {
 	ID      string `json:"id"`
 	Attempt int    `json:"attempt"`
+}
+
+type ServerlessTransition struct {
+	Type         string `json:"type"`
+	DeploymentID string `json:"deploymentId"`
+	ContainerID  string `json:"containerId,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type BuildDetails struct {
@@ -377,7 +408,7 @@ type StatusResponse struct {
 	WorkItems               []WorkQueueItem          `json:"workItems"`
 }
 
-func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkItem, active []ActiveWorkItem) (*StatusResponse, error) {
+func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkItem, active []ActiveWorkItem, serverlessTransitions []ServerlessTransition) (*StatusResponse, error) {
 	payload := map[string]interface{}{
 		"statusReport": report,
 	}
@@ -386,6 +417,9 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 	}
 	if len(active) > 0 {
 		payload["activeWorkItems"] = active
+	}
+	if len(serverlessTransitions) > 0 {
+		payload["serverlessTransitions"] = serverlessTransitions
 	}
 
 	body, err := json.Marshal(payload)

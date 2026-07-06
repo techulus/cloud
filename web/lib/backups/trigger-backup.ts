@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -54,7 +54,7 @@ export async function triggerBackup({
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
+				inArray(deployments.observedPhase, ["healthy", "running"]),
 			),
 		)
 		.then((r) => r[0]);

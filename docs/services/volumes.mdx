@@ -18,6 +18,8 @@ Each volume has a name and a container path:
 
 When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica so the container always mounts the same local data path. When the last volume is removed, the service reverts to stateless.
 
+Stateful services can use serverless scaling when they have a public HTTP domain. Because volumes are local to one server, only a proxy-hosted stateful replica can sleep and wake on request. A stateful replica placed on a worker node stays always on.
+
 ## Volume Backups
 
 Volumes can be backed up to S3-compatible storage on a schedule or on demand.

@@ -203,6 +203,72 @@ Proxy nodes receive routes and certificates from the control plane:
 
 Worker nodes do not run Traefik.
 
+### Serverless Containers
+
+Public HTTP services can be configured as serverless. Serverless scale-to-zero is
+proxy-local: deployments placed on proxy nodes may sleep after an idle period,
+then wake on the next public request handled by that proxy. Deployments placed on
+worker nodes stay always on and remain routable.
+
+Serverless uses the same declarative expected-state model as normal
+deployments, but proxy agents own the local lifecycle decision:
+
+- A sleeping deployment keeps `trafficState: "active"` but records
+  `runtimeDesiredState: "stopped"` and `observedPhase: "sleeping"`.
+- Expected state advertises proxy-hosted sleeping containers with
+  `desiredState: "stopped"` so normal reconciliation does not restart them.
+- Expected state advertises worker-hosted deployments with
+  `desiredState: "running"` even when the service is serverless-enabled.
+- The proxy gateway wakes local sleeping deployments from expected-state
+  metadata and reports `wake_started` through the next status report.
+- The proxy agent reports local sleep with a `sleep` status transition after it
+  stops the local container.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Traefik
+    participant Gateway as Agent wake gateway
+    participant Agent
+    participant CP as Control plane
+    participant Container
+
+    User->>Traefik: Request service domain
+    Traefik->>Gateway: Route to 127.0.0.1:18080
+    Gateway->>Gateway: Resolve host from expected-state metadata
+    Gateway->>Agent: Queue wake_started status transition
+    Agent->>Container: Start local Podman container
+    Agent->>CP: Report wake_started and container status
+    CP->>CP: Record waking/healthy state
+    Gateway->>Container: Proxy original request
+```
+
+Proxy Traefik routes point to the local wake gateway only on proxy nodes that
+host a local proxy deployment for that serverless service. Non-owner proxies do
+not emit a public HTTP route for that service, even when always-on worker
+upstreams exist. Worker-only serverless services use normal direct routes because
+there is nothing local to wake.
+
+Public DNS or external load balancers must therefore send serverless traffic only
+to proxy nodes that own a local proxy replica for that service. Cross-proxy wake
+coordination is intentionally out of scope.
+
+The wake gateway keeps the incoming request open while it starts local proxy
+replicas, unless an always-on worker upstream is already ready. `Min Ready`
+controls how many ready upstreams are preferred before releasing queued requests.
+If fewer replicas become ready and no local wake is still in progress, the
+gateway serves any available ready upstream instead of returning a 503.
+
+Sleep is driven by the proxy gateway's in-memory activity timer. The control
+plane does not scan request activity and does not enqueue sleep work. It accepts
+validated `sleep`, `wake_started`, and `wake_failed` transitions through the
+existing agent status endpoint.
+
+Wake failures are bounded. Transient failures return a deployment to `sleeping`
+so a later request can retry. After repeated failures, the deployment is parked
+as `failed` with a visible failed stage until a redeploy creates fresh
+deployments.
+
 ### Multiple Proxy Nodes
 
 The platform supports geographically distributed proxy nodes with proximity steering:

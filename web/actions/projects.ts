@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
@@ -31,10 +31,16 @@ import {
 import { requireDeveloperRole } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import {
+	isObservedReady,
+	markDeploymentRemoved,
+	runtimeExpectedStates,
+} from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
+import { blocksProjectDeletion } from "@/lib/project-deletion";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -262,24 +268,13 @@ export async function deleteProject(id: string) {
 		.from(services)
 		.where(eq(services.projectId, id));
 
-	const activeStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-		"stopping",
-	];
-
 	for (const service of projectServices) {
 		const activeDeployments = await db
 			.select()
 			.from(deployments)
 			.where(eq(deployments.serviceId, service.id));
 
-		const hasActiveDeployments = activeDeployments.some((d) =>
-			activeStatuses.includes(d.status),
-		);
+		const hasActiveDeployments = activeDeployments.some(blocksProjectDeletion);
 
 		if (hasActiveDeployments) {
 			throw new Error(
@@ -536,15 +531,7 @@ async function hardDeleteService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	for (const dep of allDeployments) {
-		if (
-			(dep.status === "running" || dep.status === "healthy") &&
-			dep.containerId
-		) {
-			await db
-				.update(deployments)
-				.set(markDeploymentUndesired("stopping"))
-				.where(eq(deployments.id, dep.id));
-
+		if (isObservedReady(dep.observedPhase) && dep.containerId) {
 			await enqueueWork(dep.serverId, "stop", {
 				deploymentId: dep.id,
 				containerId: dep.containerId,
@@ -627,7 +614,7 @@ export async function deleteService(serviceId: string) {
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.status, ["running", "healthy"]),
+				inArray(deployments.observedPhase, ["running", "healthy"]),
 			),
 		)
 		.then((r) => r[0]);
@@ -1013,6 +1000,91 @@ export async function updateServiceSchedule(
 	return { success: true };
 }
 
+const serverlessSettingsSchema = z.object({
+	enabled: z.boolean(),
+	sleepAfterSeconds: z.number().int().min(60).max(86_400),
+	wakeTimeoutSeconds: z.number().int().min(10).max(900),
+	minReadyReplicas: z.number().int().min(1).max(10),
+});
+
+export async function updateServiceServerlessSettings(
+	serviceId: string,
+	settings: {
+		enabled: boolean;
+		sleepAfterSeconds: number;
+		wakeTimeoutSeconds: number;
+		minReadyReplicas: number;
+	},
+) {
+	await requireDeveloperRole();
+	const validated = serverlessSettingsSchema.parse(settings);
+
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+
+		const [service] = await tx
+			.select()
+			.from(services)
+			.where(eq(services.id, serviceId))
+			.limit(1);
+
+		if (!service || service.deletedAt) {
+			throw new Error("Service not found");
+		}
+
+		if (validated.enabled) {
+			const publicHttpPorts = await tx
+				.select({ id: servicePorts.id })
+				.from(servicePorts)
+				.where(
+					and(
+						eq(servicePorts.serviceId, serviceId),
+						eq(servicePorts.isPublic, true),
+						eq(servicePorts.protocol, "http"),
+						isNotNull(servicePorts.domain),
+					),
+				)
+				.limit(1);
+
+			if (publicHttpPorts.length === 0) {
+				throw new Error(
+					"Serverless services require a public HTTP port with a domain",
+				);
+			}
+
+			const configuredReplicas = await tx
+				.select({ count: serviceReplicas.count })
+				.from(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, serviceId));
+			const totalConfiguredReplicas = configuredReplicas.reduce(
+				(total, replica) => total + replica.count,
+				0,
+			);
+
+			if (totalConfiguredReplicas < 1) {
+				throw new Error("Serverless services require at least one replica");
+			}
+			if (validated.minReadyReplicas > totalConfiguredReplicas) {
+				throw new Error(
+					"Minimum ready replicas cannot exceed configured replicas",
+				);
+			}
+		}
+
+		await tx
+			.update(services)
+			.set({
+				serverlessEnabled: validated.enabled,
+				serverlessSleepAfterSeconds: validated.sleepAfterSeconds,
+				serverlessWakeTimeoutSeconds: validated.wakeTimeoutSeconds,
+				serverlessMinReadyReplicas: validated.minReadyReplicas,
+			})
+			.where(eq(services.id, serviceId));
+	});
+
+	return { success: true };
+}
+
 export type ServiceConfigUpdate = {
 	source?: { type: "image"; image: string };
 	healthCheck?: ServiceHealthCheckConfig | null;
@@ -1147,8 +1219,10 @@ export async function updateServiceConfig(
 			.delete(serviceReplicas)
 			.where(eq(serviceReplicas.serviceId, serviceId));
 
+		let totalReplicas = 0;
 		for (const replica of config.replicas) {
 			if (replica.count > 0) {
+				totalReplicas += replica.count;
 				await db.insert(serviceReplicas).values({
 					id: randomUUID(),
 					serviceId,
@@ -1157,6 +1231,15 @@ export async function updateServiceConfig(
 				});
 			}
 		}
+
+		await db
+			.update(services)
+			.set({
+				serverlessMinReadyReplicas: sql`LEAST(${services.serverlessMinReadyReplicas}, ${Math.max(1, totalReplicas)})`,
+			})
+			.where(
+				and(eq(services.id, serviceId), eq(services.serverlessEnabled, true)),
+			);
 	}
 
 	return { success: true };
@@ -1164,31 +1247,32 @@ export async function updateServiceConfig(
 
 export async function stopService(serviceId: string) {
 	await requireDeveloperRole();
-	const runningDeployments = await db
+	const desiredDeployments = await db
 		.select()
 		.from(deployments)
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 			),
 		);
 
-	for (const dep of runningDeployments) {
-		if (!dep.containerId) continue;
-
+	for (const dep of desiredDeployments) {
+		// User stop is teardown; runtimeDesiredState "stopped" is reserved for
+		// serverless sleep where the deployment must remain wakeable.
 		await db
 			.update(deployments)
-			.set(markDeploymentUndesired("stopping"))
+			.set(markDeploymentRemoved())
 			.where(eq(deployments.id, dep.id));
 
+		if (!dep.containerId) continue;
 		await enqueueWork(dep.serverId, "stop", {
 			deploymentId: dep.id,
 			containerId: dep.containerId,
 		});
 	}
 
-	return { success: true, count: runningDeployments.length };
+	return { success: true, count: desiredDeployments.length };
 }
 
 export async function restartService(serviceId: string) {
@@ -1204,7 +1288,7 @@ export async function restartService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	const deploymentsToRestart = runningDeployments.filter(
-		(d) => d.status === "running" && d.containerId,
+		(d) => isObservedReady(d.observedPhase) && d.containerId,
 	);
 
 	if (deploymentsToRestart.length === 0) {
@@ -1256,15 +1340,7 @@ export async function abortRollout(serviceId: string) {
 		);
 	}
 
-	await db
-		.update(deployments)
-		.set({ status: "running" })
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "draining"),
-			),
-		);
+	await restoreDrainingDeploymentsForRollback(serviceId);
 
 	const rolloutDeployments =
 		activeRolloutIds.length > 0
@@ -1429,16 +1505,7 @@ export async function removeServiceVolume(volumeId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, volume[0].serviceId));
 
-	const runningStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-	];
-	const hasRunning = activeDeployments.some((d) =>
-		runningStatuses.includes(d.status),
-	);
+	const hasRunning = activeDeployments.some(blocksProjectDeletion);
 	if (hasRunning) {
 		throw new Error("Stop the service before removing volumes");
 	}

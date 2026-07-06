@@ -272,6 +272,7 @@ export type ContainerHealth = {
 export type AgentHealth = {
 	version: string;
 	uptimeSecs: number;
+	capabilities?: string[];
 };
 
 export type AgentUpgradeStatus =
@@ -379,6 +380,16 @@ export const services = pgTable("services", {
 	startCommand: text("start_command"),
 	resourceCpuLimit: real("resource_cpu_limit").default(2),
 	resourceMemoryLimitMb: integer("resource_memory_limit_mb").default(1024),
+	serverlessEnabled: boolean("serverless_enabled").notNull().default(false),
+	serverlessSleepAfterSeconds: integer("serverless_sleep_after_seconds")
+		.notNull()
+		.default(300),
+	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
+		.notNull()
+		.default(300),
+	serverlessMinReadyReplicas: integer("serverless_min_ready_replicas")
+		.notNull()
+		.default(1),
 	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
@@ -521,24 +532,32 @@ export const deployments = pgTable(
 			.references(() => servers.id, { onDelete: "cascade" }),
 		containerId: text("container_id"),
 		ipAddress: text("ip_address"),
-		status: text("status", {
+		runtimeDesiredState: text("runtime_desired_state", {
+			enum: ["running", "stopped", "removed"],
+		})
+			.notNull()
+			.default("running"),
+		trafficState: text("traffic_state", {
+			enum: ["candidate", "active", "draining", "inactive"],
+		})
+			.notNull()
+			.default("candidate"),
+		observedPhase: text("observed_phase", {
 			enum: [
 				"pending",
 				"pulling",
 				"starting",
+				"waking",
 				"healthy",
 				"running",
-				"draining",
-				"stopping",
+				"sleeping",
 				"stopped",
 				"failed",
-				"rolled_back",
 				"unknown",
 			],
 		})
 			.notNull()
 			.default("pending"),
-		desired: boolean("desired").notNull().default(true),
 		healthStatus: text("health_status", {
 			enum: ["none", "starting", "healthy", "unhealthy"],
 		}),
@@ -554,6 +573,9 @@ export const deployments = pgTable(
 		rolloutId: text("rollout_id"),
 		previousDeploymentId: text("previous_deployment_id"),
 		failedStage: text("failed_stage"),
+		serverlessWakeFailureCount: integer("serverless_wake_failure_count")
+			.notNull()
+			.default(0),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -563,7 +585,11 @@ export const deployments = pgTable(
 		index("deployments_rollout_id_idx").on(table.rolloutId),
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_server_id_idx").on(table.serverId),
-		index("deployments_status_idx").on(table.status),
+		index("deployments_runtime_desired_state_idx").on(
+			table.runtimeDesiredState,
+		),
+		index("deployments_traffic_state_idx").on(table.trafficState),
+		index("deployments_observed_phase_idx").on(table.observedPhase),
 	],
 );
 

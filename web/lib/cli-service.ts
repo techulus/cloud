@@ -761,7 +761,7 @@ export async function getManifestStatus(identity: ManifestIdentity) {
 	const serviceDeployments = await db
 		.select({
 			id: deployments.id,
-			status: deployments.status,
+			status: deployments.observedPhase,
 			serverId: deployments.serverId,
 			createdAt: deployments.createdAt,
 		})

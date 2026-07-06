@@ -307,10 +307,10 @@ function ServiceCard({
 			p.externalPort,
 	);
 	const hasInternalDns = service.deployments.some(
-		(d) => d.status === "running",
+		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
 	);
 	const runningCount = service.deployments.filter(
-		(d) => d.status === "running",
+		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
 	).length;
 
 	const hasEndpoints =

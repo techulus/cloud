@@ -46,6 +46,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { getServiceDeploymentActionState } from "@/lib/service-deployment-actions";
 
 type ConfirmAction = "redeploy" | "stop" | "delete" | null;
 
@@ -121,20 +122,7 @@ export default function DeploymentsPage() {
 		},
 	};
 
-	const hasRunningDeployments = service.deployments.some(
-		(d) => d.status === "running",
-	);
-	const hasStoppedOrFailedDeployments =
-		!hasRunningDeployments &&
-		service.deployments.some(
-			(d) =>
-				d.status === "stopped" ||
-				d.status === "failed" ||
-				d.status === "rolled_back",
-		);
-	const canStartAll =
-		hasStoppedOrFailedDeployments &&
-		(service.configuredReplicas || []).length > 0;
+	const deploymentActions = getServiceDeploymentActionState(service);
 
 	return (
 		<div>
@@ -163,8 +151,8 @@ export default function DeploymentsPage() {
 					projectSlug={projectSlug}
 					envName={envName}
 					actions={
-						service.deployments.length > 0 ? (
-							hasRunningDeployments ? (
+						deploymentActions.hasDeployments ? (
+							deploymentActions.hasExpectedDeployments ? (
 								<ButtonGroup>
 									<Button
 										variant="outline"
@@ -188,20 +176,24 @@ export default function DeploymentsPage() {
 											<ChevronDownIcon />
 										</DropdownMenuTrigger>
 										<DropdownMenuContent side="bottom" align="end">
-											<DropdownMenuItem
-												disabled={isLoading !== null}
-												onClick={() =>
-													handleAction(
-														"restart",
-														() => restartService(service.id),
-														"Restart queued",
-													)
-												}
-											>
-												<RefreshCwIcon />
-												Restart
-											</DropdownMenuItem>
-											<DropdownMenuSeparator />
+											{deploymentActions.hasRestartableDeployments ? (
+												<>
+													<DropdownMenuItem
+														disabled={isLoading !== null}
+														onClick={() =>
+															handleAction(
+																"restart",
+																() => restartService(service.id),
+																"Restart queued",
+															)
+														}
+													>
+														<RefreshCwIcon />
+														Restart
+													</DropdownMenuItem>
+													<DropdownMenuSeparator />
+												</>
+											) : null}
 											<DropdownMenuItem
 												disabled={isLoading !== null}
 												onClick={() => setConfirmAction("stop")}
@@ -221,7 +213,7 @@ export default function DeploymentsPage() {
 										</DropdownMenuContent>
 									</DropdownMenu>
 								</ButtonGroup>
-							) : canStartAll ? (
+							) : deploymentActions.canStartAll ? (
 								<ButtonGroup>
 									<Button
 										variant="default"

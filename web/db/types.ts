@@ -40,7 +40,7 @@ export type MemberInvitation = typeof memberInvitations.$inferSelect;
 export type MemberRole = User["role"];
 export type InvitableMemberRole = MemberInvitation["role"];
 
-export type DeploymentStatus = NonNullable<Deployment["status"]>;
+export type DeploymentStatus = NonNullable<Deployment["observedPhase"]>;
 export type HealthStatus = Deployment["healthStatus"];
 export type RolloutStatus = NonNullable<Rollout["status"]>;
 export type BuildStatus = NonNullable<Build["status"]>;

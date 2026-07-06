@@ -1,5 +1,6 @@
 "use client";
 
+import cronstrue from "cronstrue";
 import {
 	Activity,
 	Box,
@@ -404,11 +405,11 @@ function ServiceConfigPanel({
 			<div className="grid gap-3 sm:grid-cols-2">
 				<SummaryItem icon={Activity} label="Status">
 					<StatusValue status={overview.status} />
-				</SummaryItem>
-				<SummaryItem icon={Server} label="Instances">
 					<p className="text-base font-medium">
 						{formatInstanceSummary(overview)}
 					</p>
+				</SummaryItem>
+				<SummaryItem icon={Server} label="Instances">
 					<ServerList servers={overview.serverSummaries} />
 				</SummaryItem>
 
@@ -708,7 +709,10 @@ function buildOverviewData(
 			total: 0,
 		};
 		summary.total++;
-		if (deployment.status === "running") {
+		if (
+			deployment.observedPhase === "running" ||
+			deployment.observedPhase === "healthy"
+		) {
 			runningDeployments++;
 			summary.running++;
 		}
@@ -787,7 +791,7 @@ function getServiceStatus(
 	if (runningDeployments > 0) return { label: "Live", tone: "live" };
 
 	for (const deployment of service.deployments || []) {
-		if (deployment.status === "failed" || deployment.status === "rolled_back") {
+		if (deployment.observedPhase === "failed") {
 			return { label: "Needs attention", tone: "warning" };
 		}
 	}
@@ -1007,9 +1011,20 @@ function formatBackupLabel(service: Service): string {
 }
 
 function formatDeployScheduleLabel(service: Service): string {
-	return service.deploymentSchedule
-		? `Deploy ${service.deploymentSchedule}`
-		: "Manual Deploy";
+	if (!service.deploymentSchedule) return "Manual Deploy";
+
+	try {
+		const scheduleDescription = cronstrue.toString(service.deploymentSchedule, {
+			verbose: true,
+		});
+		return `Deploy ${lowercaseFirstLetter(scheduleDescription)}`;
+	} catch {
+		return "Scheduled Deploy";
+	}
+}
+
+function lowercaseFirstLetter(value: string): string {
+	return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function formatCount(count: number, singular: string): string {

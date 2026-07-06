@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { deployments, services, serviceVolumes } from "@/db/schema";
@@ -53,7 +53,7 @@ export async function startMigrationInternal(
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.status, "running"),
+				inArray(deployments.observedPhase, ["healthy", "running"]),
 			),
 		)
 		.then((r) => r[0]);

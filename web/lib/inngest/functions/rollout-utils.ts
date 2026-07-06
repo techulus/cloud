@@ -1,8 +1,38 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
+
+export function shouldRollBackDeploymentState(deployment: {
+	trafficState: string;
+	runtimeDesiredState: string;
+}) {
+	void deployment.trafficState;
+	return deployment.runtimeDesiredState !== "removed";
+}
+
+export function shouldRestoreDrainingDeployment(deployment: {
+	trafficState: string;
+	runtimeDesiredState: string;
+}) {
+	return (
+		deployment.trafficState === "draining" &&
+		deployment.runtimeDesiredState !== "removed"
+	);
+}
+
+export async function restoreDrainingDeploymentsForRollback(serviceId: string) {
+	await db
+		.update(deployments)
+		.set({ trafficState: "active" })
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.trafficState, "draining"),
+			),
+		);
+}
 
 export async function handleRolloutFailure(
 	rolloutId: string,
@@ -41,31 +71,16 @@ export async function handleRolloutFailure(
 	const serverId = rolloutDeployments[0].serverId;
 
 	if (isRollingUpdate) {
-		await db
-			.update(deployments)
-			.set({ status: "running" })
-			.where(
-				and(
-					eq(deployments.serviceId, serviceId),
-					eq(deployments.status, "draining"),
-				),
-			);
+		await restoreDrainingDeploymentsForRollback(serviceId);
 	}
 
 	await db
 		.update(deployments)
-		.set({ ...markDeploymentUndesired("rolled_back"), failedStage: reason })
+		.set(markDeploymentFailedRemoved(reason))
 		.where(
 			and(
 				eq(deployments.rolloutId, rolloutId),
-				inArray(deployments.status, [
-					"pending",
-					"pulling",
-					"starting",
-					"healthy",
-					"running",
-					"failed",
-				]),
+				ne(deployments.runtimeDesiredState, "removed"),
 			),
 		);
 

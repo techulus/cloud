@@ -17,7 +17,7 @@ export const onDeploymentFailed = inngest.createFunction(
 					id: deployments.id,
 					rolloutId: deployments.rolloutId,
 					serviceId: deployments.serviceId,
-					status: deployments.status,
+					observedPhase: deployments.observedPhase,
 					failedStage: deployments.failedStage,
 				})
 				.from(deployments)
@@ -27,7 +27,7 @@ export const onDeploymentFailed = inngest.createFunction(
 
 		if (
 			!deployment?.rolloutId ||
-			(deployment.status !== "failed" && deployment.status !== "rolled_back")
+			deployment.observedPhase !== "failed"
 		) {
 			return;
 		}
