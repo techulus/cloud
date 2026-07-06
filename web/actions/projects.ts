@@ -31,7 +31,11 @@ import {
 import { requireDeveloperRole } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import {
+	isObservedReady,
+	markDeploymentRemoved,
+	runtimeExpectedStates,
+} from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
@@ -527,15 +531,7 @@ async function hardDeleteService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	for (const dep of allDeployments) {
-		if (
-			(dep.status === "running" || dep.status === "healthy") &&
-			dep.containerId
-		) {
-			await db
-				.update(deployments)
-				.set(markDeploymentUndesired("stopping"))
-				.where(eq(deployments.id, dep.id));
-
+		if (isObservedReady(dep.observedPhase) && dep.containerId) {
 			await enqueueWork(dep.serverId, "stop", {
 				deploymentId: dep.id,
 				containerId: dep.containerId,
@@ -618,7 +614,7 @@ export async function deleteService(serviceId: string) {
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.status, ["running", "healthy"]),
+				inArray(deployments.observedPhase, ["running", "healthy"]),
 			),
 		)
 		.then((r) => r[0]);
@@ -1258,15 +1254,14 @@ export async function stopService(serviceId: string) {
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				eq(deployments.desired, true),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 			),
 		);
 
 	for (const dep of desiredDeployments) {
-		const nextStatus = dep.containerId ? "stopping" : "stopped";
 		await db
 			.update(deployments)
-			.set(markDeploymentUndesired(nextStatus))
+			.set(markDeploymentRemoved())
 			.where(eq(deployments.id, dep.id));
 
 		if (!dep.containerId) continue;
@@ -1292,7 +1287,7 @@ export async function restartService(serviceId: string) {
 		.where(eq(deployments.serviceId, serviceId));
 
 	const deploymentsToRestart = runningDeployments.filter(
-		(d) => d.status === "running" && d.containerId,
+		(d) => isObservedReady(d.observedPhase) && d.containerId,
 	);
 
 	if (deploymentsToRestart.length === 0) {
@@ -1509,16 +1504,7 @@ export async function removeServiceVolume(volumeId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, volume[0].serviceId));
 
-	const runningStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-	];
-	const hasRunning = activeDeployments.some((d) =>
-		runningStatuses.includes(d.status),
-	);
+	const hasRunning = activeDeployments.some(blocksProjectDeletion);
 	if (hasRunning) {
 		throw new Error("Stop the service before removing volumes");
 	}

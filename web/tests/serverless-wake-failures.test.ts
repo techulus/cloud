@@ -10,8 +10,8 @@ describe("serverless wake failure policy", () => {
 				failedStage: "serverless_wake",
 			}),
 		).toMatchObject({
-			status: "sleeping",
-			desired: true,
+			runtimeDesiredState: "stopped",
+			observedPhase: "sleeping",
 			failedStage: null,
 			serverlessWakeFailureCount: 2,
 		});
@@ -25,8 +25,9 @@ describe("serverless wake failure policy", () => {
 				failedStage: "serverless_wake",
 			}),
 		).toMatchObject({
-			status: "failed",
-			desired: false,
+			runtimeDesiredState: "removed",
+			trafficState: "inactive",
+			observedPhase: "failed",
 			failedStage: "serverless_wake",
 			serverlessWakeFailureCount: 3,
 		});
@@ -40,8 +41,9 @@ describe("serverless wake failure policy", () => {
 				failedStage: "serverless_wake_timeout",
 			}),
 		).toMatchObject({
-			status: "failed",
-			desired: false,
+			runtimeDesiredState: "removed",
+			trafficState: "inactive",
+			observedPhase: "failed",
 			failedStage: "serverless_wake_timeout",
 			serverlessWakeFailureCount: 1,
 		});

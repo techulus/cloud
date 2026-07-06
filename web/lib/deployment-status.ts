@@ -1,46 +1,95 @@
 import type { deployments } from "@/db/schema";
 
-export type DeploymentStatus = typeof deployments.$inferSelect.status;
+export type RuntimeDesiredState =
+	typeof deployments.$inferSelect.runtimeDesiredState;
+export type TrafficState = typeof deployments.$inferSelect.trafficState;
+export type ObservedPhase = typeof deployments.$inferSelect.observedPhase;
 
-export type UndesiredDeploymentStatus = Extract<
-	DeploymentStatus,
-	"stopping" | "stopped" | "failed" | "rolled_back"
->;
-
-type DeploymentStatusCapabilities = {
-	expected: boolean;
-	routable: boolean;
-	dns: boolean;
+export type DeploymentState = {
+	runtimeDesiredState: RuntimeDesiredState;
+	trafficState: TrafficState;
+	observedPhase: ObservedPhase;
 };
 
-const deploymentStatusCapabilities = {
-	pending: { expected: true, routable: false, dns: false },
-	pulling: { expected: true, routable: false, dns: false },
-	starting: { expected: true, routable: false, dns: false },
-	waking: { expected: true, routable: false, dns: false },
-	healthy: { expected: true, routable: true, dns: true },
-	running: { expected: true, routable: true, dns: true },
-	draining: { expected: true, routable: false, dns: false },
-	sleeping: { expected: true, routable: false, dns: false },
-	stopping: { expected: false, routable: false, dns: false },
-	stopped: { expected: false, routable: false, dns: false },
-	failed: { expected: false, routable: false, dns: false },
-	rolled_back: { expected: false, routable: false, dns: false },
-	unknown: { expected: true, routable: false, dns: false },
-} satisfies Record<DeploymentStatus, DeploymentStatusCapabilities>;
+export const runtimeExpectedStates = ["running", "stopped"] as const satisfies
+	readonly RuntimeDesiredState[];
 
-export const expectedDeploymentStatuses = statusesWithCapability("expected");
-export const routableDeploymentStatuses = statusesWithCapability("routable");
-export const dnsDeploymentStatuses = statusesWithCapability("dns");
+export const activeTrafficStates = ["active"] as const satisfies
+	readonly TrafficState[];
 
-export function markDeploymentUndesired(status: UndesiredDeploymentStatus) {
-	return { status, desired: false };
+export const observedReadyPhases = ["healthy", "running"] as const satisfies
+	readonly ObservedPhase[];
+
+export const observedStartingPhases = [
+	"pending",
+	"pulling",
+	"starting",
+	"waking",
+] as const satisfies readonly ObservedPhase[];
+
+export const observedActiveContainerPhases = [
+	"starting",
+	"healthy",
+	"running",
+] as const satisfies readonly ObservedPhase[];
+
+export function isRuntimeExpected(
+	runtimeDesiredState: RuntimeDesiredState,
+): boolean {
+	return runtimeDesiredState !== "removed";
 }
 
-function statusesWithCapability(
-	capability: keyof DeploymentStatusCapabilities,
-) {
-	return Object.entries(deploymentStatusCapabilities)
-		.filter(([, capabilities]) => capabilities[capability])
-		.map(([status]) => status as DeploymentStatus);
+export function isObservedReady(observedPhase: ObservedPhase): boolean {
+	return (observedReadyPhases as readonly ObservedPhase[]).includes(
+		observedPhase,
+	);
+}
+
+export function isObservedStarting(observedPhase: ObservedPhase): boolean {
+	return (observedStartingPhases as readonly ObservedPhase[]).includes(
+		observedPhase,
+	);
+}
+
+export function isObservedActiveContainer(
+	observedPhase: ObservedPhase,
+): boolean {
+	return (observedActiveContainerPhases as readonly ObservedPhase[]).includes(
+		observedPhase,
+	);
+}
+
+export function isTrafficActive(trafficState: TrafficState): boolean {
+	return trafficState === "active";
+}
+
+export function isDeploymentExpected(
+	deployment: Pick<DeploymentState, "runtimeDesiredState">,
+): boolean {
+	return isRuntimeExpected(deployment.runtimeDesiredState);
+}
+
+export function isDeploymentRoutable(
+	deployment: Pick<DeploymentState, "trafficState" | "observedPhase">,
+): boolean {
+	return (
+		isTrafficActive(deployment.trafficState) &&
+		isObservedReady(deployment.observedPhase)
+	);
+}
+
+export function markDeploymentRemoved() {
+	return {
+		runtimeDesiredState: "removed" as const,
+		trafficState: "inactive" as const,
+	};
+}
+
+export function markDeploymentFailedRemoved(failedStage: string) {
+	return {
+		...markDeploymentRemoved(),
+		observedPhase: "failed" as const,
+		healthStatus: null,
+		failedStage,
+	};
 }

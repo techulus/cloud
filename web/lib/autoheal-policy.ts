@@ -23,8 +23,15 @@ export function getStartingHealthCheckFailureUpdate({
 
 	return {
 		update: {
-			status: "failed" as const,
-			desired: !isRolloutDeployment && !recreateLimitReached,
+			observedPhase: "failed" as const,
+			runtimeDesiredState:
+				!isRolloutDeployment && !recreateLimitReached
+					? ("running" as const)
+					: ("removed" as const),
+			trafficState:
+				!isRolloutDeployment && !recreateLimitReached
+					? ("active" as const)
+					: ("inactive" as const),
 			failedStage,
 			...(isRolloutDeployment
 				? {}
@@ -54,8 +61,9 @@ export function getSteadyStateRecreateDecision({
 		return {
 			limitReached: true,
 			updateFields: {
-				status: "failed" as const,
-				desired: false,
+				observedPhase: "failed" as const,
+				runtimeDesiredState: "removed" as const,
+				trafficState: "inactive" as const,
 				failedStage: "autoheal_recreate_limit",
 				unhealthyReportCount: 0,
 				autohealRestartCount: 0,
@@ -67,8 +75,9 @@ export function getSteadyStateRecreateDecision({
 	return {
 		limitReached: false,
 		updateFields: {
-			status: "failed" as const,
-			desired: true,
+			observedPhase: "failed" as const,
+			runtimeDesiredState: "running" as const,
+			trafficState: "active" as const,
 			failedStage: "autoheal_recreate",
 			unhealthyReportCount: 0,
 			autohealRestartCount: 0,

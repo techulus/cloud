@@ -2,7 +2,6 @@ import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
-import { isDeployedServerlessService } from "@/lib/service-config";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -415,7 +414,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					.where(
 						and(
 							inArray(deployments.id, deploymentIds),
-							inArray(deployments.status, ["healthy", "running"]),
+							inArray(deployments.observedPhase, ["healthy", "running"]),
 						),
 					);
 
@@ -444,7 +443,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				const deploymentStates = await db
 					.select({
 						id: deployments.id,
-						status: deployments.status,
+						observedPhase: deployments.observedPhase,
 						serverName: servers.name,
 					})
 					.from(deployments)
@@ -453,7 +452,8 @@ export const rolloutWorkflow = inngest.createFunction(
 
 				return deploymentStates.filter(
 					(deployment) =>
-						deployment.status !== "healthy" && deployment.status !== "running",
+						deployment.observedPhase !== "healthy" &&
+						deployment.observedPhase !== "running",
 				);
 			},
 		);
@@ -489,42 +489,37 @@ export const rolloutWorkflow = inngest.createFunction(
 		}
 
 		await step.run("start-dns-sync", async () => {
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
-			const oldActiveStatuses = isDeployedServerlessService(service)
-				? (["running", "healthy", "sleeping", "waking"] as const)
-				: (["running", "healthy"] as const);
+			await db.transaction(async (tx) => {
+				await tx
+					.update(rollouts)
+					.set({ currentStage: "dns_sync" })
+					.where(eq(rollouts.id, rolloutId));
 
-			await db
-				.update(rollouts)
-				.set({ currentStage: "dns_sync" })
-				.where(eq(rollouts.id, rolloutId));
-
-			await db
-				.update(deployments)
-				.set({ status: "running" })
-				.where(
-					and(
-						eq(deployments.rolloutId, rolloutId),
-						eq(deployments.status, "healthy"),
-					),
-				);
-
-			await db
-				.update(deployments)
-				.set({ status: "draining" })
-				.where(
-					and(
-						eq(deployments.serviceId, serviceId),
-						inArray(deployments.status, oldActiveStatuses),
-						or(
-							ne(deployments.rolloutId, rolloutId),
-							isNull(deployments.rolloutId),
+				await tx
+					.update(deployments)
+					.set({ trafficState: "active" })
+					.where(
+						and(
+							eq(deployments.rolloutId, rolloutId),
+							eq(deployments.trafficState, "candidate"),
+							inArray(deployments.observedPhase, ["healthy", "running"]),
 						),
-					),
-				);
+					);
+
+				await tx
+					.update(deployments)
+					.set({ trafficState: "draining" })
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.trafficState, "active"),
+							or(
+								ne(deployments.rolloutId, rolloutId),
+								isNull(deployments.rolloutId),
+							),
+						),
+					);
+			});
 
 			await ingestRolloutLog(
 				rolloutId,
@@ -592,11 +587,14 @@ export const rolloutWorkflow = inngest.createFunction(
 			await step.run("stop-old-deployments", async () => {
 				const stoppedDeploymentsWithoutContainers = await db
 					.update(deployments)
-					.set({ status: "stopped", desired: false })
+					.set({
+						runtimeDesiredState: "removed",
+						trafficState: "inactive",
+					})
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							eq(deployments.status, "draining"),
+							eq(deployments.trafficState, "draining"),
 							isNull(deployments.containerId),
 						),
 					)
@@ -604,11 +602,14 @@ export const rolloutWorkflow = inngest.createFunction(
 
 				const stoppingDeployments = await db
 					.update(deployments)
-					.set({ status: "stopping", desired: false })
+					.set({
+						runtimeDesiredState: "removed",
+						trafficState: "inactive",
+					})
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							eq(deployments.status, "draining"),
+							eq(deployments.trafficState, "draining"),
 						),
 					)
 					.returning({ id: deployments.id });

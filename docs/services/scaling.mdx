@@ -12,10 +12,10 @@ Replica count ranges from 1 to 10 per service.
 ## Serverless scaling
 
 Public HTTP services can be configured to sleep when idle on proxy nodes. A
-sleeping deployment keeps its desired replica record, but the proxy agent removes
-the local container. The next public HTTP request wakes local proxy-hosted
-deployments and is held until an upstream is ready or the wake timeout is
-reached.
+sleeping deployment keeps active traffic intent, records stopped runtime intent,
+and stops the local container. The next public HTTP request wakes local
+proxy-hosted deployments and is held until an upstream is ready or the wake
+timeout is reached.
 
 Worker-hosted deployments do not sleep. If a serverless-enabled service has only
 worker replicas, it stays always on and routes directly. If a service has both

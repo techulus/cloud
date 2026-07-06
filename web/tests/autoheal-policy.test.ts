@@ -13,8 +13,9 @@ describe("autoheal policy", () => {
 
 		expect(decision.recreateLimitReached).toBe(false);
 		expect(decision.update).toMatchObject({
-			status: "failed",
-			desired: true,
+			observedPhase: "failed",
+			runtimeDesiredState: "running",
+			trafficState: "active",
 			failedStage: "autoheal_recreate",
 			autohealRecreateCount: 3,
 		});
@@ -28,8 +29,9 @@ describe("autoheal policy", () => {
 
 		expect(decision.recreateLimitReached).toBe(true);
 		expect(decision.update).toMatchObject({
-			status: "failed",
-			desired: false,
+			observedPhase: "failed",
+			runtimeDesiredState: "removed",
+			trafficState: "inactive",
 			failedStage: "autoheal_recreate_limit",
 			autohealRecreateCount: 3,
 		});
@@ -42,8 +44,9 @@ describe("autoheal policy", () => {
 		});
 
 		expect(decision.update).toEqual({
-			status: "failed",
-			desired: false,
+			observedPhase: "failed",
+			runtimeDesiredState: "removed",
+			trafficState: "inactive",
 			failedStage: "health_check",
 		});
 	});
@@ -60,8 +63,9 @@ describe("autoheal policy", () => {
 
 		expect(decision.limitReached).toBe(false);
 		expect(decision.updateFields).toMatchObject({
-			status: "failed",
-			desired: true,
+			observedPhase: "failed",
+			runtimeDesiredState: "running",
+			trafficState: "active",
 			failedStage: "autoheal_recreate",
 			autohealRecreateCount: 2,
 		});

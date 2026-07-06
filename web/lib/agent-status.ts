@@ -18,7 +18,14 @@ import {
 	getStartingHealthCheckFailureUpdate,
 	getSteadyStateRecreateDecision,
 } from "@/lib/autoheal-policy";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import {
+	type ObservedPhase,
+	isObservedActiveContainer,
+	isObservedReady,
+	markDeploymentFailedRemoved,
+	observedStartingPhases,
+	runtimeExpectedStates,
+} from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
@@ -43,8 +50,10 @@ export type ServerlessTransition =
 	| { type: "wake_started"; deploymentId: string }
 	| { type: "wake_failed"; deploymentId: string; error: string };
 
-export function shouldAttachReportedContainer(status: string) {
-	return status === "pending" || status === "pulling" || status === "waking";
+export function shouldAttachReportedContainer(observedPhase: ObservedPhase) {
+	return (observedStartingPhases as readonly ObservedPhase[]).includes(
+		observedPhase,
+	);
 }
 
 function isMigrationTargetStarting(status: string | null | undefined) {
@@ -90,7 +99,7 @@ async function applyDeploymentErrors(
 				id: deployments.id,
 				serviceId: deployments.serviceId,
 				rolloutId: deployments.rolloutId,
-				status: deployments.status,
+				observedPhase: deployments.observedPhase,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
 				serverlessEnabled: services.serverlessEnabled,
 				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
@@ -117,7 +126,7 @@ async function applyDeploymentErrors(
 			continue;
 		}
 
-		const isServerlessWakeDeployment = deployment.status === "waking";
+		const isServerlessWakeDeployment = deployment.observedPhase === "waking";
 		const isActiveRolloutDeployment =
 			!isServerlessWakeDeployment &&
 			deployment.rolloutId &&
@@ -137,13 +146,13 @@ async function applyDeploymentErrors(
 							currentFailureCount: deployment.serverlessWakeFailureCount,
 							failedStage: "serverless_wake",
 						})
-					: { status: "failed", failedStage: "deploying" },
+					: markDeploymentFailedRemoved("deploying"),
 			)
 			.where(
 				and(
 					eq(deployments.id, deployment.id),
 					inArray(
-						deployments.status,
+						deployments.observedPhase,
 						isServerlessWakeDeployment
 							? ["waking"]
 							: ["pending", "pulling", "starting"],
@@ -205,8 +214,9 @@ async function applyServerlessTransitions(
 				serviceId: deployments.serviceId,
 				serverId: deployments.serverId,
 				containerId: deployments.containerId,
-				status: deployments.status,
-				desired: deployments.desired,
+				runtimeDesiredState: deployments.runtimeDesiredState,
+				trafficState: deployments.trafficState,
+				observedPhase: deployments.observedPhase,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
 				serverlessEnabled: services.serverlessEnabled,
 				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
@@ -239,7 +249,9 @@ async function applyServerlessTransitions(
 			const updated = await db
 				.update(deployments)
 				.set({
-					status: "sleeping",
+					runtimeDesiredState: "stopped",
+					observedPhase: "sleeping",
+					containerId: null,
 					healthStatus: null,
 					failedStage: null,
 				})
@@ -248,8 +260,8 @@ async function applyServerlessTransitions(
 						eq(deployments.id, transition.deploymentId),
 						eq(deployments.serverId, serverId),
 						eq(deployments.containerId, transition.containerId),
-						eq(deployments.desired, true),
-						inArray(deployments.status, ["healthy", "running"]),
+						eq(deployments.runtimeDesiredState, "running"),
+						inArray(deployments.observedPhase, ["healthy", "running"]),
 					),
 				)
 				.returning({ id: deployments.id });
@@ -270,7 +282,9 @@ async function applyServerlessTransitions(
 			const updated = await db
 				.update(deployments)
 				.set({
-					status: "waking",
+					runtimeDesiredState: "running",
+					observedPhase: "waking",
+					containerId: null,
 					healthStatus: null,
 					failedStage: null,
 				})
@@ -278,8 +292,8 @@ async function applyServerlessTransitions(
 					and(
 						eq(deployments.id, transition.deploymentId),
 						eq(deployments.serverId, serverId),
-						eq(deployments.desired, true),
-						eq(deployments.status, "sleeping"),
+						eq(deployments.runtimeDesiredState, "stopped"),
+						eq(deployments.observedPhase, "sleeping"),
 					),
 				)
 				.returning({ id: deployments.id });
@@ -309,8 +323,8 @@ async function applyServerlessTransitions(
 				and(
 					eq(deployments.id, transition.deploymentId),
 					eq(deployments.serverId, serverId),
-					eq(deployments.desired, true),
-					inArray(deployments.status, ["sleeping", "waking"]),
+					inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+					inArray(deployments.observedPhase, ["sleeping", "waking"]),
 				),
 			)
 			.returning({ id: deployments.id });
@@ -358,8 +372,9 @@ function getInvalidServerlessTransitionReason({
 		| {
 				serverId: string;
 				containerId: string | null;
-				status: string;
-				desired: boolean;
+				runtimeDesiredState: string;
+				trafficState: string;
+				observedPhase: string;
 				serverlessEnabled: boolean;
 				serverlessSleepAfterSeconds: number;
 				serverlessWakeTimeoutSeconds: number;
@@ -375,11 +390,16 @@ function getInvalidServerlessTransitionReason({
 	if (!getDeployedServerlessConfig(deployment).enabled) {
 		return "service is not serverless";
 	}
-	if (!deployment.desired) return "deployment is not desired";
+	if (deployment.runtimeDesiredState === "removed") {
+		return "deployment is removed";
+	}
 
 	if (transition.type === "sleep") {
-		if (!["healthy", "running"].includes(deployment.status)) {
-			return `deployment is not sleepable from ${deployment.status}`;
+		if (deployment.runtimeDesiredState !== "running") {
+			return `deployment is not expected running (${deployment.runtimeDesiredState})`;
+		}
+		if (!["healthy", "running"].includes(deployment.observedPhase)) {
+			return `deployment is not sleepable from ${deployment.observedPhase}`;
 		}
 		if (deployment.containerId !== transition.containerId) {
 			return "stale containerId";
@@ -388,16 +408,16 @@ function getInvalidServerlessTransitionReason({
 
 	if (
 		transition.type === "wake_started" &&
-		deployment.status !== "sleeping"
+		deployment.observedPhase !== "sleeping"
 	) {
-		return `deployment is not sleeping (${deployment.status})`;
+		return `deployment is not sleeping (${deployment.observedPhase})`;
 	}
 
 	if (
 		transition.type === "wake_failed" &&
-		!["sleeping", "waking"].includes(deployment.status)
+		!["sleeping", "waking"].includes(deployment.observedPhase)
 	) {
-		return `deployment is not waking or sleeping (${deployment.status})`;
+		return `deployment is not waking or sleeping (${deployment.observedPhase})`;
 	}
 
 	return null;
@@ -524,45 +544,38 @@ export async function applyStatusReport(
 		.map((c) => c.deploymentId)
 		.filter((id) => id !== "");
 
-	const activeStatuses = [
-		"starting",
-		"healthy",
-		"running",
-		"stopping",
-	] as const;
-
 	const activeDeployments = await db
 		.select({
 			id: deployments.id,
 			containerId: deployments.containerId,
-			status: deployments.status,
+			runtimeDesiredState: deployments.runtimeDesiredState,
+			observedPhase: deployments.observedPhase,
 		})
 		.from(deployments)
 		.where(
 			and(
 				eq(deployments.serverId, serverId),
 				isNotNull(deployments.containerId),
-				inArray(deployments.status, activeStatuses),
 			),
 		);
 
 	for (const dep of activeDeployments) {
 		if (!reportedDeploymentIds.includes(dep.id)) {
-			if (dep.status === "stopping") {
+			if (dep.runtimeDesiredState === "removed") {
 				console.log(
-					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was stopping and container gone, deleting`,
+					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was removed and container gone, deleting`,
 				);
 				await db
 					.delete(deploymentPorts)
 					.where(eq(deploymentPorts.deploymentId, dep.id));
 				await db.delete(deployments).where(eq(deployments.id, dep.id));
-			} else {
+			} else if (isObservedActiveContainer(dep.observedPhase)) {
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,
 				);
 				await db
 					.update(deployments)
-					.set({ status: "unknown", healthStatus: null })
+					.set({ observedPhase: "unknown", healthStatus: null })
 					.where(eq(deployments.id, dep.id));
 			}
 		}
@@ -586,7 +599,6 @@ export async function applyStatusReport(
 		}
 
 		if (!deployment) {
-			const stuckStatuses = ["pending", "pulling", "waking"] as const;
 			const [stuckDeployment] = await db
 				.select()
 				.from(deployments)
@@ -594,7 +606,7 @@ export async function applyStatusReport(
 					and(
 						eq(deployments.serverId, serverId),
 						isNull(deployments.containerId),
-						inArray(deployments.status, stuckStatuses),
+						inArray(deployments.observedPhase, observedStartingPhases),
 					),
 				);
 
@@ -616,7 +628,7 @@ export async function applyStatusReport(
 					.update(deployments)
 					.set({
 						containerId: container.containerId,
-						status: newStatus,
+						observedPhase: newStatus,
 						healthStatus: hasHealthCheck ? "starting" : "none",
 						serverlessWakeFailureCount: 0,
 					})
@@ -624,7 +636,7 @@ export async function applyStatusReport(
 
 				deployment = {
 					...stuckDeployment,
-					status: newStatus,
+					observedPhase: newStatus,
 					containerId: container.containerId,
 					healthStatus: hasHealthCheck ? "starting" : "none",
 				};
@@ -664,7 +676,38 @@ export async function applyStatusReport(
 			updateFields.containerId = container.containerId;
 		}
 
-		if (shouldAttachReportedContainer(deployment.status)) {
+		if (container.status === "stopped") {
+			updateFields.observedPhase = "stopped";
+			updateFields.healthStatus = "none";
+			await db
+				.update(deployments)
+				.set(updateFields)
+				.where(eq(deployments.id, deployment.id));
+			continue;
+		}
+
+		if (container.status === "failed") {
+			updateFields.observedPhase = "failed";
+			updateFields.healthStatus = null;
+			updateFields.failedStage ??= "container_failed";
+			await db
+				.update(deployments)
+				.set(updateFields)
+				.where(eq(deployments.id, deployment.id));
+			if (deployment.rolloutId) {
+				await inngest.send(
+					inngestEvents.resourceStatusChanged.create({
+						type: "deployment",
+						id: deployment.id,
+						parentType: "rollout",
+						parentId: deployment.rolloutId,
+					}),
+				);
+			}
+			continue;
+		}
+
+		if (shouldAttachReportedContainer(deployment.observedPhase)) {
 			if (container.status !== "running") {
 				continue;
 			}
@@ -677,15 +720,15 @@ export async function applyStatusReport(
 
 			const hasHealthCheck = service?.healthCheckCmd != null;
 			const newStatus = hasHealthCheck ? "starting" : "healthy";
-			updateFields.status = newStatus;
-			if (deployment.status === "waking") {
+			updateFields.observedPhase = newStatus;
+			if (deployment.observedPhase === "waking") {
 				updateFields.serverlessWakeFailureCount = 0;
 			}
 			if (hasHealthCheck) {
 				updateFields.healthStatus = "starting";
 			}
 			console.log(
-				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.status} to ${newStatus}`,
+				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.observedPhase} to ${newStatus}`,
 			);
 
 			if (deployment.rolloutId) {
@@ -725,12 +768,12 @@ export async function applyStatusReport(
 			}
 		}
 
-		if (deployment.status === "unknown") {
+		if (deployment.observedPhase === "unknown") {
 			const newStatus =
 				healthStatus === "healthy" || healthStatus === "none"
 					? "running"
 					: "starting";
-			updateFields.status = newStatus;
+			updateFields.observedPhase = newStatus;
 			console.log(
 				`[health:restore] deployment ${deployment.id} restored from unknown to ${newStatus}`,
 			);
@@ -738,7 +781,7 @@ export async function applyStatusReport(
 
 		const canAutoheal =
 			container.status === "running" &&
-			(deployment.status === "running" || deployment.status === "healthy");
+			isObservedReady(deployment.observedPhase);
 		const healthRecovered =
 			healthStatus === "healthy" || healthStatus === "none";
 		if (canAutoheal && healthRecovered) {
@@ -766,8 +809,10 @@ export async function applyStatusReport(
 						console.log(
 							`[autoheal] rollout deployment ${deployment.id} exceeded restart limit`,
 						);
-						Object.assign(updateFields, markDeploymentUndesired("failed"));
-						updateFields.failedStage = "autoheal";
+						Object.assign(
+							updateFields,
+							markDeploymentFailedRemoved("autoheal"),
+						);
 						autohealFailed = true;
 					} else {
 						autohealRecreatePayload = prepareAutohealRecreatePayload({
@@ -825,7 +870,7 @@ export async function applyStatusReport(
 		}
 
 		if (
-			deployment.status === "starting" &&
+			deployment.observedPhase === "starting" &&
 			container.status === "running" &&
 			(healthStatus === "healthy" || healthStatus === "none")
 		) {
@@ -836,7 +881,7 @@ export async function applyStatusReport(
 			await db
 				.update(deployments)
 				.set({
-					status: "healthy",
+					observedPhase: "healthy",
 					autohealRestartCount: 0,
 					autohealRecreateCount: 0,
 					serverlessWakeFailureCount: 0,
@@ -875,7 +920,10 @@ export async function applyStatusReport(
 			}
 		}
 
-		if (deployment.status === "starting" && healthStatus === "unhealthy") {
+		if (
+			deployment.observedPhase === "starting" &&
+			healthStatus === "unhealthy"
+		) {
 			console.log(`[health] deployment ${deployment.id} failed health check`);
 			const rollout = deployment.rolloutId
 				? await db

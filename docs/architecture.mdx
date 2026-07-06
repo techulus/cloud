@@ -205,15 +205,16 @@ Worker nodes do not run Traefik.
 
 ### Serverless Containers
 
-Stateless HTTP services can be configured as serverless. Serverless scale-to-zero
-is proxy-local: deployments placed on proxy nodes may sleep after an idle period,
+Public HTTP services can be configured as serverless. Serverless scale-to-zero is
+proxy-local: deployments placed on proxy nodes may sleep after an idle period,
 then wake on the next public request handled by that proxy. Deployments placed on
 worker nodes stay always on and remain routable.
 
 Serverless uses the same declarative expected-state model as normal
 deployments, but proxy agents own the local lifecycle decision:
 
-- A sleeping deployment remains `desired: true`.
+- A sleeping deployment keeps `trafficState: "active"` but records
+  `runtimeDesiredState: "stopped"` and `observedPhase: "sleeping"`.
 - Expected state advertises proxy-hosted sleeping containers with
   `desiredState: "stopped"` so normal reconciliation does not restart them.
 - Expected state advertises worker-hosted deployments with

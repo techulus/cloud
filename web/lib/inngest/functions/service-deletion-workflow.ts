@@ -13,7 +13,7 @@ import {
 	volumeBackups,
 } from "@/db/schema";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import { markDeploymentRemoved } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -81,7 +81,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							inArray(deployments.status, ["running", "healthy"]),
+							inArray(deployments.observedPhase, ["running", "healthy"]),
 						),
 					)
 					.then((r) => r[0]);
@@ -237,16 +237,12 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(eq(deployments.serviceId, serviceId));
 
 				for (const deployment of allDeployments) {
-					if (
-						(deployment.status === "running" ||
-							deployment.status === "healthy") &&
-						deployment.containerId
-					) {
-						await db
-							.update(deployments)
-							.set(markDeploymentUndesired("stopping"))
-							.where(eq(deployments.id, deployment.id));
+					await db
+						.update(deployments)
+						.set(markDeploymentRemoved())
+						.where(eq(deployments.id, deployment.id));
 
+					if (deployment.containerId) {
 						await enqueueWork(deployment.serverId, "stop", {
 							deploymentId: deployment.id,
 							containerId: deployment.containerId,
@@ -470,7 +466,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				async () => {
 					return db
 						.select({
-							status: deployments.status,
+							observedPhase: deployments.observedPhase,
 							failedStage: deployments.failedStage,
 						})
 						.from(deployments)
@@ -485,11 +481,11 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			const healthyDeployment = restoredDeployments.find(
 				(deployment) =>
-					deployment.status === "healthy" || deployment.status === "running",
+					deployment.observedPhase === "healthy" ||
+					deployment.observedPhase === "running",
 			);
 			const failedDeployment = restoredDeployments.find(
-				(deployment) =>
-					deployment.status === "failed" || deployment.status === "rolled_back",
+				(deployment) => deployment.observedPhase === "failed",
 			);
 
 			if (!healthyDeployment || failedDeployment) {

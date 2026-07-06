@@ -16,68 +16,24 @@ vi.mock("@/lib/work-queue", () => ({
 import { isActiveDeploymentForRollout } from "@/lib/inngest/functions/rollout-helpers";
 
 describe("rollout helpers", () => {
-	it("treats sleeping and waking serverless deployments as active rollout versions", () => {
-		const deployedServerlessConfig = JSON.stringify({
-			source: { type: "image", image: "nginx" },
-			stateful: false,
-			replicas: [],
-			healthCheck: null,
-			ports: [],
-			serverless: {
-				enabled: true,
-				sleepAfterSeconds: 300,
-				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
-			},
-		});
-
+	it("treats active traffic deployments as the live rollout version", () => {
 		expect(
 			isActiveDeploymentForRollout(
-				{ status: "sleeping" },
+				{ trafficState: "active" },
 				{ serverlessEnabled: true },
 			),
 		).toBe(true);
 		expect(
 			isActiveDeploymentForRollout(
-				{ status: "waking" },
+				{ trafficState: "candidate" },
 				{ serverlessEnabled: true },
-			),
-		).toBe(true);
-		expect(
-			isActiveDeploymentForRollout(
-				{ status: "sleeping" },
-				{
-					serverlessEnabled: false,
-					deployedConfig: deployedServerlessConfig,
-				},
-			),
-		).toBe(true);
-		expect(
-			isActiveDeploymentForRollout(
-				{ status: "sleeping" },
-				{
-					serverlessEnabled: false,
-					deployedConfig: JSON.stringify({
-						source: { type: "image", image: "nginx" },
-						stateful: false,
-						replicas: [],
-						healthCheck: null,
-						ports: [],
-						serverless: {
-							enabled: false,
-							sleepAfterSeconds: 300,
-							wakeTimeoutSeconds: 120,
-							minReadyReplicas: 1,
-						},
-					}),
-				},
 			),
 		).toBe(false);
 		expect(
 			isActiveDeploymentForRollout(
-				{ status: "healthy" },
+				{ trafficState: "draining" },
 				{ serverlessEnabled: false },
 			),
-		).toBe(true);
+		).toBe(false);
 	});
 });

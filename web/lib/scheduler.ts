@@ -26,14 +26,6 @@ async function triggerRecoveryForOfflineServers(
 ): Promise<void> {
 	if (offlineServerIds.length === 0) return;
 
-	const activeStatuses = [
-		"pending",
-		"pulling",
-		"starting",
-		"healthy",
-		"running",
-	] as const;
-
 	const affectedDeployments = await db
 		.select({
 			deploymentId: deployments.id,
@@ -49,7 +41,8 @@ async function triggerRecoveryForOfflineServers(
 		.where(
 			and(
 				inArray(deployments.serverId, offlineServerIds),
-				inArray(deployments.status, activeStatuses),
+				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				inArray(deployments.trafficState, ["candidate", "active"]),
 				isNull(services.deletedAt),
 			),
 		);

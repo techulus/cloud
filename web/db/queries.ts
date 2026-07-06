@@ -228,7 +228,7 @@ export async function getServerServices(serverId: string) {
 	const results = await db
 		.selectDistinctOn([services.id], {
 			deploymentId: deployments.id,
-			deploymentStatus: deployments.status,
+			deploymentStatus: deployments.observedPhase,
 			serviceId: services.id,
 			serviceName: services.name,
 			serviceImage: services.image,

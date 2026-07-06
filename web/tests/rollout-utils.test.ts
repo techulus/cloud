@@ -6,61 +6,50 @@ vi.mock("@/lib/email", () => ({
 }));
 
 import {
-	shouldRestoreDrainingDeploymentAsSleeping,
-	shouldRollBackDeploymentStatus,
+	shouldRestoreDrainingDeployment,
+	shouldRollBackDeploymentState,
 } from "@/lib/inngest/functions/rollout-utils";
 
-const deployedServerlessConfig = JSON.stringify({
-	source: { type: "image", image: "nginx" },
-	stateful: false,
-	replicas: [],
-	healthCheck: null,
-	ports: [],
-	serverless: {
-		enabled: true,
-		sleepAfterSeconds: 300,
-		wakeTimeoutSeconds: 120,
-		minReadyReplicas: 1,
-	},
-});
-
 describe("rollout failure helpers", () => {
-	it("cleans up sleeping and waking rollout deployments", () => {
-		expect(shouldRollBackDeploymentStatus("sleeping")).toBe(true);
-		expect(shouldRollBackDeploymentStatus("waking")).toBe(true);
-		expect(shouldRollBackDeploymentStatus("running")).toBe(true);
-		expect(shouldRollBackDeploymentStatus("draining")).toBe(false);
-		expect(shouldRollBackDeploymentStatus("stopped")).toBe(false);
-	});
-
-	it("restores no-container deployed-serverless drains as sleeping", () => {
-		const service = {
-			serverlessEnabled: false,
-			stateful: true,
-			deployedConfig: deployedServerlessConfig,
-		};
-
+	it("cleans up live rollout deployments even after DNS promotion", () => {
 		expect(
-			shouldRestoreDrainingDeploymentAsSleeping(
-				{ containerId: null },
-				service,
-			),
+			shouldRollBackDeploymentState({
+				trafficState: "candidate",
+				runtimeDesiredState: "running",
+			}),
 		).toBe(true);
 		expect(
-			shouldRestoreDrainingDeploymentAsSleeping(
-				{ containerId: "ctr_old" },
-				service,
-			),
-		).toBe(false);
+			shouldRollBackDeploymentState({
+				trafficState: "active",
+				runtimeDesiredState: "running",
+			}),
+		).toBe(true);
 		expect(
-			shouldRestoreDrainingDeploymentAsSleeping(
-				{ containerId: null },
-				{
-					serverlessEnabled: false,
-					stateful: false,
-					deployedConfig: null,
-				},
-			),
+			shouldRollBackDeploymentState({
+				trafficState: "candidate",
+				runtimeDesiredState: "removed",
+			}),
+		).toBe(false);
+	});
+
+	it("restores draining deployments by traffic intent only", () => {
+		expect(
+			shouldRestoreDrainingDeployment({
+				trafficState: "draining",
+				runtimeDesiredState: "running",
+			}),
+		).toBe(true);
+		expect(
+			shouldRestoreDrainingDeployment({
+				trafficState: "draining",
+				runtimeDesiredState: "stopped",
+			}),
+		).toBe(true);
+		expect(
+			shouldRestoreDrainingDeployment({
+				trafficState: "draining",
+				runtimeDesiredState: "removed",
+			}),
 		).toBe(false);
 	});
 });

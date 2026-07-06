@@ -66,7 +66,7 @@ export function ServiceLayoutClient({
 				svc.rollouts?.[0]?.status === "in_progress" ||
 				!!svc.migrationStatus ||
 				svc.deployments.some((d) =>
-					IN_PROGRESS_DEPLOY_STATUSES.includes(d.status),
+					IN_PROGRESS_DEPLOY_STATUSES.includes(d.observedPhase),
 				);
 			setHasActiveActivity(isActive);
 		},

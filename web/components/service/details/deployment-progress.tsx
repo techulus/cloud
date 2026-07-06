@@ -130,14 +130,16 @@ export function getBarState(
 	if (!latestRolloutJustCompleted) {
 		const inProgressStatuses = ["pending", "pulling", "starting", "healthy"];
 		const hasInProgressDeployments = service.deployments.some((d) =>
-			inProgressStatuses.includes(d.status),
+			inProgressStatuses.includes(d.observedPhase),
 		);
 
 		if (hasInProgressDeployments) {
 			const maxStageIndex = Math.max(
 				...service.deployments
-					.filter((d) => inProgressStatuses.includes(d.status))
-					.map((d) => getStageIndex(mapDeploymentStatusToStage(d.status))),
+					.filter((d) => inProgressStatuses.includes(d.observedPhase))
+					.map((d) =>
+						getStageIndex(mapDeploymentStatusToStage(d.observedPhase)),
+					),
 			);
 			return {
 				mode: "deploying",

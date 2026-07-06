@@ -11,9 +11,10 @@ import {
 } from "@/db/schema";
 import { getAllCertificatesForDomains } from "@/lib/acme-manager";
 import {
-	dnsDeploymentStatuses,
-	expectedDeploymentStatuses,
-	routableDeploymentStatuses,
+	activeTrafficStates,
+	isDeploymentRoutable,
+	observedReadyPhases,
+	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import {
 	getDeployedServerlessConfig,
@@ -150,7 +151,9 @@ type ServerlessDeploymentRow = {
 	serviceId: string;
 	serverId: string;
 	ipAddress: string | null;
-	status: Deployment["status"];
+	runtimeDesiredState: Deployment["runtimeDesiredState"];
+	trafficState: Deployment["trafficState"];
+	observedPhase: Deployment["observedPhase"];
 	serverIsProxy: boolean;
 };
 
@@ -200,8 +203,7 @@ async function buildExpectedContainers(
 		.where(
 			and(
 				eq(deployments.serverId, serverId),
-				eq(deployments.desired, true),
-				inArray(deployments.status, expectedDeploymentStatuses),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 			),
 		);
 
@@ -325,8 +327,7 @@ export function buildExpectedContainersFromRows({
 						serverIsProxy &&
 						isDeployedServerlessService(service) &&
 						sleepableServiceIds.has(service.id) &&
-						(dep.status === "sleeping" ||
-							(dep.status === "draining" && !dep.containerId))
+						dep.runtimeDesiredState === "stopped"
 							? "stopped"
 							: "running",
 					image: normalizeImage(service.image),
@@ -379,7 +380,9 @@ async function buildServerlessExpectedState(
 				serviceId: deployments.serviceId,
 				serverId: deployments.serverId,
 				ipAddress: deployments.ipAddress,
-				status: deployments.status,
+				runtimeDesiredState: deployments.runtimeDesiredState,
+				trafficState: deployments.trafficState,
+				observedPhase: deployments.observedPhase,
 				serverIsProxy: servers.isProxy,
 			})
 			.from(deployments)
@@ -387,8 +390,7 @@ async function buildServerlessExpectedState(
 			.where(
 				and(
 					inArray(deployments.serviceId, serviceIds),
-					eq(deployments.desired, true),
-					inArray(deployments.status, expectedDeploymentStatuses),
+					inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 				),
 			),
 	]);
@@ -449,7 +451,7 @@ export function buildServerlessRoutesFromRows({
 					(deployment) =>
 						deployment.serverId === serverId &&
 						deployment.serverIsProxy &&
-						deployment.status !== "draining" &&
+						deployment.trafficState === "active" &&
 						expectedDeploymentIds.has(deployment.id),
 				)
 				.map((deployment) => deployment.id)
@@ -459,7 +461,7 @@ export function buildServerlessRoutesFromRows({
 				.filter(
 					(deployment) =>
 						deployment.ipAddress &&
-						routableDeploymentStatuses.includes(deployment.status),
+						isDeploymentRoutable(deployment),
 				)
 				.map((deployment) => ({
 					deploymentId: deployment.id,
@@ -503,8 +505,9 @@ async function buildDnsRecords(allServices: Service[]) {
 		.where(
 			and(
 				inArray(deployments.serviceId, serviceIds),
-				eq(deployments.desired, true),
-				inArray(deployments.status, dnsDeploymentStatuses),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+				inArray(deployments.trafficState, activeTrafficStates),
+				inArray(deployments.observedPhase, observedReadyPhases),
 			),
 		);
 
@@ -557,8 +560,12 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 						.where(
 							and(
 								inArray(deployments.serviceId, serviceIds),
-								eq(deployments.desired, true),
-								inArray(deployments.status, routableDeploymentStatuses),
+								inArray(
+									deployments.runtimeDesiredState,
+									runtimeExpectedStates,
+								),
+								inArray(deployments.trafficState, activeTrafficStates),
+								inArray(deployments.observedPhase, observedReadyPhases),
 							),
 						)
 				: Promise.resolve([]),
@@ -573,9 +580,12 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 						.where(
 							and(
 								inArray(deployments.serviceId, serviceIds),
-								eq(deployments.desired, true),
 								eq(servers.isProxy, true),
-								inArray(deployments.status, expectedDeploymentStatuses),
+								inArray(
+									deployments.runtimeDesiredState,
+									runtimeExpectedStates,
+								),
+								inArray(deployments.trafficState, activeTrafficStates),
 							),
 						)
 				: Promise.resolve([]),

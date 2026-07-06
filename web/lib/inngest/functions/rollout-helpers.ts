@@ -13,11 +13,7 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
-import {
-	buildCurrentConfig,
-	getDeployedStateful,
-	isDeployedServerlessService,
-} from "@/lib/service-config";
+import { buildCurrentConfig, getDeployedStateful } from "@/lib/service-config";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -38,7 +34,7 @@ export type DeploymentContext = {
 };
 
 export function isActiveDeploymentForRollout(
-	deployment: { status: string },
+	deployment: { trafficState: string },
 	service: {
 		deployedConfig?: string | null;
 		stateful?: boolean | null;
@@ -48,13 +44,8 @@ export function isActiveDeploymentForRollout(
 		serverlessMinReadyReplicas?: number | null;
 	},
 ) {
-	if (deployment.status === "running" || deployment.status === "healthy") {
-		return true;
-	}
-	return (
-		isDeployedServerlessService(service) &&
-		(deployment.status === "sleeping" || deployment.status === "waking")
-	);
+	void service;
+	return deployment.trafficState === "active";
 }
 
 export function normalizeImage(image: string): string {
@@ -217,7 +208,7 @@ export async function cleanupTerminalDeployments(
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.status, ["rolled_back", "stopped", "failed"]),
+				eq(deployments.runtimeDesiredState, "removed"),
 			),
 		);
 
@@ -373,7 +364,9 @@ export async function createDeploymentRecords(
 				serviceId,
 				serverId: server.id,
 				ipAddress,
-				status: "pending",
+				runtimeDesiredState: "running",
+				trafficState: "candidate",
+				observedPhase: "pending",
 				rolloutId,
 			});
 

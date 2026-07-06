@@ -47,7 +47,7 @@ export default function ConfigurationPage() {
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
-				deployment.status as (typeof ACTIVE_DELETE_BACKUP_STATUSES)[number],
+				deployment.observedPhase as (typeof ACTIVE_DELETE_BACKUP_STATUSES)[number],
 			) && !!deployment.containerId,
 	);
 	const hasVolumes = (service.volumes?.length ?? 0) > 0;

@@ -1,4 +1,4 @@
-import { markDeploymentUndesired } from "@/lib/deployment-status";
+import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 
 export const SERVERLESS_WAKE_FAILURE_LIMIT = 3;
 
@@ -21,15 +21,14 @@ export function getServerlessWakeFailureUpdate({
 	if (serverlessEnabled && nextFailureCount < SERVERLESS_WAKE_FAILURE_LIMIT) {
 		return {
 			...baseUpdate,
-			status: "sleeping" as const,
-			desired: true,
+			runtimeDesiredState: "stopped" as const,
+			observedPhase: "sleeping" as const,
 			failedStage: null,
 		};
 	}
 
 	return {
-		...markDeploymentUndesired("failed"),
+		...markDeploymentFailedRemoved(failedStage),
 		...baseUpdate,
-		failedStage,
 	};
 }

@@ -122,15 +122,13 @@ export default function DeploymentsPage() {
 	};
 
 	const hasRunningDeployments = service.deployments.some(
-		(d) => d.status === "running",
+		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
 	);
 	const hasStoppedOrFailedDeployments =
 		!hasRunningDeployments &&
 		service.deployments.some(
 			(d) =>
-				d.status === "stopped" ||
-				d.status === "failed" ||
-				d.status === "rolled_back",
+				d.runtimeDesiredState === "removed" || d.observedPhase === "failed",
 		);
 	const canStartAll =
 		hasStoppedOrFailedDeployments &&
