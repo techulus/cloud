@@ -177,12 +177,42 @@ describe("expected-state pure builders", () => {
 			deploymentPorts: [],
 			secrets: [],
 			volumes: [],
-			serverlessRoutableServiceIds: new Set(),
 		});
 
 		expect(containers[0]).toMatchObject({
 			deploymentId: "dep_sleeping",
 			desiredState: "running",
+		});
+	});
+
+	it("projects stopped runtime intent without checking route eligibility", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_stopped",
+					serviceId: "svc_private",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "sleeping",
+				},
+			] as any,
+			services: [
+				{
+					id: "svc_private",
+					name: "private-api",
+					image: "nginx",
+					serverlessEnabled: false,
+				},
+			] as any,
+			deploymentPorts: [],
+			secrets: [],
+			volumes: [],
+		});
+
+		expect(containers[0]).toMatchObject({
+			deploymentId: "dep_stopped",
+			desiredState: "stopped",
 		});
 	});
 
@@ -209,7 +239,6 @@ describe("expected-state pure builders", () => {
 			deploymentPorts: [],
 			secrets: [],
 			volumes: [],
-			serverlessRoutableServiceIds: new Set(["svc_public"]),
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -242,7 +271,6 @@ describe("expected-state pure builders", () => {
 			deploymentPorts: [],
 			secrets: [],
 			volumes: [],
-			serverlessRoutableServiceIds: new Set(["svc_public"]),
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -275,7 +303,6 @@ describe("expected-state pure builders", () => {
 			deploymentPorts: [],
 			secrets: [],
 			volumes: [],
-			serverlessRoutableServiceIds: new Set(["svc_public"]),
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -446,26 +473,26 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deployments: [
-					{
-						id: "dep_proxy",
-						serviceId: "svc_1",
-						serverId: "proxy_1",
-						ipAddress: "10.0.0.10",
-						runtimeDesiredState: "stopped",
-						trafficState: "active",
-						observedPhase: "sleeping",
-						serverIsProxy: true,
-					},
+				{
+					id: "dep_proxy",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "sleeping",
+					serverIsProxy: true,
+				},
 				{
 					id: "dep_worker",
-						serviceId: "svc_1",
-						serverId: "worker_1",
-						ipAddress: "10.0.0.20",
-						runtimeDesiredState: "running",
-						trafficState: "active",
-						observedPhase: "healthy",
-						serverIsProxy: false,
-					},
+					serviceId: "svc_1",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.20",
+					runtimeDesiredState: "running",
+					trafficState: "active",
+					observedPhase: "healthy",
+					serverIsProxy: false,
+				},
 			] as any,
 			containers: [
 				{
@@ -521,16 +548,16 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deployments: [
-					{
-						id: "dep_stateful",
-						serviceId: "svc_stateful",
-						serverId: "proxy_1",
-						ipAddress: "10.0.0.10",
-						runtimeDesiredState: "stopped",
-						trafficState: "active",
-						observedPhase: "sleeping",
-						serverIsProxy: true,
-					},
+				{
+					id: "dep_stateful",
+					serviceId: "svc_stateful",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "sleeping",
+					serverIsProxy: true,
+				},
 			] as any,
 			containers: [
 				{
@@ -578,26 +605,26 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deployments: [
-					{
-						id: "dep_old",
-						serviceId: "svc_1",
-						serverId: "proxy_1",
-						ipAddress: "10.0.0.10",
-						runtimeDesiredState: "stopped",
-						trafficState: "draining",
-						observedPhase: "sleeping",
-						serverIsProxy: true,
-					},
+				{
+					id: "dep_old",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "draining",
+					observedPhase: "sleeping",
+					serverIsProxy: true,
+				},
 				{
 					id: "dep_new",
-						serviceId: "svc_1",
-						serverId: "proxy_1",
-						ipAddress: "10.0.0.11",
-						runtimeDesiredState: "running",
-						trafficState: "active",
-						observedPhase: "running",
-						serverIsProxy: true,
-					},
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.11",
+					runtimeDesiredState: "running",
+					trafficState: "active",
+					observedPhase: "running",
+					serverIsProxy: true,
+				},
 			] as any,
 			containers: [
 				{ deploymentId: "dep_old", desiredState: "stopped" },
@@ -606,9 +633,9 @@ describe("expected-state pure builders", () => {
 		});
 
 		expect(routes[0]?.localDeploymentIds).toEqual(["dep_new"]);
-		expect(routes[0]?.upstreams.map((upstream) => upstream.deploymentId)).toEqual([
-			"dep_new",
-		]);
+		expect(
+			routes[0]?.upstreams.map((upstream) => upstream.deploymentId),
+		).toEqual(["dep_new"]);
 	});
 
 	it("keeps wake metadata from deployed serverless config while live settings are disabled", () => {
@@ -627,16 +654,16 @@ describe("expected-state pure builders", () => {
 			] as any,
 			ports: [],
 			deployments: [
-					{
-						id: "dep_sleeping",
-						serviceId: "svc_1",
-						serverId: "proxy_1",
-						ipAddress: "10.0.0.10",
-						runtimeDesiredState: "stopped",
-						trafficState: "active",
-						observedPhase: "sleeping",
-						serverIsProxy: true,
-					},
+				{
+					id: "dep_sleeping",
+					serviceId: "svc_1",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "sleeping",
+					serverIsProxy: true,
+				},
 			] as any,
 			containers: [
 				{ deploymentId: "dep_sleeping", desiredState: "stopped" },
@@ -711,16 +738,16 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deployments: [
-					{
-						id: "dep_worker",
-						serviceId: "svc_1",
-						serverId: "worker_1",
-						ipAddress: "10.0.0.20",
-						runtimeDesiredState: "running",
-						trafficState: "active",
-						observedPhase: "healthy",
-						serverIsProxy: false,
-					},
+				{
+					id: "dep_worker",
+					serviceId: "svc_1",
+					serverId: "worker_1",
+					ipAddress: "10.0.0.20",
+					runtimeDesiredState: "running",
+					trafficState: "active",
+					observedPhase: "healthy",
+					serverIsProxy: false,
+				},
 			] as any,
 			containers: [],
 		});

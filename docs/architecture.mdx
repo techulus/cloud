@@ -222,7 +222,7 @@ deployments, but proxy agents own the local lifecycle decision:
 - The proxy gateway wakes local sleeping deployments from expected-state
   metadata and reports `wake_started` through the next status report.
 - The proxy agent reports local sleep with a `sleep` status transition after it
-  removes the local container.
+  stops the local container.
 
 ```mermaid
 sequenceDiagram

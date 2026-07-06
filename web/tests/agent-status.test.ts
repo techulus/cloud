@@ -17,7 +17,10 @@ vi.mock("@/lib/work-queue", () => ({
 	enqueueWork: vi.fn(),
 }));
 
-import { shouldAttachReportedContainer } from "@/lib/agent-status";
+import {
+	getStoppedContainerReportUpdate,
+	shouldAttachReportedContainer,
+} from "@/lib/agent-status";
 
 describe("agent status serverless attachment", () => {
 	it("does not attach reported containers to sleeping deployments", () => {
@@ -26,5 +29,22 @@ describe("agent status serverless attachment", () => {
 		expect(shouldAttachReportedContainer("waking")).toBe(true);
 		expect(shouldAttachReportedContainer("sleeping")).toBe(false);
 		expect(shouldAttachReportedContainer("failed")).toBe(false);
+	});
+
+	it("preserves sleeping observation for intended-stopped container reports", () => {
+		expect(
+			getStoppedContainerReportUpdate({ runtimeDesiredState: "stopped" }),
+		).toEqual({
+			containerId: null,
+			observedPhase: "sleeping",
+			healthStatus: null,
+		});
+
+		expect(
+			getStoppedContainerReportUpdate({ runtimeDesiredState: "running" }),
+		).toEqual({
+			observedPhase: "stopped",
+			healthStatus: "none",
+		});
 	});
 });

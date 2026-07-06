@@ -56,6 +56,23 @@ export function shouldAttachReportedContainer(observedPhase: ObservedPhase) {
 	);
 }
 
+export function getStoppedContainerReportUpdate(deployment: {
+	runtimeDesiredState: string;
+}) {
+	if (deployment.runtimeDesiredState === "stopped") {
+		return {
+			containerId: null,
+			observedPhase: "sleeping" as const,
+			healthStatus: null,
+		};
+	}
+
+	return {
+		observedPhase: "stopped" as const,
+		healthStatus: "none" as const,
+	};
+}
+
 function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
@@ -385,7 +402,8 @@ function getInvalidServerlessTransitionReason({
 		| undefined;
 }) {
 	if (!deployment) return "deployment not found";
-	if (deployment.serverId !== serverId) return "deployment belongs to another server";
+	if (deployment.serverId !== serverId)
+		return "deployment belongs to another server";
 	if (!deployment.serverIsProxy) return "server is not a proxy";
 	if (!getDeployedServerlessConfig(deployment).enabled) {
 		return "service is not serverless";
@@ -423,7 +441,10 @@ function getInvalidServerlessTransitionReason({
 	return null;
 }
 
-async function emitDeploymentStatusChanged(deploymentId: string, serviceId: string) {
+async function emitDeploymentStatusChanged(
+	deploymentId: string,
+	serviceId: string,
+) {
 	await inngest.send(
 		inngestEvents.resourceStatusChanged.create({
 			type: "deployment",
@@ -677,8 +698,7 @@ export async function applyStatusReport(
 		}
 
 		if (container.status === "stopped") {
-			updateFields.observedPhase = "stopped";
-			updateFields.healthStatus = "none";
+			Object.assign(updateFields, getStoppedContainerReportUpdate(deployment));
 			await db
 				.update(deployments)
 				.set(updateFields)

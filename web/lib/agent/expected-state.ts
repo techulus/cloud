@@ -169,7 +169,7 @@ export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
 	const allServices = await getActiveServices();
-	const containers = await buildExpectedContainers(server.id, server.isProxy);
+	const containers = await buildExpectedContainers(server.id);
 	const dnsRecords = await buildDnsRecords(allServices);
 	const traefikConfig = await buildTraefikConfig(server, allServices);
 	const serverless = await buildServerlessExpectedState(
@@ -195,7 +195,6 @@ async function getActiveServices() {
 
 async function buildExpectedContainers(
 	serverId: string,
-	serverIsProxy: boolean,
 ): Promise<ExpectedContainer[]> {
 	const serverDeployments = await db
 		.select()
@@ -210,8 +209,8 @@ async function buildExpectedContainers(
 	const serviceIds = unique(serverDeployments.map((dep) => dep.serviceId));
 	if (serviceIds.length === 0) return [];
 
-	const [activeServices, depPorts, serviceSecrets, volumes, servicePortRows] =
-		await Promise.all([
+	const [activeServices, depPorts, serviceSecrets, volumes] = await Promise.all(
+		[
 			db
 				.select()
 				.from(services)
@@ -235,11 +234,7 @@ async function buildExpectedContainers(
 				})
 				.from(serviceVolumes)
 				.where(inArray(serviceVolumes.serviceId, serviceIds)),
-			fetchServicePorts(serviceIds),
-		]);
-	const serverlessRoutableServiceIds = getServerlessRoutableServiceIds(
-		activeServices,
-		servicePortRows,
+		],
 	);
 
 	return buildExpectedContainersFromRows({
@@ -248,8 +243,6 @@ async function buildExpectedContainers(
 		deploymentPorts: depPorts,
 		secrets: serviceSecrets,
 		volumes,
-		serverIsProxy,
-		serverlessRoutableServiceIds,
 	});
 }
 
@@ -282,27 +275,16 @@ export function buildExpectedContainersFromRows({
 	deploymentPorts: deploymentPortRows,
 	secrets: secretRows,
 	volumes: volumeRows,
-	serverIsProxy = true,
-	serverlessRoutableServiceIds,
 }: {
 	deployments: Deployment[];
 	services: Service[];
 	deploymentPorts: DeploymentPortRow[];
 	secrets: SecretRow[];
 	volumes: VolumeRow[];
-	serverIsProxy?: boolean;
-	serverlessRoutableServiceIds?: Set<string>;
 }): ExpectedContainer[] {
 	const servicesById = new Map(
 		serviceRows.map((service) => [service.id, service]),
 	);
-	const sleepableServiceIds =
-		serverlessRoutableServiceIds ??
-		new Set(
-			serviceRows
-				.filter((service) => isDeployedServerlessService(service))
-				.map((service) => service.id),
-		);
 	const portsByDeploymentId = groupBy(
 		deploymentPortRows,
 		(port) => port.deploymentId,
@@ -324,12 +306,7 @@ export function buildExpectedContainersFromRows({
 					serviceName: service.name,
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
 					desiredState:
-						serverIsProxy &&
-						isDeployedServerlessService(service) &&
-						sleepableServiceIds.has(service.id) &&
-						dep.runtimeDesiredState === "stopped"
-							? "stopped"
-							: "running",
+						dep.runtimeDesiredState === "stopped" ? "stopped" : "running",
 					image: normalizeImage(service.image),
 					ipAddress: dep.ipAddress,
 					ports: (portsByDeploymentId.get(dep.id) ?? [])
@@ -353,7 +330,7 @@ export function buildExpectedContainersFromRows({
 					resourceMemoryLimitMb: service.resourceMemoryLimitMb,
 				},
 			];
-	});
+		});
 }
 
 async function buildServerlessExpectedState(
@@ -361,7 +338,10 @@ async function buildServerlessExpectedState(
 	allServices: Service[],
 	containers: ExpectedContainer[],
 ): Promise<{ routes: ServerlessRoute[] }> {
-	if (!server.isProxy || !hasAgentCapability(server, SERVERLESS_GATEWAY_CAPABILITY)) {
+	if (
+		!server.isProxy ||
+		!hasAgentCapability(server, SERVERLESS_GATEWAY_CAPABILITY)
+	) {
 		return { routes: [] };
 	}
 
@@ -460,8 +440,7 @@ export function buildServerlessRoutesFromRows({
 			const upstreams = serviceDeployments
 				.filter(
 					(deployment) =>
-						deployment.ipAddress &&
-						isDeploymentRoutable(deployment),
+						deployment.ipAddress && isDeploymentRoutable(deployment),
 				)
 				.map((deployment) => ({
 					deploymentId: deployment.id,
@@ -541,8 +520,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		SERVERLESS_GATEWAY_CAPABILITY,
 	);
 	const [ports, routableDeployments, proxyHostedServerlessDeployments] =
-		await Promise.all(
-		[
+		await Promise.all([
 			serviceIds.length > 0
 				? db
 						.select()
@@ -560,10 +538,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 						.where(
 							and(
 								inArray(deployments.serviceId, serviceIds),
-								inArray(
-									deployments.runtimeDesiredState,
-									runtimeExpectedStates,
-								),
+								inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 								inArray(deployments.trafficState, activeTrafficStates),
 								inArray(deployments.observedPhase, observedReadyPhases),
 							),
@@ -581,16 +556,12 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 							and(
 								inArray(deployments.serviceId, serviceIds),
 								eq(servers.isProxy, true),
-								inArray(
-									deployments.runtimeDesiredState,
-									runtimeExpectedStates,
-								),
+								inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 								inArray(deployments.trafficState, activeTrafficStates),
 							),
 						)
 				: Promise.resolve([]),
-		],
-	);
+		]);
 	const proxyHostedServerlessServiceIds = new Set(
 		proxyHostedServerlessDeployments.map((deployment) => deployment.serviceId),
 	);
@@ -609,9 +580,10 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 			.map((service) => service.id),
 	);
 	const serverlessServiceIds = new Set(
-		[...serverlessProxyRoutedServiceIds].filter((serviceId) =>
-			supportsServerlessGateway &&
-			localProxyHostedServerlessServiceIds.has(serviceId),
+		[...serverlessProxyRoutedServiceIds].filter(
+			(serviceId) =>
+				supportsServerlessGateway &&
+				localProxyHostedServerlessServiceIds.has(serviceId),
 		),
 	);
 	const serverlessRouteSuppressedServiceIds = new Set(
@@ -850,28 +822,6 @@ function getRuntimeServicePortsForRoutes(
 			tlsPassthrough: routePort.tlsPassthrough ?? false,
 		};
 	});
-}
-
-function getServerlessRoutableServiceIds(
-	serviceRows: Service[],
-	portRows: RouteServicePort[],
-) {
-	return new Set(
-		serviceRows
-			.filter((service) => hasDeployedPublicHttpPort(service, portRows))
-			.map((service) => service.id),
-	);
-}
-
-function hasDeployedPublicHttpPort(
-	service: Service,
-	portRows: RouteServicePort[],
-) {
-	if (!isDeployedServerlessService(service)) return false;
-	const livePorts = portRows.filter((port) => port.serviceId === service.id);
-	return getRuntimeServicePortsForRoutes(service, livePorts).some(
-		(port) => port.isPublic && port.protocol === "http" && !!port.domain,
-	);
 }
 
 function compareServicePorts(a: RouteServicePort, b: RouteServicePort) {
