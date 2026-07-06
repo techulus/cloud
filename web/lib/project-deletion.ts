@@ -6,5 +6,6 @@ type ProjectDeletionDeployment = Pick<
 >;
 
 export function blocksProjectDeletion(deployment: ProjectDeletionDeployment) {
+	// Sleeping serverless deployments still have runtime intent and can wake.
 	return deployment.runtimeDesiredState !== "removed";
 }

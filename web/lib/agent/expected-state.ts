@@ -440,7 +440,9 @@ export function buildServerlessRoutesFromRows({
 			const upstreams = serviceDeployments
 				.filter(
 					(deployment) =>
-						deployment.ipAddress && isDeploymentRoutable(deployment),
+						deployment.ipAddress &&
+						deployment.runtimeDesiredState === "running" &&
+						isDeploymentRoutable(deployment),
 				)
 				.map((deployment) => ({
 					deploymentId: deployment.id,
@@ -484,7 +486,7 @@ async function buildDnsRecords(allServices: Service[]) {
 		.where(
 			and(
 				inArray(deployments.serviceId, serviceIds),
-				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+				eq(deployments.runtimeDesiredState, "running"),
 				inArray(deployments.trafficState, activeTrafficStates),
 				inArray(deployments.observedPhase, observedReadyPhases),
 			),
@@ -538,7 +540,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 						.where(
 							and(
 								inArray(deployments.serviceId, serviceIds),
-								inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+								eq(deployments.runtimeDesiredState, "running"),
 								inArray(deployments.trafficState, activeTrafficStates),
 								inArray(deployments.observedPhase, observedReadyPhases),
 							),

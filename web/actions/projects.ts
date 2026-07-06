@@ -1080,7 +1080,6 @@ export async function updateServiceServerlessSettings(
 				serverlessMinReadyReplicas: validated.minReadyReplicas,
 			})
 			.where(eq(services.id, serviceId));
-
 	});
 
 	return { success: true };
@@ -1259,6 +1258,8 @@ export async function stopService(serviceId: string) {
 		);
 
 	for (const dep of desiredDeployments) {
+		// User stop is teardown; runtimeDesiredState "stopped" is reserved for
+		// serverless sleep where the deployment must remain wakeable.
 		await db
 			.update(deployments)
 			.set(markDeploymentRemoved())

@@ -493,6 +493,16 @@ describe("expected-state pure builders", () => {
 					observedPhase: "healthy",
 					serverIsProxy: false,
 				},
+				{
+					id: "dep_stopped_stale_ready",
+					serviceId: "svc_1",
+					serverId: "worker_2",
+					ipAddress: "10.0.0.30",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "healthy",
+					serverIsProxy: false,
+				},
 			] as any,
 			containers: [
 				{
