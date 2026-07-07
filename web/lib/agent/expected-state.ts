@@ -101,7 +101,6 @@ export type ServerlessRoute = {
 	port: number;
 	sleepAfterSeconds: number;
 	wakeTimeoutSeconds: number;
-	minReadyReplicas: number;
 	localDeploymentIds: string[];
 	upstreams: ServerlessRouteUpstream[];
 };
@@ -462,10 +461,6 @@ export function buildServerlessRoutesFromRows({
 						getDeployedServerlessConfig(service).sleepAfterSeconds,
 					wakeTimeoutSeconds:
 						getDeployedServerlessConfig(service).wakeTimeoutSeconds,
-					minReadyReplicas: Math.max(
-						1,
-						getDeployedServerlessConfig(service).minReadyReplicas,
-					),
 					localDeploymentIds,
 					upstreams,
 				},
@@ -594,15 +589,16 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		),
 	);
 
+	const routePorts = buildRuntimeRoutePorts(allServices, ports);
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
-		ports: buildRuntimeRoutePorts(allServices, ports),
+		ports: routePorts,
 		routableDeployments,
 		serverlessServiceIds,
 		serverlessRouteSuppressedServiceIds,
 	});
-	const routedDomains = routes.httpRoutes.map((r) => r.domain);
-	const certificates = await getAllCertificatesForDomains(routedDomains);
+	const certificateDomains = buildTraefikCertificateDomains(routePorts);
+	const certificates = await getAllCertificatesForDomains(certificateDomains);
 	const controlPlaneUrl = process.env.APP_URL;
 
 	if (!controlPlaneUrl) {
@@ -720,6 +716,17 @@ export function buildTraefikRoutes({
 	}
 
 	return { httpRoutes, tcpRoutes, udpRoutes };
+}
+
+export function buildTraefikCertificateDomains(ports: RouteServicePort[]) {
+	return Array.from(
+		new Set(
+			ports
+				.filter((port) => port.isPublic && port.protocol === "http")
+				.map((port) => port.domain?.trim())
+				.filter((domain): domain is string => Boolean(domain)),
+		),
+	).sort();
 }
 
 function buildHealthCheck(service: Service): ExpectedContainer["healthCheck"] {

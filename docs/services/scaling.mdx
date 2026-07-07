@@ -34,15 +34,13 @@ Serverless settings are configured per service:
 | Enable serverless | Off | Allows proxy-hosted HTTP deployments to sleep and wake on request |
 | Sleep after | `300s` | Idle period before running containers are stopped |
 | Wake timeout | `300s` | Maximum time the wake gateway waits for ready upstreams |
-| Min Ready | `1` | Preferred number of ready deployments before queued requests resume |
 
-`Min Ready` does not cap how many local proxy replicas are started. A cold wake
-starts the sleeping local proxy replicas for that host. `Min Ready` only controls
-when held requests can resume. If a worker upstream is already ready, the gateway
-can serve it immediately while local proxy replicas wake in the background.
+A cold wake starts the sleeping local proxy replicas for that host. Held
+requests resume when one upstream is ready. If a worker upstream is already
+ready, the gateway can serve it immediately while local proxy replicas wake in
+the background.
 
-Serverless services require at least one configured replica. `Min Ready` must be
-between `1` and `10`, and cannot exceed the configured replica count.
+Serverless services require at least one configured replica.
 
 ## Placement
 

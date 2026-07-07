@@ -41,7 +41,6 @@ export function isActiveDeploymentForRollout(
 		serverlessEnabled?: boolean | null;
 		serverlessSleepAfterSeconds?: number | null;
 		serverlessWakeTimeoutSeconds?: number | null;
-		serverlessMinReadyReplicas?: number | null;
 	},
 ) {
 	void service;
@@ -192,8 +191,8 @@ export async function prepareRollingUpdate(
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
-	const runningDeployments = existingDeployments.filter(
-		(d) => isActiveDeploymentForRollout(d, service),
+	const runningDeployments = existingDeployments.filter((d) =>
+		isActiveDeploymentForRollout(d, service),
 	);
 
 	return { deploymentIds: runningDeployments.map((d) => d.id) };
@@ -487,8 +486,8 @@ export async function checkForRollingUpdate(
 		.from(deployments)
 		.where(eq(deployments.serviceId, serviceId));
 
-	const runningDeployments = existingDeployments.filter(
-		(d) => isActiveDeploymentForRollout(d, service),
+	const runningDeployments = existingDeployments.filter((d) =>
+		isActiveDeploymentForRollout(d, service),
 	);
 
 	return runningDeployments.length > 0;

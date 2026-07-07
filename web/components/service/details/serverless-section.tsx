@@ -25,9 +25,6 @@ export const ServerlessSection = memo(function ServerlessSection({
 	const [wakeTimeoutSeconds, setWakeTimeoutSeconds] = useState(
 		String(service.serverlessWakeTimeoutSeconds ?? 300),
 	);
-	const [minReadyReplicas, setMinReadyReplicas] = useState(
-		String(service.serverlessMinReadyReplicas ?? 1),
-	);
 	const hasPublicHttpEndpoint = useMemo(
 		() =>
 			service.ports.some(
@@ -44,9 +41,8 @@ export const ServerlessSection = memo(function ServerlessSection({
 		() => ({
 			sleepAfterSeconds: Number.parseInt(sleepAfterSeconds, 10),
 			wakeTimeoutSeconds: Number.parseInt(wakeTimeoutSeconds, 10),
-			minReadyReplicas: Number.parseInt(minReadyReplicas, 10),
 		}),
-		[sleepAfterSeconds, wakeTimeoutSeconds, minReadyReplicas],
+		[sleepAfterSeconds, wakeTimeoutSeconds],
 	);
 
 	const validationError = useMemo(() => {
@@ -67,21 +63,13 @@ export const ServerlessSection = memo(function ServerlessSection({
 		) {
 			return "Wake timeout must be between 10 and 900 seconds";
 		}
-		if (
-			!Number.isInteger(parsed.minReadyReplicas) ||
-			parsed.minReadyReplicas < 1 ||
-			parsed.minReadyReplicas > 10
-		) {
-			return "Minimum ready replicas must be between 1 and 10";
-		}
 		return null;
 	}, [enabled, parsed, unavailableReason]);
 
 	const hasChanges =
 		enabled !== service.serverlessEnabled ||
 		parsed.sleepAfterSeconds !== service.serverlessSleepAfterSeconds ||
-		parsed.wakeTimeoutSeconds !== service.serverlessWakeTimeoutSeconds ||
-		parsed.minReadyReplicas !== service.serverlessMinReadyReplicas;
+		parsed.wakeTimeoutSeconds !== service.serverlessWakeTimeoutSeconds;
 
 	const handleSave = async () => {
 		setIsSaving(true);
@@ -90,7 +78,6 @@ export const ServerlessSection = memo(function ServerlessSection({
 				enabled,
 				sleepAfterSeconds: parsed.sleepAfterSeconds,
 				wakeTimeoutSeconds: parsed.wakeTimeoutSeconds,
-				minReadyReplicas: parsed.minReadyReplicas,
 			});
 			onUpdate();
 			toast.success("Serverless settings saved. Deploy to apply.");
@@ -123,7 +110,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 				/>
 			</Item>
 			<div className="space-y-4 p-4">
-				<div className="grid gap-3 md:grid-cols-3">
+				<div className="grid gap-3 md:grid-cols-2">
 					<div className="space-y-1">
 						<label
 							htmlFor="serverless-sleep-after"
@@ -158,24 +145,6 @@ export const ServerlessSection = memo(function ServerlessSection({
 							value={wakeTimeoutSeconds}
 							disabled={optionsDisabled}
 							onChange={(event) => setWakeTimeoutSeconds(event.target.value)}
-						/>
-					</div>
-					<div className="space-y-1">
-						<label
-							htmlFor="serverless-min-ready"
-							className="text-xs font-medium"
-						>
-							Min Ready
-						</label>
-						<Input
-							id="serverless-min-ready"
-							type="number"
-							min="1"
-							max="10"
-							step="1"
-							value={minReadyReplicas}
-							disabled={optionsDisabled}
-							onChange={(event) => setMinReadyReplicas(event.target.value)}
 						/>
 					</div>
 				</div>

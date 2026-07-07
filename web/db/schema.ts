@@ -387,9 +387,6 @@ export const services = pgTable("services", {
 	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
 		.notNull()
 		.default(300),
-	serverlessMinReadyReplicas: integer("serverless_min_ready_replicas")
-		.notNull()
-		.default(1),
 	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {

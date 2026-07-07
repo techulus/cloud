@@ -19,10 +19,10 @@ import {
 	getSteadyStateRecreateDecision,
 } from "@/lib/autoheal-policy";
 import {
-	type ObservedPhase,
 	isObservedActiveContainer,
 	isObservedReady,
 	markDeploymentFailedRemoved,
+	type ObservedPhase,
 	observedStartingPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
@@ -149,7 +149,6 @@ async function applyDeploymentErrors(
 				serverlessEnabled: services.serverlessEnabled,
 				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
 				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
-				serverlessMinReadyReplicas: services.serverlessMinReadyReplicas,
 				stateful: services.stateful,
 				deployedConfig: services.deployedConfig,
 				rolloutStatus: rollouts.status,
@@ -281,7 +280,6 @@ async function applyServerlessTransitions(
 				serverlessEnabled: services.serverlessEnabled,
 				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
 				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
-				serverlessMinReadyReplicas: services.serverlessMinReadyReplicas,
 				stateful: services.stateful,
 				deployedConfig: services.deployedConfig,
 				serverIsProxy: servers.isProxy,
@@ -480,7 +478,9 @@ function getServerlessTransitionResultBase(
 function isServerlessTransitionType(
 	value: unknown,
 ): value is ServerlessTransition["type"] {
-	return value === "sleep" || value === "wake_started" || value === "wake_failed";
+	return (
+		value === "sleep" || value === "wake_started" || value === "wake_failed"
+	);
 }
 
 export function getSleepTransitionDeploymentIds(
@@ -561,7 +561,6 @@ function getInvalidServerlessTransitionReason({
 				serverlessEnabled: boolean;
 				serverlessSleepAfterSeconds: number;
 				serverlessWakeTimeoutSeconds: number;
-				serverlessMinReadyReplicas: number;
 				deployedConfig: string | null;
 				serverIsProxy: boolean;
 		  }
@@ -729,8 +728,9 @@ export async function applyStatusReport(
 		serverId,
 		serverlessTransitions,
 	);
-	const sleepTransitionDeploymentIds =
-		getSleepTransitionDeploymentIds(serverlessTransitions);
+	const sleepTransitionDeploymentIds = getSleepTransitionDeploymentIds(
+		serverlessTransitions,
+	);
 
 	const reportedDeploymentIds = report.containers
 		.map((c) => c.deploymentId)

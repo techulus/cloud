@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +44,13 @@ type Builder struct {
 	dataDir   string
 	logSender LogSender
 }
+
+const (
+	staleBuildDirAge     = 1 * time.Hour
+	staleTempArtifactAge = 24 * time.Hour
+)
+
+var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
 
 func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	return &Builder{
@@ -408,8 +417,26 @@ func (b *Builder) sendLog(config *Config, message string) {
 }
 
 func (b *Builder) Cleanup() error {
-	buildsDir := filepath.Join(b.dataDir, "builds")
+	now := time.Now()
+	var cleanupErrors []error
 
+	if err := cleanupStaleBuildDirs(filepath.Join(b.dataDir, "builds"), now.Add(-staleBuildDirAge)); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	if err := cleanupManagedTempArtifacts(filepath.Join(b.dataDir, "tmp"), now.Add(-staleTempArtifactAge)); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	log.Printf("[build:cleanup] pruning unused images")
+	if err := container.ImagePrune(); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	return errors.Join(cleanupErrors...)
+}
+
+func cleanupStaleBuildDirs(buildsDir string, cutoff time.Time) error {
 	entries, err := os.ReadDir(buildsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -418,7 +445,7 @@ func (b *Builder) Cleanup() error {
 		return err
 	}
 
-	cutoff := time.Now().Add(-1 * time.Hour)
+	var cleanupErrors []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -432,14 +459,47 @@ func (b *Builder) Cleanup() error {
 		if info.ModTime().Before(cutoff) {
 			path := filepath.Join(buildsDir, entry.Name())
 			log.Printf("[build:cleanup] removing stale build dir: %s", entry.Name())
-			os.RemoveAll(path)
+			if err := os.RemoveAll(path); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
 		}
 	}
 
-	log.Printf("[build:cleanup] pruning unused images")
-	container.ImagePrune()
+	return errors.Join(cleanupErrors...)
+}
 
-	return nil
+func cleanupManagedTempArtifacts(tmpDir string, cutoff time.Time) error {
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var cleanupErrors []error
+	for _, entry := range entries {
+		if !managedTempArtifactPattern.MatchString(entry.Name()) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+
+		path := filepath.Join(tmpDir, entry.Name())
+		log.Printf("[build:cleanup] removing stale temp artifact: %s", entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+
+	return errors.Join(cleanupErrors...)
 }
 
 func CheckPrerequisites() error {

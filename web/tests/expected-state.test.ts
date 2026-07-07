@@ -10,6 +10,7 @@ import {
 	buildExpectedContainersFromRows,
 	buildRuntimeRoutePorts,
 	buildServerlessRoutesFromRows,
+	buildTraefikCertificateDomains,
 	buildTraefikRoutes,
 } from "@/lib/agent/expected-state";
 
@@ -31,7 +32,6 @@ describe("expected-state pure builders", () => {
 			enabled: true,
 			sleepAfterSeconds: 300,
 			wakeTimeoutSeconds: 120,
-			minReadyReplicas: 1,
 		},
 	});
 
@@ -358,6 +358,33 @@ describe("expected-state pure builders", () => {
 		expect(routes.httpRoutes).toEqual([]);
 	});
 
+	it("keeps suppressed serverless HTTP domains in certificate selection", () => {
+		const ports: Parameters<typeof buildTraefikCertificateDomains>[0] = [
+			{
+				id: "port_1",
+				serviceId: "svc_serverless",
+				port: 3000,
+				isPublic: true,
+				protocol: "http",
+				domain: "sleepy.example.com",
+				externalPort: null,
+				tlsPassthrough: false,
+			},
+		];
+
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_2",
+			ports,
+			routableDeployments: [],
+			serverlessRouteSuppressedServiceIds: new Set(["svc_serverless"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([]);
+		expect(buildTraefikCertificateDomains(ports)).toEqual([
+			"sleepy.example.com",
+		]);
+	});
+
 	it("keeps worker-only serverless services on direct routes", () => {
 		const routes = buildTraefikRoutes({
 			serverId: "proxy_1",
@@ -459,7 +486,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -519,7 +545,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_proxy"],
 				upstreams: [
 					{
@@ -544,7 +569,6 @@ describe("expected-state pure builders", () => {
 					stateful: true,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -584,7 +608,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_stateful"],
 				upstreams: [],
 			},
@@ -601,7 +624,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -658,7 +680,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 60,
 					serverlessWakeTimeoutSeconds: 60,
-					serverlessMinReadyReplicas: 1,
 					deployedConfig: deployedServerlessConfig,
 				},
 			] as any,
@@ -687,7 +708,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_sleeping"],
 				upstreams: [],
 			},
@@ -734,7 +754,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [

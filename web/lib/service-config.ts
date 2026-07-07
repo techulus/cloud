@@ -48,7 +48,6 @@ export type ServerlessConfig = {
 	enabled: boolean;
 	sleepAfterSeconds: number;
 	wakeTimeoutSeconds: number;
-	minReadyReplicas: number;
 };
 
 export type DeployedConfig = {
@@ -90,7 +89,6 @@ export function buildCurrentConfig(
 		serverlessEnabled?: boolean | null;
 		serverlessSleepAfterSeconds?: number | null;
 		serverlessWakeTimeoutSeconds?: number | null;
-		serverlessMinReadyReplicas?: number | null;
 	},
 	replicas: { serverId: string; serverName: string; count: number }[],
 	ports: {
@@ -148,7 +146,6 @@ export function buildCurrentConfig(
 			enabled: service.serverlessEnabled ?? false,
 			sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
 			wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
-			minReadyReplicas: service.serverlessMinReadyReplicas ?? 1,
 		},
 		secrets: (secrets ?? []).map((s) => ({
 			key: s.key,
@@ -287,16 +284,6 @@ export function diffConfigs(
 				field: "Serverless wake timeout",
 				from: `${deployedServerless.wakeTimeoutSeconds}s`,
 				to: `${currentServerless.wakeTimeoutSeconds}s`,
-			});
-		}
-		if (
-			deployedServerless.minReadyReplicas !==
-			currentServerless.minReadyReplicas
-		) {
-			changes.push({
-				field: "Serverless min ready",
-				from: String(deployedServerless.minReadyReplicas),
-				to: String(currentServerless.minReadyReplicas),
 			});
 		}
 	}
@@ -568,7 +555,6 @@ export function normalizeServerlessConfig(
 		enabled: config?.enabled ?? false,
 		sleepAfterSeconds: config?.sleepAfterSeconds ?? 300,
 		wakeTimeoutSeconds: config?.wakeTimeoutSeconds ?? 300,
-		minReadyReplicas: config?.minReadyReplicas ?? 1,
 	};
 }
 
@@ -576,13 +562,11 @@ export function getCurrentServerlessConfig(service: {
 	serverlessEnabled?: boolean | null;
 	serverlessSleepAfterSeconds?: number | null;
 	serverlessWakeTimeoutSeconds?: number | null;
-	serverlessMinReadyReplicas?: number | null;
 }): ServerlessConfig {
 	return {
 		enabled: service.serverlessEnabled ?? false,
 		sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
 		wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
-		minReadyReplicas: service.serverlessMinReadyReplicas ?? 1,
 	};
 }
 
@@ -591,7 +575,6 @@ export function getDeployedServerlessConfig(service: {
 	serverlessEnabled?: boolean | null;
 	serverlessSleepAfterSeconds?: number | null;
 	serverlessWakeTimeoutSeconds?: number | null;
-	serverlessMinReadyReplicas?: number | null;
 }): ServerlessConfig {
 	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
 	return deployed?.serverless
@@ -613,7 +596,6 @@ export function isDeployedServerlessService(service: {
 	serverlessEnabled?: boolean | null;
 	serverlessSleepAfterSeconds?: number | null;
 	serverlessWakeTimeoutSeconds?: number | null;
-	serverlessMinReadyReplicas?: number | null;
 }) {
 	return getDeployedServerlessConfig(service).enabled;
 }
