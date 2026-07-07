@@ -10,6 +10,7 @@ import {
 	buildExpectedContainersFromRows,
 	buildRuntimeRoutePorts,
 	buildServerlessRoutesFromRows,
+	buildServerlessTraefikRouteSets,
 	buildTraefikCertificateDomains,
 	buildTraefikRoutes,
 } from "@/lib/agent/expected-state";
@@ -326,6 +327,57 @@ describe("expected-state pure builders", () => {
 			] as any,
 			routableDeployments: [],
 			serverlessServiceIds: new Set(["svc_serverless"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([
+			{
+				id: "sleepy.example.com",
+				domain: "sleepy.example.com",
+				serviceId: "svc_serverless",
+				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
+			},
+		]);
+	});
+
+	it("classifies owner proxy serverless routes without capability metadata", () => {
+		const services: Parameters<
+			typeof buildServerlessTraefikRouteSets
+		>[0]["services"] = [
+			{
+				id: "svc_serverless",
+				serverlessEnabled: true,
+				stateful: false,
+			},
+		] as Parameters<typeof buildServerlessTraefikRouteSets>[0]["services"];
+		const ports: Parameters<typeof buildTraefikRoutes>[0]["ports"] = [
+			{
+				id: "port_1",
+				serviceId: "svc_serverless",
+				port: 3000,
+				isPublic: true,
+				protocol: "http",
+				domain: "sleepy.example.com",
+			},
+		] as Parameters<typeof buildTraefikRoutes>[0]["ports"];
+
+		const { serverlessServiceIds, serverlessRouteSuppressedServiceIds } =
+			buildServerlessTraefikRouteSets({
+				serverId: "proxy_1",
+				services,
+				proxyHostedServerlessDeployments: [
+					{ serviceId: "svc_serverless", serverId: "proxy_1" },
+				],
+			});
+
+		expect(Array.from(serverlessServiceIds)).toEqual(["svc_serverless"]);
+		expect(Array.from(serverlessRouteSuppressedServiceIds)).toEqual([]);
+
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_1",
+			ports,
+			routableDeployments: [],
+			serverlessServiceIds,
+			serverlessRouteSuppressedServiceIds,
 		});
 
 		expect(routes.httpRoutes).toEqual([

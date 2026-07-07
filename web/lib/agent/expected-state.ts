@@ -125,7 +125,6 @@ type DeploymentPortRow = {
 	hostPort: number;
 	containerPort: number;
 };
-const SERVERLESS_GATEWAY_CAPABILITY = "serverless_gateway";
 
 type SecretRow = {
 	serviceId: string;
@@ -142,6 +141,11 @@ type VolumeRow = {
 type RoutableDeploymentRow = {
 	serviceId: string;
 	ipAddress: string | null;
+	serverId: string;
+};
+
+type ProxyHostedServerlessDeploymentRow = {
+	serviceId: string;
 	serverId: string;
 };
 
@@ -337,10 +341,7 @@ async function buildServerlessExpectedState(
 	allServices: Service[],
 	containers: ExpectedContainer[],
 ): Promise<{ routes: ServerlessRoute[] }> {
-	if (
-		!server.isProxy ||
-		!hasAgentCapability(server, SERVERLESS_GATEWAY_CAPABILITY)
-	) {
+	if (!server.isProxy) {
 		return { routes: [] };
 	}
 
@@ -512,10 +513,6 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 	if (!server.isProxy) return emptyConfig;
 
 	const serviceIds = allServices.map((service) => service.id);
-	const supportsServerlessGateway = hasAgentCapability(
-		server,
-		SERVERLESS_GATEWAY_CAPABILITY,
-	);
 	const [ports, routableDeployments, proxyHostedServerlessDeployments] =
 		await Promise.all([
 			serviceIds.length > 0
@@ -559,35 +556,12 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 						)
 				: Promise.resolve([]),
 		]);
-	const proxyHostedServerlessServiceIds = new Set(
-		proxyHostedServerlessDeployments.map((deployment) => deployment.serviceId),
-	);
-	const localProxyHostedServerlessServiceIds = new Set(
-		proxyHostedServerlessDeployments
-			.filter((deployment) => deployment.serverId === server.id)
-			.map((deployment) => deployment.serviceId),
-	);
-	const serverlessProxyRoutedServiceIds = new Set(
-		allServices
-			.filter(
-				(service) =>
-					isDeployedServerlessService(service) &&
-					proxyHostedServerlessServiceIds.has(service.id),
-			)
-			.map((service) => service.id),
-	);
-	const serverlessServiceIds = new Set(
-		[...serverlessProxyRoutedServiceIds].filter(
-			(serviceId) =>
-				supportsServerlessGateway &&
-				localProxyHostedServerlessServiceIds.has(serviceId),
-		),
-	);
-	const serverlessRouteSuppressedServiceIds = new Set(
-		[...serverlessProxyRoutedServiceIds].filter(
-			(serviceId) => !serverlessServiceIds.has(serviceId),
-		),
-	);
+	const { serverlessServiceIds, serverlessRouteSuppressedServiceIds } =
+		buildServerlessTraefikRouteSets({
+			serverId: server.id,
+			services: allServices,
+			proxyHostedServerlessDeployments,
+		});
 
 	const routePorts = buildRuntimeRoutePorts(allServices, ports);
 	const routes = buildTraefikRoutes({
@@ -612,10 +586,6 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 		certificates,
 		challengeRoute: controlPlaneUrl ? { controlPlaneUrl } : undefined,
 	};
-}
-
-function hasAgentCapability(server: Server, capability: string) {
-	return server.agentHealth?.capabilities?.includes(capability) === true;
 }
 
 export function buildTraefikRoutes({
@@ -716,6 +686,46 @@ export function buildTraefikRoutes({
 	}
 
 	return { httpRoutes, tcpRoutes, udpRoutes };
+}
+
+export function buildServerlessTraefikRouteSets({
+	serverId,
+	services: serviceRows,
+	proxyHostedServerlessDeployments,
+}: {
+	serverId: string;
+	services: Service[];
+	proxyHostedServerlessDeployments: ProxyHostedServerlessDeploymentRow[];
+}) {
+	const proxyHostedServerlessServiceIds = new Set(
+		proxyHostedServerlessDeployments.map((deployment) => deployment.serviceId),
+	);
+	const localProxyHostedServerlessServiceIds = new Set(
+		proxyHostedServerlessDeployments
+			.filter((deployment) => deployment.serverId === serverId)
+			.map((deployment) => deployment.serviceId),
+	);
+	const serverlessProxyRoutedServiceIds = new Set(
+		serviceRows
+			.filter(
+				(service) =>
+					isDeployedServerlessService(service) &&
+					proxyHostedServerlessServiceIds.has(service.id),
+			)
+			.map((service) => service.id),
+	);
+	const serverlessServiceIds = new Set(
+		[...serverlessProxyRoutedServiceIds].filter((serviceId) =>
+			localProxyHostedServerlessServiceIds.has(serviceId),
+		),
+	);
+	const serverlessRouteSuppressedServiceIds = new Set(
+		[...serverlessProxyRoutedServiceIds].filter(
+			(serviceId) => !serverlessServiceIds.has(serviceId),
+		),
+	);
+
+	return { serverlessServiceIds, serverlessRouteSuppressedServiceIds };
 }
 
 export function buildTraefikCertificateDomains(ports: RouteServicePort[]) {
