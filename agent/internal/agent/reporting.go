@@ -32,6 +32,11 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		PrivateIP:  a.PrivateIP,
 		Containers: []agenthttp.ContainerStatus{},
 		DnsInSync:  a.dnsInSync,
+		AgentHealth: &agenthttp.AgentHealth{
+			Version:      Version,
+			UptimeSecs:   int64(time.Since(agentStartTime).Seconds()),
+			Capabilities: a.agentCapabilities(),
+		},
 	}
 
 	if includeResources {
@@ -52,11 +57,6 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		}
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
-		report.AgentHealth = &agenthttp.AgentHealth{
-			Version:      Version,
-			UptimeSecs:   int64(time.Since(agentStartTime).Seconds()),
-			Capabilities: a.agentCapabilities(),
-		}
 		lastHealthCollect = time.Now()
 		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
 			systemStats.CpuUsagePercent, systemStats.MemoryUsagePercent,
