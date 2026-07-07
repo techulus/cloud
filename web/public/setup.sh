@@ -61,6 +61,31 @@ pkg_hold() {
   fi
 }
 
+configure_journald_limits() {
+  step "Configuring journal storage limits..."
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/techulus.conf << 'EOF'
+[Journal]
+SystemMaxUse=1G
+SystemKeepFree=1G
+RuntimeMaxUse=256M
+MaxRetentionSec=7day
+EOF
+  systemctl restart systemd-journald 2>/dev/null || true
+  echo "✓ Journald storage limits configured"
+}
+
+ensure_logrotate() {
+  if command -v logrotate &>/dev/null; then
+    return
+  fi
+
+  pkg_install logrotate
+  if ! command -v logrotate &>/dev/null; then
+    error "Failed to install logrotate"
+  fi
+}
+
 echo ""
 echo "=========================================="
 echo "  Techulus Cloud Agent Installer"
@@ -117,6 +142,8 @@ case $ARCH in
     ;;
 esac
 echo "✓ Architecture: $ARCH ($AGENT_ARCH)"
+
+configure_journald_limits
 
 step "Collecting configuration..."
 
@@ -409,6 +436,26 @@ EOF
   fi
   echo "✓ Traefik config created"
 
+  step "Configuring Traefik access log rotation..."
+  ensure_logrotate
+  cat > /etc/logrotate.d/techulus-traefik << 'EOF'
+/var/log/traefik/access.log {
+  daily
+  maxsize 100M
+  rotate 7
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+  create 0644 root root
+}
+EOF
+  if [ ! -f /etc/logrotate.d/techulus-traefik ]; then
+    error "Failed to create Traefik logrotate config"
+  fi
+  echo "✓ Traefik access log rotation configured"
+
   cat > /etc/systemd/system/traefik.service << 'EOF'
 [Unit]
 Description=Traefik Reverse Proxy
@@ -541,6 +588,23 @@ mkdir -p /etc/buildkit
 cat > /etc/buildkit/buildkitd.toml << 'EOF'
 [dns]
   nameservers = ["8.8.8.8", "1.1.1.1"]
+
+[worker.oci]
+  gc = true
+  reservedSpace = "15%"
+  maxUsedSpace = "30%"
+  minFreeSpace = "15%"
+
+[[worker.oci.gcpolicy]]
+  filters = ["type==source.local", "type==source.git.checkout", "type==exec.cachemount"]
+  keepDuration = "48h"
+  maxUsedSpace = "10%"
+
+[[worker.oci.gcpolicy]]
+  all = true
+  keepDuration = "168h"
+  reservedSpace = "15%"
+  maxUsedSpace = "30%"
 EOF
 if [ ! -f /etc/buildkit/buildkitd.toml ]; then
   error "Failed to create BuildKit config"
@@ -568,7 +632,7 @@ fi
 
 systemctl daemon-reload
 systemctl enable buildkitd
-systemctl start buildkitd
+systemctl restart buildkitd
 sleep 2
 if ! systemctl is-active --quiet buildkitd; then
   error "Failed to start BuildKit daemon"

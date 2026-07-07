@@ -101,7 +101,10 @@ func (a *Agent) processVolumeBackup(backupID, serviceID, containerID, volumeName
 		}
 	}
 
-	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("backup-%s.tar.gz", backupID))
+	tarPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("backup-%s.tar.gz", backupID))
+	if err != nil {
+		return reportFailure(fmt.Errorf("failed to create temp archive path: %w", err))
+	}
 	defer os.Remove(tarPath)
 
 	size, checksum, err := createTarGzWithChecksum(volumePath, tarPath)
@@ -158,7 +161,10 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		return err
 	}
 
-	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-%s.tar.gz", backupID))
+	tarPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("restore-%s.tar.gz", backupID))
+	if err != nil {
+		return reportFailure(fmt.Errorf("failed to create temp archive path: %w", err))
+	}
 	defer os.Remove(tarPath)
 
 	if !strings.HasSuffix(storagePath, ".tar.gz") {
@@ -185,7 +191,10 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
 	}
 
-	tempExtractPath := filepath.Join(os.TempDir(), fmt.Sprintf("restore-extract-%s", backupID))
+	tempExtractPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("restore-extract-%s", backupID))
+	if err != nil {
+		return reportFailure(fmt.Errorf("failed to create temp extract path: %w", err))
+	}
 	defer os.RemoveAll(tempExtractPath)
 
 	if err := os.MkdirAll(tempExtractPath, 0755); err != nil {
@@ -256,6 +265,19 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 	}
 
 	return nil
+}
+
+func tempArtifactPath(dataDir, name string) (string, error) {
+	if name == "" || name != filepath.Base(name) {
+		return "", fmt.Errorf("invalid temp artifact name: %s", name)
+	}
+
+	tmpDir := filepath.Join(dataDir, "tmp")
+	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(tmpDir, name), nil
 }
 
 func moveDir(src, dst string) error {

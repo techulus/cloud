@@ -456,8 +456,12 @@ func writeDockerConfig(registryURL, username, password string) error {
 	return nil
 }
 
-func ImagePrune() {
-	exec.Command("podman", "image", "prune", "-a", "-f", "--filter", "until=168h").Run()
+func ImagePrune() error {
+	cmd := exec.Command("podman", "image", "prune", "-a", "-f", "--filter", "until=168h")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to prune images: %s: %w", string(output), err)
+	}
+	return nil
 }
 
 type podmanContainer struct {
