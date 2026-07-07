@@ -10,6 +10,7 @@ import {
 	buildExpectedContainersFromRows,
 	buildRuntimeRoutePorts,
 	buildServerlessRoutesFromRows,
+	buildTraefikCertificateDomains,
 	buildTraefikRoutes,
 } from "@/lib/agent/expected-state";
 
@@ -356,6 +357,33 @@ describe("expected-state pure builders", () => {
 		});
 
 		expect(routes.httpRoutes).toEqual([]);
+	});
+
+	it("keeps suppressed serverless HTTP domains in certificate selection", () => {
+		const ports: Parameters<typeof buildTraefikCertificateDomains>[0] = [
+			{
+				id: "port_1",
+				serviceId: "svc_serverless",
+				port: 3000,
+				isPublic: true,
+				protocol: "http",
+				domain: "sleepy.example.com",
+				externalPort: null,
+				tlsPassthrough: false,
+			},
+		];
+
+		const routes = buildTraefikRoutes({
+			serverId: "proxy_2",
+			ports,
+			routableDeployments: [],
+			serverlessRouteSuppressedServiceIds: new Set(["svc_serverless"]),
+		});
+
+		expect(routes.httpRoutes).toEqual([]);
+		expect(buildTraefikCertificateDomains(ports)).toEqual([
+			"sleepy.example.com",
+		]);
 	});
 
 	it("keeps worker-only serverless services on direct routes", () => {
