@@ -44,6 +44,7 @@ func (a *Agent) Run(ctx context.Context) {
 
 	var cleanupTickerC <-chan time.Time
 	if a.Builder != nil {
+		go a.RunBuildCleanup()
 		cleanupTicker := time.NewTicker(BuildCleanupInterval)
 		defer cleanupTicker.Stop()
 		cleanupTickerC = cleanupTicker.C
