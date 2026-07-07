@@ -481,7 +481,6 @@ func testExpectedState(localDesiredState string) *agenthttp.ExpectedState {
 			Port:               3000,
 			SleepAfterSeconds:  300,
 			WakeTimeoutSeconds: 5,
-			MinReadyReplicas:   1,
 			LocalDeploymentIDs: []string{"dep_local"},
 			Upstreams: []agenthttp.ServerlessUpstream{
 				{

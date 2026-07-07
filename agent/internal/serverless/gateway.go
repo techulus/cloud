@@ -236,7 +236,7 @@ func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream,
 	}
 
 	wakeStartedAt := time.Now()
-	if len(ready) >= max(1, route.MinReadyReplicas) || (len(ready) > 0 && hasAlwaysOnUpstream(ready)) {
+	if len(ready) > 0 {
 		log.Printf(
 			"[serverless-gateway] wake requested host=%s deployments=%d ready_upstreams=%d mode=background",
 			host,
@@ -380,11 +380,11 @@ func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTi
 
 	for {
 		state := g.runtime.ExpectedState()
-		ready, sleepingLocalIDs, err := g.readyUpstreams(route, state)
+		ready, _, err := g.readyUpstreams(route, state)
 		if err != nil {
 			return nil, err
 		}
-		if len(ready) >= max(1, route.MinReadyReplicas) || (len(ready) > 0 && len(sleepingLocalIDs) == 0) {
+		if len(ready) > 0 {
 			pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
 			if len(pendingIDs) > 0 {
 				go g.waitForWokenDeployments(route, route.WakeTimeoutSeconds, startedAt, pendingIDs)
@@ -907,15 +907,6 @@ func localUpstream(route *agenthttp.ServerlessRoute, expected agenthttp.Expected
 		}
 	}
 	return agenthttp.ServerlessUpstream{}, false
-}
-
-func hasAlwaysOnUpstream(upstreams []agenthttp.ServerlessUpstream) bool {
-	for _, upstream := range upstreams {
-		if upstream.AlwaysOn {
-			return true
-		}
-	}
-	return false
 }
 
 func hasRunningLocalDeployment(deploymentIDs []string, actualByDeploymentID map[string]container.Container) bool {
