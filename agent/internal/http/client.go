@@ -109,7 +109,6 @@ type ServerlessRoute struct {
 	Port               int                  `json:"port"`
 	SleepAfterSeconds  int                  `json:"sleepAfterSeconds"`
 	WakeTimeoutSeconds int                  `json:"wakeTimeoutSeconds"`
-	MinReadyReplicas   int                  `json:"minReadyReplicas"`
 	LocalDeploymentIDs []string             `json:"localDeploymentIds"`
 	Upstreams          []ServerlessUpstream `json:"upstreams"`
 }

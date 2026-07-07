@@ -254,10 +254,9 @@ to proxy nodes that own a local proxy replica for that service. Cross-proxy wake
 coordination is intentionally out of scope.
 
 The wake gateway keeps the incoming request open while it starts local proxy
-replicas, unless an always-on worker upstream is already ready. `Min Ready`
-controls how many ready upstreams are preferred before releasing queued requests.
-If fewer replicas become ready and no local wake is still in progress, the
-gateway serves any available ready upstream instead of returning a 503.
+replicas, unless an always-on worker upstream is already ready. Queued requests
+resume when one upstream is ready. If no upstream becomes ready and no local wake
+is still in progress, the gateway returns a 503.
 
 Sleep is driven by the proxy gateway's in-memory activity timer. The control
 plane does not scan request activity and does not enqueue sleep work. It accepts

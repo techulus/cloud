@@ -101,7 +101,6 @@ export type ServerlessRoute = {
 	port: number;
 	sleepAfterSeconds: number;
 	wakeTimeoutSeconds: number;
-	minReadyReplicas: number;
 	localDeploymentIds: string[];
 	upstreams: ServerlessRouteUpstream[];
 };
@@ -462,10 +461,6 @@ export function buildServerlessRoutesFromRows({
 						getDeployedServerlessConfig(service).sleepAfterSeconds,
 					wakeTimeoutSeconds:
 						getDeployedServerlessConfig(service).wakeTimeoutSeconds,
-					minReadyReplicas: Math.max(
-						1,
-						getDeployedServerlessConfig(service).minReadyReplicas,
-					),
 					localDeploymentIds,
 					upstreams,
 				},

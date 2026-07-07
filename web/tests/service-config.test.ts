@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	type DeployedConfig,
 	diffConfigs,
 	getDeployedServerlessConfig,
 	isDeployedServerlessService,
-	type DeployedConfig,
 } from "@/lib/service-config";
 
 function deployedConfig(
@@ -19,7 +19,6 @@ function deployedConfig(
 			enabled: true,
 			sleepAfterSeconds: 300,
 			wakeTimeoutSeconds: 120,
-			minReadyReplicas: 1,
 		},
 		...overrides,
 	};
@@ -31,7 +30,6 @@ describe("service config", () => {
 			serverlessEnabled: false,
 			serverlessSleepAfterSeconds: 60,
 			serverlessWakeTimeoutSeconds: 60,
-			serverlessMinReadyReplicas: 1,
 			stateful: true,
 			deployedConfig: JSON.stringify(deployedConfig()),
 		};
@@ -50,7 +48,6 @@ describe("service config", () => {
 			stateful: true,
 			serverlessSleepAfterSeconds: 300,
 			serverlessWakeTimeoutSeconds: 120,
-			serverlessMinReadyReplicas: 1,
 			deployedConfig: JSON.stringify(deployedConfig({ stateful: true })),
 		};
 
@@ -68,7 +65,6 @@ describe("service config", () => {
 				enabled: false,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 			},
 		});
 

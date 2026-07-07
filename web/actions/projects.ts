@@ -1004,7 +1004,6 @@ const serverlessSettingsSchema = z.object({
 	enabled: z.boolean(),
 	sleepAfterSeconds: z.number().int().min(60).max(86_400),
 	wakeTimeoutSeconds: z.number().int().min(10).max(900),
-	minReadyReplicas: z.number().int().min(1).max(10),
 });
 
 export async function updateServiceServerlessSettings(
@@ -1013,7 +1012,6 @@ export async function updateServiceServerlessSettings(
 		enabled: boolean;
 		sleepAfterSeconds: number;
 		wakeTimeoutSeconds: number;
-		minReadyReplicas: number;
 	},
 ) {
 	await requireDeveloperRole();
@@ -1064,11 +1062,6 @@ export async function updateServiceServerlessSettings(
 			if (totalConfiguredReplicas < 1) {
 				throw new Error("Serverless services require at least one replica");
 			}
-			if (validated.minReadyReplicas > totalConfiguredReplicas) {
-				throw new Error(
-					"Minimum ready replicas cannot exceed configured replicas",
-				);
-			}
 		}
 
 		await tx
@@ -1077,7 +1070,6 @@ export async function updateServiceServerlessSettings(
 				serverlessEnabled: validated.enabled,
 				serverlessSleepAfterSeconds: validated.sleepAfterSeconds,
 				serverlessWakeTimeoutSeconds: validated.wakeTimeoutSeconds,
-				serverlessMinReadyReplicas: validated.minReadyReplicas,
 			})
 			.where(eq(services.id, serviceId));
 	});
@@ -1219,10 +1211,8 @@ export async function updateServiceConfig(
 			.delete(serviceReplicas)
 			.where(eq(serviceReplicas.serviceId, serviceId));
 
-		let totalReplicas = 0;
 		for (const replica of config.replicas) {
 			if (replica.count > 0) {
-				totalReplicas += replica.count;
 				await db.insert(serviceReplicas).values({
 					id: randomUUID(),
 					serviceId,
@@ -1231,15 +1221,6 @@ export async function updateServiceConfig(
 				});
 			}
 		}
-
-		await db
-			.update(services)
-			.set({
-				serverlessMinReadyReplicas: sql`LEAST(${services.serverlessMinReadyReplicas}, ${Math.max(1, totalReplicas)})`,
-			})
-			.where(
-				and(eq(services.id, serviceId), eq(services.serverlessEnabled, true)),
-			);
 	}
 
 	return { success: true };

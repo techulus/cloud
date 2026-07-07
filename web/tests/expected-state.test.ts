@@ -32,7 +32,6 @@ describe("expected-state pure builders", () => {
 			enabled: true,
 			sleepAfterSeconds: 300,
 			wakeTimeoutSeconds: 120,
-			minReadyReplicas: 1,
 		},
 	});
 
@@ -487,7 +486,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -547,7 +545,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_proxy"],
 				upstreams: [
 					{
@@ -572,7 +569,6 @@ describe("expected-state pure builders", () => {
 					stateful: true,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -612,7 +608,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_stateful"],
 				upstreams: [],
 			},
@@ -629,7 +624,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
@@ -686,7 +680,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 60,
 					serverlessWakeTimeoutSeconds: 60,
-					serverlessMinReadyReplicas: 1,
 					deployedConfig: deployedServerlessConfig,
 				},
 			] as any,
@@ -715,7 +708,6 @@ describe("expected-state pure builders", () => {
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,
-				minReadyReplicas: 1,
 				localDeploymentIds: ["dep_sleeping"],
 				upstreams: [],
 			},
@@ -762,7 +754,6 @@ describe("expected-state pure builders", () => {
 					stateful: false,
 					serverlessSleepAfterSeconds: 300,
 					serverlessWakeTimeoutSeconds: 120,
-					serverlessMinReadyReplicas: 1,
 				},
 			] as any,
 			ports: [
