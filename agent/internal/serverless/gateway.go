@@ -338,21 +338,31 @@ func (g *Gateway) inspectUpstreams(route *agenthttp.ServerlessRoute, state *agen
 				resolution.waiting = append(resolution.waiting, waitReason)
 				continue
 			}
-			if upstream, ok := localUpstream(route, expected); ok {
-				readiness := checkUpstreamReady(upstream.Url)
-				if readiness.ready {
-					upstreamsByURL[upstream.Url] = upstream
-				} else {
-					resolution.waiting = append(resolution.waiting, upstreamWaitReason{
-						deploymentID: expected.DeploymentID,
-						serviceID:    expected.ServiceID,
-						containerID:  actual.ID,
-						upstreamURL:  upstream.Url,
-						reason:       "upstream_unreachable",
-						state:        actual.State,
-						dialLatency:  readiness.latency,
-						err:          readiness.err,
-					})
+			upstreams := localUpstreamCandidates(route, expected)
+			if len(upstreams) > 0 {
+				upstreamReady := false
+				waitReasons := make([]upstreamWaitReason, 0, len(upstreams))
+				for _, upstream := range upstreams {
+					readiness := checkUpstreamReady(upstream.Url)
+					if readiness.ready {
+						upstreamsByURL[upstream.Url] = upstream
+						upstreamReady = true
+						break
+					} else {
+						waitReasons = append(waitReasons, upstreamWaitReason{
+							deploymentID: expected.DeploymentID,
+							serviceID:    expected.ServiceID,
+							containerID:  actual.ID,
+							upstreamURL:  upstream.Url,
+							reason:       "upstream_unreachable",
+							state:        actual.State,
+							dialLatency:  readiness.latency,
+							err:          readiness.err,
+						})
+					}
+				}
+				if !upstreamReady {
+					resolution.waiting = append(resolution.waiting, waitReasons...)
 				}
 			} else {
 				resolution.waiting = append(resolution.waiting, upstreamWaitReason{
@@ -1147,25 +1157,36 @@ func containerState(actual container.Container, exists bool) string {
 	return actual.State
 }
 
-func localUpstream(route *agenthttp.ServerlessRoute, expected agenthttp.ExpectedContainer) (agenthttp.ServerlessUpstream, bool) {
+func localUpstreamCandidates(route *agenthttp.ServerlessRoute, expected agenthttp.ExpectedContainer) []agenthttp.ServerlessUpstream {
+	upstreams := []agenthttp.ServerlessUpstream{}
+	if expected.PublishLocalPorts {
+		upstreams = append(upstreams, localLoopbackUpstreams(route, expected)...)
+	}
 	if expected.IPAddress != "" {
-		return agenthttp.ServerlessUpstream{
+		upstreams = append(upstreams, agenthttp.ServerlessUpstream{
 			DeploymentID: expected.DeploymentID,
 			Url:          fmt.Sprintf("%s:%d", expected.IPAddress, route.Port),
 			Local:        true,
-		}, true
+		})
 	}
+	if expected.IPAddress == "" && !expected.PublishLocalPorts {
+		upstreams = append(upstreams, localLoopbackUpstreams(route, expected)...)
+	}
+	return upstreams
+}
 
+func localLoopbackUpstreams(route *agenthttp.ServerlessRoute, expected agenthttp.ExpectedContainer) []agenthttp.ServerlessUpstream {
+	upstreams := []agenthttp.ServerlessUpstream{}
 	for _, port := range expected.Ports {
 		if port.ContainerPort == route.Port && port.HostPort > 0 {
-			return agenthttp.ServerlessUpstream{
+			upstreams = append(upstreams, agenthttp.ServerlessUpstream{
 				DeploymentID: expected.DeploymentID,
 				Url:          fmt.Sprintf("127.0.0.1:%d", port.HostPort),
 				Local:        true,
-			}, true
+			})
 		}
 	}
-	return agenthttp.ServerlessUpstream{}, false
+	return upstreams
 }
 
 func hasRunningLocalDeployment(deploymentIDs []string, actualByDeploymentID map[string]container.Container) bool {

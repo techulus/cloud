@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -241,6 +242,84 @@ func TestSleepingLocalDeploymentWakesAndReturnsLocalUpstream(t *testing.T) {
 	}
 	if len(transitions) != 1 || transitions[0].Type != "wake_started" {
 		t.Fatalf("transitions = %+v, want wake_started", transitions)
+	}
+}
+
+func TestSleepingLocalDeploymentPrefersPublishedLoopbackUpstream(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	var checked []string
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		checked = append(checked, address)
+		if address == "127.0.0.1:31000" {
+			return upstreamReadiness{ready: true}
+		}
+		t.Fatalf("unexpected readiness check for %s", address)
+		return upstreamReadiness{}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 3000, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "127.0.0.1:31000" {
+		t.Fatalf("upstreams = %+v, want loopback upstream", upstreams)
+	}
+	if len(checked) != 1 || checked[0] != "127.0.0.1:31000" {
+		t.Fatalf("checked = %+v, want only loopback check", checked)
+	}
+}
+
+func TestSleepingLocalDeploymentFallsBackToStaticIPWhenLoopbackUnreachable(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	var checked []string
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		checked = append(checked, address)
+		if address == "10.0.0.10:3000" {
+			return upstreamReadiness{ready: true}
+		}
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 3000, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "10.0.0.10:3000" {
+		t.Fatalf("upstreams = %+v, want static IP fallback", upstreams)
+	}
+	wantChecked := []string{"127.0.0.1:31000", "10.0.0.10:3000"}
+	if !slices.Equal(checked, wantChecked) {
+		t.Fatalf("checked = %+v, want %+v", checked, wantChecked)
 	}
 }
 

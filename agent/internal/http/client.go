@@ -77,6 +77,7 @@ type ExpectedContainer struct {
 	Image                 string            `json:"image"`
 	IPAddress             string            `json:"ipAddress"`
 	Ports                 []PortMapping     `json:"ports"`
+	PublishLocalPorts     bool              `json:"publishLocalPorts"`
 	Env                   map[string]string `json:"env"`
 	StartCommand          string            `json:"startCommand"`
 	HealthCheck           *HealthCheck      `json:"healthCheck"`

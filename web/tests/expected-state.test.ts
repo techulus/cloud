@@ -98,6 +98,7 @@ describe("expected-state pure builders", () => {
 				{ containerPort: 80, hostPort: 80 },
 				{ containerPort: 3000, hostPort: 30001 },
 			],
+			publishLocalPorts: true,
 			env: { ALPHA: "first", ZED: "last" },
 			volumes: [
 				{ name: "data", containerPath: "/data" },
@@ -214,6 +215,7 @@ describe("expected-state pure builders", () => {
 		expect(containers[0]).toMatchObject({
 			deploymentId: "dep_stopped",
 			desiredState: "stopped",
+			publishLocalPorts: false,
 		});
 	});
 
@@ -245,6 +247,7 @@ describe("expected-state pure builders", () => {
 		expect(containers[0]).toMatchObject({
 			deploymentId: "dep_sleeping",
 			desiredState: "stopped",
+			publishLocalPorts: true,
 		});
 	});
 
@@ -277,6 +280,7 @@ describe("expected-state pure builders", () => {
 		expect(containers[0]).toMatchObject({
 			deploymentId: "dep_sleeping",
 			desiredState: "stopped",
+			publishLocalPorts: true,
 		});
 	});
 
