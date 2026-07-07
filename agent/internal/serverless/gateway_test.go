@@ -1,8 +1,11 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +15,7 @@ import (
 )
 
 func init() {
-	checkUpstreamReady = func(string) bool { return true }
+	checkUpstreamReady = func(string) upstreamReadiness { return upstreamReadiness{ready: true} }
 }
 
 type fakeRuntime struct {
@@ -431,7 +434,9 @@ func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
 	previousPoll := wakePollInterval
 	previousReady := checkUpstreamReady
 	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(string) bool { return false }
+	checkUpstreamReady = func(string) upstreamReadiness {
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
 	t.Cleanup(func() {
 		wakePollInterval = previousPoll
 		checkUpstreamReady = previousReady
@@ -457,6 +462,59 @@ func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
 	}
 	if transitions[0].Type != "wake_started" || transitions[1].Type != "wake_failed" {
 		t.Fatalf("transitions = %+v, want wake_started then wake_failed", transitions)
+	}
+}
+
+func TestWakeWaitingLogsReadinessReason(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousLogInterval := wakeWaitLogInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	wakeWaitLogInterval = time.Hour
+	checkUpstreamReady = func(string) upstreamReadiness {
+		return upstreamReadiness{
+			latency: time.Millisecond,
+			err:     errors.New("connection refused"),
+		}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		wakeWaitLogInterval = previousLogInterval
+		checkUpstreamReady = previousReady
+	})
+
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	})
+
+	state := testExpectedState("stopped")
+	state.Serverless.Routes[0].Upstreams = nil
+	state.Serverless.Routes[0].WakeTimeoutSeconds = 1
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	_, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err == nil {
+		t.Fatal("getUpstreams succeeded, want timeout error")
+	}
+
+	output := logs.String()
+	for _, want := range []string{
+		"wake waiting",
+		"host=app.example.com",
+		"deployment=dep_local",
+		"reason=upstream_unreachable",
+		"error=\"connection refused\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("log output missing %q:\n%s", want, output)
+		}
 	}
 }
 

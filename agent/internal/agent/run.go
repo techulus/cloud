@@ -117,13 +117,14 @@ func (a *Agent) RequestStatusReport(reason string) {
 }
 
 func (a *Agent) reportStatus(reason string) {
+	startedAt := time.Now()
 	report := a.BuildStatusReport(true)
 	reportedDeploymentErrorCount := len(report.DeploymentErrors)
 	completed, active := a.SnapshotWorkStatus()
 	serverlessTransitions := a.SnapshotServerlessTransitions()
 	response, err := a.Client.ReportStatus(report, completed, active, serverlessTransitions)
 	if err != nil {
-		log.Printf("[status] failed to report (%s): %v", reason, err)
+		log.Printf("[status] failed to report (%s) latency=%s: %v", reason, time.Since(startedAt).Round(time.Millisecond), err)
 		return
 	}
 	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
@@ -131,7 +132,7 @@ func (a *Agent) reportStatus(reason string) {
 	a.AcknowledgeWorkResults(response.AcceptedWorkItemResults, response.RejectedWorkItemResults)
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)
-	log.Printf("[status] reported (%s)", reason)
+	log.Printf("[status] reported (%s) latency=%s", reason, time.Since(startedAt).Round(time.Millisecond))
 }
 
 func nextStatusReportDelay() time.Duration {
