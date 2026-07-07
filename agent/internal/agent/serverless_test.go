@@ -65,6 +65,25 @@ func TestServerlessGatewayCapabilityRequiresStartedGateway(t *testing.T) {
 	}
 }
 
+func TestBuildStatusReportAlwaysIncludesAgentHealth(t *testing.T) {
+	previousLastHealthCollect := lastHealthCollect
+	lastHealthCollect = time.Now()
+	t.Cleanup(func() {
+		lastHealthCollect = previousLastHealthCollect
+	})
+
+	agent := &Agent{IsProxy: true}
+	agent.serverlessGatewayRunning.Store(true)
+
+	report := agent.BuildStatusReport(false)
+	if report.AgentHealth == nil {
+		t.Fatal("status report omitted agent health while health sampling was skipped")
+	}
+	if !slices.Contains(report.AgentHealth.Capabilities, serverlessGatewayCapability) {
+		t.Fatalf("capabilities = %v, want %s", report.AgentHealth.Capabilities, serverlessGatewayCapability)
+	}
+}
+
 func TestPendingServerlessWakeDoesNotSuppressContainerReport(t *testing.T) {
 	agent := &Agent{
 		pendingServerlessSleep: map[string]serverlessTransitionGuard{},
