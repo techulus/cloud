@@ -28,7 +28,6 @@ var (
 	wakePollInterval      = 500 * time.Millisecond
 	idleTimerSeedInterval = 15 * time.Second
 	upstreamDialTimeout   = 250 * time.Millisecond
-	wakeWaitLogInterval   = 2 * time.Second
 	checkUpstreamReady    = tcpUpstreamReady
 )
 
@@ -340,28 +339,10 @@ func (g *Gateway) inspectUpstreams(route *agenthttp.ServerlessRoute, state *agen
 			}
 			upstreams := localUpstreamCandidates(route, expected)
 			if len(upstreams) > 0 {
-				upstreamReady := false
-				waitReasons := make([]upstreamWaitReason, 0, len(upstreams))
-				for _, upstream := range upstreams {
-					readiness := checkUpstreamReady(upstream.Url)
-					if readiness.ready {
-						upstreamsByURL[upstream.Url] = upstream
-						upstreamReady = true
-						break
-					} else {
-						waitReasons = append(waitReasons, upstreamWaitReason{
-							deploymentID: expected.DeploymentID,
-							serviceID:    expected.ServiceID,
-							containerID:  actual.ID,
-							upstreamURL:  upstream.Url,
-							reason:       "upstream_unreachable",
-							state:        actual.State,
-							dialLatency:  readiness.latency,
-							err:          readiness.err,
-						})
-					}
-				}
-				if !upstreamReady {
+				upstream, waitReasons, upstreamReady := probeLocalUpstreams(upstreams, expected, actual)
+				if upstreamReady {
+					upstreamsByURL[upstream.Url] = upstream
+				} else {
 					resolution.waiting = append(resolution.waiting, waitReasons...)
 				}
 			} else {
@@ -462,49 +443,52 @@ func (g *Gateway) wakeLocalDeployments(route *agenthttp.ServerlessRoute, state *
 }
 
 func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTimeoutSeconds int, startedAt time.Time, wokenDeploymentIDs []string) ([]agenthttp.ServerlessUpstream, error) {
+	domain := route.Domain
 	timeout := wakeTimeout(wakeTimeoutSeconds)
 	deadline := startedAt.Add(timeout)
 	attempt := 0
-	nextWaitLogAt := time.Time{}
-	lastWaitKey := ""
 
 	for {
 		attempt++
 		state := g.runtime.ExpectedState()
+		currentRoute := findRoute(state, domain)
+		if currentRoute == nil {
+			log.Printf(
+				"[serverless-gateway] wake stale host=%s reason=route_missing attempts=%d latency=%s",
+				domain,
+				attempt,
+				roundDuration(time.Since(startedAt)),
+			)
+			return nil, fmt.Errorf("serverless route changed during wake")
+		}
+		route = currentRoute
+		currentWokenIDs := currentWakeDeploymentIDs(route, state, wokenDeploymentIDs)
 		resolution, err := g.inspectUpstreams(route, state)
 		if err != nil {
 			return nil, err
 		}
 		ready := resolution.ready
 		if len(ready) > 0 {
-			pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+			pendingIDs := pendingWakeDeploymentIDs(currentWokenIDs, ready)
 			if len(pendingIDs) > 0 {
 				go g.waitForWokenDeployments(route, route.WakeTimeoutSeconds, startedAt, pendingIDs)
 			}
+			logWakeReady(route, ready, attempt, startedAt)
+			return ready, nil
+		}
+		if len(currentWokenIDs) == 0 {
 			log.Printf(
-				"[serverless-gateway] wake ready host=%s upstreams=%d attempts=%d latency=%s",
-				route.Domain,
-				len(ready),
+				"[serverless-gateway] wake stale host=%s reason=deployments_replaced attempts=%d latency=%s",
+				domain,
 				attempt,
 				roundDuration(time.Since(startedAt)),
 			)
-			return ready, nil
+			return nil, fmt.Errorf("serverless route changed during wake")
 		}
-		waitSummary := summarizeWaitReasons(resolution.waiting)
-		waitKey := summarizeWaitReasonKeys(resolution.waiting)
+		waitSummary := summarizeWaitReasons(filterWaitReasons(resolution.waiting, currentWokenIDs))
 		if time.Now().After(deadline) {
-			pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+			pendingIDs := pendingWakeDeploymentIDs(currentWokenIDs, ready)
 			g.queueWakeTimeouts(route, pendingIDs, startedAt, waitSummary)
-			if len(ready) > 0 {
-				log.Printf(
-					"[serverless-gateway] wake partially ready host=%s upstreams=%d attempts=%d latency=%s",
-					route.Domain,
-					len(ready),
-					attempt,
-					roundDuration(time.Since(startedAt)),
-				)
-				return ready, nil
-			}
 			log.Printf(
 				"[serverless-gateway] wake timed out host=%s attempts=%d latency=%s last_wait=%q",
 				route.Domain,
@@ -514,52 +498,55 @@ func (g *Gateway) waitForReadyUpstreams(route *agenthttp.ServerlessRoute, wakeTi
 			)
 			return nil, fmt.Errorf("timed out waiting for local serverless wake")
 		}
-		if shouldLogWakeWait(nextWaitLogAt, lastWaitKey, waitKey) {
-			logWakeWait(route, resolution.waiting, attempt, time.Since(startedAt))
-			nextWaitLogAt = time.Now().Add(wakeWaitLogInterval)
-			lastWaitKey = waitKey
-		}
 		time.Sleep(wakePollInterval)
 	}
 }
 
 func (g *Gateway) waitForWokenDeployments(route *agenthttp.ServerlessRoute, wakeTimeoutSeconds int, startedAt time.Time, wokenDeploymentIDs []string) {
+	domain := route.Domain
 	timeout := wakeTimeout(wakeTimeoutSeconds)
 	deadline := startedAt.Add(timeout)
 	attempt := 0
-	nextWaitLogAt := time.Time{}
-	lastWaitKey := ""
 
 	for {
 		attempt++
 		state := g.runtime.ExpectedState()
+		currentRoute := findRoute(state, domain)
+		if currentRoute == nil {
+			log.Printf(
+				"[serverless-gateway] wake monitor stale host=%s reason=route_missing attempts=%d latency=%s",
+				domain,
+				attempt,
+				roundDuration(time.Since(startedAt)),
+			)
+			return
+		}
+		route = currentRoute
+		currentWokenIDs := currentWakeDeploymentIDs(route, state, wokenDeploymentIDs)
+		if len(currentWokenIDs) == 0 {
+			log.Printf(
+				"[serverless-gateway] wake monitor stale host=%s reason=deployments_replaced attempts=%d latency=%s",
+				domain,
+				attempt,
+				roundDuration(time.Since(startedAt)),
+			)
+			return
+		}
 		resolution, err := g.inspectUpstreams(route, state)
 		if err != nil {
 			log.Printf("[serverless-gateway] wake monitor failed host=%s error=%v", route.Domain, err)
 			return
 		}
 		ready := resolution.ready
-		pendingIDs := pendingWakeDeploymentIDs(wokenDeploymentIDs, ready)
+		pendingIDs := pendingWakeDeploymentIDs(currentWokenIDs, ready)
 		if len(pendingIDs) == 0 {
-			log.Printf(
-				"[serverless-gateway] wake ready host=%s deployments=%d attempts=%d latency=%s",
-				route.Domain,
-				len(wokenDeploymentIDs),
-				attempt,
-				roundDuration(time.Since(startedAt)),
-			)
+			logWakeReadyDeployments(route, ready, len(currentWokenIDs), attempt, startedAt)
 			return
 		}
-		waitSummary := summarizeWaitReasons(resolution.waiting)
-		waitKey := summarizeWaitReasonKeys(resolution.waiting)
+		waitSummary := summarizeWaitReasons(filterWaitReasons(resolution.waiting, pendingIDs))
 		if time.Now().After(deadline) {
 			g.queueWakeTimeouts(route, pendingIDs, startedAt, waitSummary)
 			return
-		}
-		if shouldLogWakeWait(nextWaitLogAt, lastWaitKey, waitKey) {
-			logWakeWait(route, filterWaitReasons(resolution.waiting, pendingIDs), attempt, time.Since(startedAt))
-			nextWaitLogAt = time.Now().Add(wakeWaitLogInterval)
-			lastWaitKey = waitKey
 		}
 		time.Sleep(wakePollInterval)
 	}
@@ -582,57 +569,6 @@ func pendingWakeDeploymentIDs(wokenDeploymentIDs []string, ready []agenthttp.Ser
 	return pendingIDs
 }
 
-func shouldLogWakeWait(nextLogAt time.Time, lastSummary string, currentSummary string) bool {
-	if currentSummary == "" {
-		return false
-	}
-	if currentSummary != lastSummary {
-		return true
-	}
-	return nextLogAt.IsZero() || time.Now().After(nextLogAt)
-}
-
-func logWakeWait(route *agenthttp.ServerlessRoute, reasons []upstreamWaitReason, attempt int, elapsed time.Duration) {
-	if len(reasons) == 0 {
-		log.Printf(
-			"[serverless-gateway] wake waiting host=%s attempt=%d elapsed=%s reason=no_ready_upstreams",
-			route.Domain,
-			attempt,
-			roundDuration(elapsed),
-		)
-		return
-	}
-	for _, reason := range reasons {
-		fields := []string{
-			fmt.Sprintf("host=%s", route.Domain),
-			fmt.Sprintf("deployment=%s", reason.deploymentID),
-			fmt.Sprintf("service=%s", reason.serviceID),
-			fmt.Sprintf("attempt=%d", attempt),
-			fmt.Sprintf("elapsed=%s", roundDuration(elapsed)),
-			fmt.Sprintf("reason=%s", reason.reason),
-		}
-		if reason.containerID != "" {
-			fields = append(fields, fmt.Sprintf("container=%s", reason.containerID))
-		}
-		if reason.upstreamURL != "" {
-			fields = append(fields, fmt.Sprintf("upstream=%s", reason.upstreamURL))
-		}
-		if reason.state != "" {
-			fields = append(fields, fmt.Sprintf("state=%s", reason.state))
-		}
-		if reason.health != "" {
-			fields = append(fields, fmt.Sprintf("health=%s", reason.health))
-		}
-		if reason.dialLatency > 0 {
-			fields = append(fields, fmt.Sprintf("dial_latency=%s", roundDuration(reason.dialLatency)))
-		}
-		if reason.err != nil {
-			fields = append(fields, fmt.Sprintf("error=%q", compactError(reason.err)))
-		}
-		log.Printf("[serverless-gateway] wake waiting %s", strings.Join(fields, " "))
-	}
-}
-
 func filterWaitReasons(reasons []upstreamWaitReason, deploymentIDs []string) []upstreamWaitReason {
 	if len(reasons) == 0 || len(deploymentIDs) == 0 {
 		return nil
@@ -650,12 +586,73 @@ func filterWaitReasons(reasons []upstreamWaitReason, deploymentIDs []string) []u
 	return filtered
 }
 
-func summarizeWaitReasons(reasons []upstreamWaitReason) string {
-	return formatWaitReasons(reasons, true)
+func currentWakeDeploymentIDs(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState, deploymentIDs []string) []string {
+	if route == nil || len(deploymentIDs) == 0 {
+		return nil
+	}
+
+	expectedByDeploymentID := expectedContainersByDeploymentID(state)
+	routeIDs := map[string]struct{}{}
+	for _, deploymentID := range route.LocalDeploymentIDs {
+		routeIDs[deploymentID] = struct{}{}
+	}
+
+	currentIDs := []string{}
+	for _, deploymentID := range deploymentIDs {
+		if _, ok := routeIDs[deploymentID]; !ok {
+			continue
+		}
+		if _, ok := expectedByDeploymentID[deploymentID]; !ok {
+			continue
+		}
+		currentIDs = append(currentIDs, deploymentID)
+	}
+	return currentIDs
 }
 
-func summarizeWaitReasonKeys(reasons []upstreamWaitReason) string {
-	return formatWaitReasons(reasons, false)
+func logWakeReady(route *agenthttp.ServerlessRoute, ready []agenthttp.ServerlessUpstream, attempt int, startedAt time.Time) {
+	fields := []string{
+		fmt.Sprintf("host=%s", route.Domain),
+		fmt.Sprintf("upstreams=%d", len(ready)),
+	}
+	if localUpstreams := formatLocalUpstreamURLs(ready); localUpstreams != "" {
+		fields = append(fields, fmt.Sprintf("local_upstreams=%s", localUpstreams))
+	}
+	fields = append(fields,
+		fmt.Sprintf("attempts=%d", attempt),
+		fmt.Sprintf("latency=%s", roundDuration(time.Since(startedAt))),
+	)
+	log.Printf("[serverless-gateway] wake ready %s", strings.Join(fields, " "))
+}
+
+func logWakeReadyDeployments(route *agenthttp.ServerlessRoute, ready []agenthttp.ServerlessUpstream, deployments int, attempt int, startedAt time.Time) {
+	fields := []string{
+		fmt.Sprintf("host=%s", route.Domain),
+		fmt.Sprintf("deployments=%d", deployments),
+	}
+	if localUpstreams := formatLocalUpstreamURLs(ready); localUpstreams != "" {
+		fields = append(fields, fmt.Sprintf("local_upstreams=%s", localUpstreams))
+	}
+	fields = append(fields,
+		fmt.Sprintf("attempts=%d", attempt),
+		fmt.Sprintf("latency=%s", roundDuration(time.Since(startedAt))),
+	)
+	log.Printf("[serverless-gateway] wake ready %s", strings.Join(fields, " "))
+}
+
+func formatLocalUpstreamURLs(upstreams []agenthttp.ServerlessUpstream) string {
+	urls := []string{}
+	for _, upstream := range upstreams {
+		if upstream.Local {
+			urls = append(urls, upstream.Url)
+		}
+	}
+	sort.Strings(urls)
+	return strings.Join(urls, ",")
+}
+
+func summarizeWaitReasons(reasons []upstreamWaitReason) string {
+	return formatWaitReasons(reasons, true)
 }
 
 func formatWaitReasons(reasons []upstreamWaitReason, includeDialLatency bool) string {
@@ -1187,6 +1184,61 @@ func localLoopbackUpstreams(route *agenthttp.ServerlessRoute, expected agenthttp
 		}
 	}
 	return upstreams
+}
+
+type upstreamProbeResult struct {
+	upstream  agenthttp.ServerlessUpstream
+	readiness upstreamReadiness
+}
+
+func probeLocalUpstreams(upstreams []agenthttp.ServerlessUpstream, expected agenthttp.ExpectedContainer, actual container.Container) (agenthttp.ServerlessUpstream, []upstreamWaitReason, bool) {
+	if len(upstreams) == 0 {
+		return agenthttp.ServerlessUpstream{}, nil, false
+	}
+
+	check := checkUpstreamReady
+	results := make(chan upstreamProbeResult, len(upstreams))
+	for _, upstream := range upstreams {
+		upstream := upstream
+		go func() {
+			results <- upstreamProbeResult{
+				upstream:  upstream,
+				readiness: check(upstream.Url),
+			}
+		}()
+	}
+
+	waitReasons := make([]upstreamWaitReason, 0, len(upstreams))
+	for range upstreams {
+		result := <-results
+		if result.readiness.ready {
+			return result.upstream, nil, true
+		}
+		waitReasons = append(waitReasons, upstreamWaitReason{
+			deploymentID: expected.DeploymentID,
+			serviceID:    expected.ServiceID,
+			containerID:  actual.ID,
+			upstreamURL:  result.upstream.Url,
+			reason:       "upstream_unreachable",
+			state:        actual.State,
+			dialLatency:  result.readiness.latency,
+			err:          result.readiness.err,
+		})
+	}
+	sortWaitReasons(waitReasons)
+	return agenthttp.ServerlessUpstream{}, waitReasons, false
+}
+
+func sortWaitReasons(reasons []upstreamWaitReason) {
+	sort.Slice(reasons, func(i, j int) bool {
+		if reasons[i].deploymentID != reasons[j].deploymentID {
+			return reasons[i].deploymentID < reasons[j].deploymentID
+		}
+		if reasons[i].reason != reasons[j].reason {
+			return reasons[i].reason < reasons[j].reason
+		}
+		return reasons[i].upstreamURL < reasons[j].upstreamURL
+	})
 }
 
 func hasRunningLocalDeployment(deploymentIDs []string, actualByDeploymentID map[string]container.Container) bool {
