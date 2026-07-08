@@ -50,6 +50,10 @@ export type ServerlessConfig = {
 	wakeTimeoutSeconds: number;
 };
 
+export const MIN_SERVERLESS_SLEEP_AFTER_SECONDS = 120;
+const DEFAULT_SERVERLESS_SLEEP_AFTER_SECONDS = 300;
+const DEFAULT_SERVERLESS_WAKE_TIMEOUT_SECONDS = 300;
+
 export type DeployedConfig = {
 	source: SourceConfig;
 	hostname?: string;
@@ -142,11 +146,7 @@ export function buildCurrentConfig(
 			protocol: p.protocol ?? "http",
 			tlsPassthrough: p.tlsPassthrough ?? undefined,
 		})),
-		serverless: {
-			enabled: service.serverlessEnabled ?? false,
-			sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
-			wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
-		},
+		serverless: getCurrentServerlessConfig(service),
 		secrets: (secrets ?? []).map((s) => ({
 			key: s.key,
 			updatedAt:
@@ -553,8 +553,12 @@ export function normalizeServerlessConfig(
 ): ServerlessConfig {
 	return {
 		enabled: config?.enabled ?? false,
-		sleepAfterSeconds: config?.sleepAfterSeconds ?? 300,
-		wakeTimeoutSeconds: config?.wakeTimeoutSeconds ?? 300,
+		sleepAfterSeconds: Math.max(
+			config?.sleepAfterSeconds ?? DEFAULT_SERVERLESS_SLEEP_AFTER_SECONDS,
+			MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
+		),
+		wakeTimeoutSeconds:
+			config?.wakeTimeoutSeconds ?? DEFAULT_SERVERLESS_WAKE_TIMEOUT_SECONDS,
 	};
 }
 
@@ -565,8 +569,14 @@ export function getCurrentServerlessConfig(service: {
 }): ServerlessConfig {
 	return {
 		enabled: service.serverlessEnabled ?? false,
-		sleepAfterSeconds: service.serverlessSleepAfterSeconds ?? 300,
-		wakeTimeoutSeconds: service.serverlessWakeTimeoutSeconds ?? 300,
+		sleepAfterSeconds: Math.max(
+			service.serverlessSleepAfterSeconds ??
+				DEFAULT_SERVERLESS_SLEEP_AFTER_SECONDS,
+			MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
+		),
+		wakeTimeoutSeconds:
+			service.serverlessWakeTimeoutSeconds ??
+			DEFAULT_SERVERLESS_WAKE_TIMEOUT_SECONDS,
 	};
 }
 

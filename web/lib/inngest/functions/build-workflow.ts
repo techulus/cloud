@@ -1,9 +1,45 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { builds, serviceReplicas, services } from "@/db/schema";
+import { builds, serviceReplicas, services, workQueue } from "@/db/schema";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
+
+async function hasCompletedManifestWorkItem({
+	serviceId,
+	buildId,
+	buildGroupId,
+}: {
+	serviceId: string;
+	buildId?: string;
+	buildGroupId?: string | null;
+}) {
+	const completedManifestItems = await db
+		.select({ payload: workQueue.payload })
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.type, "create_manifest"),
+				eq(workQueue.status, "completed"),
+			),
+		);
+
+	return completedManifestItems.some((item) => {
+		try {
+			const payload = JSON.parse(item.payload) as {
+				serviceId?: string;
+				buildId?: string;
+				buildGroupId?: string;
+			};
+
+			if (payload.serviceId !== serviceId) return false;
+			if (buildGroupId) return payload.buildGroupId === buildGroupId;
+			return !payload.buildGroupId && payload.buildId === buildId;
+		} catch {
+			return false;
+		}
+	});
+}
 
 export const buildWorkflow = inngest.createFunction(
 	{
@@ -42,14 +78,23 @@ export const buildWorkflow = inngest.createFunction(
 				return { status: "failed", reason: result.data.error, buildId };
 			}
 
-			const manifestResult = await step.waitForEvent("wait-manifest", {
-				event: inngestEvents.manifestCompleted,
-				timeout: "10m",
-				if: `async.data.serviceId == "${serviceId}"`,
+			const manifestAlreadyCompleted = await step.run("check-existing-manifest", async () => {
+				return hasCompletedManifestWorkItem({
+					serviceId,
+					buildId,
+				});
 			});
 
-			if (!manifestResult) {
-				return { status: "completed_no_manifest", buildId };
+			if (!manifestAlreadyCompleted) {
+				const manifestResult = await step.waitForEvent("wait-manifest", {
+					event: inngestEvents.manifestCompleted,
+					timeout: "10m",
+					if: `async.data.serviceId == "${serviceId}"`,
+				});
+
+				if (!manifestResult) {
+					return { status: "completed_no_manifest", buildId };
+				}
 			}
 
 			const shouldDeploy = await step.run("check-auto-deploy", async () => {
@@ -118,14 +163,23 @@ export const buildWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "build_failed", buildGroupId };
 		}
 
-		const manifestResult = await step.waitForEvent("wait-group-manifest", {
-			event: inngestEvents.manifestCompleted,
-			timeout: "10m",
-			if: `async.data.buildGroupId == "${buildGroupId}"`,
+		const manifestAlreadyCompleted = await step.run("check-existing-group-manifest", async () => {
+			return hasCompletedManifestWorkItem({
+				serviceId,
+				buildGroupId,
+			});
 		});
 
-		if (!manifestResult) {
-			return { status: "completed_no_manifest", buildGroupId };
+		if (!manifestAlreadyCompleted) {
+			const manifestResult = await step.waitForEvent("wait-group-manifest", {
+				event: inngestEvents.manifestCompleted,
+				timeout: "10m",
+				if: `async.data.buildGroupId == "${buildGroupId}"`,
+			});
+
+			if (!manifestResult) {
+				return { status: "completed_no_manifest", buildGroupId };
+			}
 		}
 
 		const shouldDeploy = await step.run("check-auto-deploy-group", async () => {

@@ -48,6 +48,16 @@ describe("agent status serverless attachment", () => {
 			observedPhase: "stopped",
 			healthStatus: "none",
 		});
+
+		expect(
+			getStoppedContainerReportUpdate({
+				runtimeDesiredState: "running",
+				observedPhase: "waking",
+			}),
+		).toEqual({
+			observedPhase: "waking",
+			healthStatus: null,
+		});
 	});
 
 	it("restores stale stopped serverless observations from live running reports", () => {

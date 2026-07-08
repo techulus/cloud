@@ -51,6 +51,7 @@ export type ExpectedContainer = {
 	image: string;
 	ipAddress: string | null;
 	ports: Array<{ containerPort: number; hostPort: number }>;
+	publishLocalPorts: boolean;
 	env: Record<string, string>;
 	startCommand: string | null;
 	healthCheck: {
@@ -319,6 +320,7 @@ export function buildExpectedContainersFromRows({
 							containerPort: p.containerPort,
 							hostPort: p.hostPort,
 						})),
+					publishLocalPorts: isDeployedServerlessService(service),
 					env: buildEnv(secretsByServiceId.get(dep.serviceId) ?? []),
 					startCommand: service.startCommand || null,
 					healthCheck: buildHealthCheck(service),

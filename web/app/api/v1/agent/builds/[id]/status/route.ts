@@ -241,6 +241,7 @@ export async function POST(
 					images: [archImageUri],
 					finalImageUri: baseImageUri,
 					serviceId: shouldDeploy ? build.serviceId : undefined,
+					buildId,
 				});
 
 				await db

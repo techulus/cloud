@@ -3,7 +3,9 @@ import {
 	type DeployedConfig,
 	diffConfigs,
 	getDeployedServerlessConfig,
+	getCurrentServerlessConfig,
 	isDeployedServerlessService,
+	MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
 } from "@/lib/service-config";
 
 function deployedConfig(
@@ -40,6 +42,33 @@ describe("service config", () => {
 			wakeTimeoutSeconds: 120,
 		});
 		expect(isDeployedServerlessService(service)).toBe(true);
+	});
+
+	it("enforces the minimum serverless sleep timeout for legacy config", () => {
+		expect(
+			getCurrentServerlessConfig({
+				serverlessEnabled: true,
+				serverlessSleepAfterSeconds: 60,
+				serverlessWakeTimeoutSeconds: 120,
+			}),
+		).toMatchObject({
+			sleepAfterSeconds: MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
+		});
+		expect(
+			getDeployedServerlessConfig({
+				deployedConfig: JSON.stringify(
+					deployedConfig({
+						serverless: {
+							enabled: true,
+							sleepAfterSeconds: 60,
+							wakeTimeoutSeconds: 120,
+						},
+					}),
+				),
+			}),
+		).toMatchObject({
+			sleepAfterSeconds: MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
+		});
 	});
 
 	it("allows deployed stateful services to be serverless", () => {
