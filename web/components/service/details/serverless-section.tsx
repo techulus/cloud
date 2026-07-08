@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 
 export const ServerlessSection = memo(function ServerlessSection({
 	service,
@@ -51,10 +52,10 @@ export const ServerlessSection = memo(function ServerlessSection({
 		}
 		if (
 			!Number.isInteger(parsed.sleepAfterSeconds) ||
-			parsed.sleepAfterSeconds < 60 ||
+			parsed.sleepAfterSeconds < MIN_SERVERLESS_SLEEP_AFTER_SECONDS ||
 			parsed.sleepAfterSeconds > 86_400
 		) {
-			return "Sleep timeout must be between 60 seconds and 24 hours";
+			return `Sleep timeout must be between ${MIN_SERVERLESS_SLEEP_AFTER_SECONDS} seconds and 24 hours`;
 		}
 		if (
 			!Number.isInteger(parsed.wakeTimeoutSeconds) ||
@@ -121,7 +122,7 @@ export const ServerlessSection = memo(function ServerlessSection({
 						<Input
 							id="serverless-sleep-after"
 							type="number"
-							min="60"
+							min={MIN_SERVERLESS_SLEEP_AFTER_SECONDS}
 							max="86400"
 							step="30"
 							value={sleepAfterSeconds}

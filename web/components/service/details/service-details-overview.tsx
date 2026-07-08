@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +79,7 @@ type SourceInfo = {
 
 type ServiceStatus = {
 	label: string;
-	tone: "live" | "progress" | "warning" | "muted";
+	tone: "live" | "progress" | "warning" | "sleeping" | "muted";
 };
 
 type ChartRow = {
@@ -119,6 +120,7 @@ const STATUS_TONE_CLASSES: Record<
 	live: { dot: "bg-teal-500", text: "text-teal-700 dark:text-teal-400" },
 	progress: { dot: "bg-blue-500", text: "text-blue-700 dark:text-blue-400" },
 	warning: { dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
+	sleeping: { dot: "bg-cyan-500", text: "text-cyan-700 dark:text-cyan-400" },
 	muted: { dot: "bg-muted-foreground", text: "text-muted-foreground" },
 };
 
@@ -196,13 +198,13 @@ function RequestStatsPanel({
 				<div className="min-w-0">
 					{isLoading ? (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-							<Skeleton className="h-9 w-28" />
+							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
 					) : hasPublicHttp ? (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
 							<div>
-								<p className="text-4xl font-semibold tabular-nums">
+								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 									{hasMetricData
 										? formatCompactNumber(stats.totalRequests)
 										: "-"}
@@ -212,7 +214,7 @@ function RequestStatsPanel({
 								</p>
 							</div>
 							<div>
-								<p className="text-2xl font-semibold tabular-nums">
+								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 									{hasMetricData
 										? formatRate(getAverageRequestsPerSecond(stats))
 										: "-"}
@@ -224,7 +226,9 @@ function RequestStatsPanel({
 						</div>
 					) : (
 						<>
-							<p className="text-4xl font-semibold tabular-nums">-</p>
+							<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+								-
+							</p>
 							<p className="text-sm text-muted-foreground">
 								no public HTTP ingress
 							</p>
@@ -758,6 +762,7 @@ function getServiceStatus(
 	runningDeployments: number,
 ): ServiceStatus {
 	const latestRollout = service.rollouts?.[0];
+	const deployments = service.deployments || [];
 
 	if (service.migrationStatus) return { label: "Migrating", tone: "progress" };
 	if (
@@ -774,14 +779,29 @@ function getServiceStatus(
 	}
 	if (runningDeployments > 0) return { label: "Live", tone: "live" };
 
-	for (const deployment of service.deployments || []) {
+	for (const deployment of deployments) {
 		if (deployment.observedPhase === "failed") {
 			return { label: "Needs attention", tone: "warning" };
 		}
 	}
+	for (const deployment of deployments) {
+		if (deployment.observedPhase === "waking") {
+			return { label: "Waking", tone: "progress" };
+		}
+	}
+	for (const deployment of deployments) {
+		if (isObservedStarting(deployment.observedPhase)) {
+			return { label: "Starting", tone: "progress" };
+		}
+	}
+	for (const deployment of deployments) {
+		if (deployment.observedPhase === "sleeping") {
+			return { label: "Sleeping", tone: "sleeping" };
+		}
+	}
 
 	return {
-		label: service.deployments.length > 0 ? "Stopped" : "Not deployed",
+		label: deployments.length > 0 ? "Stopped" : "Not deployed",
 		tone: "muted",
 	};
 }

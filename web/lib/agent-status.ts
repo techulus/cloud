@@ -66,11 +66,18 @@ export function shouldAttachReportedContainer(observedPhase: ObservedPhase) {
 
 export function getStoppedContainerReportUpdate(deployment: {
 	runtimeDesiredState: string;
+	observedPhase?: string;
 }) {
 	if (deployment.runtimeDesiredState === "stopped") {
 		return {
 			containerId: null,
 			observedPhase: "sleeping" as const,
+			healthStatus: null,
+		};
+	}
+	if (deployment.observedPhase === "waking") {
+		return {
+			observedPhase: "waking" as const,
 			healthStatus: null,
 		};
 	}

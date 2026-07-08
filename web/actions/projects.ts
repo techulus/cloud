@@ -47,6 +47,7 @@ import {
 	nameSchema,
 	volumeNameSchema,
 } from "@/lib/schemas";
+import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 import type {
 	PortConfig,
 	HealthCheckConfig as ServiceHealthCheckConfig,
@@ -1002,7 +1003,11 @@ export async function updateServiceSchedule(
 
 const serverlessSettingsSchema = z.object({
 	enabled: z.boolean(),
-	sleepAfterSeconds: z.number().int().min(60).max(86_400),
+	sleepAfterSeconds: z
+		.number()
+		.int()
+		.min(MIN_SERVERLESS_SLEEP_AFTER_SECONDS)
+		.max(86_400),
 	wakeTimeoutSeconds: z.number().int().min(10).max(900),
 });
 

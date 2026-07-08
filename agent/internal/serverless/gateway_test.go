@@ -1,8 +1,12 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +16,7 @@ import (
 )
 
 func init() {
-	checkUpstreamReady = func(string) bool { return true }
+	checkUpstreamReady = func(string) upstreamReadiness { return upstreamReadiness{ready: true} }
 }
 
 type fakeRuntime struct {
@@ -130,6 +134,36 @@ func (f *fakeRuntime) snapshotContainers() []container.Container {
 	return append([]container.Container(nil), f.containers...)
 }
 
+func (f *fakeRuntime) setState(state *agenthttp.ExpectedState, containers []container.Container) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state = state
+	f.containers = append([]container.Container(nil), containers...)
+}
+
+func receiveProbe(t *testing.T, probes <-chan string) string {
+	t.Helper()
+	select {
+	case probe := <-probes:
+		return probe
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for readiness probe")
+		return ""
+	}
+}
+
+func assertProbeSet(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("probes = %+v, want %+v", got, want)
+	}
+	for _, probe := range want {
+		if !slices.Contains(got, probe) {
+			t.Fatalf("probes = %+v, want %+v", got, want)
+		}
+	}
+}
+
 func TestGetUpstreamsReturnsWhenFollowerContextIsCancelled(t *testing.T) {
 	state := testExpectedState("stopped")
 	g := NewGateway(&fakeRuntime{state: state})
@@ -238,6 +272,164 @@ func TestSleepingLocalDeploymentWakesAndReturnsLocalUpstream(t *testing.T) {
 	}
 	if len(transitions) != 1 || transitions[0].Type != "wake_started" {
 		t.Fatalf("transitions = %+v, want wake_started", transitions)
+	}
+}
+
+func TestSleepingLocalDeploymentPrefersPublishedLoopbackUpstream(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	releaseStatic := make(chan struct{})
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		if address == "127.0.0.1:31000" {
+			return upstreamReadiness{ready: true}
+		}
+		<-releaseStatic
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		close(releaseStatic)
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 3000, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "127.0.0.1:31000" {
+		t.Fatalf("upstreams = %+v, want loopback upstream", upstreams)
+	}
+}
+
+func TestSleepingLocalDeploymentFallsBackToStaticIPWhenLoopbackUnreachable(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		if address == "10.0.0.10:3000" {
+			return upstreamReadiness{ready: true}
+		}
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 3000, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "10.0.0.10:3000" {
+		t.Fatalf("upstreams = %+v, want static IP fallback", upstreams)
+	}
+}
+
+func TestPublishedLoopbackAndStaticIPAreProbedConcurrently(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	probes := make(chan string, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		probes <- address
+		<-release
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("running")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 3000, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{
+		state: state,
+		containers: []container.Container{
+			{ID: "ctr-local", State: "running", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+	}
+	gateway := NewGateway(runtime)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = gateway.inspectUpstreams(&state.Serverless.Routes[0], state)
+		close(done)
+	}()
+
+	got := []string{receiveProbe(t, probes)}
+	select {
+	case probe := <-probes:
+		got = append(got, probe)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("only saw probes %+v; want loopback and static IP to start concurrently", got)
+	}
+	assertProbeSet(t, got, "127.0.0.1:31000", "10.0.0.10:3000")
+
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for concurrent probes to finish")
+	}
+}
+
+func TestPublishedLocalPortsWithoutMatchingHostPortUsesStaticIP(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		if address != "10.0.0.10:3000" {
+			t.Errorf("checked %s, want only static IP", address)
+			return upstreamReadiness{err: errors.New("unexpected upstream")}
+		}
+		return upstreamReadiness{ready: true}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	state := testExpectedState("stopped")
+	state.Containers[0].PublishLocalPorts = true
+	state.Containers[0].Ports = []agenthttp.PortMapping{
+		{ContainerPort: 8080, HostPort: 31000},
+	}
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{state: state}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.getUpstreams(context.Background(), "app.example.com")
+	if err != nil {
+		t.Fatalf("getUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "10.0.0.10:3000" {
+		t.Fatalf("upstreams = %+v, want static IP upstream", upstreams)
 	}
 }
 
@@ -385,6 +577,154 @@ func TestPendingSleepCanWakeBeforeExpectedStateSettles(t *testing.T) {
 	}
 }
 
+func TestBlockingWakeRefreshesRouteAfterRedeploy(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(address string) upstreamReadiness {
+		if address == "10.0.0.11:3000" {
+			return upstreamReadiness{ready: true}
+		}
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	oldState := testExpectedStateWithLocalDeployment("running", "dep_local", "10.0.0.10")
+	oldState.Serverless.Routes[0].Upstreams = nil
+	newState := testExpectedStateWithLocalDeployment("running", "dep_new", "10.0.0.11")
+	newState.Serverless.Routes[0].Upstreams = nil
+
+	runtime := &fakeRuntime{
+		state: oldState,
+		containers: []container.Container{
+			{ID: "ctr-old", State: "running", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+	}
+	var swapped sync.Once
+	runtime.afterList = func() {
+		swapped.Do(func() {
+			runtime.setState(newState, []container.Container{
+				{ID: "ctr-new", State: "running", DeploymentID: "dep_new", ServiceID: "svc_1"},
+			})
+		})
+	}
+	gateway := NewGateway(runtime)
+
+	upstreams, err := gateway.waitForReadyUpstreams(&oldState.Serverless.Routes[0], 5, time.Now(), []string{"dep_local"})
+	if err != nil {
+		t.Fatalf("waitForReadyUpstreams failed: %v", err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Url != "10.0.0.11:3000" || upstreams[0].DeploymentID != "dep_new" {
+		t.Fatalf("upstreams = %+v, want redeployed local upstream", upstreams)
+	}
+	transitions, _, _ := runtime.snapshot()
+	if len(transitions) != 0 {
+		t.Fatalf("transitions = %+v, want no stale wake_failed transition", transitions)
+	}
+}
+
+func TestBlockingWakeReturnsWhenRouteDisappearsDuringRedeploy(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(string) upstreamReadiness {
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	oldState := testExpectedState("running")
+	oldState.Serverless.Routes[0].Upstreams = nil
+	newState := testExpectedState("running")
+	newState.Serverless.Routes = nil
+	runtime := &fakeRuntime{
+		state: oldState,
+		containers: []container.Container{
+			{ID: "ctr-old", State: "running", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+	}
+	var swapped sync.Once
+	runtime.afterList = func() {
+		swapped.Do(func() {
+			runtime.setState(newState, nil)
+		})
+	}
+	gateway := NewGateway(runtime)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := gateway.waitForReadyUpstreams(&oldState.Serverless.Routes[0], 5, time.Now(), []string{"dep_local"})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("waitForReadyUpstreams succeeded, want stale route error")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for stale route to return")
+	}
+	transitions, _, _ := runtime.snapshot()
+	if len(transitions) != 0 {
+		t.Fatalf("transitions = %+v, want no stale wake_failed transition", transitions)
+	}
+}
+
+func TestWakeMonitorDropsStaleDeploymentAfterRedeploy(t *testing.T) {
+	previousPoll := wakePollInterval
+	previousReady := checkUpstreamReady
+	wakePollInterval = time.Millisecond
+	checkUpstreamReady = func(string) upstreamReadiness {
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
+	t.Cleanup(func() {
+		wakePollInterval = previousPoll
+		checkUpstreamReady = previousReady
+	})
+
+	oldState := testExpectedStateWithLocalDeployment("running", "dep_local", "10.0.0.10")
+	oldState.Serverless.Routes[0].Upstreams = nil
+	newState := testExpectedStateWithLocalDeployment("running", "dep_new", "10.0.0.11")
+	newState.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{
+		state: oldState,
+		containers: []container.Container{
+			{ID: "ctr-old", State: "running", DeploymentID: "dep_local", ServiceID: "svc_1"},
+		},
+	}
+	var swapped sync.Once
+	runtime.afterList = func() {
+		swapped.Do(func() {
+			runtime.setState(newState, []container.Container{
+				{ID: "ctr-new", State: "running", DeploymentID: "dep_new", ServiceID: "svc_1"},
+			})
+		})
+	}
+	gateway := NewGateway(runtime)
+
+	done := make(chan struct{})
+	go func() {
+		gateway.waitForWokenDeployments(&oldState.Serverless.Routes[0], 5, time.Now(), []string{"dep_local"})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for stale wake monitor to return")
+	}
+	transitions, _, _ := runtime.snapshot()
+	if len(transitions) != 0 {
+		t.Fatalf("transitions = %+v, want no stale wake_failed transition", transitions)
+	}
+}
+
 func TestWakeTimeoutQueuesWakeFailedTransition(t *testing.T) {
 	previousPoll := wakePollInterval
 	wakePollInterval = time.Millisecond
@@ -431,10 +771,22 @@ func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
 	previousPoll := wakePollInterval
 	previousReady := checkUpstreamReady
 	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(string) bool { return false }
+	checkUpstreamReady = func(string) upstreamReadiness {
+		return upstreamReadiness{err: errors.New("connection refused")}
+	}
 	t.Cleanup(func() {
 		wakePollInterval = previousPoll
 		checkUpstreamReady = previousReady
+	})
+
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
 	})
 
 	state := testExpectedState("stopped")
@@ -457,6 +809,9 @@ func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
 	}
 	if transitions[0].Type != "wake_started" || transitions[1].Type != "wake_failed" {
 		t.Fatalf("transitions = %+v, want wake_started then wake_failed", transitions)
+	}
+	if strings.Contains(logs.String(), "wake waiting") {
+		t.Fatalf("log output contains verbose wake waiting logs:\n%s", logs.String())
 	}
 }
 
@@ -492,5 +847,14 @@ func testExpectedState(localDesiredState string) *agenthttp.ExpectedState {
 			},
 		},
 	}
+	return state
+}
+
+func testExpectedStateWithLocalDeployment(localDesiredState string, deploymentID string, ipAddress string) *agenthttp.ExpectedState {
+	state := testExpectedState(localDesiredState)
+	state.Containers[0].DeploymentID = deploymentID
+	state.Containers[0].Name = "svc_1-" + deploymentID
+	state.Containers[0].IPAddress = ipAddress
+	state.Serverless.Routes[0].LocalDeploymentIDs = []string{deploymentID}
 	return state
 }

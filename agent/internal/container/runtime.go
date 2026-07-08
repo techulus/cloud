@@ -91,69 +91,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		logFunc("stdout", fmt.Sprintf("Created volume directory: %s", vm.HostPath))
 	}
 
-	args := []string{
-		"run", "-d",
-		"--name", config.Name,
-		"--replace",
-		"--restart", "on-failure:5",
-		"--cap-drop", "ALL",
-		"--cap-add", "CHOWN",
-		"--cap-add", "DAC_OVERRIDE",
-		"--cap-add", "FOWNER",
-		"--cap-add", "SETPCAP",
-		"--cap-add", "SETUID",
-		"--cap-add", "SETGID",
-		"--cap-add", "NET_BIND_SERVICE",
-		"--cap-add", "NET_RAW",
-		"--log-opt", "max-size=10m",
-		"--log-opt", "max-file=3",
-	}
-
-	args = append(args,
-		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
-		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
-		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
-	)
-
-	if config.IPAddress != "" {
-		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
-	} else {
-		for _, pm := range config.PortMappings {
-			portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
-			args = append(args, "-p", portMapping)
-		}
-	}
-
-	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {
-		args = append(args, "--health-cmd", config.HealthCheck.Cmd)
-		args = append(args, "--health-interval", fmt.Sprintf("%ds", config.HealthCheck.Interval))
-		args = append(args, "--health-timeout", fmt.Sprintf("%ds", config.HealthCheck.Timeout))
-		args = append(args, "--health-retries", fmt.Sprintf("%d", config.HealthCheck.Retries))
-		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
-	}
-
-	if config.MemoryLimitMb != nil && *config.MemoryLimitMb > 0 {
-		args = append(args, "--memory", fmt.Sprintf("%dm", *config.MemoryLimitMb))
-	}
-	if config.CPULimit != nil && *config.CPULimit > 0 {
-		args = append(args, "--cpus", fmt.Sprintf("%.2f", *config.CPULimit))
-	}
-
-	for _, vm := range config.VolumeMounts {
-		args = append(args, "-v", fmt.Sprintf("%s:%s", vm.HostPath, vm.ContainerPath))
-	}
-
-	for key, value := range config.Env {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
-	}
-
-	if config.StartCommand != "" {
-		args = append(args, "--entrypoint", "/bin/sh")
-		args = append(args, image)
-		args = append(args, "-c", config.StartCommand)
-	} else {
-		args = append(args, image)
-	}
+	args := buildPodmanRunArgs(config, image)
 
 	logFunc("stdout", fmt.Sprintf("Starting container: %s", config.Name))
 
@@ -191,6 +129,79 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	return &DeployResult{
 		ContainerID: containerID,
 	}, nil
+}
+
+func buildPodmanRunArgs(config *DeployConfig, image string) []string {
+	args := []string{
+		"run", "-d",
+		"--name", config.Name,
+		"--replace",
+		"--restart", "on-failure:5",
+		"--cap-drop", "ALL",
+		"--cap-add", "CHOWN",
+		"--cap-add", "DAC_OVERRIDE",
+		"--cap-add", "FOWNER",
+		"--cap-add", "SETPCAP",
+		"--cap-add", "SETUID",
+		"--cap-add", "SETGID",
+		"--cap-add", "NET_BIND_SERVICE",
+		"--cap-add", "NET_RAW",
+		"--log-opt", "max-size=10m",
+		"--log-opt", "max-file=3",
+	}
+
+	args = append(args,
+		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
+		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
+		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
+	)
+
+	if config.IPAddress != "" {
+		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
+		if config.PublishLocalPorts {
+			for _, pm := range config.PortMappings {
+				portMapping := fmt.Sprintf("127.0.0.1:%d:%d", pm.HostPort, pm.ContainerPort)
+				args = append(args, "-p", portMapping)
+			}
+		}
+	} else {
+		for _, pm := range config.PortMappings {
+			portMapping := fmt.Sprintf("%s:%d:%d", config.WireGuardIP, pm.HostPort, pm.ContainerPort)
+			args = append(args, "-p", portMapping)
+		}
+	}
+
+	if config.HealthCheck != nil && config.HealthCheck.Cmd != "" {
+		args = append(args, "--health-cmd", config.HealthCheck.Cmd)
+		args = append(args, "--health-interval", fmt.Sprintf("%ds", config.HealthCheck.Interval))
+		args = append(args, "--health-timeout", fmt.Sprintf("%ds", config.HealthCheck.Timeout))
+		args = append(args, "--health-retries", fmt.Sprintf("%d", config.HealthCheck.Retries))
+		args = append(args, "--health-start-period", fmt.Sprintf("%ds", config.HealthCheck.StartPeriod))
+	}
+
+	if config.MemoryLimitMb != nil && *config.MemoryLimitMb > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", *config.MemoryLimitMb))
+	}
+	if config.CPULimit != nil && *config.CPULimit > 0 {
+		args = append(args, "--cpus", fmt.Sprintf("%.2f", *config.CPULimit))
+	}
+
+	for _, vm := range config.VolumeMounts {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", vm.HostPath, vm.ContainerPath))
+	}
+
+	for key, value := range config.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
+	}
+
+	if config.StartCommand != "" {
+		args = append(args, "--entrypoint", "/bin/sh")
+		args = append(args, image)
+		args = append(args, "-c", config.StartCommand)
+	} else {
+		args = append(args, image)
+	}
+	return args
 }
 
 func Stop(containerID string) error {
