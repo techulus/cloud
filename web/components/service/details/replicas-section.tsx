@@ -19,16 +19,16 @@ import type {
 	ServiceWithDetails as Service,
 } from "@/db/types";
 
-type ServerInfo = Pick<ServerType, "id" | "name" | "wireguardIp">;
+type ServerInfo = Pick<ServerType, "id" | "name" | "isProxy">;
 type ServerWithStatus = ServerInfo & { status: string };
 
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	const res = await fetch(url);
 	const servers: ServerWithStatus[] = await res.json();
-	return servers.map(({ id, name, wireguardIp }) => ({
+	return servers.map(({ id, name, isProxy }) => ({
 		id,
 		name,
-		wireguardIp,
+		isProxy,
 	}));
 };
 
@@ -143,6 +143,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 			? 1
 			: 0
 		: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
+	const formatServerRole = (server: ServerInfo) =>
+		server.isProxy ? "Proxy + compute node" : "Compute-only node";
 
 	if (service.stateful) {
 		return (
@@ -216,13 +218,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 										<div className="flex-1 min-w-0">
 											<p className="font-medium truncate">{server.name}</p>
 											<p
-												className={`text-xs font-mono ${
+												className={`text-xs ${
 													selectedServerId === server.id
 														? "text-primary-foreground/70"
 														: "text-muted-foreground"
 												}`}
 											>
-												{server.wireguardIp}
+												{formatServerRole(server)}
 											</p>
 										</div>
 									</button>
@@ -282,8 +284,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 								>
 									<div className="flex-1 min-w-0">
 										<p className="font-medium truncate">{server.name}</p>
-										<p className="text-xs text-muted-foreground font-mono">
-											{server.wireguardIp}
+										<p className="text-xs text-muted-foreground">
+											{formatServerRole(server)}
 										</p>
 									</div>
 									<div className="flex items-center gap-2">
