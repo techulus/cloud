@@ -198,13 +198,13 @@ function RequestStatsPanel({
 				<div className="min-w-0">
 					{isLoading ? (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-							<Skeleton className="h-9 w-28" />
+							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
 					) : hasPublicHttp ? (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
 							<div>
-								<p className="text-4xl font-semibold tabular-nums">
+								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 									{hasMetricData
 										? formatCompactNumber(stats.totalRequests)
 										: "-"}
@@ -214,7 +214,7 @@ function RequestStatsPanel({
 								</p>
 							</div>
 							<div>
-								<p className="text-2xl font-semibold tabular-nums">
+								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 									{hasMetricData
 										? formatRate(getAverageRequestsPerSecond(stats))
 										: "-"}
@@ -226,7 +226,9 @@ function RequestStatsPanel({
 						</div>
 					) : (
 						<>
-							<p className="text-4xl font-semibold tabular-nums">-</p>
+							<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+								-
+							</p>
 							<p className="text-sm text-muted-foreground">
 								no public HTTP ingress
 							</p>
