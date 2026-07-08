@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
@@ -759,6 +760,7 @@ function getServiceStatus(
 	runningDeployments: number,
 ): ServiceStatus {
 	const latestRollout = service.rollouts?.[0];
+	const deployments = service.deployments || [];
 
 	if (service.migrationStatus) return { label: "Migrating", tone: "progress" };
 	if (
@@ -775,19 +777,29 @@ function getServiceStatus(
 	}
 	if (runningDeployments > 0) return { label: "Live", tone: "live" };
 
-	for (const deployment of service.deployments || []) {
+	for (const deployment of deployments) {
 		if (deployment.observedPhase === "failed") {
 			return { label: "Needs attention", tone: "warning" };
 		}
 	}
-	for (const deployment of service.deployments || []) {
+	for (const deployment of deployments) {
+		if (deployment.observedPhase === "waking") {
+			return { label: "Waking", tone: "progress" };
+		}
+	}
+	for (const deployment of deployments) {
+		if (isObservedStarting(deployment.observedPhase)) {
+			return { label: "Starting", tone: "progress" };
+		}
+	}
+	for (const deployment of deployments) {
 		if (deployment.observedPhase === "sleeping") {
 			return { label: "Sleeping", tone: "sleeping" };
 		}
 	}
 
 	return {
-		label: service.deployments.length > 0 ? "Stopped" : "Not deployed",
+		label: deployments.length > 0 ? "Stopped" : "Not deployed",
 		tone: "muted",
 	};
 }
