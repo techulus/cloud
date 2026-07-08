@@ -78,7 +78,7 @@ type SourceInfo = {
 
 type ServiceStatus = {
 	label: string;
-	tone: "live" | "progress" | "warning" | "muted";
+	tone: "live" | "progress" | "warning" | "sleeping" | "muted";
 };
 
 type ChartRow = {
@@ -119,6 +119,7 @@ const STATUS_TONE_CLASSES: Record<
 	live: { dot: "bg-teal-500", text: "text-teal-700 dark:text-teal-400" },
 	progress: { dot: "bg-blue-500", text: "text-blue-700 dark:text-blue-400" },
 	warning: { dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
+	sleeping: { dot: "bg-cyan-500", text: "text-cyan-700 dark:text-cyan-400" },
 	muted: { dot: "bg-muted-foreground", text: "text-muted-foreground" },
 };
 
@@ -777,6 +778,11 @@ function getServiceStatus(
 	for (const deployment of service.deployments || []) {
 		if (deployment.observedPhase === "failed") {
 			return { label: "Needs attention", tone: "warning" };
+		}
+	}
+	for (const deployment of service.deployments || []) {
+		if (deployment.observedPhase === "sleeping") {
+			return { label: "Sleeping", tone: "sleeping" };
 		}
 	}
 

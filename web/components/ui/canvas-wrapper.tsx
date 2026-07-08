@@ -40,6 +40,12 @@ const statusColorMap: Record<string, StatusColors> = {
 		dot: "bg-slate-400",
 		text: "text-slate-500",
 	},
+	sleeping: {
+		bg: "bg-cyan-500/5",
+		border: "border-cyan-500/30",
+		dot: "bg-cyan-500",
+		text: "text-cyan-700 dark:text-cyan-400",
+	},
 	failed: {
 		bg: "bg-rose-500/5",
 		border: "border-rose-500/30",
@@ -79,10 +85,10 @@ export function getStatusColorFromDeployments(
 			d.observedPhase === "waking",
 	);
 	const hasFailed = deployments.some((d) => d.observedPhase === "failed");
+	const hasSleeping = deployments.some((d) => d.observedPhase === "sleeping");
 	const hasStopped = deployments.some(
 		(d) =>
 			d.observedPhase === "stopped" ||
-			d.observedPhase === "sleeping" ||
 			d.runtimeDesiredState === "removed",
 	);
 	const hasUnknown = deployments.some((d) => d.observedPhase === "unknown");
@@ -91,6 +97,7 @@ export function getStatusColorFromDeployments(
 	if (hasPending) return statusColorMap.pending;
 	if (hasFailed) return statusColorMap.failed;
 	if (hasUnknown) return statusColorMap.unknown;
+	if (hasSleeping) return statusColorMap.sleeping;
 	if (hasStopped) return statusColorMap.stopped;
 	return defaultColors;
 }
