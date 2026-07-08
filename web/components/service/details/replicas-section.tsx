@@ -144,7 +144,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 			: 0
 		: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
 	const formatServerRole = (server: ServerInfo) =>
-		server.isProxy ? "Proxy + compute node" : "Compute-only node";
+		server.isProxy ? "Proxy node" : "Worker node";
 
 	if (service.stateful) {
 		return (
