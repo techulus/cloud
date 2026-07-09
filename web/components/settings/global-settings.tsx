@@ -303,13 +303,13 @@ export function GlobalSettings({
 	const updateState = initialSettings.controlPlaneUpdateState;
 	const upgradeState = initialSettings.controlPlaneUpgradeState;
 	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
-	const checkedAtLabel = (() => {
-		if (!updateState?.checkedAt) return "Never";
-		const date = new Date(updateState.checkedAt);
-		return Number.isNaN(date.getTime())
+	let checkedAtLabel = "Never";
+	if (updateState?.checkedAt) {
+		const checkedAt = new Date(updateState.checkedAt);
+		checkedAtLabel = Number.isNaN(checkedAt.getTime())
 			? "Unknown"
-			: dateTimeFormatter.format(date);
-	})();
+			: dateTimeFormatter.format(checkedAt);
+	}
 	const upgradeRunning = upgradeState?.status === "running";
 
 	return (
