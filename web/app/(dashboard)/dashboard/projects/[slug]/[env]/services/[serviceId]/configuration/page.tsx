@@ -30,9 +30,18 @@ import {
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { useSession } from "@/lib/auth-client";
+import { normalizeTwoFactorCode } from "@/lib/two-factor";
 
 const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
+
+type TwoFactorSessionUser = {
+	twoFactorEnabled?: boolean | null;
+};
 
 function formatBackupDate(value: Date | string | null | undefined) {
 	if (!value) return "an unknown time";
@@ -42,8 +51,19 @@ function formatBackupDate(value: Date | string | null | undefined) {
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
+	const { data: session, isPending: isSessionLoading } = useSession();
+	const sessionUser = session?.user as TwoFactorSessionUser | undefined;
 	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
+	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+	const [deletePassword, setDeletePassword] = useState("");
+	const [deleteTotpCode, setDeleteTotpCode] = useState("");
 	const [isDeleting, setIsDeleting] = useState(false);
+	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
+	const normalizedDeleteTotpCode = normalizeTwoFactorCode(deleteTotpCode);
+	const isDeleteConfirmationIncomplete =
+		requiresDeleteConfirmation &&
+		(deletePassword.trim().length === 0 ||
+			normalizedDeleteTotpCode.length === 0);
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -63,15 +83,39 @@ export default function ConfigurationPage() {
 		toast.info("Changes saved. Deploy to apply them.");
 	}, [onUpdate]);
 
+	const resetDeleteConfirmation = useCallback(() => {
+		setDeletePassword("");
+		setDeleteTotpCode("");
+	}, []);
+
 	const handleDelete = async () => {
+		if (isDeleteConfirmationIncomplete) {
+			toast.error("Enter your current password and authenticator code");
+			return;
+		}
+
 		setIsDeleting(true);
 		try {
-			await deleteService(service.id);
+			await deleteService(
+				service.id,
+				requiresDeleteConfirmation
+					? {
+							password: deletePassword,
+							totpCode: normalizedDeleteTotpCode,
+						}
+					: undefined,
+			);
 			await globalMutate(`/api/projects/${service.projectId}/services`);
 			toast.success(
 				service.stateful ? "Delete workflow started" : "Service deleted",
 			);
+			setDeleteDialogOpen(false);
+			resetDeleteConfirmation();
 			router.push(`/dashboard/projects/${projectSlug}/${envName}`);
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to delete service",
+			);
 		} finally {
 			setIsDeleting(false);
 		}
@@ -120,11 +164,17 @@ export default function ConfigurationPage() {
 									: "Once deleted, this service and all its deployments will be permanently removed."}
 							</p>
 						</ItemContent>
-						<AlertDialog>
+						<AlertDialog
+							open={deleteDialogOpen}
+							onOpenChange={(open) => {
+								setDeleteDialogOpen(open);
+								if (!open && !isDeleting) resetDeleteConfirmation();
+							}}
+						>
 							<AlertDialogTrigger render={<Button variant="destructive" />}>
 								Delete Service
 							</AlertDialogTrigger>
-							<AlertDialogContent>
+							<AlertDialogContent className="sm:max-w-md">
 								<AlertDialogHeader>
 									<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
 									<AlertDialogDescription>
@@ -167,15 +217,63 @@ export default function ConfigurationPage() {
 										) : (
 											"This action cannot be undone. This will permanently delete the service and all its deployments."
 										)}
+										{requiresDeleteConfirmation && (
+											<>
+												<br />
+												<br />
+												Enter your current password and authenticator code to
+												confirm this deletion.
+											</>
+										)}
 									</AlertDialogDescription>
 								</AlertDialogHeader>
+								{requiresDeleteConfirmation && (
+									<div className="space-y-3">
+										<div className="space-y-2">
+											<Label htmlFor="delete-service-password">
+												Current password
+											</Label>
+											<Input
+												id="delete-service-password"
+												type="password"
+												autoComplete="current-password"
+												value={deletePassword}
+												onChange={(event) =>
+													setDeletePassword(event.target.value)
+												}
+												disabled={isDeleting}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="delete-service-totp-code">
+												Authenticator code
+											</Label>
+											<Input
+												id="delete-service-totp-code"
+												inputMode="numeric"
+												autoComplete="one-time-code"
+												value={deleteTotpCode}
+												onChange={(event) =>
+													setDeleteTotpCode(event.target.value)
+												}
+												placeholder="123456"
+												disabled={isDeleting}
+											/>
+										</div>
+									</div>
+								)}
 								<AlertDialogFooter>
 									<AlertDialogCancel>Cancel</AlertDialogCancel>
 									<AlertDialogAction
 										variant="destructive"
 										onClick={handleDelete}
-										disabled={isDeleting}
+										disabled={
+											isDeleting ||
+											isSessionLoading ||
+											isDeleteConfirmationIncomplete
+										}
 									>
+										{isDeleting ? <Spinner className="size-4" /> : null}
 										{isDeleting ? "Deleting..." : "Delete"}
 									</AlertDialogAction>
 								</AlertDialogFooter>

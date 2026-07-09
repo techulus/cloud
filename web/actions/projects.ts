@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
 import {
@@ -28,7 +29,7 @@ import {
 	volumeBackups,
 	workQueue,
 } from "@/db/schema";
-import { requireDeveloperRole } from "@/lib/auth";
+import { auth, requireDeveloperRole } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
@@ -47,14 +48,26 @@ import {
 	nameSchema,
 	volumeNameSchema,
 } from "@/lib/schemas";
-import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 import type {
 	PortConfig,
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
+import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
+import {
+	getServiceDeleteConfirmation,
+	type ServiceDeleteConfirmation,
+} from "@/lib/service-delete-confirmation";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
+
+type AuthenticatedDeveloperSession = Awaited<
+	ReturnType<typeof requireDeveloperRole>
+>;
+
+type TwoFactorSessionUser = {
+	twoFactorEnabled?: boolean | null;
+};
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -574,8 +587,51 @@ async function hardDeleteService(serviceId: string) {
 	return { success: true };
 }
 
-export async function deleteService(serviceId: string) {
-	await requireDeveloperRole();
+function hasTwoFactorEnabled(session: AuthenticatedDeveloperSession) {
+	return Boolean(
+		(session?.user as TwoFactorSessionUser | undefined)?.twoFactorEnabled,
+	);
+}
+
+async function verifyServiceDeleteConfirmation(
+	session: AuthenticatedDeveloperSession,
+	confirmation?: ServiceDeleteConfirmation,
+) {
+	const normalizedConfirmation = getServiceDeleteConfirmation(
+		hasTwoFactorEnabled(session),
+		confirmation,
+	);
+
+	if (!normalizedConfirmation) return;
+
+	const requestHeaders = await headers();
+
+	try {
+		const passwordVerification = await auth.api.verifyPassword({
+			body: { password: normalizedConfirmation.password },
+			headers: requestHeaders,
+		});
+
+		if (passwordVerification.status !== true) {
+			throw new Error("Invalid password");
+		}
+
+		await auth.api.verifyTOTP({
+			body: { code: normalizedConfirmation.totpCode },
+			headers: requestHeaders,
+		});
+	} catch {
+		throw new Error("Invalid password or authenticator code");
+	}
+}
+
+export async function deleteService(
+	serviceId: string,
+	confirmation?: ServiceDeleteConfirmation,
+) {
+	const session = await requireDeveloperRole();
+	await verifyServiceDeleteConfirmation(session, confirmation);
+
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
