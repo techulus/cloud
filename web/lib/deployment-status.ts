@@ -63,12 +63,6 @@ export function isTrafficActive(trafficState: TrafficState): boolean {
 	return trafficState === "active";
 }
 
-export function isDeploymentExpected(
-	deployment: Pick<DeploymentState, "runtimeDesiredState">,
-): boolean {
-	return isRuntimeExpected(deployment.runtimeDesiredState);
-}
-
 export function isDeploymentRoutable(
 	deployment: Pick<DeploymentState, "trafficState" | "observedPhase">,
 ): boolean {

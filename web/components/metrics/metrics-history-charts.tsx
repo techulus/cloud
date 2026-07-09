@@ -97,6 +97,11 @@ const CHARTS: ChartConfig[] = [
 	},
 ];
 
+const CHART_THRESHOLDS = [
+	{ value: 70, color: "#f59e0b" },
+	{ value: 90, color: "#f43f5e" },
+];
+
 const SERVER_COLORS = [
 	"#10b981",
 	"#0ea5e9",
@@ -284,7 +289,7 @@ function MetricChartCard({
 								iconType="plainline"
 								wrapperStyle={{ paddingBottom: 12 }}
 							/>
-							{thresholdsForChart().map((threshold) => (
+							{CHART_THRESHOLDS.map((threshold) => (
 								<ReferenceLine
 									key={threshold.value}
 									y={threshold.value}
@@ -440,18 +445,16 @@ function buildChartRows(series: ServerMetricsHistory[]): ChartRow[] {
 		(a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
 	);
 }
-
-function thresholdsForChart() {
-	return [
-		{ value: 70, color: "#f59e0b" },
-		{ value: 90, color: "#f43f5e" },
-	];
-}
-
 function formatTooltipValue(item: TooltipPayload) {
 	const value = Number(item.value);
 	if (!Number.isFinite(value)) return "-";
-	if (isBytesSeries(String(item.dataKey))) return formatBytes(value);
+	const dataKey = String(item.dataKey);
+	if (
+		dataKey.startsWith("memoryUsedBytes:") ||
+		dataKey.startsWith("diskUsedBytes:")
+	) {
+		return formatBytes(value);
+	}
 	return `${value.toFixed(1)}%`;
 }
 
@@ -461,13 +464,6 @@ function getSeriesKey(metricKey: keyof MetricsHistory, serverId: string) {
 
 function getServerColor(index: number) {
 	return SERVER_COLORS[index % SERVER_COLORS.length];
-}
-
-function isBytesSeries(dataKey: string) {
-	return (
-		dataKey.startsWith("memoryUsedBytes:") ||
-		dataKey.startsWith("diskUsedBytes:")
-	);
 }
 
 function formatShortTime(value: string) {

@@ -100,13 +100,6 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
 const CONTROL_PLANE_UPGRADE_DOCS_URL =
 	"https://docs.techulus.com/installation#manual-upgrades";
 
-function formatCheckedAt(value: string | null | undefined) {
-	if (!value) return "Never";
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return "Unknown";
-	return dateTimeFormatter.format(date);
-}
-
 export function GlobalSettings({
 	servers,
 	membersData,
@@ -310,6 +303,14 @@ export function GlobalSettings({
 	const updateState = initialSettings.controlPlaneUpdateState;
 	const upgradeState = initialSettings.controlPlaneUpgradeState;
 	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
+	const checkedAt = updateState?.checkedAt
+		? new Date(updateState.checkedAt)
+		: null;
+	const checkedAtLabel = !checkedAt
+		? "Never"
+		: Number.isNaN(checkedAt.getTime())
+			? "Unknown"
+			: dateTimeFormatter.format(checkedAt);
 	const upgradeRunning = upgradeState?.status === "running";
 
 	return (
@@ -582,9 +583,7 @@ export function GlobalSettings({
 							</div>
 							<div>
 								<p className="text-xs text-muted-foreground">Last checked</p>
-								<p className="text-sm">
-									{formatCheckedAt(updateState?.checkedAt)}
-								</p>
+								<p className="text-sm">{checkedAtLabel}</p>
 							</div>
 						</div>
 
