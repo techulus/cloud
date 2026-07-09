@@ -6,8 +6,6 @@ import {
 
 export { METRIC_RANGE_OPTIONS, type MetricRange, parseMetricRange };
 
-const VICTORIA_METRICS_URL = process.env.VICTORIA_METRICS_URL;
-const VICTORIA_METRICS_PRIVATE_URL = process.env.VICTORIA_METRICS_PRIVATE_URL;
 let hasWarnedMissingMetricsConfig = false;
 
 type EndpointConfig = {
@@ -27,13 +25,15 @@ type VictoriaInstantResponse = {
 	error?: string;
 };
 
+type VictoriaMatrixResult = {
+	metric: Record<string, string>;
+	values: Array<[number, string]>;
+};
+
 type VictoriaMatrixResponse = {
 	status: string;
 	data?: {
-		result?: Array<{
-			metric: Record<string, string>;
-			values: Array<[number, string]>;
-		}>;
+		result?: VictoriaMatrixResult[];
 	};
 	error?: string;
 };
@@ -49,6 +49,32 @@ export type NodeMetricsSnapshot = {
 export type NodeMetricPoint = {
 	timestamp: string;
 	value: number;
+};
+
+export type ServiceMetricsBucket = {
+	timestamp: string;
+	totalRequests: number;
+	statuses: Record<string, number>;
+	p50ResponseTimeMs: number | null;
+	p90ResponseTimeMs: number | null;
+	p95ResponseTimeMs: number | null;
+	p99ResponseTimeMs: number | null;
+	ingressBytesPerSecond: number | null;
+	egressBytesPerSecond: number | null;
+	cpuUsagePercent: number | null;
+	memoryUsagePercent: number | null;
+	memoryUsedBytes: number | null;
+};
+
+export type ServiceMetrics = {
+	metricsEnabled: boolean;
+	range: MetricRange;
+	windowStart: string;
+	windowEnd: string;
+	stepSeconds: number;
+	totalRequests: number;
+	statusCodes: string[];
+	buckets: ServiceMetricsBucket[];
 };
 
 export type NodeMetricsHistory = {
@@ -85,7 +111,9 @@ function parseEndpoint(endpoint: string): EndpointConfig {
 }
 
 function getQueryEndpoint(): EndpointConfig | undefined {
-	const endpoint = VICTORIA_METRICS_PRIVATE_URL || VICTORIA_METRICS_URL;
+	const endpoint =
+		process.env.VICTORIA_METRICS_PRIVATE_URL ||
+		process.env.VICTORIA_METRICS_URL;
 	if (!endpoint) return undefined;
 	return parseEndpoint(endpoint);
 }
@@ -101,7 +129,9 @@ function buildFetchOptions(config: EndpointConfig): RequestInit {
 }
 
 export function isMetricsEnabled(): boolean {
-	return !!(VICTORIA_METRICS_PRIVATE_URL || VICTORIA_METRICS_URL);
+	return !!(
+		process.env.VICTORIA_METRICS_PRIVATE_URL || process.env.VICTORIA_METRICS_URL
+	);
 }
 
 export function warnMissingMetricsConfig(context: string) {
@@ -262,6 +292,180 @@ export async function queryServersMetricsHistory(options: {
 	}));
 }
 
+export function createEmptyServiceMetrics(
+	range: MetricRange,
+	now = new Date(),
+): ServiceMetrics {
+	const window = getMetricWindow(range, now);
+	return {
+		metricsEnabled: false,
+		range,
+		windowStart: window.start.toISOString(),
+		windowEnd: window.end.toISOString(),
+		stepSeconds: window.stepSeconds,
+		totalRequests: 0,
+		statusCodes: [],
+		buckets: [],
+	};
+}
+
+export async function queryServiceMetrics(options: {
+	serviceId: string;
+	range: MetricRange;
+	now?: Date;
+}): Promise<ServiceMetrics> {
+	const endpoint = getQueryEndpoint();
+	const now = options.now ?? new Date();
+	const window = getMetricWindow(options.range, now);
+	if (!endpoint) return createEmptyServiceMetrics(options.range, now);
+
+	const serviceMatcher = buildTraefikServiceMatcher(options.serviceId);
+	const serviceId = escapePromQL(options.serviceId);
+	const rangeWindow = formatPromDuration(window.stepSeconds);
+	const traefikFilter = `service=~"${serviceMatcher}"`;
+	const queryStart = new Date(
+		window.start.getTime() + window.stepSeconds * 1000,
+	);
+
+	const [
+		requestResults,
+		p50Results,
+		p90Results,
+		p95Results,
+		p99Results,
+		ingressResults,
+		egressResults,
+		cpuResults,
+		memoryPercentResults,
+		memoryBytesResults,
+	] = await Promise.all([
+		queryRangePromQL(endpoint, {
+			query: `sum by (code) (increase(traefik_service_requests_total{${traefikFilter}}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: responseTimeQuery(0.5, traefikFilter, rangeWindow),
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: responseTimeQuery(0.9, traefikFilter, rangeWindow),
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: responseTimeQuery(0.95, traefikFilter, rangeWindow),
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: responseTimeQuery(0.99, traefikFilter, rangeWindow),
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: `sum(rate(traefik_service_requests_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: `sum(rate(traefik_service_responses_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: `sum(avg_over_time(techulus_service_cpu_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: `avg(avg_over_time(techulus_service_memory_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+		queryRangePromQL(endpoint, {
+			query: `sum(avg_over_time(techulus_service_memory_used_bytes{service_id="${serviceId}"}[${rangeWindow}]))`,
+			start: queryStart,
+			end: window.end,
+			stepSeconds: window.stepSeconds,
+		}).catch(() => []),
+	]);
+
+	const buckets = createServiceMetricBuckets(window);
+	const bucketsByTimestamp = new Map(
+		buckets.map((bucket) => [bucket.timestamp, bucket]),
+	);
+	const statusCodes = new Set<string>();
+
+	for (const result of requestResults) {
+		const status = result.metric.code || "unknown";
+		statusCodes.add(status);
+		for (const point of matrixResultToPoints(result)) {
+			const bucket = bucketsByTimestamp.get(point.timestamp);
+			if (!bucket) continue;
+			const requests = Math.max(0, Math.round(point.value));
+			bucket.statuses[status] = (bucket.statuses[status] ?? 0) + requests;
+			bucket.totalRequests += requests;
+		}
+	}
+
+	applySingleSeries(bucketsByTimestamp, p50Results, (bucket, value) => {
+		bucket.p50ResponseTimeMs = value * 1000;
+	});
+	applySingleSeries(bucketsByTimestamp, p90Results, (bucket, value) => {
+		bucket.p90ResponseTimeMs = value * 1000;
+	});
+	applySingleSeries(bucketsByTimestamp, p95Results, (bucket, value) => {
+		bucket.p95ResponseTimeMs = value * 1000;
+	});
+	applySingleSeries(bucketsByTimestamp, p99Results, (bucket, value) => {
+		bucket.p99ResponseTimeMs = value * 1000;
+	});
+	applySingleSeries(bucketsByTimestamp, ingressResults, (bucket, value) => {
+		bucket.ingressBytesPerSecond = value;
+	});
+	applySingleSeries(bucketsByTimestamp, egressResults, (bucket, value) => {
+		bucket.egressBytesPerSecond = value;
+	});
+	applySingleSeries(bucketsByTimestamp, cpuResults, (bucket, value) => {
+		bucket.cpuUsagePercent = value;
+	});
+	applySingleSeries(
+		bucketsByTimestamp,
+		memoryPercentResults,
+		(bucket, value) => {
+			bucket.memoryUsagePercent = value;
+		},
+	);
+	applySingleSeries(bucketsByTimestamp, memoryBytesResults, (bucket, value) => {
+		bucket.memoryUsedBytes = value;
+	});
+
+	return {
+		metricsEnabled: true,
+		range: options.range,
+		windowStart: window.start.toISOString(),
+		windowEnd: window.end.toISOString(),
+		stepSeconds: window.stepSeconds,
+		totalRequests: buckets.reduce(
+			(total, bucket) => total + bucket.totalRequests,
+			0,
+		),
+		statusCodes: sortStatusCodes([...statusCodes]),
+		buckets,
+	};
+}
+
 async function queryInstantMetric(
 	endpoint: EndpointConfig,
 	metricName: string,
@@ -414,6 +618,39 @@ async function queryRangeMetricGroup(
 	return byServer;
 }
 
+async function queryRangePromQL(
+	endpoint: EndpointConfig,
+	options: {
+		query: string;
+		start: Date;
+		end: Date;
+		stepSeconds: number;
+	},
+): Promise<VictoriaMatrixResult[]> {
+	const url = new URL(`${endpoint.url}/api/v1/query_range`);
+	url.searchParams.set("query", options.query);
+	url.searchParams.set(
+		"start",
+		String(Math.floor(options.start.getTime() / 1000)),
+	);
+	url.searchParams.set("end", String(Math.floor(options.end.getTime() / 1000)));
+	url.searchParams.set("step", String(options.stepSeconds));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query metrics range: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const data = (await response.json()) as VictoriaMatrixResponse;
+	if (data.status !== "success") {
+		throw new Error(data.error || "Failed to query metrics range");
+	}
+
+	return data.data?.result ?? [];
+}
+
 export function emptyHistory(): NodeMetricsHistory {
 	return {
 		cpuUsagePercent: [],
@@ -424,9 +661,118 @@ export function emptyHistory(): NodeMetricsHistory {
 	};
 }
 
+export function getMetricWindow(
+	range: MetricRange,
+	now = new Date(),
+): {
+	start: Date;
+	end: Date;
+	durationMs: number;
+	stepSeconds: number;
+} {
+	const option = METRIC_RANGE_OPTIONS[range];
+	const end = new Date(Math.floor(now.getTime() / 1000) * 1000);
+	const start = new Date(end.getTime() - option.durationMs);
+	return {
+		start,
+		end,
+		durationMs: option.durationMs,
+		stepSeconds: option.stepSeconds,
+	};
+}
+
+export function buildTraefikServiceMatcher(serviceId: string): string {
+	return `^${escapePromRegex(serviceId)}(@file)?$`;
+}
+
+export function formatPromDuration(seconds: number): string {
+	if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+	if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+	if (seconds % 60 === 0) return `${seconds / 60}m`;
+	return `${seconds}s`;
+}
+
+function responseTimeQuery(
+	quantile: number,
+	traefikFilter: string,
+	rangeWindow: string,
+) {
+	return `histogram_quantile(${quantile}, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{${traefikFilter}}[${rangeWindow}])))`;
+}
+
+function createServiceMetricBuckets(window: {
+	start: Date;
+	end: Date;
+	stepSeconds: number;
+}): ServiceMetricsBucket[] {
+	const buckets: ServiceMetricsBucket[] = [];
+	const stepMs = window.stepSeconds * 1000;
+	for (
+		let timestampMs = window.start.getTime() + stepMs;
+		timestampMs <= window.end.getTime();
+		timestampMs += stepMs
+	) {
+		buckets.push({
+			timestamp: new Date(timestampMs).toISOString(),
+			totalRequests: 0,
+			statuses: {},
+			p50ResponseTimeMs: null,
+			p90ResponseTimeMs: null,
+			p95ResponseTimeMs: null,
+			p99ResponseTimeMs: null,
+			ingressBytesPerSecond: null,
+			egressBytesPerSecond: null,
+			cpuUsagePercent: null,
+			memoryUsagePercent: null,
+			memoryUsedBytes: null,
+		});
+	}
+	return buckets;
+}
+
+function applySingleSeries(
+	bucketsByTimestamp: Map<string, ServiceMetricsBucket>,
+	results: VictoriaMatrixResult[],
+	apply: (bucket: ServiceMetricsBucket, value: number) => void,
+) {
+	const result = results[0];
+	if (!result) return;
+	for (const point of matrixResultToPoints(result)) {
+		const bucket = bucketsByTimestamp.get(point.timestamp);
+		if (!bucket) continue;
+		apply(bucket, point.value);
+	}
+}
+
+function matrixResultToPoints(result: {
+	values: Array<[number, string]>;
+}): NodeMetricPoint[] {
+	return result.values
+		.map(([timestamp, rawValue]) => ({
+			timestamp: new Date(timestamp * 1000).toISOString(),
+			value: Number.parseFloat(rawValue),
+		}))
+		.filter((point) => Number.isFinite(point.value));
+}
+
+function sortStatusCodes(statuses: string[]): string[] {
+	return Array.from(new Set(statuses)).sort((a, b) => {
+		const statusA = Number(a);
+		const statusB = Number(b);
+		if (Number.isFinite(statusA) && Number.isFinite(statusB)) {
+			return statusA - statusB;
+		}
+		return a.localeCompare(b);
+	});
+}
+
 function escapePromQL(value: string) {
 	return value
 		.replace(/\\/g, "\\\\")
 		.replace(/"/g, '\\"')
 		.replace(/\n/g, "\\n");
+}
+
+function escapePromRegex(value: string) {
+	return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }

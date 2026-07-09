@@ -53,6 +53,14 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 				if err := a.MetricsSender.SendSystemStats(systemStats, collectedAt); err != nil {
 					log.Printf("[metrics] failed to send system stats: %v", err)
 				}
+				containerStats, err := container.CollectResourceStats()
+				if err != nil {
+					log.Printf("[metrics] failed to collect container stats: %v", err)
+					return
+				}
+				if err := a.MetricsSender.SendContainerStats(containerStats, collectedAt); err != nil {
+					log.Printf("[metrics] failed to send container stats: %v", err)
+				}
 			}()
 		}
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")

@@ -127,6 +127,8 @@ func NewAgent(
 
 type MetricsSender interface {
 	SendSystemStats(stats *health.SystemStats, collectedAt time.Time) error
+	SendContainerStats(stats []container.ResourceStats, collectedAt time.Time) error
+	SendPrometheusMetrics(data []byte, extraLabels map[string]string) error
 }
 
 func (a *Agent) GetState() AgentState {
