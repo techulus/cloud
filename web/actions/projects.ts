@@ -65,10 +65,6 @@ type AuthenticatedDeveloperSession = Awaited<
 	ReturnType<typeof requireDeveloperRole>
 >;
 
-type TwoFactorSessionUser = {
-	twoFactorEnabled?: boolean | null;
-};
-
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 	const digestPattern = /^[A-Za-z0-9_+.-]+:[0-9a-fA-F]{32,256}$/;
@@ -587,18 +583,15 @@ async function hardDeleteService(serviceId: string) {
 	return { success: true };
 }
 
-function hasTwoFactorEnabled(session: AuthenticatedDeveloperSession) {
-	return Boolean(
-		(session?.user as TwoFactorSessionUser | undefined)?.twoFactorEnabled,
-	);
-}
-
 async function verifyServiceDeleteConfirmation(
 	session: AuthenticatedDeveloperSession,
 	confirmation?: ServiceDeleteConfirmation,
 ) {
 	const normalizedConfirmation = getServiceDeleteConfirmation(
-		hasTwoFactorEnabled(session),
+		Boolean(
+			(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
+				?.twoFactorEnabled,
+		),
 		confirmation,
 	);
 
