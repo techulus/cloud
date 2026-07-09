@@ -575,13 +575,19 @@ func (a *Agent) updateTraefik() error {
 	}
 
 	needsRestart := false
+	metricsRestart, err := traefik.EnsureMetricsConfig()
+	if err != nil {
+		return fmt.Errorf("failed to ensure Traefik metrics config: %w", err)
+	}
+	needsRestart = metricsRestart
+
 	if len(tcpPorts) > 0 || len(udpPorts) > 0 {
 		log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
-		var err error
-		needsRestart, err = traefik.EnsureEntryPoints(tcpPorts, udpPorts)
+		entryPointsRestart, err := traefik.EnsureEntryPoints(tcpPorts, udpPorts)
 		if err != nil {
 			return fmt.Errorf("failed to ensure entry points: %w", err)
 		}
+		needsRestart = needsRestart || entryPointsRestart
 	}
 
 	log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))

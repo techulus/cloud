@@ -2,11 +2,12 @@ import { headers } from "next/headers";
 import { getService } from "@/db/queries";
 import { auth } from "@/lib/auth";
 import {
-	createEmptyHttpRequestStats,
-	isLoggingEnabled,
-	parseRequestStatsRange,
-	queryHttpRequestStats,
-} from "@/lib/victoria-logs";
+	createEmptyServiceMetrics,
+	isMetricsEnabled,
+	parseMetricRange,
+	queryServiceMetrics,
+	warnMissingMetricsConfig,
+} from "@/lib/victoria-metrics";
 
 const SERVICE_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,7 +26,7 @@ export async function GET(
 
 	const { id: serviceId } = await params;
 	const url = new URL(request.url);
-	const range = parseRequestStatsRange(url.searchParams.get("range"));
+	const range = parseMetricRange(url.searchParams.get("range"));
 
 	if (!SERVICE_ID_PATTERN.test(serviceId)) {
 		return Response.json({ message: "Invalid service id" }, { status: 400 });
@@ -36,20 +37,17 @@ export async function GET(
 		return Response.json({ message: "Service not found" }, { status: 404 });
 	}
 
-	if (!isLoggingEnabled()) {
-		return Response.json({
-			loggingEnabled: false,
-			...createEmptyHttpRequestStats(range),
-		});
+	if (!isMetricsEnabled()) {
+		warnMissingMetricsConfig("service");
+		return Response.json(createEmptyServiceMetrics(range));
 	}
 
 	try {
-		const stats = await queryHttpRequestStats({ serviceId, range });
-		return Response.json({ loggingEnabled: true, ...stats });
+		return Response.json(await queryServiceMetrics({ serviceId, range }));
 	} catch (error) {
-		console.error("[logs:request-stats] failed to query HTTP stats:", error);
+		console.error("[metrics:service] failed to query service metrics:", error);
 		return Response.json(
-			{ message: "Request stats unavailable" },
+			{ message: "Service metrics unavailable" },
 			{ status: 502 },
 		);
 	}
