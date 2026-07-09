@@ -408,7 +408,7 @@ export async function queryServiceMetrics(options: {
 	const statusCodes = new Set<string>();
 
 	for (const result of requestResults) {
-		const status = result.metric.code || "unknown";
+		const status = normalizeHTTPStatusFamily(result.metric.code);
 		statusCodes.add(status);
 		for (const point of matrixResultToPoints(result)) {
 			const bucket = bucketsByTimestamp.get(point.timestamp);
@@ -757,7 +757,23 @@ function matrixResultToPoints(result: {
 }
 
 function sortStatusCodes(statuses: string[]): string[] {
+	const statusOrder = new Map([
+		["2xx", 0],
+		["3xx", 1],
+		["4xx", 2],
+		["5xx", 3],
+		["unknown", 4],
+	]);
+
 	return Array.from(new Set(statuses)).sort((a, b) => {
+		const orderA = statusOrder.get(a);
+		const orderB = statusOrder.get(b);
+		if (orderA !== undefined && orderB !== undefined) {
+			return orderA - orderB;
+		}
+		if (orderA !== undefined) return -1;
+		if (orderB !== undefined) return 1;
+
 		const statusA = Number(a);
 		const statusB = Number(b);
 		if (Number.isFinite(statusA) && Number.isFinite(statusB)) {
@@ -765,6 +781,11 @@ function sortStatusCodes(statuses: string[]): string[] {
 		}
 		return a.localeCompare(b);
 	});
+}
+
+function normalizeHTTPStatusFamily(code: string | undefined): string {
+	if (!code || !/^[2-5]\d\d$/.test(code)) return "unknown";
+	return `${code.charAt(0)}xx`;
 }
 
 function escapePromQL(value: string) {

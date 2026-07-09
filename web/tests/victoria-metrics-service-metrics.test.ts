@@ -66,6 +66,26 @@ describe("VictoriaMetrics service metrics", () => {
 						metric: { code: "200" },
 						values: [[END_TS, "3"]],
 					},
+					{
+						metric: { code: "204" },
+						values: [[END_TS, "2"]],
+					},
+					{
+						metric: { code: "301" },
+						values: [[END_TS, "1"]],
+					},
+					{
+						metric: { code: "404" },
+						values: [[END_TS, "4"]],
+					},
+					{
+						metric: { code: "500" },
+						values: [[END_TS, "5"]],
+					},
+					{
+						metric: { code: "502" },
+						values: [[END_TS, "6"]],
+					},
 				]);
 			}
 			if (query.includes("histogram_quantile(0.95")) {
@@ -102,16 +122,16 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(
 			starts.every((start) => start === String(END_TS - 24 * 60 * 60 + 5 * 60)),
 		).toBe(true);
-		expect(stats.totalRequests).toBe(3);
-		expect(stats.statusCodes).toEqual(["200"]);
+		expect(stats.totalRequests).toBe(21);
+		expect(stats.statusCodes).toEqual(["2xx", "3xx", "4xx", "5xx"]);
 		expect(stats.buckets).toHaveLength(288);
 		expect(stats.windowEnd).toBe("2026-07-02T12:30:00.000Z");
 		expect(stats.buckets[0]?.timestamp).toBe("2026-07-01T12:35:00.000Z");
 
 		const lastBucket = stats.buckets.at(-1);
 		expect(lastBucket).toMatchObject({
-			totalRequests: 3,
-			statuses: { "200": 3 },
+			totalRequests: 21,
+			statuses: { "2xx": 5, "3xx": 1, "4xx": 4, "5xx": 11 },
 			p95ResponseTimeMs: 123,
 			egressBytesPerSecond: 2048,
 			cpuUsagePercent: 42,

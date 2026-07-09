@@ -159,6 +159,14 @@ const STATUS_CODE_COLOR_PALETTES: Record<string, string[]> = {
 	default: ["#64748b", "#0ea5e9", "#a855f7", "#71717a"],
 };
 
+const STATUS_FAMILY_COLORS: Record<string, string> = {
+	"2xx": "#10b981",
+	"3xx": "#6366f1",
+	"4xx": "#f59e0b",
+	"5xx": "#ef4444",
+	unknown: "#64748b",
+};
+
 export function ServiceDetailsOverview({ service }: { service: Service }) {
 	const { proxyDomain } = useService();
 	const overview = useMemo(
@@ -878,6 +886,9 @@ function getStatusDataKeyBase(status: string): string {
 }
 
 function getStatusColor(status: string, index: number): string {
+	const familyColor = STATUS_FAMILY_COLORS[status];
+	if (familyColor) return familyColor;
+
 	const palette =
 		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
 		STATUS_CODE_COLOR_PALETTES.default;
