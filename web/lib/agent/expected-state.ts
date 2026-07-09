@@ -264,15 +264,6 @@ async function fetchDeploymentPorts(deploymentIds: string[]) {
 		.where(inArray(deploymentPorts.deploymentId, deploymentIds));
 }
 
-async function fetchServicePorts(serviceIds: string[]) {
-	if (serviceIds.length === 0) return [];
-
-	return db
-		.select()
-		.from(servicePorts)
-		.where(inArray(servicePorts.serviceId, serviceIds));
-}
-
 export function buildExpectedContainersFromRows({
 	deployments: deploymentRows,
 	services: serviceRows,

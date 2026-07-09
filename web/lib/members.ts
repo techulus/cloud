@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { user } from "@/db/schema";
 import type { InvitableMemberRole, MemberRole } from "@/db/types";
 
-export const MEMBER_ROLES = ["admin", "developer", "reader"] as const;
 export const INVITABLE_MEMBER_ROLES = ["developer", "reader"] as const;
 export const ADMIN_NOT_CONFIGURED_MESSAGE =
 	"No admin user is configured. Run `pnpm admin:create <email>` from the web app to create the first admin.";
@@ -18,13 +17,6 @@ export class AdminNotConfiguredError extends Error {
 		super(ADMIN_NOT_CONFIGURED_MESSAGE);
 		this.name = "AdminNotConfiguredError";
 	}
-}
-
-export function isMemberRole(value: unknown): value is MemberRole {
-	return (
-		typeof value === "string" &&
-		MEMBER_ROLES.includes(value as (typeof MEMBER_ROLES)[number])
-	);
 }
 
 export function isInvitableMemberRole(

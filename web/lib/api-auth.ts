@@ -111,7 +111,3 @@ export async function requireRequestRole(
 export async function requireRequestDeveloperRole(request: Request) {
 	return requireRequestRole(request, ["admin", "developer"]);
 }
-
-export async function requireRequestAdminRole(request: Request) {
-	return requireRequestRole(request, ["admin"]);
-}

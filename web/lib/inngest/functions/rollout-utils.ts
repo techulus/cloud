@@ -4,24 +4,6 @@ import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
 
-export function shouldRollBackDeploymentState(deployment: {
-	trafficState: string;
-	runtimeDesiredState: string;
-}) {
-	void deployment.trafficState;
-	return deployment.runtimeDesiredState !== "removed";
-}
-
-export function shouldRestoreDrainingDeployment(deployment: {
-	trafficState: string;
-	runtimeDesiredState: string;
-}) {
-	return (
-		deployment.trafficState === "draining" &&
-		deployment.runtimeDesiredState !== "removed"
-	);
-}
-
 export async function restoreDrainingDeploymentsForRollback(serviceId: string) {
 	await db
 		.update(deployments)
