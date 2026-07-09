@@ -388,7 +388,7 @@ export async function queryServiceMetrics(options: {
 			stepSeconds: window.stepSeconds,
 		}).catch(() => []),
 		queryRangePromQL(endpoint, {
-			query: `avg(avg_over_time(techulus_service_memory_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
+			query: `sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
 			start: queryStart,
 			end: window.end,
 			stepSeconds: window.stepSeconds,

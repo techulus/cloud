@@ -4,7 +4,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"techulus/cloud-agent/internal/container"
 )
 
 func TestSendPrometheusMetricsAddsExtraLabels(t *testing.T) {
@@ -37,5 +41,55 @@ func TestSendPrometheusMetricsAddsExtraLabels(t *testing.T) {
 	}
 	if gotBody != "sample_metric 1\n" {
 		t.Fatalf("body = %q", gotBody)
+	}
+}
+
+func TestSendContainerStatsAggregatesStableServiceLabels(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	sender := NewVictoriaMetricsSender(server.URL, "server-1")
+	err := sender.SendContainerStats([]container.ResourceStats{
+		{
+			ContainerID:          "container-a",
+			ServiceID:            "svc-a",
+			DeploymentID:         "dep-a",
+			CPUUsagePercent:      10,
+			MemoryUsagePercent:   1.5,
+			MemoryUsedBytes:      1024,
+			NetworkReceiveBytes:  100,
+			NetworkTransmitBytes: 200,
+		},
+		{
+			ContainerID:          "container-b",
+			ServiceID:            "svc-a",
+			DeploymentID:         "dep-b",
+			CPUUsagePercent:      20,
+			MemoryUsagePercent:   2.5,
+			MemoryUsedBytes:      2048,
+			NetworkReceiveBytes:  300,
+			NetworkTransmitBytes: 400,
+		},
+	}, time.UnixMilli(1_700_000_000_000))
+	if err != nil {
+		t.Fatalf("send container stats: %v", err)
+	}
+
+	if strings.Contains(gotBody, "container_id") || strings.Contains(gotBody, "deployment_id") {
+		t.Fatalf("unexpected churn labels in body:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_service_cpu_usage_percent{server_id="server-1",service_id="svc-a"} 30.000000 1700000000000`) {
+		t.Fatalf("missing aggregated CPU metric:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_service_memory_usage_percent{server_id="server-1",service_id="svc-a"} 4.000000 1700000000000`) {
+		t.Fatalf("missing aggregated memory percent metric:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_service_memory_used_bytes{server_id="server-1",service_id="svc-a"} 3072.000000 1700000000000`) {
+		t.Fatalf("missing aggregated memory bytes metric:\n%s", gotBody)
 	}
 }

@@ -96,6 +96,9 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(queries).toContain(
 			`sum(avg_over_time(techulus_service_cpu_usage_percent{service_id="${SERVICE_ID}"}[5m]))`,
 		);
+		expect(queries).toContain(
+			`sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${SERVICE_ID}"}[5m]))`,
+		);
 		expect(
 			starts.every((start) => start === String(END_TS - 24 * 60 * 60 + 5 * 60)),
 		).toBe(true);

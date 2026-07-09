@@ -21,6 +21,15 @@ type VictoriaMetricsSender struct {
 	client   *http.Client
 }
 
+type serviceResourceStats struct {
+	ServiceID            string
+	CPUUsagePercent      float64
+	MemoryUsagePercent   float64
+	MemoryUsedBytes      float64
+	NetworkReceiveBytes  float64
+	NetworkTransmitBytes float64
+}
+
 func NewVictoriaMetricsSender(endpoint, serverID string) *VictoriaMetricsSender {
 	var username, password string
 	cleanEndpoint := strings.TrimRight(endpoint, "/")
@@ -85,16 +94,19 @@ func (v *VictoriaMetricsSender) SendContainerStats(stats []container.ResourceSta
 		return nil
 	}
 
+	aggregates := aggregateContainerStats(stats)
+	if len(aggregates) == 0 {
+		return nil
+	}
+
 	timestampMs := collectedAt.UnixMilli()
 	serverID := escapeLabelValue(v.serverID)
 
 	var buf bytes.Buffer
-	for _, stat := range stats {
+	for _, stat := range aggregates {
 		labels := map[string]string{
-			"server_id":     serverID,
-			"service_id":    escapeLabelValue(stat.ServiceID),
-			"deployment_id": escapeLabelValue(stat.DeploymentID),
-			"container_id":  escapeLabelValue(stat.ContainerID),
+			"server_id":  serverID,
+			"service_id": escapeLabelValue(stat.ServiceID),
 		}
 		writeGaugeWithLabels(&buf, "techulus_service_cpu_usage_percent", labels, stat.CPUUsagePercent, timestampMs)
 		writeGaugeWithLabels(&buf, "techulus_service_memory_usage_percent", labels, stat.MemoryUsagePercent, timestampMs)
@@ -104,6 +116,37 @@ func (v *VictoriaMetricsSender) SendContainerStats(stats []container.ResourceSta
 	}
 
 	return v.postPrometheusImport(buf.Bytes(), nil)
+}
+
+func aggregateContainerStats(stats []container.ResourceStats) []serviceResourceStats {
+	byService := make(map[string]*serviceResourceStats)
+	for _, stat := range stats {
+		if stat.ServiceID == "" {
+			continue
+		}
+		aggregate := byService[stat.ServiceID]
+		if aggregate == nil {
+			aggregate = &serviceResourceStats{ServiceID: stat.ServiceID}
+			byService[stat.ServiceID] = aggregate
+		}
+		aggregate.CPUUsagePercent += stat.CPUUsagePercent
+		aggregate.MemoryUsagePercent += stat.MemoryUsagePercent
+		aggregate.MemoryUsedBytes += stat.MemoryUsedBytes
+		aggregate.NetworkReceiveBytes += stat.NetworkReceiveBytes
+		aggregate.NetworkTransmitBytes += stat.NetworkTransmitBytes
+	}
+
+	serviceIDs := make([]string, 0, len(byService))
+	for serviceID := range byService {
+		serviceIDs = append(serviceIDs, serviceID)
+	}
+	sort.Strings(serviceIDs)
+
+	aggregates := make([]serviceResourceStats, 0, len(serviceIDs))
+	for _, serviceID := range serviceIDs {
+		aggregates = append(aggregates, *byService[serviceID])
+	}
+	return aggregates
 }
 
 func (v *VictoriaMetricsSender) SendPrometheusMetrics(data []byte, extraLabels map[string]string) error {
