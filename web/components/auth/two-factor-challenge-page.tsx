@@ -1,5 +1,6 @@
 "use client";
 
+import { REGEXP_ONLY_DIGITS } from "input-otp";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -14,6 +15,11 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+	InputOTP,
+	InputOTPGroup,
+	InputOTPSlot,
+} from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -145,16 +151,39 @@ export function TwoFactorChallengePage() {
 							<Label htmlFor="two-factor-code">
 								{mode === "totp" ? "Authenticator code" : "Backup code"}
 							</Label>
-							<Input
-								id="two-factor-code"
-								inputMode={mode === "totp" ? "numeric" : "text"}
-								autoComplete="one-time-code"
-								value={code}
-								onChange={(event) => setCode(event.target.value)}
-								placeholder={mode === "totp" ? "123456" : "XXXX-XXXX"}
-								required
-								autoFocus
-							/>
+							{mode === "totp" ? (
+								<InputOTP
+									id="two-factor-code"
+									maxLength={6}
+									pattern={REGEXP_ONLY_DIGITS}
+									inputMode="numeric"
+									autoComplete="one-time-code"
+									value={code}
+									onChange={(value) => setCode(value.replace(/\D/g, ""))}
+									required
+									autoFocus
+								>
+									<InputOTPGroup>
+										<InputOTPSlot index={0} />
+										<InputOTPSlot index={1} />
+										<InputOTPSlot index={2} />
+										<InputOTPSlot index={3} />
+										<InputOTPSlot index={4} />
+										<InputOTPSlot index={5} />
+									</InputOTPGroup>
+								</InputOTP>
+							) : (
+								<Input
+									id="two-factor-code"
+									inputMode="text"
+									autoComplete="one-time-code"
+									value={code}
+									onChange={(event) => setCode(event.target.value)}
+									placeholder="XXXX-XXXX"
+									required
+									autoFocus
+								/>
+							)}
 						</div>
 						<div className="flex items-center justify-between gap-4 rounded-lg border p-3">
 							<div>
@@ -174,7 +203,12 @@ export function TwoFactorChallengePage() {
 						<Button
 							type="submit"
 							className="w-full"
-							disabled={loading || normalizedCode.length === 0}
+							disabled={
+								loading ||
+								(mode === "totp"
+									? normalizedCode.length !== 6
+									: normalizedCode.length === 0)
+							}
 						>
 							{loading ? <Spinner className="size-4" /> : null}
 							Verify

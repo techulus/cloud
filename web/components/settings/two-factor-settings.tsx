@@ -1,5 +1,6 @@
 "use client";
 
+import { REGEXP_ONLY_DIGITS } from "input-otp";
 import {
 	Copy,
 	KeyRound,
@@ -15,6 +16,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+	InputOTP,
+	InputOTPGroup,
+	InputOTPSlot,
+} from "@/components/ui/input-otp";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -388,23 +394,33 @@ export function TwoFactorSettings() {
 							<div className="space-y-4">
 								<div className="space-y-2">
 									<Label htmlFor="totp-code">Authenticator code</Label>
-									<Input
+									<InputOTP
 										id="totp-code"
+										maxLength={6}
+										pattern={REGEXP_ONLY_DIGITS}
 										inputMode="numeric"
 										autoComplete="one-time-code"
 										value={verificationCode}
-										onChange={(event) =>
-											setVerificationCode(event.target.value)
+										onChange={(value) =>
+											setVerificationCode(value.replace(/\D/g, ""))
 										}
-										placeholder="123456"
 										required
-									/>
+									>
+										<InputOTPGroup>
+											<InputOTPSlot index={0} />
+											<InputOTPSlot index={1} />
+											<InputOTPSlot index={2} />
+											<InputOTPSlot index={3} />
+											<InputOTPSlot index={4} />
+											<InputOTPSlot index={5} />
+										</InputOTPGroup>
+									</InputOTP>
 								</div>
 								<div className="flex flex-wrap gap-2">
 									<Button
 										type="submit"
 										disabled={
-											isVerifying || formattedVerificationCode.length === 0
+											isVerifying || formattedVerificationCode.length !== 6
 										}
 									>
 										{isVerifying ? <Spinner className="size-4" /> : null}
