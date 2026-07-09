@@ -1,28 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
 import {
+	deleteProject,
 	updateProjectName,
 	updateProjectSlug,
-	deleteProject,
 } from "@/actions/projects";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import { DeleteConfirmationDialog } from "@/components/core/delete-confirmation-dialog";
 import { EditableText } from "@/components/core/editable-text";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import type { DeleteConfirmation } from "@/lib/two-factor";
 
 type Project = {
 	id: string;
@@ -87,20 +76,11 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
 
 export function ProjectDangerZone({ project }: { project: Project }) {
 	const router = useRouter();
-	const [isDeleting, setIsDeleting] = useState(false);
 
-	const handleDelete = async () => {
-		setIsDeleting(true);
-		try {
-			await deleteProject(project.id);
-			toast.success("Project deleted");
-			router.push("/dashboard");
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to delete project",
-			);
-			setIsDeleting(false);
-		}
+	const handleDelete = async (confirmation?: DeleteConfirmation) => {
+		await deleteProject(project.id, confirmation);
+		toast.success("Project deleted");
+		router.push("/dashboard");
 	};
 
 	return (
@@ -118,30 +98,13 @@ export function ProjectDangerZone({ project }: { project: Project }) {
 							deployments will be permanently removed.
 						</p>
 					</ItemContent>
-					<AlertDialog>
-						<AlertDialogTrigger render={<Button variant="destructive" />}>
-							Delete Project
-						</AlertDialogTrigger>
-						<AlertDialogContent>
-							<AlertDialogHeader>
-								<AlertDialogTitle>Delete {project.name}?</AlertDialogTitle>
-								<AlertDialogDescription>
-									This action cannot be undone. This will permanently delete the
-									project and all its environments, services, and deployments.
-								</AlertDialogDescription>
-							</AlertDialogHeader>
-							<AlertDialogFooter>
-								<AlertDialogCancel>Cancel</AlertDialogCancel>
-								<AlertDialogAction
-									variant="destructive"
-									onClick={handleDelete}
-									disabled={isDeleting}
-								>
-									{isDeleting ? "Deleting..." : "Delete"}
-								</AlertDialogAction>
-							</AlertDialogFooter>
-						</AlertDialogContent>
-					</AlertDialog>
+					<DeleteConfirmationDialog
+						resourceName={project.name}
+						triggerLabel="Delete Project"
+						description="This action cannot be undone. This will permanently delete the project and all its environments, services, and deployments."
+						fallbackError="Failed to delete project"
+						onDelete={handleDelete}
+					/>
 				</Item>
 			</div>
 		</div>
