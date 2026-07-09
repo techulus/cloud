@@ -223,6 +223,10 @@ function ServiceMetricsPanel({
 		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
 		[chartMode, stats, chartRows, hasMetricData],
 	);
+	const todayLabel = new Intl.DateTimeFormat(undefined, {
+		day: "numeric",
+		month: "short",
+	}).format(new Date());
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
@@ -247,7 +251,7 @@ function ServiceMetricsPanel({
 					)}
 				</div>
 				<div className="flex flex-col items-end gap-2">
-					<p className="text-sm text-muted-foreground">{formatToday()}</p>
+					<p className="text-sm text-muted-foreground">{todayLabel}</p>
 					<ServiceChartModeToggle
 						value={chartMode}
 						onChange={setChartMode}
@@ -819,7 +823,10 @@ function getSourceInfo(service: Service): SourceInfo {
 	if (service.sourceType === "github" && service.githubRepoUrl) {
 		return {
 			icon: Github,
-			label: formatGithubRepo(service.githubRepoUrl),
+			label: service.githubRepoUrl
+				.replace(/^https:\/\/github\.com\//, "")
+				.replace(/^git@github\.com:/, "")
+				.replace(/\.git$/, ""),
 			detail: "GitHub",
 			href: service.githubRepoUrl,
 			branch: service.githubBranch || "main",
@@ -877,12 +884,8 @@ function buildStatusSeries(stats?: ServiceMetricsResponse): StatusSeries[] {
 }
 
 function getStatusDataKey(status: string): string {
-	return `${getStatusDataKeyBase(status)}_total`;
-}
-
-function getStatusDataKeyBase(status: string): string {
 	const normalized = status.replace(/[^a-zA-Z0-9]/g, "_");
-	return `status_${normalized || "unknown"}`;
+	return `status_${normalized || "unknown"}_total`;
 }
 
 function getStatusColor(status: string, index: number): string {
@@ -893,13 +896,6 @@ function getStatusColor(status: string, index: number): string {
 		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
 		STATUS_CODE_COLOR_PALETTES.default;
 	return palette[index % palette.length];
-}
-
-function formatGithubRepo(repoUrl: string): string {
-	return repoUrl
-		.replace(/^https:\/\/github\.com\//, "")
-		.replace(/^git@github\.com:/, "")
-		.replace(/\.git$/, "");
 }
 
 function formatResources(service: Service): string {
@@ -917,15 +913,11 @@ function formatResources(service: Service): string {
 	return `${cpuLabel} · ${memoryLabel}`;
 }
 
-function getConfiguredReplicaCount(overview: OverviewData): number {
-	return overview.serverSummaries.reduce(
+function formatInstanceSummary(overview: OverviewData): string {
+	const configured = overview.serverSummaries.reduce(
 		(total, server) => total + server.configured,
 		0,
 	);
-}
-
-function formatInstanceSummary(overview: OverviewData): string {
-	const configured = getConfiguredReplicaCount(overview);
 	const serverCount = overview.serverSummaries.length;
 
 	if (configured === 0) {
@@ -953,16 +945,14 @@ function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
 
 function formatPortSummary(ports: Service["ports"]): string {
 	if (ports.length === 0) return "No Ports";
-	if (ports.length === 1) return formatPortLabel(ports[0]);
+	if (ports.length === 1) {
+		const port = ports[0];
+		const protocol = (port.protocol || "http").toUpperCase();
+		const external = port.externalPort ? ` -> :${port.externalPort}` : "";
+		return `${protocol} :${port.port}${external}`;
+	}
 
 	return formatCount(ports.length, "port");
-}
-
-function formatPortLabel(port: Service["ports"][number]): string {
-	const protocol = (port.protocol || "http").toUpperCase();
-	const external = port.externalPort ? ` -> :${port.externalPort}` : "";
-
-	return `${protocol} :${port.port}${external}`;
 }
 
 function formatCount(count: number, singular: string): string {
@@ -1227,7 +1217,7 @@ function formatAxisTick(value: number, mode: ServiceChartMode): string {
 	if (mode === "latency") return formatDurationMs(value);
 	if (mode === "traffic") return formatBytes(value);
 	if (mode === "resources") return `${formatRateTick(value)}%`;
-	return formatRequestTick(value);
+	return formatCompactNumber(value);
 }
 
 function formatRateTick(value: number): string {
@@ -1241,10 +1231,6 @@ function getYAxisMargin(mode: ServiceChartMode): number {
 	if (mode === "latency") return -12;
 	if (mode === "resources") return -24;
 	return -20;
-}
-
-function formatRequestTick(value: number): string {
-	return formatCompactNumber(value);
 }
 
 function formatRequestCount(value: number): string {
@@ -1292,11 +1278,4 @@ function formatTooltipDate(value: string): string {
 		hour: "numeric",
 		minute: "2-digit",
 	}).format(new Date(value));
-}
-
-function formatToday(): string {
-	return new Intl.DateTimeFormat(undefined, {
-		day: "numeric",
-		month: "short",
-	}).format(new Date());
 }
