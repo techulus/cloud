@@ -114,6 +114,7 @@ export default function ConfigurationPage() {
 			toast.error(
 				error instanceof Error ? error.message : "Failed to delete service",
 			);
+			resetDeleteConfirmation();
 		} finally {
 			setIsDeleting(false);
 		}
@@ -165,8 +166,9 @@ export default function ConfigurationPage() {
 						<AlertDialog
 							open={deleteDialogOpen}
 							onOpenChange={(open) => {
+								if (isDeleting) return;
 								setDeleteDialogOpen(open);
-								if (!open && !isDeleting) resetDeleteConfirmation();
+								if (!open) resetDeleteConfirmation();
 							}}
 						>
 							<AlertDialogTrigger render={<Button variant="destructive" />}>
@@ -255,7 +257,9 @@ export default function ConfigurationPage() {
 									</div>
 								)}
 								<AlertDialogFooter>
-									<AlertDialogCancel>Cancel</AlertDialogCancel>
+									<AlertDialogCancel disabled={isDeleting}>
+										Cancel
+									</AlertDialogCancel>
 									<AlertDialogAction
 										variant="destructive"
 										onClick={handleDelete}
