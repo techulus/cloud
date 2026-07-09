@@ -17,12 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn, useSession } from "@/lib/auth-client";
+import { getSafeAuthRedirect } from "@/lib/two-factor";
 
 export function SignInPage() {
 	const router = useRouter();
 	const searchParams = useSearchParams();
 	const { data: session, isPending } = useSession();
-	const redirectTo = searchParams.get("redirect") || "/dashboard";
+	const redirectTo = getSafeAuthRedirect(searchParams.get("redirect"));
 
 	useEffect(() => {
 		if (!isPending && session) {
@@ -40,15 +41,22 @@ export function SignInPage() {
 		setError("");
 		setLoading(true);
 
-		const { error } = await signIn.email({
+		const response = await signIn.email({
 			email,
 			password,
 		});
 
 		setLoading(false);
 
-		if (error) {
-			setError(error.message || "Failed to sign in");
+		if (response.error) {
+			setError(response.error.message || "Failed to sign in");
+			return;
+		}
+
+		if (
+			(response.data as { twoFactorRedirect?: boolean } | null)
+				?.twoFactorRedirect
+		) {
 			return;
 		}
 

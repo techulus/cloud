@@ -1,7 +1,7 @@
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { bearer, deviceAuthorization } from "better-auth/plugins";
+import { bearer, deviceAuthorization, twoFactor } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
 import { userAc } from "better-auth/plugins/admin/access";
 import { headers } from "next/headers";
@@ -11,8 +11,10 @@ import type { MemberRole } from "@/db/types";
 import { getUserRole, hasAnyRole } from "@/lib/members";
 
 const TECHULUS_CLI_CLIENT_ID = "techulus-cli";
+const APP_NAME = "Techulus Cloud";
 
 export const auth = betterAuth({
+	appName: APP_NAME,
 	database: drizzleAdapter(db, {
 		provider: "pg",
 		schema,
@@ -46,6 +48,9 @@ export const auth = betterAuth({
 				developer: userAc,
 				reader: userAc,
 			},
+		}),
+		twoFactor({
+			issuer: APP_NAME,
 		}),
 		bearer(),
 	],
