@@ -160,10 +160,7 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 		() => buildOverviewData(service, proxyDomain),
 		[service, proxyDomain],
 	);
-	const serviceMetricsUrl =
-		overview.runningDeployments > 0
-			? `/api/services/${service.id}/metrics?range=24h`
-			: null;
+	const serviceMetricsUrl = `/api/services/${service.id}/metrics?range=24h`;
 	const {
 		data: serviceMetrics,
 		error: serviceMetricsError,
@@ -177,7 +174,6 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 			<div className="grid items-stretch lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
 				<ServiceMetricsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
-					hasRunningDeployments={overview.runningDeployments > 0}
 					stats={serviceMetrics}
 					error={serviceMetricsError}
 					isLoading={isServiceMetricsLoading}
@@ -191,13 +187,11 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 
 function ServiceMetricsPanel({
 	hasPublicHttp,
-	hasRunningDeployments,
 	stats,
 	error,
 	isLoading,
 }: {
 	hasPublicHttp: boolean;
-	hasRunningDeployments: boolean;
 	stats?: ServiceMetricsResponse;
 	error?: unknown;
 	isLoading: boolean;
@@ -226,7 +220,7 @@ function ServiceMetricsPanel({
 							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
-					) : hasRunningDeployments ? (
+					) : (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
 							<div>
 								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
@@ -271,13 +265,6 @@ function ServiceMetricsPanel({
 								<p className="text-sm text-muted-foreground">egress</p>
 							</div>
 						</div>
-					) : (
-						<>
-							<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-								-
-							</p>
-							<p className="text-sm text-muted-foreground">not deployed</p>
-						</>
 					)}
 				</div>
 				<div className="flex flex-col items-end gap-2">
@@ -285,15 +272,13 @@ function ServiceMetricsPanel({
 					<ServiceChartModeToggle
 						value={chartMode}
 						onChange={setChartMode}
-						disabled={!hasRunningDeployments || isLoading || isUnavailable}
+						disabled={isLoading || isUnavailable}
 					/>
 				</div>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
-				{!hasRunningDeployments ? (
-					<ServiceMetricsState message="Deploy the service to collect metrics" />
-				) : isLoading ? (
+				{isLoading ? (
 					<Skeleton className="h-full rounded-lg" />
 				) : isUnavailable ? (
 					<ServiceMetricsState message="Service metrics unavailable" />
