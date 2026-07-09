@@ -127,6 +127,11 @@ type MetricSeries = {
 	valueFormatter: (value: number) => string;
 };
 
+type ServiceMetricSummaryItem = {
+	label: string;
+	value: string;
+};
+
 const STATUS_TONE_CLASSES: Record<
 	ServiceStatus["tone"],
 	{ dot: string; text: string }
@@ -205,11 +210,11 @@ function ServiceMetricsPanel({
 	);
 	const hasChartData = hasMetricDataForMode(chartRows, chartMode, activeSeries);
 	const isUnavailable = Boolean(error) || stats?.metricsEnabled === false;
-	const hasMetricData = stats && !isUnavailable;
-	const p95 = getLatestValue(chartRows, "p95ResponseTimeMs");
-	const egress = getLatestValue(chartRows, "egressBytesPerSecond");
-	const cpu = getLatestValue(chartRows, "cpuUsagePercent");
-	const memory = getLatestValue(chartRows, "memoryUsedBytes");
+	const hasMetricData = Boolean(stats && !isUnavailable);
+	const summaryItems = useMemo(
+		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
+		[chartMode, stats, chartRows, hasMetricData],
+	);
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
@@ -222,48 +227,14 @@ function ServiceMetricsPanel({
 						</div>
 					) : (
 						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatCompactNumber(stats.totalRequests)
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">requests in 24h</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatRate(getAverageRequestsPerSecond(stats))
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">avg RPS</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && p95 != null ? formatDurationMs(p95) : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">p95 latency</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && cpu != null ? `${formatRate(cpu)}%` : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">CPU</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && memory != null ? formatBytes(memory) : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">memory</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && egress != null
-										? `${formatBytes(egress)}/s`
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">egress</p>
-							</div>
+							{summaryItems.map((item) => (
+								<div key={item.label}>
+									<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+										{item.value}
+									</p>
+									<p className="text-sm text-muted-foreground">{item.label}</p>
+								</div>
+							))}
 						</div>
 					)}
 				</div>
@@ -1004,6 +975,101 @@ function formatRate(value: number): string {
 	if (value >= 100) return value.toFixed(0);
 	if (value >= 10) return value.toFixed(1);
 	return value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function buildServiceMetricSummaryItems(
+	mode: ServiceChartMode,
+	stats: ServiceMetricsResponse | undefined,
+	rows: ChartRow[],
+	hasMetricData: boolean,
+): ServiceMetricSummaryItem[] {
+	if (mode === "requests") {
+		return [
+			{
+				label: "requests in 24h",
+				value:
+					hasMetricData && stats
+						? formatCompactNumber(stats.totalRequests)
+						: "-",
+			},
+			{
+				label: "avg RPS",
+				value:
+					hasMetricData && stats
+						? formatRate(getAverageRequestsPerSecond(stats))
+						: "-",
+			},
+		];
+	}
+
+	if (mode === "latency") {
+		return [
+			{
+				label: "p50 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p50ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p95 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p95ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p99 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p99ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+		];
+	}
+
+	if (mode === "traffic") {
+		return [
+			{
+				label: "ingress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "ingressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+			{
+				label: "egress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "egressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+		];
+	}
+
+	return [
+		{
+			label: "CPU",
+			value: formatNullableMetric(
+				getLatestValue(rows, "cpuUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+		{
+			label: "memory",
+			value: formatNullableMetric(
+				getLatestValue(rows, "memoryUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+	];
+}
+
+function formatNullableMetric(
+	value: number | null,
+	formatter: (value: number) => string,
+): string {
+	return value == null ? "-" : formatter(value);
 }
 
 function buildMetricSeries(
