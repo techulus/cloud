@@ -127,6 +127,11 @@ type MetricSeries = {
 	valueFormatter: (value: number) => string;
 };
 
+type ServiceMetricSummaryItem = {
+	label: string;
+	value: string;
+};
+
 const STATUS_TONE_CLASSES: Record<
 	ServiceStatus["tone"],
 	{ dot: string; text: string }
@@ -154,16 +159,21 @@ const STATUS_CODE_COLOR_PALETTES: Record<string, string[]> = {
 	default: ["#64748b", "#0ea5e9", "#a855f7", "#71717a"],
 };
 
+const STATUS_FAMILY_COLORS: Record<string, string> = {
+	"2xx": "#10b981",
+	"3xx": "#6366f1",
+	"4xx": "#f59e0b",
+	"5xx": "#ef4444",
+	unknown: "#64748b",
+};
+
 export function ServiceDetailsOverview({ service }: { service: Service }) {
 	const { proxyDomain } = useService();
 	const overview = useMemo(
 		() => buildOverviewData(service, proxyDomain),
 		[service, proxyDomain],
 	);
-	const serviceMetricsUrl =
-		overview.runningDeployments > 0
-			? `/api/services/${service.id}/metrics?range=24h`
-			: null;
+	const serviceMetricsUrl = `/api/services/${service.id}/metrics?range=24h`;
 	const {
 		data: serviceMetrics,
 		error: serviceMetricsError,
@@ -177,7 +187,6 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 			<div className="grid items-stretch lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
 				<ServiceMetricsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
-					hasRunningDeployments={overview.runningDeployments > 0}
 					stats={serviceMetrics}
 					error={serviceMetricsError}
 					isLoading={isServiceMetricsLoading}
@@ -191,13 +200,11 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 
 function ServiceMetricsPanel({
 	hasPublicHttp,
-	hasRunningDeployments,
 	stats,
 	error,
 	isLoading,
 }: {
 	hasPublicHttp: boolean;
-	hasRunningDeployments: boolean;
 	stats?: ServiceMetricsResponse;
 	error?: unknown;
 	isLoading: boolean;
@@ -211,11 +218,11 @@ function ServiceMetricsPanel({
 	);
 	const hasChartData = hasMetricDataForMode(chartRows, chartMode, activeSeries);
 	const isUnavailable = Boolean(error) || stats?.metricsEnabled === false;
-	const hasMetricData = stats && !isUnavailable;
-	const p95 = getLatestValue(chartRows, "p95ResponseTimeMs");
-	const egress = getLatestValue(chartRows, "egressBytesPerSecond");
-	const cpu = getLatestValue(chartRows, "cpuUsagePercent");
-	const memory = getLatestValue(chartRows, "memoryUsedBytes");
+	const hasMetricData = Boolean(stats && !isUnavailable);
+	const summaryItems = useMemo(
+		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
+		[chartMode, stats, chartRows, hasMetricData],
+	);
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
@@ -226,58 +233,17 @@ function ServiceMetricsPanel({
 							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
-					) : hasRunningDeployments ? (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatCompactNumber(stats.totalRequests)
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">requests in 24h</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatRate(getAverageRequestsPerSecond(stats))
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">avg RPS</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && p95 != null ? formatDurationMs(p95) : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">p95 latency</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && cpu != null ? `${formatRate(cpu)}%` : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">CPU</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && memory != null ? formatBytes(memory) : "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">memory</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData && egress != null
-										? `${formatBytes(egress)}/s`
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">egress</p>
-							</div>
-						</div>
 					) : (
-						<>
-							<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-								-
-							</p>
-							<p className="text-sm text-muted-foreground">not deployed</p>
-						</>
+						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+							{summaryItems.map((item) => (
+								<div key={item.label}>
+									<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+										{item.value}
+									</p>
+									<p className="text-sm text-muted-foreground">{item.label}</p>
+								</div>
+							))}
+						</div>
 					)}
 				</div>
 				<div className="flex flex-col items-end gap-2">
@@ -285,15 +251,13 @@ function ServiceMetricsPanel({
 					<ServiceChartModeToggle
 						value={chartMode}
 						onChange={setChartMode}
-						disabled={!hasRunningDeployments || isLoading || isUnavailable}
+						disabled={isLoading || isUnavailable}
 					/>
 				</div>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
-				{!hasRunningDeployments ? (
-					<ServiceMetricsState message="Deploy the service to collect metrics" />
-				) : isLoading ? (
+				{isLoading ? (
 					<Skeleton className="h-full rounded-lg" />
 				) : isUnavailable ? (
 					<ServiceMetricsState message="Service metrics unavailable" />
@@ -922,6 +886,9 @@ function getStatusDataKeyBase(status: string): string {
 }
 
 function getStatusColor(status: string, index: number): string {
+	const familyColor = STATUS_FAMILY_COLORS[status];
+	if (familyColor) return familyColor;
+
 	const palette =
 		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
 		STATUS_CODE_COLOR_PALETTES.default;
@@ -1019,6 +986,101 @@ function formatRate(value: number): string {
 	if (value >= 100) return value.toFixed(0);
 	if (value >= 10) return value.toFixed(1);
 	return value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function buildServiceMetricSummaryItems(
+	mode: ServiceChartMode,
+	stats: ServiceMetricsResponse | undefined,
+	rows: ChartRow[],
+	hasMetricData: boolean,
+): ServiceMetricSummaryItem[] {
+	if (mode === "requests") {
+		return [
+			{
+				label: "requests in 24h",
+				value:
+					hasMetricData && stats
+						? formatCompactNumber(stats.totalRequests)
+						: "-",
+			},
+			{
+				label: "avg RPS",
+				value:
+					hasMetricData && stats
+						? formatRate(getAverageRequestsPerSecond(stats))
+						: "-",
+			},
+		];
+	}
+
+	if (mode === "latency") {
+		return [
+			{
+				label: "p50 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p50ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p95 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p95ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p99 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p99ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+		];
+	}
+
+	if (mode === "traffic") {
+		return [
+			{
+				label: "ingress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "ingressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+			{
+				label: "egress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "egressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+		];
+	}
+
+	return [
+		{
+			label: "CPU",
+			value: formatNullableMetric(
+				getLatestValue(rows, "cpuUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+		{
+			label: "memory",
+			value: formatNullableMetric(
+				getLatestValue(rows, "memoryUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+	];
+}
+
+function formatNullableMetric(
+	value: number | null,
+	formatter: (value: number) => string,
+): string {
+	return value == null ? "-" : formatter(value);
 }
 
 function buildMetricSeries(
