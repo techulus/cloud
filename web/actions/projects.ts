@@ -53,10 +53,6 @@ import type {
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
-import {
-	getServiceDeleteConfirmation,
-	type ServiceDeleteConfirmation,
-} from "@/lib/service-delete-confirmation";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
@@ -64,6 +60,11 @@ import { deleteBackup } from "./backups";
 type AuthenticatedDeveloperSession = Awaited<
 	ReturnType<typeof requireDeveloperRole>
 >;
+
+type ServiceDeleteConfirmation = {
+	password?: string;
+	totpCode?: string;
+};
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -587,21 +588,26 @@ async function verifyServiceDeleteConfirmation(
 	session: AuthenticatedDeveloperSession,
 	confirmation?: ServiceDeleteConfirmation,
 ) {
-	const normalizedConfirmation = getServiceDeleteConfirmation(
-		Boolean(
-			(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
-				?.twoFactorEnabled,
-		),
-		confirmation,
+	const twoFactorEnabled = Boolean(
+		(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
+			?.twoFactorEnabled,
 	);
+	if (!twoFactorEnabled) return;
 
-	if (!normalizedConfirmation) return;
+	const password = confirmation?.password?.trim() ?? "";
+	const totpCode = (confirmation?.totpCode ?? "").replace(/\s/g, "");
+
+	if (!password || !totpCode) {
+		throw new Error(
+			"Password and authenticator code are required to delete this service",
+		);
+	}
 
 	const requestHeaders = await headers();
 
 	try {
 		const passwordVerification = await auth.api.verifyPassword({
-			body: { password: normalizedConfirmation.password },
+			body: { password },
 			headers: requestHeaders,
 		});
 
@@ -610,7 +616,7 @@ async function verifyServiceDeleteConfirmation(
 		}
 
 		await auth.api.verifyTOTP({
-			body: { code: normalizedConfirmation.totpCode },
+			body: { code: totpCode },
 			headers: requestHeaders,
 		});
 	} catch {

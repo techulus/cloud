@@ -3,7 +3,6 @@ import {
 	DEFAULT_AUTH_REDIRECT,
 	getSafeAuthRedirect,
 	getTotpSecret,
-	normalizeTwoFactorCode,
 } from "@/lib/two-factor";
 
 describe("two-factor helpers", () => {
@@ -35,10 +34,5 @@ describe("two-factor helpers", () => {
 
 	it("returns an empty secret for malformed TOTP URIs", () => {
 		expect(getTotpSecret("not a uri")).toBe("");
-	});
-
-	it("normalizes two-factor codes by removing whitespace", () => {
-		expect(normalizeTwoFactorCode(" 123 456\n")).toBe("123456");
-		expect(normalizeTwoFactorCode(null)).toBe("");
 	});
 });

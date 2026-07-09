@@ -35,7 +35,6 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useSession } from "@/lib/auth-client";
-import { normalizeTwoFactorCode } from "@/lib/two-factor";
 
 const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
 
@@ -59,7 +58,7 @@ export default function ConfigurationPage() {
 	const [deleteTotpCode, setDeleteTotpCode] = useState("");
 	const [isDeleting, setIsDeleting] = useState(false);
 	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
-	const normalizedDeleteTotpCode = normalizeTwoFactorCode(deleteTotpCode);
+	const normalizedDeleteTotpCode = deleteTotpCode.replace(/\s/g, "");
 	const isDeleteConfirmationIncomplete =
 		requiresDeleteConfirmation &&
 		(deletePassword.trim().length === 0 ||

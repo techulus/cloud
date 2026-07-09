@@ -37,7 +37,3 @@ export function getTotpSecret(totpURI: string) {
 		return "";
 	}
 }
-
-export function normalizeTwoFactorCode(value: string | null | undefined) {
-	return (value ?? "").replace(/\s/g, "");
-}
