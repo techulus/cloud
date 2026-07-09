@@ -8,8 +8,8 @@
 	--font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 	--font-sans--font-feature-settings: "cv11", "ss03";
 	--font-mono:
-		var(--font-ioskeley-mono), ui-monospace, SFMono-Regular, "SF Mono",
-		Menlo, Consolas, monospace;
+		var(--font-ioskeley-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+		Consolas, monospace;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-sidebar-ring: var(--sidebar-ring);
@@ -76,6 +76,7 @@
 
 @theme {
 	--animate-shimmer: shimmer 1.4s ease-in-out infinite;
+	--animate-caret-blink: caret-blink 1.2s ease-out infinite;
 
 	@keyframes shimmer {
 		0% {
@@ -83,6 +84,18 @@
 		}
 		100% {
 			transform: translateX(300%);
+		}
+	}
+
+	@keyframes caret-blink {
+		0%,
+		70%,
+		100% {
+			opacity: 1;
+		}
+		20%,
+		50% {
+			opacity: 0;
 		}
 	}
 }

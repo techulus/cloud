@@ -1,5 +1,6 @@
 "use client";
 
+import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
@@ -30,7 +31,11 @@ import {
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+	InputOTP,
+	InputOTPGroup,
+	InputOTPSlot,
+} from "@/components/ui/input-otp";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -59,7 +64,7 @@ export default function ConfigurationPage() {
 	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
 	const normalizedDeleteTotpCode = deleteTotpCode.replace(/\s/g, "");
 	const isDeleteConfirmationIncomplete =
-		requiresDeleteConfirmation && normalizedDeleteTotpCode.length === 0;
+		requiresDeleteConfirmation && normalizedDeleteTotpCode.length !== 6;
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -85,7 +90,7 @@ export default function ConfigurationPage() {
 
 	const handleDelete = async () => {
 		if (isDeleteConfirmationIncomplete) {
-			toast.error("Enter your authenticator code");
+			toast.error("Enter your 6-digit authenticator code");
 			return;
 		}
 
@@ -226,17 +231,27 @@ export default function ConfigurationPage() {
 											<Label htmlFor="delete-service-totp-code">
 												Authenticator code
 											</Label>
-											<Input
+											<InputOTP
 												id="delete-service-totp-code"
+												maxLength={6}
+												pattern={REGEXP_ONLY_DIGITS}
 												inputMode="numeric"
 												autoComplete="one-time-code"
 												value={deleteTotpCode}
-												onChange={(event) =>
-													setDeleteTotpCode(event.target.value)
+												onChange={(value) =>
+													setDeleteTotpCode(value.replace(/\D/g, ""))
 												}
-												placeholder="123456"
 												disabled={isDeleting}
-											/>
+											>
+												<InputOTPGroup>
+													<InputOTPSlot index={0} />
+													<InputOTPSlot index={1} />
+													<InputOTPSlot index={2} />
+													<InputOTPSlot index={3} />
+													<InputOTPSlot index={4} />
+													<InputOTPSlot index={5} />
+												</InputOTPGroup>
+											</InputOTP>
 										</div>
 									</div>
 								)}
