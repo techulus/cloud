@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/health"
 )
 
 func TestSendPrometheusMetricsAddsExtraLabels(t *testing.T) {
@@ -41,6 +42,36 @@ func TestSendPrometheusMetricsAddsExtraLabels(t *testing.T) {
 	}
 	if gotBody != "sample_metric 1\n" {
 		t.Fatalf("body = %q", gotBody)
+	}
+}
+
+func TestSendAgentStatsWritesStableServerLabels(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	sender := NewVictoriaMetricsSender(server.URL, "server-1")
+	err := sender.SendAgentStats(&health.AgentProcessStats{
+		CPUUsagePercent:    1.25,
+		MemoryUsagePercent: 0.5,
+		MemoryUsedBytes:    64 * 1024 * 1024,
+	}, time.UnixMilli(1_700_000_000_000))
+	if err != nil {
+		t.Fatalf("send agent stats: %v", err)
+	}
+
+	if !strings.Contains(gotBody, `techulus_agent_cpu_usage_percent{server_id="server-1"} 1.250000 1700000000000`) {
+		t.Fatalf("missing agent CPU metric:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_agent_memory_usage_percent{server_id="server-1"} 0.500000 1700000000000`) {
+		t.Fatalf("missing agent memory percent metric:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_agent_memory_used_bytes{server_id="server-1"} 67108864.000000 1700000000000`) {
+		t.Fatalf("missing agent memory bytes metric:\n%s", gotBody)
 	}
 }
 

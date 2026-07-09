@@ -89,6 +89,22 @@ func (v *VictoriaMetricsSender) SendSystemStats(stats *health.SystemStats, colle
 	return nil
 }
 
+func (v *VictoriaMetricsSender) SendAgentStats(stats *health.AgentProcessStats, collectedAt time.Time) error {
+	if stats == nil {
+		return nil
+	}
+
+	timestampMs := collectedAt.UnixMilli()
+	serverID := escapeLabelValue(v.serverID)
+
+	var buf bytes.Buffer
+	writeGauge(&buf, "techulus_agent_cpu_usage_percent", serverID, stats.CPUUsagePercent, timestampMs)
+	writeGauge(&buf, "techulus_agent_memory_usage_percent", serverID, stats.MemoryUsagePercent, timestampMs)
+	writeGauge(&buf, "techulus_agent_memory_used_bytes", serverID, float64(stats.MemoryUsedBytes), timestampMs)
+
+	return v.postPrometheusImport(buf.Bytes(), nil)
+}
+
 func (v *VictoriaMetricsSender) SendContainerStats(stats []container.ResourceStats, collectedAt time.Time) error {
 	if len(stats) == 0 {
 		return nil
