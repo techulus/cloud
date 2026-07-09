@@ -7,7 +7,7 @@ import {
 } from "@/lib/victoria-metrics";
 
 const SERVICE_ID = "123e4567-e89b-42d3-a456-426614174000";
-const END_TS = Date.parse("2026-07-02T12:34:00Z") / 1000;
+const END_TS = Date.parse("2026-07-02T12:30:00Z") / 1000;
 
 describe("VictoriaMetrics service metrics", () => {
 	afterEach(() => {
@@ -105,7 +105,8 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(stats.totalRequests).toBe(3);
 		expect(stats.statusCodes).toEqual(["200"]);
 		expect(stats.buckets).toHaveLength(288);
-		expect(stats.buckets[0]?.timestamp).toBe("2026-07-01T12:39:00.000Z");
+		expect(stats.windowEnd).toBe("2026-07-02T12:30:00.000Z");
+		expect(stats.buckets[0]?.timestamp).toBe("2026-07-01T12:35:00.000Z");
 
 		const lastBucket = stats.buckets.at(-1);
 		expect(lastBucket).toMatchObject({

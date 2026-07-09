@@ -671,7 +671,8 @@ export function getMetricWindow(
 	stepSeconds: number;
 } {
 	const option = METRIC_RANGE_OPTIONS[range];
-	const end = new Date(Math.floor(now.getTime() / 1000) * 1000);
+	const stepMs = option.stepSeconds * 1000;
+	const end = new Date(Math.floor(now.getTime() / stepMs) * stepMs);
 	const start = new Date(end.getTime() - option.durationMs);
 	return {
 		start,
