@@ -87,19 +87,6 @@ function formatDate(value: string | Date | null) {
 	return dateTimeFormatter.format(date);
 }
 
-function describeSource(apiKey: ApiKeyRecord) {
-	const source = apiKey.metadata?.creationSource;
-	if (source === "techulus-cli") return "CLI";
-	if (source === "dashboard") return "Dashboard";
-	return "Manual";
-}
-
-function getKeyPreview(apiKey: ApiKeyRecord) {
-	if (apiKey.start) return `${apiKey.start}••••`;
-	if (apiKey.prefix) return `${apiKey.prefix}••••`;
-	return "Hidden";
-}
-
 export function ApiKeySettings() {
 	const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
@@ -227,68 +214,85 @@ export function ApiKeySettings() {
 						</Empty>
 					) : (
 						<div className="overflow-hidden rounded-lg border">
-							{sortedApiKeys.map((apiKey, index) => (
-								<div
-									key={apiKey.id}
-									className={`grid gap-3 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-center ${
-										index > 0 ? "border-t" : ""
-									}`}
-								>
-									<div className="min-w-0 space-y-1">
-										<div className="flex flex-wrap items-center gap-2">
-											<p className="truncate text-sm font-medium">
-												{apiKey.name ?? "Untitled key"}
-											</p>
-											<Badge
-												variant={apiKey.enabled ? "secondary" : "destructive"}
-											>
-												{apiKey.enabled ? "Active" : "Disabled"}
-											</Badge>
-											<Badge variant="outline">{describeSource(apiKey)}</Badge>
-										</div>
-										<p className="font-mono text-xs text-muted-foreground">
-											{getKeyPreview(apiKey)}
-										</p>
-									</div>
-									<div className="text-xs md:text-sm">
-										<p className="text-muted-foreground">Created</p>
-										<p>{formatDate(apiKey.createdAt)}</p>
-									</div>
-									<div className="text-xs md:text-sm">
-										<p className="text-muted-foreground">Last used</p>
-										<p>{formatDate(apiKey.lastRequest)}</p>
-									</div>
-									<AlertDialog>
-										<AlertDialogTrigger
-											render={<Button variant="destructive" size="sm" />}
-										>
-											<Trash2 className="size-4" />
-											Revoke
-										</AlertDialogTrigger>
-										<AlertDialogContent>
-											<AlertDialogHeader>
-												<AlertDialogTitle>
-													Revoke {apiKey.name ?? "this API key"}?
-												</AlertDialogTitle>
-												<AlertDialogDescription>
-													Any script or CLI using this key will stop working
-													immediately. This cannot be undone.
-												</AlertDialogDescription>
-											</AlertDialogHeader>
-											<AlertDialogFooter>
-												<AlertDialogCancel>Cancel</AlertDialogCancel>
-												<AlertDialogAction
-													variant="destructive"
-													onClick={() => void handleRevoke(apiKey)}
-													disabled={revokingId === apiKey.id}
+							{sortedApiKeys.map((apiKey, index) => {
+								const creationSource = apiKey.metadata?.creationSource;
+								const sourceLabel =
+									creationSource === "techulus-cli"
+										? "CLI"
+										: creationSource === "dashboard"
+											? "Dashboard"
+											: "Manual";
+								const keyPreview = apiKey.start
+									? `${apiKey.start}••••`
+									: apiKey.prefix
+										? `${apiKey.prefix}••••`
+										: "Hidden";
+
+								return (
+									<div
+										key={apiKey.id}
+										className={`grid gap-3 p-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-center ${
+											index > 0 ? "border-t" : ""
+										}`}
+									>
+										<div className="min-w-0 space-y-1">
+											<div className="flex flex-wrap items-center gap-2">
+												<p className="truncate text-sm font-medium">
+													{apiKey.name ?? "Untitled key"}
+												</p>
+												<Badge
+													variant={apiKey.enabled ? "secondary" : "destructive"}
 												>
-													{revokingId === apiKey.id ? "Revoking..." : "Revoke"}
-												</AlertDialogAction>
-											</AlertDialogFooter>
-										</AlertDialogContent>
-									</AlertDialog>
-								</div>
-							))}
+													{apiKey.enabled ? "Active" : "Disabled"}
+												</Badge>
+												<Badge variant="outline">{sourceLabel}</Badge>
+											</div>
+											<p className="font-mono text-xs text-muted-foreground">
+												{keyPreview}
+											</p>
+										</div>
+										<div className="text-xs md:text-sm">
+											<p className="text-muted-foreground">Created</p>
+											<p>{formatDate(apiKey.createdAt)}</p>
+										</div>
+										<div className="text-xs md:text-sm">
+											<p className="text-muted-foreground">Last used</p>
+											<p>{formatDate(apiKey.lastRequest)}</p>
+										</div>
+										<AlertDialog>
+											<AlertDialogTrigger
+												render={<Button variant="destructive" size="sm" />}
+											>
+												<Trash2 className="size-4" />
+												Revoke
+											</AlertDialogTrigger>
+											<AlertDialogContent>
+												<AlertDialogHeader>
+													<AlertDialogTitle>
+														Revoke {apiKey.name ?? "this API key"}?
+													</AlertDialogTitle>
+													<AlertDialogDescription>
+														Any script or CLI using this key will stop working
+														immediately. This cannot be undone.
+													</AlertDialogDescription>
+												</AlertDialogHeader>
+												<AlertDialogFooter>
+													<AlertDialogCancel>Cancel</AlertDialogCancel>
+													<AlertDialogAction
+														variant="destructive"
+														onClick={() => void handleRevoke(apiKey)}
+														disabled={revokingId === apiKey.id}
+													>
+														{revokingId === apiKey.id
+															? "Revoking..."
+															: "Revoke"}
+													</AlertDialogAction>
+												</AlertDialogFooter>
+											</AlertDialogContent>
+										</AlertDialog>
+									</div>
+								);
+							})}
 						</div>
 					)}
 				</div>

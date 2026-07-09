@@ -15,10 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 
-function normalizeUserCode(value: string) {
-	return value.trim().replace(/-/g, "").toUpperCase();
-}
-
 export function DeviceAuthorizationPage() {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -36,7 +32,7 @@ export function DeviceAuthorizationPage() {
 
 	const verifyCode = useCallback(
 		async (code: string) => {
-			const formatted = normalizeUserCode(code);
+			const formatted = code.trim().replace(/-/g, "").toUpperCase();
 			if (!formatted) {
 				setError("Enter the device code to continue");
 				return;
