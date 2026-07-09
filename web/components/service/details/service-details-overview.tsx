@@ -28,8 +28,8 @@ import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
-type RequestStatsResponse = {
-	loggingEnabled: boolean;
+type ServiceMetricsResponse = {
+	metricsEnabled: boolean;
 	range: string;
 	windowStart: string;
 	windowEnd: string;
@@ -40,6 +40,15 @@ type RequestStatsResponse = {
 		timestamp: string;
 		totalRequests: number;
 		statuses: Record<string, number>;
+		p50ResponseTimeMs: number | null;
+		p90ResponseTimeMs: number | null;
+		p95ResponseTimeMs: number | null;
+		p99ResponseTimeMs: number | null;
+		ingressBytesPerSecond: number | null;
+		egressBytesPerSecond: number | null;
+		cpuUsagePercent: number | null;
+		memoryUsagePercent: number | null;
+		memoryUsedBytes: number | null;
 	}>;
 };
 
@@ -85,20 +94,18 @@ type ServiceStatus = {
 type ChartRow = {
 	timestamp: string;
 	totalRequests: number;
-} & Record<string, string | number>;
+} & Record<string, string | number | null>;
 
-type RequestChartMode = "rate" | "total";
+type ServiceChartMode = "requests" | "latency" | "traffic" | "resources";
 
 type StatusSeries = {
 	status: string;
-	rateDataKey: string;
 	totalDataKey: string;
 	color: string;
-	averageRequestsPerSecond: number;
 	totalRequests: number;
 };
 
-type RequestTooltipPayload = {
+type ServiceMetricsTooltipPayload = {
 	name?: string;
 	value?: unknown;
 	color?: string;
@@ -106,11 +113,23 @@ type RequestTooltipPayload = {
 	payload?: ChartRow;
 };
 
-type RequestTooltipProps = {
+type ServiceMetricsTooltipProps = {
 	active?: boolean;
 	label?: string | number;
-	mode: RequestChartMode;
-	payload?: readonly RequestTooltipPayload[];
+	mode: ServiceChartMode;
+	payload?: readonly ServiceMetricsTooltipPayload[];
+};
+
+type MetricSeries = {
+	key: string;
+	label: string;
+	color: string;
+	valueFormatter: (value: number) => string;
+};
+
+type ServiceMetricSummaryItem = {
+	label: string;
+	value: string;
 };
 
 const STATUS_TONE_CLASSES: Record<
@@ -140,32 +159,37 @@ const STATUS_CODE_COLOR_PALETTES: Record<string, string[]> = {
 	default: ["#64748b", "#0ea5e9", "#a855f7", "#71717a"],
 };
 
+const STATUS_FAMILY_COLORS: Record<string, string> = {
+	"2xx": "#10b981",
+	"3xx": "#6366f1",
+	"4xx": "#f59e0b",
+	"5xx": "#ef4444",
+	unknown: "#64748b",
+};
+
 export function ServiceDetailsOverview({ service }: { service: Service }) {
 	const { proxyDomain } = useService();
 	const overview = useMemo(
 		() => buildOverviewData(service, proxyDomain),
 		[service, proxyDomain],
 	);
-	const requestStatsUrl =
-		overview.publicHttpCount > 0
-			? `/api/services/${service.id}/request-stats?range=week`
-			: null;
+	const serviceMetricsUrl = `/api/services/${service.id}/metrics?range=24h`;
 	const {
-		data: requestStats,
-		error: requestStatsError,
-		isLoading: isRequestStatsLoading,
-	} = useSWR<RequestStatsResponse>(requestStatsUrl, fetcher, {
+		data: serviceMetrics,
+		error: serviceMetricsError,
+		isLoading: isServiceMetricsLoading,
+	} = useSWR<ServiceMetricsResponse>(serviceMetricsUrl, fetcher, {
 		refreshInterval: 60000,
 	});
 
 	return (
 		<Card className="gap-0 border border-border py-0 ring-0">
 			<div className="grid items-stretch lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-				<RequestStatsPanel
+				<ServiceMetricsPanel
 					hasPublicHttp={overview.publicHttpCount > 0}
-					stats={requestStats}
-					error={requestStatsError}
-					isLoading={isRequestStatsLoading}
+					stats={serviceMetrics}
+					error={serviceMetricsError}
+					isLoading={isServiceMetricsLoading}
 				/>
 
 				<ServiceConfigPanel service={service} overview={overview} />
@@ -174,23 +198,31 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 	);
 }
 
-function RequestStatsPanel({
+function ServiceMetricsPanel({
 	hasPublicHttp,
 	stats,
 	error,
 	isLoading,
 }: {
 	hasPublicHttp: boolean;
-	stats?: RequestStatsResponse;
+	stats?: ServiceMetricsResponse;
 	error?: unknown;
 	isLoading: boolean;
 }) {
-	const [chartMode, setChartMode] = useState<RequestChartMode>("total");
+	const [chartMode, setChartMode] = useState<ServiceChartMode>("requests");
 	const chartRows = useMemo(() => buildChartRows(stats), [stats]);
 	const statusSeries = useMemo(() => buildStatusSeries(stats), [stats]);
-	const hasChartData = chartRows.some((row) => row.totalRequests > 0);
-	const isUnavailable = Boolean(error) || stats?.loggingEnabled === false;
-	const hasMetricData = hasPublicHttp && stats && !isUnavailable;
+	const activeSeries = useMemo(
+		() => buildMetricSeries(chartMode, statusSeries),
+		[chartMode, statusSeries],
+	);
+	const hasChartData = hasMetricDataForMode(chartRows, chartMode, activeSeries);
+	const isUnavailable = Boolean(error) || stats?.metricsEnabled === false;
+	const hasMetricData = Boolean(stats && !isUnavailable);
+	const summaryItems = useMemo(
+		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
+		[chartMode, stats, chartRows, hasMetricData],
+	);
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
@@ -201,61 +233,46 @@ function RequestStatsPanel({
 							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
-					) : hasPublicHttp ? (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatCompactNumber(stats.totalRequests)
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">
-									requests this week
-								</p>
-							</div>
-							<div>
-								<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-									{hasMetricData
-										? formatRate(getAverageRequestsPerSecond(stats))
-										: "-"}
-								</p>
-								<p className="text-sm text-muted-foreground">
-									avg RPS this week
-								</p>
-							</div>
-						</div>
 					) : (
-						<>
-							<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-								-
-							</p>
-							<p className="text-sm text-muted-foreground">
-								no public HTTP ingress
-							</p>
-						</>
+						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+							{summaryItems.map((item) => (
+								<div key={item.label}>
+									<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+										{item.value}
+									</p>
+									<p className="text-sm text-muted-foreground">{item.label}</p>
+								</div>
+							))}
+						</div>
 					)}
 				</div>
 				<div className="flex flex-col items-end gap-2">
 					<p className="text-sm text-muted-foreground">{formatToday()}</p>
-					<RequestChartModeToggle
+					<ServiceChartModeToggle
 						value={chartMode}
 						onChange={setChartMode}
-						disabled={
-							!hasPublicHttp || isLoading || isUnavailable || !hasChartData
-						}
+						disabled={isLoading || isUnavailable}
 					/>
 				</div>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
-				{!hasPublicHttp ? (
-					<RequestStatsState message="No public HTTP ingress" />
-				) : isLoading ? (
+				{isLoading ? (
 					<Skeleton className="h-full rounded-lg" />
 				) : isUnavailable ? (
-					<RequestStatsState message="Request stats unavailable" />
+					<ServiceMetricsState message="Service metrics unavailable" />
 				) : !hasChartData ? (
-					<RequestStatsState message="No requests in this range" />
+					<ServiceMetricsState
+						message={
+							chartMode === "requests" ||
+							chartMode === "latency" ||
+							chartMode === "traffic"
+								? hasPublicHttp
+									? "No public HTTP metrics in this range"
+									: "No public HTTP ingress"
+								: "No resource metrics in this range"
+						}
+					/>
 				) : (
 					<ResponsiveContainer
 						width="100%"
@@ -269,7 +286,7 @@ function RequestStatsPanel({
 							margin={{
 								top: 8,
 								right: 4,
-								left: chartMode === "rate" ? -28 : -20,
+								left: getYAxisMargin(chartMode),
 								bottom: 0,
 							}}
 						>
@@ -289,30 +306,26 @@ function RequestStatsPanel({
 							<YAxis
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={
-									chartMode === "rate" ? formatRateTick : formatRequestTick
+								tickFormatter={(value) =>
+									formatAxisTick(Number(value), chartMode)
 								}
 								className="text-xs"
 							/>
 							<Tooltip
 								cursor={{ strokeDasharray: "3 3" }}
 								content={(props) => (
-									<RequestStatsTooltip
-										{...(props as unknown as RequestTooltipProps)}
+									<ServiceMetricsTooltip
+										{...(props as unknown as ServiceMetricsTooltipProps)}
 										mode={chartMode}
 									/>
 								)}
 							/>
-							{statusSeries.map((series) => (
+							{activeSeries.map((series) => (
 								<Line
-									key={series.status}
+									key={series.key}
 									type="monotone"
-									dataKey={
-										chartMode === "rate"
-											? series.rateDataKey
-											: series.totalDataKey
-									}
-									name={series.status}
+									dataKey={series.key}
+									name={series.label}
 									stroke={series.color}
 									strokeWidth={2}
 									dot={false}
@@ -325,22 +338,14 @@ function RequestStatsPanel({
 				)}
 			</div>
 
-			{statusSeries.length > 0 && (
+			{activeSeries.length > 0 && (
 				<div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-					{statusSeries.map((series) => (
+					{activeSeries.map((series) => (
 						<LegendMetric
-							key={series.status}
+							key={series.key}
 							color={series.color}
-							label={
-								chartMode === "rate" ? `${series.status}/s` : series.status
-							}
-							value={
-								stats && !isUnavailable
-									? chartMode === "rate"
-										? formatRate(series.averageRequestsPerSecond)
-										: formatRequestCount(series.totalRequests)
-									: "-"
-							}
+							label={series.label}
+							value={formatLatestSeriesValue(chartRows, series)}
 						/>
 					))}
 				</div>
@@ -349,18 +354,20 @@ function RequestStatsPanel({
 	);
 }
 
-function RequestChartModeToggle({
+function ServiceChartModeToggle({
 	value,
 	onChange,
 	disabled,
 }: {
-	value: RequestChartMode;
-	onChange: (value: RequestChartMode) => void;
+	value: ServiceChartMode;
+	onChange: (value: ServiceChartMode) => void;
 	disabled: boolean;
 }) {
-	const options: Array<{ value: RequestChartMode; label: string }> = [
-		{ value: "total", label: "Total" },
-		{ value: "rate", label: "RPS" },
+	const options: Array<{ value: ServiceChartMode; label: string }> = [
+		{ value: "requests", label: "Requests" },
+		{ value: "latency", label: "Latency" },
+		{ value: "traffic", label: "Traffic" },
+		{ value: "resources", label: "Resources" },
 	];
 
 	return (
@@ -616,7 +623,7 @@ function LegendMetric({
 	);
 }
 
-function RequestStatsState({ message }: { message: string }) {
+function ServiceMetricsState({ message }: { message: string }) {
 	return (
 		<div className="flex h-full items-center justify-center rounded-lg border border-border border-dashed text-sm text-muted-foreground">
 			{message}
@@ -624,16 +631,18 @@ function RequestStatsState({ message }: { message: string }) {
 	);
 }
 
-function RequestStatsTooltip({
+function ServiceMetricsTooltip({
 	active,
 	payload,
 	label,
 	mode,
-}: RequestTooltipProps) {
+}: ServiceMetricsTooltipProps) {
 	if (!active || !payload?.length) return null;
 
 	const row = payload[0]?.payload;
-	const visiblePayload = payload.filter((item) => Number(item.value) > 0);
+	const visiblePayload = payload.filter(
+		(item) => item.value != null && Number.isFinite(Number(item.value)),
+	);
 	const items = visiblePayload.length > 0 ? visiblePayload : payload;
 
 	return (
@@ -824,27 +833,33 @@ function getSourceInfo(service: Service): SourceInfo {
 	};
 }
 
-function buildChartRows(stats?: RequestStatsResponse): ChartRow[] {
+function buildChartRows(stats?: ServiceMetricsResponse): ChartRow[] {
 	if (!stats) return [];
 
 	return stats.buckets.map((bucket) => {
 		const row: ChartRow = {
 			timestamp: bucket.timestamp,
 			totalRequests: bucket.totalRequests,
+			p50ResponseTimeMs: bucket.p50ResponseTimeMs,
+			p90ResponseTimeMs: bucket.p90ResponseTimeMs,
+			p95ResponseTimeMs: bucket.p95ResponseTimeMs,
+			p99ResponseTimeMs: bucket.p99ResponseTimeMs,
+			ingressBytesPerSecond: bucket.ingressBytesPerSecond,
+			egressBytesPerSecond: bucket.egressBytesPerSecond,
+			cpuUsagePercent: bucket.cpuUsagePercent,
+			memoryUsagePercent: bucket.memoryUsagePercent,
+			memoryUsedBytes: bucket.memoryUsedBytes,
 		};
 		for (const status of stats.statusCodes) {
 			const requests = bucket.statuses[status] ?? 0;
-			row[getStatusRateDataKey(status)] = requests / stats.stepSeconds;
-			row[getStatusTotalDataKey(status)] = requests;
+			row[getStatusDataKey(status)] = requests;
 		}
 		return row;
 	});
 }
 
-function buildStatusSeries(stats?: RequestStatsResponse): StatusSeries[] {
+function buildStatusSeries(stats?: ServiceMetricsResponse): StatusSeries[] {
 	if (!stats) return [];
-
-	const totalSeconds = getStatsDurationSeconds(stats);
 
 	return stats.statusCodes.map((status, index) => {
 		const totalRequests = stats.buckets.reduce(
@@ -854,21 +869,14 @@ function buildStatusSeries(stats?: RequestStatsResponse): StatusSeries[] {
 
 		return {
 			status,
-			rateDataKey: getStatusRateDataKey(status),
-			totalDataKey: getStatusTotalDataKey(status),
+			totalDataKey: getStatusDataKey(status),
 			color: getStatusColor(status, index),
-			averageRequestsPerSecond:
-				totalSeconds > 0 ? totalRequests / totalSeconds : 0,
 			totalRequests,
 		};
 	});
 }
 
-function getStatusRateDataKey(status: string): string {
-	return `${getStatusDataKeyBase(status)}_rate`;
-}
-
-function getStatusTotalDataKey(status: string): string {
+function getStatusDataKey(status: string): string {
 	return `${getStatusDataKeyBase(status)}_total`;
 }
 
@@ -878,6 +886,9 @@ function getStatusDataKeyBase(status: string): string {
 }
 
 function getStatusColor(status: string, index: number): string {
+	const familyColor = STATUS_FAMILY_COLORS[status];
+	if (familyColor) return familyColor;
+
 	const palette =
 		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
 		STATUS_CODE_COLOR_PALETTES.default;
@@ -977,7 +988,211 @@ function formatRate(value: number): string {
 	return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
-function getAverageRequestsPerSecond(stats: RequestStatsResponse): number {
+function buildServiceMetricSummaryItems(
+	mode: ServiceChartMode,
+	stats: ServiceMetricsResponse | undefined,
+	rows: ChartRow[],
+	hasMetricData: boolean,
+): ServiceMetricSummaryItem[] {
+	if (mode === "requests") {
+		return [
+			{
+				label: "requests in 24h",
+				value:
+					hasMetricData && stats
+						? formatCompactNumber(stats.totalRequests)
+						: "-",
+			},
+			{
+				label: "avg RPS",
+				value:
+					hasMetricData && stats
+						? formatRate(getAverageRequestsPerSecond(stats))
+						: "-",
+			},
+		];
+	}
+
+	if (mode === "latency") {
+		return [
+			{
+				label: "p50 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p50ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p95 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p95ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+			{
+				label: "p99 latency",
+				value: formatNullableMetric(
+					getLatestValue(rows, "p99ResponseTimeMs"),
+					formatDurationMs,
+				),
+			},
+		];
+	}
+
+	if (mode === "traffic") {
+		return [
+			{
+				label: "ingress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "ingressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+			{
+				label: "egress",
+				value: formatNullableMetric(
+					getLatestValue(rows, "egressBytesPerSecond"),
+					(value) => `${formatBytes(value)}/s`,
+				),
+			},
+		];
+	}
+
+	return [
+		{
+			label: "CPU",
+			value: formatNullableMetric(
+				getLatestValue(rows, "cpuUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+		{
+			label: "memory",
+			value: formatNullableMetric(
+				getLatestValue(rows, "memoryUsagePercent"),
+				(value) => `${formatRate(value)}%`,
+			),
+		},
+	];
+}
+
+function formatNullableMetric(
+	value: number | null,
+	formatter: (value: number) => string,
+): string {
+	return value == null ? "-" : formatter(value);
+}
+
+function buildMetricSeries(
+	mode: ServiceChartMode,
+	statusSeries: StatusSeries[],
+): MetricSeries[] {
+	if (mode === "requests") {
+		return statusSeries.map((series) => ({
+			key: series.totalDataKey,
+			label: series.status,
+			color: series.color,
+			valueFormatter: formatRequestCount,
+		}));
+	}
+
+	if (mode === "latency") {
+		return [
+			{
+				key: "p99ResponseTimeMs",
+				label: "p99",
+				color: "#ef4444",
+				valueFormatter: formatDurationMs,
+			},
+			{
+				key: "p95ResponseTimeMs",
+				label: "p95",
+				color: "#ec4899",
+				valueFormatter: formatDurationMs,
+			},
+			{
+				key: "p90ResponseTimeMs",
+				label: "p90",
+				color: "#f59e0b",
+				valueFormatter: formatDurationMs,
+			},
+			{
+				key: "p50ResponseTimeMs",
+				label: "p50",
+				color: "#3b82f6",
+				valueFormatter: formatDurationMs,
+			},
+		];
+	}
+
+	if (mode === "traffic") {
+		return [
+			{
+				key: "ingressBytesPerSecond",
+				label: "Ingress",
+				color: "#0ea5e9",
+				valueFormatter: (value) => `${formatBytes(value)}/s`,
+			},
+			{
+				key: "egressBytesPerSecond",
+				label: "Egress",
+				color: "#10b981",
+				valueFormatter: (value) => `${formatBytes(value)}/s`,
+			},
+		];
+	}
+
+	return [
+		{
+			key: "cpuUsagePercent",
+			label: "CPU",
+			color: "#8b5cf6",
+			valueFormatter: (value) => `${formatRate(value)}%`,
+		},
+		{
+			key: "memoryUsagePercent",
+			label: "Memory",
+			color: "#14b8a6",
+			valueFormatter: (value) => `${formatRate(value)}%`,
+		},
+	];
+}
+
+function hasMetricDataForMode(
+	rows: ChartRow[],
+	mode: ServiceChartMode,
+	series: MetricSeries[],
+): boolean {
+	if (mode === "requests") {
+		return rows.some((row) => row.totalRequests > 0);
+	}
+	return rows.some((row) =>
+		series.some((item) => {
+			const value = row[item.key];
+			return typeof value === "number" && Number.isFinite(value);
+		}),
+	);
+}
+
+function getLatestValue(rows: ChartRow[], key: string): number | null {
+	for (let index = rows.length - 1; index >= 0; index--) {
+		const value = rows[index][key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+	}
+	return null;
+}
+
+function formatLatestSeriesValue(
+	rows: ChartRow[],
+	series: MetricSeries,
+): string {
+	const value = getLatestValue(rows, series.key);
+	return value == null ? "-" : series.valueFormatter(value);
+}
+
+function getAverageRequestsPerSecond(stats: ServiceMetricsResponse): number {
 	const totalSeconds = getStatsDurationSeconds(stats);
 
 	if (totalSeconds <= 0) return 0;
@@ -985,7 +1200,7 @@ function getAverageRequestsPerSecond(stats: RequestStatsResponse): number {
 	return stats.totalRequests / totalSeconds;
 }
 
-function getStatsDurationSeconds(stats: RequestStatsResponse): number {
+function getStatsDurationSeconds(stats: ServiceMetricsResponse): number {
 	const windowStart = new Date(stats.windowStart).getTime();
 	const windowEnd = new Date(stats.windowEnd).getTime();
 
@@ -1000,16 +1215,32 @@ function getStatsDurationSeconds(stats: RequestStatsResponse): number {
 	return stats.buckets.length * stats.stepSeconds;
 }
 
-function formatChartValue(value: number, mode: RequestChartMode): string {
-	if (mode === "rate") return `${formatRate(value)}/s`;
-
+function formatChartValue(value: number, mode: ServiceChartMode): string {
+	if (!Number.isFinite(value)) return "-";
+	if (mode === "latency") return formatDurationMs(value);
+	if (mode === "traffic") return `${formatBytes(value)}/s`;
+	if (mode === "resources") return `${formatRate(value)}%`;
 	return formatRequestCount(value);
+}
+
+function formatAxisTick(value: number, mode: ServiceChartMode): string {
+	if (mode === "latency") return formatDurationMs(value);
+	if (mode === "traffic") return formatBytes(value);
+	if (mode === "resources") return `${formatRateTick(value)}%`;
+	return formatRequestTick(value);
 }
 
 function formatRateTick(value: number): string {
 	if (value >= 100) return value.toFixed(0);
 	if (value >= 10) return value.toFixed(0);
 	return value.toFixed(1);
+}
+
+function getYAxisMargin(mode: ServiceChartMode): number {
+	if (mode === "traffic") return -4;
+	if (mode === "latency") return -12;
+	if (mode === "resources") return -24;
+	return -20;
 }
 
 function formatRequestTick(value: number): string {
@@ -1022,6 +1253,29 @@ function formatRequestCount(value: number): string {
 	return new Intl.NumberFormat(undefined, {
 		maximumFractionDigits: 0,
 	}).format(value);
+}
+
+function formatDurationMs(value: number): string {
+	if (!Number.isFinite(value)) return "-";
+	if (value >= 1000) {
+		return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s`;
+	}
+	if (value >= 100) return `${value.toFixed(0)}ms`;
+	if (value >= 10) return `${value.toFixed(1)}ms`;
+	return `${value.toFixed(2).replace(/\.?0+$/, "")}ms`;
+}
+
+function formatBytes(value: number): string {
+	if (!Number.isFinite(value)) return "-";
+	const units = ["B", "KB", "MB", "GB", "TB"];
+	let unitIndex = 0;
+	let scaled = Math.max(0, value);
+	while (scaled >= 1000 && unitIndex < units.length - 1) {
+		scaled /= 1000;
+		unitIndex++;
+	}
+	const maximumFractionDigits = scaled >= 100 || unitIndex === 0 ? 0 : 1;
+	return `${scaled.toFixed(maximumFractionDigits)} ${units[unitIndex]}`;
 }
 
 function formatShortDate(value: string): string {

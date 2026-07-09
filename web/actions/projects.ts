@@ -1,9 +1,11 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { isAPIError } from "better-auth/api";
 import cronstrue from "cronstrue";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
 import {
@@ -28,7 +30,7 @@ import {
 	volumeBackups,
 	workQueue,
 } from "@/db/schema";
-import { requireDeveloperRole } from "@/lib/auth";
+import { auth, requireDeveloperRole } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
@@ -47,14 +49,18 @@ import {
 	nameSchema,
 	volumeNameSchema,
 } from "@/lib/schemas";
-import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 import type {
 	PortConfig,
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
+import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
+
+type ServiceDeleteConfirmation = {
+	totpCode?: string;
+};
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -574,8 +580,39 @@ async function hardDeleteService(serviceId: string) {
 	return { success: true };
 }
 
-export async function deleteService(serviceId: string) {
-	await requireDeveloperRole();
+export async function deleteService(
+	serviceId: string,
+	confirmation?: ServiceDeleteConfirmation,
+) {
+	const session = await requireDeveloperRole();
+	if (!session) {
+		throw new Error("Unauthorized");
+	}
+
+	const twoFactorEnabled = Boolean(
+		(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled,
+	);
+
+	if (twoFactorEnabled) {
+		const totpCode = confirmation?.totpCode ?? "";
+
+		if (!/^\d{6}$/.test(totpCode)) {
+			throw new Error("Authenticator code is required to delete this service");
+		}
+
+		try {
+			await auth.api.verifyTOTP({
+				body: { code: totpCode },
+				headers: await headers(),
+			});
+		} catch (error) {
+			if (isAPIError(error)) {
+				throw new Error("Invalid authenticator code");
+			}
+			throw error;
+		}
+	}
+
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");

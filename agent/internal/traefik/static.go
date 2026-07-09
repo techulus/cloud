@@ -5,10 +5,34 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"reflect"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+const (
+	metricsEntryPointName = "metrics"
+	metricsEntryPointAddr = "127.0.0.1:9100"
+)
+
+var prometheusLatencyBuckets = []interface{}{
+	0.005,
+	0.01,
+	0.025,
+	0.05,
+	0.075,
+	0.1,
+	0.25,
+	0.5,
+	0.75,
+	1.0,
+	2.5,
+	5.0,
+	10.0,
+	30.0,
+	60.0,
+}
 
 func validateStaticConfig(data []byte) error {
 	var config map[string]interface{}
@@ -110,6 +134,95 @@ func EnsureEntryPoints(tcpPorts []int, udpPorts []int) (needsRestart bool, err e
 
 	log.Printf("[traefik] static config updated, restart required")
 	return true, nil
+}
+
+func EnsureMetricsConfig() (needsRestart bool, err error) {
+	originalData, err := os.ReadFile(traefikStaticConfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to read static config: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(originalData, &config); err != nil {
+		return false, fmt.Errorf("failed to parse static config: %w", err)
+	}
+
+	if !ensurePrometheusMetricsConfig(config) {
+		return false, nil
+	}
+
+	newData, err := yaml.Marshal(config)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal static config: %w", err)
+	}
+
+	if err := validateStaticConfig(newData); err != nil {
+		return false, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
+		return false, fmt.Errorf("failed to write static config: %w", err)
+	}
+
+	log.Printf("[traefik] metrics config updated, restart required")
+	return true, nil
+}
+
+func ensurePrometheusMetricsConfig(config map[string]interface{}) bool {
+	modified := false
+
+	entryPoints, ok := config["entryPoints"].(map[string]interface{})
+	if !ok {
+		entryPoints = make(map[string]interface{})
+		config["entryPoints"] = entryPoints
+		modified = true
+	}
+
+	metricsEntryPoint, ok := entryPoints[metricsEntryPointName].(map[string]interface{})
+	if !ok {
+		metricsEntryPoint = make(map[string]interface{})
+		entryPoints[metricsEntryPointName] = metricsEntryPoint
+		modified = true
+	}
+	if setMapValue(metricsEntryPoint, "address", metricsEntryPointAddr) {
+		modified = true
+	}
+
+	metricsConfig, ok := config["metrics"].(map[string]interface{})
+	if !ok {
+		metricsConfig = make(map[string]interface{})
+		config["metrics"] = metricsConfig
+		modified = true
+	}
+
+	prometheusConfig, ok := metricsConfig["prometheus"].(map[string]interface{})
+	if !ok {
+		prometheusConfig = make(map[string]interface{})
+		metricsConfig["prometheus"] = prometheusConfig
+		modified = true
+	}
+
+	for key, value := range map[string]interface{}{
+		"entryPoint":           metricsEntryPointName,
+		"addEntryPointsLabels": false,
+		"addRoutersLabels":     false,
+		"addServicesLabels":    true,
+		"buckets":              prometheusLatencyBuckets,
+	} {
+		if setMapValue(prometheusConfig, key, value) {
+			modified = true
+		}
+	}
+
+	return modified
+}
+
+func setMapValue(values map[string]interface{}, key string, value interface{}) bool {
+	if reflect.DeepEqual(values[key], value) {
+		return false
+	}
+	values[key] = value
+	return true
 }
 
 func ReloadTraefik() error {

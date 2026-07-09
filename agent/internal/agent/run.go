@@ -2,11 +2,20 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"time"
 
 	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/serverless"
+)
+
+const (
+	traefikMetricsURL      = "http://127.0.0.1:9100/metrics"
+	traefikMetricsInterval = 15 * time.Second
+	traefikMetricsMaxBytes = 8 * 1024 * 1024
 )
 
 func (a *Agent) Run(ctx context.Context) {
@@ -31,6 +40,10 @@ func (a *Agent) Run(ctx context.Context) {
 
 	if a.IsProxy && a.TraefikLogCollector != nil {
 		a.TraefikLogCollector.Start()
+	}
+
+	if a.IsProxy && a.MetricsSender != nil {
+		go a.TraefikMetricsLoop(ctx)
 	}
 
 	if a.IsProxy {
@@ -79,6 +92,58 @@ func (a *Agent) Run(ctx context.Context) {
 			go a.RunBuildCleanup()
 		}
 	}
+}
+
+func (a *Agent) TraefikMetricsLoop(ctx context.Context) {
+	ticker := time.NewTicker(traefikMetricsInterval)
+	defer ticker.Stop()
+
+	if err := a.ForwardTraefikMetrics(ctx); err != nil {
+		log.Printf("[traefik-metrics] initial scrape failed: %v", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := a.ForwardTraefikMetrics(ctx); err != nil {
+				log.Printf("[traefik-metrics] scrape failed: %v", err)
+			}
+		}
+	}
+}
+
+func (a *Agent) ForwardTraefikMetrics(ctx context.Context) error {
+	if a.MetricsSender == nil {
+		return nil
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, traefikMetricsURL, nil)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, traefikMetricsMaxBytes))
+	if err != nil {
+		return err
+	}
+
+	return a.MetricsSender.SendPrometheusMetrics(body, map[string]string{
+		"job":       "traefik",
+		"server_id": a.Config.ServerID,
+	})
 }
 
 func (a *Agent) StatusReportLoop(ctx context.Context) {
