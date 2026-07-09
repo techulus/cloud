@@ -57,12 +57,7 @@ import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
 
-type AuthenticatedDeveloperSession = Awaited<
-	ReturnType<typeof requireDeveloperRole>
->;
-
 type ServiceDeleteConfirmation = {
-	password?: string;
 	totpCode?: string;
 };
 
@@ -584,52 +579,32 @@ async function hardDeleteService(serviceId: string) {
 	return { success: true };
 }
 
-async function verifyServiceDeleteConfirmation(
-	session: AuthenticatedDeveloperSession,
-	confirmation?: ServiceDeleteConfirmation,
-) {
-	const twoFactorEnabled = Boolean(
-		(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
-			?.twoFactorEnabled,
-	);
-	if (!twoFactorEnabled) return;
-
-	const password = confirmation?.password?.trim() ?? "";
-	const totpCode = (confirmation?.totpCode ?? "").replace(/\s/g, "");
-
-	if (!password || !totpCode) {
-		throw new Error(
-			"Password and authenticator code are required to delete this service",
-		);
-	}
-
-	const requestHeaders = await headers();
-
-	try {
-		const passwordVerification = await auth.api.verifyPassword({
-			body: { password },
-			headers: requestHeaders,
-		});
-
-		if (passwordVerification.status !== true) {
-			throw new Error("Invalid password");
-		}
-
-		await auth.api.verifyTOTP({
-			body: { code: totpCode },
-			headers: requestHeaders,
-		});
-	} catch {
-		throw new Error("Invalid password or authenticator code");
-	}
-}
-
 export async function deleteService(
 	serviceId: string,
 	confirmation?: ServiceDeleteConfirmation,
 ) {
 	const session = await requireDeveloperRole();
-	await verifyServiceDeleteConfirmation(session, confirmation);
+	const twoFactorEnabled = Boolean(
+		(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
+			?.twoFactorEnabled,
+	);
+
+	if (twoFactorEnabled) {
+		const totpCode = (confirmation?.totpCode ?? "").replace(/\s/g, "");
+
+		if (!totpCode) {
+			throw new Error("Authenticator code is required to delete this service");
+		}
+
+		try {
+			await auth.api.verifyTOTP({
+				body: { code: totpCode },
+				headers: await headers(),
+			});
+		} catch {
+			throw new Error("Invalid authenticator code");
+		}
+	}
 
 	const service = await getService(serviceId);
 	if (!service) {

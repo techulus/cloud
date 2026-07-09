@@ -54,15 +54,12 @@ export default function ConfigurationPage() {
 	const sessionUser = session?.user as TwoFactorSessionUser | undefined;
 	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-	const [deletePassword, setDeletePassword] = useState("");
 	const [deleteTotpCode, setDeleteTotpCode] = useState("");
 	const [isDeleting, setIsDeleting] = useState(false);
 	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
 	const normalizedDeleteTotpCode = deleteTotpCode.replace(/\s/g, "");
 	const isDeleteConfirmationIncomplete =
-		requiresDeleteConfirmation &&
-		(deletePassword.trim().length === 0 ||
-			normalizedDeleteTotpCode.length === 0);
+		requiresDeleteConfirmation && normalizedDeleteTotpCode.length === 0;
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -83,13 +80,12 @@ export default function ConfigurationPage() {
 	}, [onUpdate]);
 
 	const resetDeleteConfirmation = useCallback(() => {
-		setDeletePassword("");
 		setDeleteTotpCode("");
 	}, []);
 
 	const handleDelete = async () => {
 		if (isDeleteConfirmationIncomplete) {
-			toast.error("Enter your current password and authenticator code");
+			toast.error("Enter your authenticator code");
 			return;
 		}
 
@@ -99,7 +95,6 @@ export default function ConfigurationPage() {
 				service.id,
 				requiresDeleteConfirmation
 					? {
-							password: deletePassword,
 							totpCode: normalizedDeleteTotpCode,
 						}
 					: undefined,
@@ -220,29 +215,13 @@ export default function ConfigurationPage() {
 											<>
 												<br />
 												<br />
-												Enter your current password and authenticator code to
-												confirm this deletion.
+												Enter your authenticator code to confirm this deletion.
 											</>
 										)}
 									</AlertDialogDescription>
 								</AlertDialogHeader>
 								{requiresDeleteConfirmation && (
 									<div className="space-y-3">
-										<div className="space-y-2">
-											<Label htmlFor="delete-service-password">
-												Current password
-											</Label>
-											<Input
-												id="delete-service-password"
-												type="password"
-												autoComplete="current-password"
-												value={deletePassword}
-												onChange={(event) =>
-													setDeletePassword(event.target.value)
-												}
-												disabled={isDeleting}
-											/>
-										</div>
 										<div className="space-y-2">
 											<Label htmlFor="delete-service-totp-code">
 												Authenticator code
