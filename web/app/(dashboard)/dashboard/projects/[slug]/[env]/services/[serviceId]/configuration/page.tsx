@@ -62,9 +62,8 @@ export default function ConfigurationPage() {
 	const [deleteTotpCode, setDeleteTotpCode] = useState("");
 	const [isDeleting, setIsDeleting] = useState(false);
 	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
-	const normalizedDeleteTotpCode = deleteTotpCode.replace(/\s/g, "");
 	const isDeleteConfirmationIncomplete =
-		requiresDeleteConfirmation && normalizedDeleteTotpCode.length !== 6;
+		requiresDeleteConfirmation && deleteTotpCode.length !== 6;
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -100,7 +99,7 @@ export default function ConfigurationPage() {
 				service.id,
 				requiresDeleteConfirmation
 					? {
-							totpCode: normalizedDeleteTotpCode,
+							totpCode: deleteTotpCode,
 						}
 					: undefined,
 			);

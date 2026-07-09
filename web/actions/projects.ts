@@ -26,6 +26,7 @@ import {
 	serviceReplicas,
 	services,
 	serviceVolumes,
+	twoFactor,
 	volumeBackups,
 	workQueue,
 } from "@/db/schema";
@@ -60,6 +61,11 @@ import { deleteBackup } from "./backups";
 type ServiceDeleteConfirmation = {
 	totpCode?: string;
 };
+
+const SERVICE_DELETE_TOTP_MAX_FAILED_ATTEMPTS = 10;
+const SERVICE_DELETE_TOTP_LOCK_MS = 15 * 60 * 1000;
+const SERVICE_DELETE_TOTP_LOCK_MESSAGE =
+	"Too many invalid authenticator codes. Try again later.";
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -584,16 +590,43 @@ export async function deleteService(
 	confirmation?: ServiceDeleteConfirmation,
 ) {
 	const session = await requireDeveloperRole();
+	if (!session) {
+		throw new Error("Unauthorized");
+	}
+
 	const twoFactorEnabled = Boolean(
-		(session?.user as { twoFactorEnabled?: boolean | null } | undefined)
-			?.twoFactorEnabled,
+		(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled,
 	);
 
 	if (twoFactorEnabled) {
-		const totpCode = (confirmation?.totpCode ?? "").replace(/\s/g, "");
+		const totpCode = confirmation?.totpCode ?? "";
 
-		if (!totpCode) {
+		if (!/^\d{6}$/.test(totpCode)) {
 			throw new Error("Authenticator code is required to delete this service");
+		}
+
+		const [twoFactorRecord] = await db
+			.select({
+				id: twoFactor.id,
+				lockedUntil: twoFactor.lockedUntil,
+			})
+			.from(twoFactor)
+			.where(eq(twoFactor.userId, session.user.id))
+			.limit(1);
+
+		if (!twoFactorRecord) {
+			throw new Error("Authenticator code is not configured");
+		}
+
+		if (twoFactorRecord.lockedUntil) {
+			if (twoFactorRecord.lockedUntil > new Date()) {
+				throw new Error(SERVICE_DELETE_TOTP_LOCK_MESSAGE);
+			}
+
+			await db
+				.update(twoFactor)
+				.set({ failedVerificationCount: 0, lockedUntil: null })
+				.where(eq(twoFactor.id, twoFactorRecord.id));
 		}
 
 		try {
@@ -602,8 +635,37 @@ export async function deleteService(
 				headers: await headers(),
 			});
 		} catch {
+			const [updatedTwoFactor] = await db
+				.update(twoFactor)
+				.set({
+					failedVerificationCount: sql`${twoFactor.failedVerificationCount} + 1`,
+				})
+				.where(eq(twoFactor.id, twoFactorRecord.id))
+				.returning({
+					failedVerificationCount: twoFactor.failedVerificationCount,
+				});
+
+			if (
+				(updatedTwoFactor?.failedVerificationCount ?? 0) >=
+				SERVICE_DELETE_TOTP_MAX_FAILED_ATTEMPTS
+			) {
+				await db
+					.update(twoFactor)
+					.set({
+						lockedUntil: new Date(Date.now() + SERVICE_DELETE_TOTP_LOCK_MS),
+					})
+					.where(eq(twoFactor.id, twoFactorRecord.id));
+
+				throw new Error(SERVICE_DELETE_TOTP_LOCK_MESSAGE);
+			}
+
 			throw new Error("Invalid authenticator code");
 		}
+
+		await db
+			.update(twoFactor)
+			.set({ failedVerificationCount: 0, lockedUntil: null })
+			.where(eq(twoFactor.id, twoFactorRecord.id));
 	}
 
 	const service = await getService(serviceId);
