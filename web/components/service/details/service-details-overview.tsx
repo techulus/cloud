@@ -19,7 +19,6 @@ import {
 	YAxis,
 } from "recharts";
 import useSWR from "swr";
-import { LocalDate } from "@/components/core/local-date";
 import { useService } from "@/components/service/service-layout-client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -237,17 +236,17 @@ function ServiceMetricsPanel({
 	);
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
-			<div className="flex items-start justify-between gap-3">
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 				<div className="min-w-0">
 					{isLoading ? (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+						<div className="flex flex-nowrap items-end gap-x-5">
 							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
 					) : (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+						<div className="flex flex-nowrap items-end gap-x-5">
 							{summaryItems.map((item) => (
-								<div key={item.label}>
+								<div key={item.label} className="shrink-0">
 									<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 										{item.value}
 									</p>
@@ -257,18 +256,11 @@ function ServiceMetricsPanel({
 						</div>
 					)}
 				</div>
-				<div className="flex flex-col items-end gap-2">
-					{stats ? (
-						<p className="text-sm text-muted-foreground">
-							<LocalDate value={stats.windowEnd} format="compactDate" />
-						</p>
-					) : null}
-					<ServiceChartModeToggle
-						value={chartMode}
-						onChange={setChartMode}
-						disabled={isLoading || isUnavailable}
-					/>
-				</div>
+				<ServiceChartModeToggle
+					value={chartMode}
+					onChange={setChartMode}
+					disabled={isLoading || isUnavailable}
+				/>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
@@ -386,7 +378,7 @@ function ServiceChartModeToggle({
 	];
 
 	return (
-		<div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+		<div className="flex w-full rounded-md border border-border bg-muted/30 p-0.5 sm:w-auto">
 			{options.map((option) => {
 				const isSelected = value === option.value;
 
@@ -398,7 +390,7 @@ function ServiceChartModeToggle({
 						disabled={disabled}
 						onClick={() => onChange(option.value)}
 						className={cn(
-							"rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors",
+							"flex-1 rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors sm:flex-none",
 							isSelected
 								? "bg-background text-foreground shadow-sm"
 								: "text-muted-foreground hover:text-foreground",
