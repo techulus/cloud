@@ -260,9 +260,12 @@ function TimeRangeFilter({
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
-				<DropdownMenuLabel>Time range</DropdownMenuLabel>
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>Time range</DropdownMenuLabel>
+				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuRadioGroup
+					aria-label="Time range"
 					value={range}
 					onValueChange={(value) => onRangeChange(value as LogTimeRange)}
 				>
