@@ -4,6 +4,11 @@ import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { services, serviceVolumes, volumeBackups } from "@/db/schema";
 import { triggerBackup } from "@/lib/backups/trigger-backup";
+import {
+	differenceInElapsedDays,
+	differenceInElapsedHours,
+	subtractUtcDays,
+} from "@/lib/date";
 import { DEFAULT_BACKUP_RETENTION_DAYS } from "@/lib/settings-keys";
 
 function shouldRunSchedule(
@@ -20,8 +25,7 @@ function shouldRunSchedule(
 		}
 
 		if (lastBackupTime) {
-			const hoursSince =
-				(now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60);
+			const hoursSince = differenceInElapsedHours(now, lastBackupTime);
 			if (hoursSince < 20) {
 				return false;
 			}
@@ -36,8 +40,7 @@ function shouldRunSchedule(
 		}
 
 		if (lastBackupTime) {
-			const daysSince =
-				(now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60 * 24);
+			const daysSince = differenceInElapsedDays(now, lastBackupTime);
 			if (daysSince < 6) {
 				return false;
 			}
@@ -124,8 +127,7 @@ export async function cleanupOldBackups() {
 	const retentionDays =
 		storageConfig?.retentionDays ?? DEFAULT_BACKUP_RETENTION_DAYS;
 
-	const cutoffDate = new Date();
-	cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+	const cutoffDate = subtractUtcDays(new Date(), retentionDays);
 
 	const oldBackups = await db
 		.select({ id: volumeBackups.id })

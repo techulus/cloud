@@ -18,7 +18,11 @@ import type {
 	SmtpConfig,
 	SmtpEncryption,
 } from "@/lib/settings-keys";
-import { DEFAULT_SMTP_PORT, DEFAULT_SMTP_TIMEOUT } from "@/lib/settings-keys";
+import {
+	DEFAULT_BACKUP_RETENTION_DAYS,
+	DEFAULT_SMTP_PORT,
+	DEFAULT_SMTP_TIMEOUT,
+} from "@/lib/settings-keys";
 import {
 	type NodeMetricsSnapshot,
 	queryNodeMetricsSnapshots,
@@ -360,6 +364,22 @@ export function getBackupStorageConfig(): BackupStorageConfig | null {
 		return null;
 	}
 
+	const configuredRetentionDays = Number(
+		process.env.BACKUP_STORAGE_RETENTION_DAYS ?? DEFAULT_BACKUP_RETENTION_DAYS,
+	);
+	const retentionDays =
+		Number.isInteger(configuredRetentionDays) &&
+		configuredRetentionDays >= 1 &&
+		configuredRetentionDays <= 3_650
+			? configuredRetentionDays
+			: DEFAULT_BACKUP_RETENTION_DAYS;
+
+	if (retentionDays !== configuredRetentionDays) {
+		console.warn(
+			`[backup-storage] invalid BACKUP_STORAGE_RETENTION_DAYS; using ${DEFAULT_BACKUP_RETENTION_DAYS}`,
+		);
+	}
+
 	return {
 		provider,
 		bucket,
@@ -367,10 +387,7 @@ export function getBackupStorageConfig(): BackupStorageConfig | null {
 		endpoint: process.env.BACKUP_STORAGE_ENDPOINT ?? "",
 		accessKey,
 		secretKey,
-		retentionDays: parseInt(
-			process.env.BACKUP_STORAGE_RETENTION_DAYS ?? "7",
-			10,
-		),
+		retentionDays,
 	};
 }
 

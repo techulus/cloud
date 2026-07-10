@@ -26,6 +26,11 @@ import {
 	NativeSelectOption,
 } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+	formatCompactDateTime,
+	formatPreciseDateTime,
+	getTimestamp,
+} from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 import { METRIC_RANGE_KEYS, type MetricRange } from "@/lib/metric-ranges";
 import type {
@@ -262,7 +267,7 @@ function MetricChartCard({
 								minTickGap={28}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={formatShortTime}
+								tickFormatter={(value) => formatCompactDateTime(value)}
 								className="text-xs"
 							/>
 							<YAxis
@@ -403,7 +408,7 @@ function MetricsTooltip({ active, payload, label }: MetricsTooltipProps) {
 
 	return (
 		<div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
-			<p className="mb-1 font-medium">{formatTooltipTime(String(label))}</p>
+			<p className="mb-1 font-medium">{formatPreciseDateTime(String(label))}</p>
 			<div className="space-y-1">
 				{payload.map((item) => (
 					<div
@@ -442,7 +447,7 @@ function buildChartRows(series: ServerMetricsHistory[]): ChartRow[] {
 	}
 
 	return Array.from(rows.values()).sort(
-		(a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+		(a, b) => getTimestamp(a.timestamp, 0) - getTimestamp(b.timestamp, 0),
 	);
 }
 function formatTooltipValue(item: TooltipPayload) {
@@ -464,25 +469,6 @@ function getSeriesKey(metricKey: keyof MetricsHistory, serverId: string) {
 
 function getServerColor(index: number) {
 	return SERVER_COLORS[index % SERVER_COLORS.length];
-}
-
-function formatShortTime(value: string) {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(value));
-}
-
-function formatTooltipTime(value: string) {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-		second: "2-digit",
-	}).format(new Date(value));
 }
 
 function formatBytesCompact(value: number) {

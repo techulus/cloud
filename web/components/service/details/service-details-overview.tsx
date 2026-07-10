@@ -19,11 +19,17 @@ import {
 	YAxis,
 } from "recharts";
 import useSWR from "swr";
+import { LocalDate } from "@/components/core/local-date";
 import { useService } from "@/components/service/service-layout-client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import {
+	formatCompactDate,
+	formatCompactDateTime,
+	getTimestamp,
+} from "@/lib/date";
 import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
@@ -220,14 +226,15 @@ function ServiceMetricsPanel({
 	const isUnavailable = Boolean(error) || stats?.metricsEnabled === false;
 	const hasMetricData = Boolean(stats && !isUnavailable);
 	const summaryItems = useMemo(
-		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
+		() =>
+			buildServiceMetricSummaryItems(
+				chartMode,
+				stats,
+				chartRows,
+				hasMetricData,
+			),
 		[chartMode, stats, chartRows, hasMetricData],
 	);
-	const todayLabel = new Intl.DateTimeFormat(undefined, {
-		day: "numeric",
-		month: "short",
-	}).format(new Date());
-
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
 			<div className="flex items-start justify-between gap-3">
@@ -251,7 +258,11 @@ function ServiceMetricsPanel({
 					)}
 				</div>
 				<div className="flex flex-col items-end gap-2">
-					<p className="text-sm text-muted-foreground">{todayLabel}</p>
+					{stats ? (
+						<p className="text-sm text-muted-foreground">
+							<LocalDate value={stats.windowEnd} format="compactDate" />
+						</p>
+					) : null}
 					<ServiceChartModeToggle
 						value={chartMode}
 						onChange={setChartMode}
@@ -304,7 +315,7 @@ function ServiceMetricsPanel({
 								minTickGap={32}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={formatShortDate}
+								tickFormatter={(value) => formatCompactDate(value)}
 								className="text-xs"
 							/>
 							<YAxis
@@ -651,7 +662,7 @@ function ServiceMetricsTooltip({
 
 	return (
 		<div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
-			<p className="mb-1 font-medium">{formatTooltipDate(String(label))}</p>
+			<p className="mb-1 font-medium">{formatCompactDateTime(String(label))}</p>
 			<div className="space-y-1">
 				{items.map((item) => (
 					<div
@@ -1191,8 +1202,8 @@ function getAverageRequestsPerSecond(stats: ServiceMetricsResponse): number {
 }
 
 function getStatsDurationSeconds(stats: ServiceMetricsResponse): number {
-	const windowStart = new Date(stats.windowStart).getTime();
-	const windowEnd = new Date(stats.windowEnd).getTime();
+	const windowStart = getTimestamp(stats.windowStart);
+	const windowEnd = getTimestamp(stats.windowEnd);
 
 	if (
 		Number.isFinite(windowStart) &&
@@ -1262,20 +1273,4 @@ function formatBytes(value: number): string {
 	}
 	const maximumFractionDigits = scaled >= 100 || unitIndex === 0 ? 0 : 1;
 	return `${scaled.toFixed(maximumFractionDigits)} ${units[unitIndex]}`;
-}
-
-function formatShortDate(value: string): string {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-	}).format(new Date(value));
-}
-
-function formatTooltipDate(value: string): string {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(value));
 }

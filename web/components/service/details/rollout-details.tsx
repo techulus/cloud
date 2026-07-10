@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { LogViewer } from "@/components/logs/log-viewer";
 import { Button } from "@/components/ui/button";
 import type { Rollout, RolloutStatus, Service } from "@/db/types";
-import { formatRelativeTime } from "@/lib/date";
+import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 
 type RolloutWithDates = Omit<Rollout, "createdAt" | "completedAt"> & {
 	createdAt: string | Date;
@@ -75,21 +75,6 @@ function formatStage(stage: string | null): string {
 	return STAGE_LABELS[stage] || stage;
 }
 
-function formatDuration(
-	start: string | Date,
-	end: string | Date | null,
-): string {
-	const startDate = new Date(start);
-	const endDate = end ? new Date(end) : new Date();
-	const diff = endDate.getTime() - startDate.getTime();
-	const seconds = Math.floor(diff / 1000);
-	const minutes = Math.floor(seconds / 60);
-	if (minutes > 0) {
-		return `${minutes}m ${seconds % 60}s`;
-	}
-	return `${seconds}s`;
-}
-
 export function RolloutDetails({
 	projectSlug,
 	envName,
@@ -139,7 +124,11 @@ export function RolloutDetails({
 							Started {formatRelativeTime(rollout.createdAt)}
 						</span>
 						<span className="text-sm text-muted-foreground">
-							Duration: {formatDuration(rollout.createdAt, rollout.completedAt)}
+							Duration:{" "}
+							{formatElapsedDurationBetween(
+								rollout.createdAt,
+								rollout.completedAt,
+							)}
 						</span>
 					</div>
 				</div>

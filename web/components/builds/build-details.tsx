@@ -28,7 +28,7 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
-import { formatRelativeTime } from "@/lib/date";
+import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type BuildWithDates = Omit<
@@ -99,21 +99,6 @@ const STATUS_CONFIG: Record<
 		label: "Cancelled",
 	},
 };
-
-function formatDuration(
-	start: string | Date,
-	end: string | Date | null,
-): string {
-	const startDate = new Date(start);
-	const endDate = end ? new Date(end) : new Date();
-	const diff = endDate.getTime() - startDate.getTime();
-	const seconds = Math.floor(diff / 1000);
-	const minutes = Math.floor(seconds / 60);
-	if (minutes > 0) {
-		return `${minutes}m ${seconds % 60}s`;
-	}
-	return `${seconds}s`;
-}
 
 export function BuildDetails({
 	projectSlug,
@@ -296,7 +281,10 @@ export function BuildDetails({
 								<div className="flex justify-between">
 									<span>Duration</span>
 									<span>
-										{formatDuration(build.startedAt, build.completedAt)}
+										{formatElapsedDurationBetween(
+											build.startedAt,
+											build.completedAt,
+										)}
 									</span>
 								</div>
 							)}

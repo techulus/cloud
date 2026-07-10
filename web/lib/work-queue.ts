@@ -3,11 +3,12 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, servers, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
+import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
-export const WORK_QUEUE_LEASE_DURATION_MS = 2 * 60 * 1000;
+export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
 
 export type WorkItemResult = {
 	id: string;
@@ -126,7 +127,10 @@ export async function renewActiveWorkItems(
 export async function claimNextWorkItem(
 	serverId: string,
 ): Promise<LeasedWorkItem | null> {
-	const staleThreshold = new Date(Date.now() - WORK_QUEUE_LEASE_DURATION_MS);
+	const staleThreshold = subtractMilliseconds(
+		new Date(),
+		WORK_QUEUE_LEASE_DURATION_MS,
+	);
 
 	const result = await db.execute(sql`
 		UPDATE work_queue

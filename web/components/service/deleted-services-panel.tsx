@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { restoreDeletedService } from "@/actions/projects";
+import { LocalDate } from "@/components/core/local-date";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -30,11 +31,6 @@ type DeletedService = Pick<
 	| "deletionStatus"
 	| "deletionError"
 >;
-
-function formatDate(value: Date | string | null) {
-	if (!value) return "Unknown";
-	return new Date(value).toLocaleString();
-}
 
 export function DeletedServicesPanel({
 	services,
@@ -102,8 +98,10 @@ export function DeletedServicesPanel({
 								{service.image}
 							</p>
 							<p className="mt-1 text-xs text-muted-foreground">
-								Deleted {formatDate(service.deletedAt)}. Purges{" "}
-								{formatDate(service.purgeAfter)}.
+								Deleted{" "}
+								<LocalDate value={service.deletedAt} fallback="Unknown" />.
+								{" Purges "}
+								<LocalDate value={service.purgeAfter} fallback="Unknown" />.
 							</p>
 							{service.deletionError && (
 								<p className="mt-1 text-xs text-destructive">

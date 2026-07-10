@@ -2,12 +2,18 @@ import { randomUUID } from "node:crypto";
 import * as acme from "acme-client";
 import { eq, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { acmeChallenges, domainCertificates, settings } from "@/db/schema";
 import { getSetting } from "@/db/queries";
+import { acmeChallenges, domainCertificates, settings } from "@/db/schema";
+import {
+	addMilliseconds,
+	addUtcDays,
+	isExpired,
+	MINUTE_IN_MILLISECONDS,
+} from "@/lib/date";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 const ACME_ACCOUNT_KEY_SETTING = "acme_account_key";
-const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const CHALLENGE_TTL_MS = 10 * MINUTE_IN_MILLISECONDS;
 
 let acmeClient: acme.Client | null = null;
 
@@ -57,7 +63,7 @@ async function storeChallenge(
 	token: string,
 	keyAuthorization: string,
 ): Promise<void> {
-	const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS);
+	const expiresAt = addMilliseconds(new Date(), CHALLENGE_TTL_MS);
 	await db
 		.insert(acmeChallenges)
 		.values({
@@ -186,21 +192,23 @@ export async function getChallenge(
 		.where(eq(acmeChallenges.token, token));
 
 	console.log(`[getChallenge] token=${token} found=${!!result[0]}`);
-	if (result[0]) {
+	const challenge = result[0];
+	const now = new Date();
+	if (challenge) {
 		console.log(
-			`[getChallenge] expires_at=${result[0].expiresAt}, now=${new Date()}, valid=${new Date() < result[0].expiresAt}`,
+			`[getChallenge] expires_at=${challenge.expiresAt}, now=${now}, valid=${!isExpired(challenge.expiresAt, now)}`,
 		);
 	}
 
-	if (!result[0] || new Date() > result[0].expiresAt) {
+	if (!challenge || isExpired(challenge.expiresAt, now)) {
 		return null;
 	}
 
-	return { keyAuthorization: result[0].keyAuthorization };
+	return { keyAuthorization: challenge.keyAuthorization };
 }
 
 export async function renewExpiringCertificates(): Promise<void> {
-	const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+	const thirtyDaysFromNow = addUtcDays(new Date(), 30);
 
 	const expiring = await db
 		.select()

@@ -28,7 +28,7 @@ import {
 import { Empty, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { formatDateTime, formatTime } from "@/lib/date";
+import { formatPreciseDateTime, formatTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type LogLevel = "error" | "warn" | "info" | "debug";
@@ -478,7 +478,7 @@ function ServiceLogRow({
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatDateTime(entry.timestamp)}
+				title={formatPreciseDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
@@ -524,7 +524,7 @@ function RequestRow({
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatDateTime(entry.timestamp)}
+				title={formatPreciseDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
@@ -560,7 +560,7 @@ function BuildLogRow({
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatDateTime(entry.timestamp)}
+				title={formatPreciseDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>
@@ -582,7 +582,7 @@ function ServerLogRow({
 		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatDateTime(entry.timestamp)}
+				title={formatPreciseDateTime(entry.timestamp)}
 			>
 				{formatTime(entry.timestamp)}
 			</span>

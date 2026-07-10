@@ -17,10 +17,7 @@ import {
 	volumeBackups,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
-
-function getBackupTime(value: Date | string | null) {
-	return value ? new Date(value).getTime() : 0;
-}
+import { getTimestamp } from "@/lib/date";
 
 export async function GET(
 	request: Request,
@@ -181,13 +178,17 @@ export async function GET(
 					oldestLatestBackupAt:
 						latestBackupTimes.length > 0
 							? latestBackupTimes.reduce((oldest, value) =>
-									getBackupTime(value) < getBackupTime(oldest) ? value : oldest,
+									getTimestamp(value, 0) < getTimestamp(oldest, 0)
+										? value
+										: oldest,
 								)
 							: null,
 					newestLatestBackupAt:
 						latestBackupTimes.length > 0
 							? latestBackupTimes.reduce((newest, value) =>
-									getBackupTime(value) > getBackupTime(newest) ? value : newest,
+									getTimestamp(value, 0) > getTimestamp(newest, 0)
+										? value
+										: newest,
 								)
 							: null,
 				};

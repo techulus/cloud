@@ -3,6 +3,7 @@
 import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { LocalDate } from "@/components/core/local-date";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -25,6 +26,7 @@ import {
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
 import { authClient } from "@/lib/auth-client";
+import { getTimestamp } from "@/lib/date";
 
 type ApiKeyRecord = {
 	id: string;
@@ -66,25 +68,11 @@ type ApiKeyClient = {
 
 const apiKeysClient = authClient as unknown as ApiKeyClient;
 
-const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
-
 function getErrorMessage(
 	error: { message?: string; error_description?: string } | null | undefined,
 	fallback: string,
 ) {
 	return error?.message || error?.error_description || fallback;
-}
-
-function formatDate(value: string | Date | null) {
-	if (!value) return "Never";
-
-	const date = value instanceof Date ? value : new Date(value);
-	if (Number.isNaN(date.getTime())) return "Unknown";
-
-	return dateTimeFormatter.format(date);
 }
 
 export function ApiKeySettings() {
@@ -96,8 +84,7 @@ export function ApiKeySettings() {
 	const sortedApiKeys = useMemo(
 		() =>
 			apiKeys.toSorted(
-				(a, b) =>
-					new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+				(a, b) => getTimestamp(b.createdAt, 0) - getTimestamp(a.createdAt, 0),
 			),
 		[apiKeys],
 	);
@@ -253,11 +240,21 @@ export function ApiKeySettings() {
 										</div>
 										<div className="text-xs md:text-sm">
 											<p className="text-muted-foreground">Created</p>
-											<p>{formatDate(apiKey.createdAt)}</p>
+											<p>
+												<LocalDate
+													value={apiKey.createdAt}
+													fallback="Unknown"
+												/>
+											</p>
 										</div>
 										<div className="text-xs md:text-sm">
 											<p className="text-muted-foreground">Last used</p>
-											<p>{formatDate(apiKey.lastRequest)}</p>
+											<p>
+												<LocalDate
+													value={apiKey.lastRequest}
+													fallback={apiKey.lastRequest ? "Unknown" : "Never"}
+												/>
+											</p>
 										</div>
 										<AlertDialog>
 											<AlertDialogTrigger
