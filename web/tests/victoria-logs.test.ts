@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_LOG_TIME_RANGE,
+	escapeLogRegex,
+	isLogCursor,
 	isLogTimeRange,
 	MAX_LOG_SEARCH_LENGTH,
+	normalizeLogCursor,
 	normalizeLogSearch,
+	parseLogLimit,
+	splitLogSearchMatches,
 } from "@/lib/log-query";
 
 describe("VictoriaLogs queries", () => {
@@ -24,6 +29,36 @@ describe("VictoriaLogs queries", () => {
 		expect(() =>
 			normalizeLogSearch("x".repeat(MAX_LOG_SEARCH_LENGTH + 1)),
 		).toThrow(`Search must be ${MAX_LOG_SEARCH_LENGTH} characters or fewer`);
+
+		expect(isLogCursor("2026-07-10T01:02:03Z")).toBe(true);
+		expect(isLogCursor("2026-07-10T01:02:03.123456789Z")).toBe(true);
+		expect(isLogCursor("2026-07-10T01:02:03+10:00")).toBe(true);
+		expect(isLogCursor("2026-02-29T01:02:03Z")).toBe(false);
+		expect(isLogCursor("2024-02-29T01:02:03Z")).toBe(true);
+		expect(isLogCursor("2026-07-10T01:02:03Z OR service_id:service-2")).toBe(
+			false,
+		);
+		expect(isLogCursor("2026-07-10T01:02:03Z | stats count()")).toBe(false);
+		expect(normalizeLogCursor(" 2026-07-10T01:02:03Z ")).toBe(
+			"2026-07-10T01:02:03Z",
+		);
+		expect(() =>
+			normalizeLogCursor("2026-07-10T01:02:03Z | stats count()"),
+		).toThrow("Invalid log cursor");
+
+		expect(parseLogLimit(null, 100)).toBe(100);
+		expect(parseLogLimit("500", 100)).toBe(500);
+		expect(parseLogLimit("1001", 100)).toBe(1000);
+		expect(() => parseLogLimit("0", 100)).toThrow("Invalid log limit");
+		expect(() => parseLogLimit("abc", 100)).toThrow("Invalid log limit");
+
+		expect(splitLogSearchMatches("error and ERROR", "error")).toEqual([
+			{ text: "", isMatch: false },
+			{ text: "error", isMatch: true },
+			{ text: " and ", isMatch: false },
+			{ text: "ERROR", isMatch: true },
+			{ text: "", isMatch: false },
+		]);
 	});
 
 	it("escapes search text as a literal case-insensitive regex", async () => {
@@ -33,9 +68,29 @@ describe("VictoriaLogs queries", () => {
 
 		expect(filter).toBeDefined();
 		const encodedPattern = filter?.slice("_msg:~".length) || "";
-		expect(JSON.parse(encodedPattern)).toBe(
-			`(?i)${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-		);
+		expect(JSON.parse(encodedPattern)).toBe(`(?i)${escapeLogRegex(search)}`);
+	});
+
+	it("rejects service-log cursors before issuing a LogsQL request", async () => {
+		const { queryLogsByService } = await loadVictoriaLogs();
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			queryLogsByService({
+				serviceId: "service-1",
+				limit: 100,
+				before: "2026-07-10T01:02:03Z OR service_id:service-2",
+			}),
+		).rejects.toThrow("Invalid log cursor");
+		await expect(
+			queryLogsByService({
+				serviceId: "service-1",
+				limit: 100,
+				after: "2026-07-10T01:02:03Z | stats count()",
+			}),
+		).rejects.toThrow("Invalid log cursor");
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("searches service logs before applying the result limit and range", async () => {
@@ -94,10 +149,9 @@ describe("VictoriaLogs queries", () => {
 			range: "6h",
 		});
 
-		for (const field of ["_msg", "path", "method", "status", "client_ip"]) {
-			expect(query).toContain(`${field}:~"(?i)10\\\\.0\\\\.0\\\\.1"`);
-		}
-		expect(query).toContain(" OR ");
+		expect(query).toContain(
+			'(_msg:~"(?i)10\\\\.0\\\\.0\\\\.1" OR path:~"(?i)10\\\\.0\\\\.0\\\\.1" OR method:~"(?i)10\\\\.0\\\\.0\\\\.1" OR status:~"(?i)10\\\\.0\\\\.0\\\\.1" OR client_ip:~"(?i)10\\\\.0\\\\.0\\\\.1")',
+		);
 		expect(query).toContain("_time:6h");
 	});
 

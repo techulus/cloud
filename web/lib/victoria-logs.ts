@@ -1,4 +1,9 @@
-import { type LogTimeRange, normalizeLogSearch } from "@/lib/log-query";
+import {
+	escapeLogRegex,
+	type LogTimeRange,
+	normalizeLogCursor,
+	normalizeLogSearch,
+} from "@/lib/log-query";
 
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
@@ -35,6 +40,7 @@ function buildFetchOptions(config: EndpointConfig): RequestInit {
 }
 
 export type LogType = "container" | "http";
+type LogSearchField = "_msg" | "path" | "method" | "status" | "client_ip";
 
 export type StoredLog = {
 	_msg: string;
@@ -68,19 +74,14 @@ function formatLogSqlExactFilter(field: string, value: string): string {
 
 export function formatLogSqlSearchFilter(
 	value: string | null | undefined,
-	fields: readonly string[] = ["_msg"],
+	fields: readonly LogSearchField[] = ["_msg"],
 ): string | undefined {
 	const search = normalizeLogSearch(value);
 	if (!search) return undefined;
 
-	const pattern = `(?i)${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
+	const pattern = `(?i)${escapeLogRegex(search)}`;
 	const quotedPattern = JSON.stringify(pattern);
-	const filters = fields.map((field) => {
-		if (!/^[a-zA-Z0-9_.-]+$/.test(field)) {
-			throw new Error(`Invalid log search field: ${field}`);
-		}
-		return `${field}:~${quotedPattern}`;
-	});
+	const filters = fields.map((field) => `${field}:~${quotedPattern}`);
 
 	return filters.length === 1 ? filters[0] : `(${filters.join(" OR ")})`;
 }
@@ -121,11 +122,13 @@ export async function queryLogsByService(
 	if (range) {
 		query += ` _time:${range}`;
 	}
-	if (after) {
-		query += ` _time:>${after}`;
+	const afterCursor = normalizeLogCursor(after);
+	if (afterCursor) {
+		query += ` _time:>${afterCursor}`;
 	}
-	if (before) {
-		query += ` _time:<${before}`;
+	const beforeCursor = normalizeLogCursor(before);
+	if (beforeCursor) {
+		query += ` _time:<${beforeCursor}`;
 	}
 	const searchFilter = formatLogSqlSearchFilter(
 		search,
@@ -171,8 +174,9 @@ export async function queryLogsByDeployment(
 	}
 
 	let query = formatLogSqlExactFilter("deployment_id", deploymentId);
-	if (before) {
-		query += ` _time:<${before}`;
+	const beforeCursor = normalizeLogCursor(before);
+	if (beforeCursor) {
+		query += ` _time:<${beforeCursor}`;
 	}
 	query += " | sort by (_time desc)";
 
@@ -242,8 +246,9 @@ export async function queryLogsByServer({
 	if (range) {
 		query += ` _time:${range}`;
 	}
-	if (before) {
-		query += ` _time:<${before}`;
+	const beforeCursor = normalizeLogCursor(before);
+	if (beforeCursor) {
+		query += ` _time:<${beforeCursor}`;
 	}
 	const searchFilter = formatLogSqlSearchFilter(search);
 	if (searchFilter) {

@@ -3,7 +3,9 @@ import { auth } from "@/lib/auth";
 import {
 	DEFAULT_LOG_TIME_RANGE,
 	isLogTimeRange,
+	normalizeLogCursor,
 	normalizeLogSearch,
+	parseLogLimit,
 } from "@/lib/log-query";
 import {
 	isLoggingEnabled,
@@ -30,8 +32,12 @@ export async function GET(
 	const { id: serviceId } = await params;
 	const url = new URL(request.url);
 	let search: string | undefined;
+	let before: string | undefined;
+	let limit: number;
 	try {
 		search = normalizeLogSearch(url.searchParams.get("q"));
+		before = normalizeLogCursor(url.searchParams.get("before"));
+		limit = parseLogLimit(url.searchParams.get("limit"), 100);
 	} catch (error) {
 		return Response.json(
 			{ message: error instanceof Error ? error.message : "Invalid search" },
@@ -42,11 +48,6 @@ export async function GET(
 	if (!isLogTimeRange(rangeParam)) {
 		return Response.json({ message: "Invalid log range" }, { status: 400 });
 	}
-	const limit = Math.min(
-		Number.parseInt(url.searchParams.get("limit") || "100", 10),
-		1000,
-	);
-	const before = url.searchParams.get("before") || undefined;
 	const serverId = url.searchParams.get("serverId") || undefined;
 	const logTypeParam = url.searchParams.get("type");
 	const logType =

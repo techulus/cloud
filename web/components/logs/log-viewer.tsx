@@ -38,6 +38,7 @@ import {
 	LOG_TIME_RANGES,
 	type LogTimeRange,
 	MAX_LOG_SEARCH_LENGTH,
+	splitLogSearchMatches,
 } from "@/lib/log-query";
 
 type LogLevel = "error" | "warn" | "info" | "debug";
@@ -140,21 +141,14 @@ function getStatusCategory(status: number): StatusCategory {
 }
 
 function highlightMatches(text: string, search: string): React.ReactNode {
-	if (!search) return text;
-
-	const regex = new RegExp(
-		`(${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-		"gi",
-	);
-	const parts = text.split(regex);
+	const parts = splitLogSearchMatches(text, search);
 	let offset = 0;
-	const normalizedSearch = search.toLowerCase();
 
-	return parts.map((part) => {
+	return parts.map(({ text: part, isMatch }) => {
 		const start = offset;
 		offset += part.length;
 
-		return part.toLowerCase() === normalizedSearch ? (
+		return isMatch ? (
 			<mark
 				key={`${part}-${start}`}
 				className="bg-yellow-300 dark:bg-yellow-700 text-inherit rounded-sm px-0.5"
@@ -189,8 +183,7 @@ function buildLogEndpoint(
 	{ search, range, filterServerId, before }: LogEndpointOptions,
 ): string {
 	const params = new URLSearchParams();
-	const trimmedSearch = search.trim();
-	if (trimmedSearch) params.set("q", trimmedSearch);
+	if (search) params.set("q", search);
 	if (supportsTimeRange(props.variant)) params.set("range", range);
 	if (before) params.set("before", before);
 
@@ -248,6 +241,7 @@ function useLogData(props: LogViewerProps, options: LogEndpointOptions) {
 	}
 
 	return useSWR<LogDataResponse>(endpoint, fetcher, {
+		keepPreviousData: true,
 		refreshInterval: pollingInterval,
 	});
 }
@@ -789,6 +783,16 @@ export function LogViewer(props: LogViewerProps) {
 		props,
 		logEndpointOptions,
 	);
+	const hasResolvedData = data !== undefined;
+	useEffect(() => {
+		if (error && hasResolvedData) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to refresh logs",
+				{ id: `logs-refresh-${paginationKey}` },
+			);
+		}
+	}, [error, hasResolvedData, paginationKey]);
+
 	const recentLogs = (data?.logs as unknown[] | undefined) || EMPTY_LOGS;
 	const logs = useMemo(() => {
 		const seenIds = new Set<string>();
@@ -826,7 +830,7 @@ export function LogViewer(props: LogViewerProps) {
 		olderLogs.length === 0 ? data?.hasMore || false : olderHasMore;
 
 	const loadOlderLogs = async () => {
-		if (isLoadingOlder || !hasMore) return;
+		if (isLoadingOlder || isLoading || !hasMore) return;
 
 		const oldestLog = logs[0] as { timestamp?: string } | undefined;
 		if (!oldestLog?.timestamp) return;
@@ -857,6 +861,7 @@ export function LogViewer(props: LogViewerProps) {
 			const result = (await response.json()) as LogDataResponse & {
 				message?: string;
 			};
+			if (paginationAbortRef.current !== controller) return;
 			if (!response.ok) {
 				throw new Error(result.message || "Failed to load older logs");
 			}
@@ -879,6 +884,7 @@ export function LogViewer(props: LogViewerProps) {
 				scrollRestorationRef.current = null;
 			}
 		} catch (error) {
+			if (paginationAbortRef.current !== controller) return;
 			scrollRestorationRef.current = null;
 			if (!(error instanceof DOMException && error.name === "AbortError")) {
 				console.error("Failed to load older logs:", error);
@@ -889,10 +895,8 @@ export function LogViewer(props: LogViewerProps) {
 		} finally {
 			if (paginationAbortRef.current === controller) {
 				paginationAbortRef.current = null;
+				setLoadingOlderKey(null);
 			}
-			setLoadingOlderKey((current) =>
-				current === requestKey ? null : current,
-			);
 		}
 	};
 
@@ -1061,13 +1065,13 @@ export function LogViewer(props: LogViewerProps) {
 				ref={containerRef}
 				className="flex-1 overflow-y-auto font-mono text-xs leading-5"
 			>
-				{!error && hasMore && config.loadMoreLabel && (
+				{hasMore && config.loadMoreLabel && (
 					<div className="flex justify-center py-2 border-b">
 						<Button
 							variant="ghost"
 							size="sm"
 							onClick={loadOlderLogs}
-							disabled={isLoadingOlder}
+							disabled={isLoadingOlder || isLoading}
 							className="gap-1 text-muted-foreground"
 						>
 							{isLoadingOlder ? (
@@ -1080,7 +1084,7 @@ export function LogViewer(props: LogViewerProps) {
 					</div>
 				)}
 
-				{error ? (
+				{error && logs.length === 0 ? (
 					<Empty className="h-full">
 						<EmptyTitle>Unable to load logs</EmptyTitle>
 						<EmptyContent>
@@ -1089,7 +1093,7 @@ export function LogViewer(props: LogViewerProps) {
 							</Button>
 						</EmptyContent>
 					</Empty>
-				) : isLoading ? (
+				) : isLoading && logs.length === 0 ? (
 					<div className="flex items-center justify-center h-full text-muted-foreground">
 						<Spinner className="size-5" />
 					</div>
