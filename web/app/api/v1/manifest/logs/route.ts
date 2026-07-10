@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import { requireRequestRole } from "@/lib/api-auth";
 import { getManifestStatus } from "@/lib/cli-service";
+import { isLogCursor } from "@/lib/log-query";
 import { slugify } from "@/lib/utils";
 import { isLoggingEnabled, queryLogsByService } from "@/lib/victoria-logs";
 
@@ -10,7 +11,12 @@ const querySchema = z.object({
 	project: z.string().trim().min(1),
 	environment: z.string().trim().min(1),
 	service: z.string().trim().min(1),
-	after: z.string().trim().min(1).optional(),
+	after: z
+		.string()
+		.trim()
+		.min(1)
+		.refine(isLogCursor, { message: "Invalid log cursor" })
+		.optional(),
 	tail: z.coerce.number().int().min(1).max(1000).default(100),
 });
 

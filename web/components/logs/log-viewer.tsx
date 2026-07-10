@@ -13,7 +13,8 @@ import {
 	parseAsStringLiteral,
 	useQueryState,
 } from "nuqs";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,14 +23,23 @@ import {
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Empty, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyContent, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { formatPreciseDateTime, formatTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
+import {
+	DEFAULT_LOG_TIME_RANGE,
+	LOG_TIME_RANGES,
+	type LogTimeRange,
+	MAX_LOG_SEARCH_LENGTH,
+	splitLogSearchMatches,
+} from "@/lib/log-query";
 
 type LogLevel = "error" | "warn" | "info" | "debug";
 type StatusCategory = "2xx" | "3xx" | "4xx" | "5xx";
@@ -85,6 +95,13 @@ const SERVER_LOG_LEVEL_COLORS: Record<string, string> = {
 
 const EMPTY_LOGS: unknown[] = [];
 
+const LOG_TIME_RANGE_LABELS: Record<LogTimeRange, string> = {
+	"1h": "Last hour",
+	"6h": "Last 6 hours",
+	"24h": "Last 24 hours",
+	"7d": "Last 7 days",
+};
+
 type LogViewerProps =
 	| { variant: "service-logs"; serviceId: string; servers?: Server[] }
 	| { variant: "requests"; serviceId: string }
@@ -124,20 +141,14 @@ function getStatusCategory(status: number): StatusCategory {
 }
 
 function highlightMatches(text: string, search: string): React.ReactNode {
-	if (!search) return text;
-
-	const regex = new RegExp(
-		`(${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-		"gi",
-	);
-	const parts = text.split(regex);
+	const parts = splitLogSearchMatches(text, search);
 	let offset = 0;
 
-	return parts.map((part) => {
+	return parts.map(({ text: part, isMatch }) => {
 		const start = offset;
 		offset += part.length;
 
-		return regex.test(part) ? (
+		return isMatch ? (
 			<mark
 				key={`${part}-${start}`}
 				className="bg-yellow-300 dark:bg-yellow-700 text-inherit rounded-sm px-0.5"
@@ -150,39 +161,108 @@ function highlightMatches(text: string, search: string): React.ReactNode {
 	});
 }
 
-function useLogData(props: LogViewerProps, filterServerId?: string) {
-	const endpoint = useMemo(() => {
-		const serverParam = filterServerId ? `&serverId=${filterServerId}` : "";
-		switch (props.variant) {
-			case "service-logs":
-				return `/api/services/${props.serviceId}/logs?limit=500&type=container${serverParam}`;
-			case "requests":
-				return `/api/services/${props.serviceId}/requests?limit=500`;
-			case "build-logs":
-				return `/api/builds/${props.buildId}/logs`;
-			case "server-logs":
-				return `/api/servers/${props.serverId}/logs?limit=500`;
-			case "rollout-logs":
-				return `/api/rollouts/${props.rolloutId}/logs`;
-		}
-	}, [props, filterServerId]);
+type LogDataResponse = { logs: unknown[]; hasMore?: boolean };
 
-	const pollingInterval = useMemo(() => {
-		if (props.variant === "build-logs") {
-			return props.isLive ? 2000 : 0;
-		}
-		if (props.variant === "rollout-logs") {
-			return props.isLive ? 2000 : 0;
-		}
-		if (props.variant === "server-logs") {
-			return 5000;
-		}
-		return 2000;
-	}, [props]);
+type LogEndpointOptions = {
+	search: string;
+	range: LogTimeRange;
+	filterServerId?: string;
+	before?: string;
+};
 
-	return useSWR<{ logs: unknown[]; hasMore?: boolean }>(endpoint, fetcher, {
-		refreshInterval: pollingInterval,
-	});
+function supportsTimeRange(variant: LogViewerProps["variant"]): boolean {
+	return (
+		variant === "service-logs" ||
+		variant === "requests" ||
+		variant === "server-logs"
+	);
+}
+
+function buildLogEndpoint(
+	props: LogViewerProps,
+	{ search, range, filterServerId, before }: LogEndpointOptions,
+): string {
+	const params = new URLSearchParams();
+	if (search) params.set("q", search);
+	if (supportsTimeRange(props.variant)) params.set("range", range);
+	if (before) params.set("before", before);
+
+	let path: string;
+	switch (props.variant) {
+		case "service-logs":
+			path = `/api/services/${props.serviceId}/logs`;
+			params.set("limit", "500");
+			params.set("type", "container");
+			if (filterServerId) params.set("serverId", filterServerId);
+			break;
+		case "requests":
+			path = `/api/services/${props.serviceId}/requests`;
+			params.set("limit", "500");
+			break;
+		case "build-logs":
+			path = `/api/builds/${props.buildId}/logs`;
+			break;
+		case "server-logs":
+			path = `/api/servers/${props.serverId}/logs`;
+			params.set("limit", "500");
+			break;
+		case "rollout-logs":
+			path = `/api/rollouts/${props.rolloutId}/logs`;
+			break;
+	}
+
+	const query = params.toString();
+	return query ? `${path}?${query}` : path;
+}
+
+function useDebouncedValue(value: string, delay: number): string {
+	const [debouncedValue, setDebouncedValue] = useState(value);
+
+	useEffect(() => {
+		if (!value) {
+			setDebouncedValue("");
+			return;
+		}
+
+		const timeout = window.setTimeout(() => setDebouncedValue(value), delay);
+		return () => window.clearTimeout(timeout);
+	}, [value, delay]);
+
+	return debouncedValue;
+}
+
+function TimeRangeFilter({
+	range,
+	onRangeChange,
+}: {
+	range: LogTimeRange;
+	onRangeChange: (range: LogTimeRange) => void;
+}) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex items-center justify-center gap-1 h-7 px-2.5 text-[0.8rem] font-medium rounded-[min(var(--radius-md),12px)] border border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50">
+				{LOG_TIME_RANGE_LABELS[range]}
+				<ChevronDown className="size-3" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-40">
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>Time range</DropdownMenuLabel>
+				</DropdownMenuGroup>
+				<DropdownMenuSeparator />
+				<DropdownMenuRadioGroup
+					aria-label="Time range"
+					value={range}
+					onValueChange={(value) => onRangeChange(value as LogTimeRange)}
+				>
+					{LOG_TIME_RANGES.map((option) => (
+						<DropdownMenuRadioItem key={option} value={option} closeOnClick>
+							{LOG_TIME_RANGE_LABELS[option]}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
 }
 
 function ServiceLogsFilters({
@@ -604,6 +684,7 @@ const logLevelParser = parseAsArrayOf(
 const statusParser = parseAsArrayOf(
 	parseAsStringLiteral(["2xx", "3xx", "4xx", "5xx"] as const),
 );
+const rangeParser = parseAsStringLiteral(LOG_TIME_RANGES);
 
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -611,7 +692,13 @@ export function LogViewer(props: LogViewerProps) {
 		scrollTop: number;
 		scrollHeight: number;
 	} | null>(null);
+	const paginationAbortRef = useRef<AbortController | null>(null);
 	const [search, setSearch] = useQueryState("q", { defaultValue: "" });
+	const debouncedSearch = useDebouncedValue(search, 300).trim();
+	const [range, setRange] = useQueryState(
+		"range",
+		rangeParser.withDefault(DEFAULT_LOG_TIME_RANGE),
+	);
 	const [autoScroll, setAutoScroll] = useState(true);
 	const [selectedServerId, setSelectedServerId] = useQueryState("server");
 
@@ -651,20 +738,59 @@ export function LogViewer(props: LogViewerProps) {
 	const setStatusFilter = (newStatus: Set<StatusCategory>) =>
 		setStatusParam(Array.from(newStatus) as typeof statusParam);
 
-	const [olderLogs, setOlderLogs] = useState<unknown[]>([]);
-	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
-	const [olderHasMore, setOlderHasMore] = useState(true);
-	const prevSelectedServerIdRef = useRef(selectedServerId);
-
-	if (selectedServerId !== prevSelectedServerIdRef.current) {
-		prevSelectedServerIdRef.current = selectedServerId;
-		setOlderLogs([]);
-		setOlderHasMore(true);
-	}
-
 	const servers = props.variant === "service-logs" ? props.servers : undefined;
+	const logEndpointOptions: LogEndpointOptions = {
+		search: debouncedSearch,
+		range,
+		filterServerId: selectedServerId ?? undefined,
+	};
+	const paginationKey = buildLogEndpoint(props, logEndpointOptions);
+	let pollingInterval = 2000;
+	if (props.variant === "build-logs" || props.variant === "rollout-logs") {
+		pollingInterval = props.isLive ? 2000 : 0;
+	} else if (props.variant === "server-logs") {
+		pollingInterval = 5000;
+	}
+	const [olderState, setOlderState] = useState<{
+		key: string;
+		logs: unknown[];
+		hasMore: boolean;
+	}>({ key: "", logs: [], hasMore: true });
+	const [loadingOlderKey, setLoadingOlderKey] = useState<string | null>(null);
+	const olderLogs =
+		olderState.key === paginationKey ? olderState.logs : EMPTY_LOGS;
+	const olderHasMore =
+		olderState.key === paginationKey ? olderState.hasMore : true;
+	const isLoadingOlder = loadingOlderKey === paginationKey;
 
-	const { data, isLoading } = useLogData(props, selectedServerId ?? undefined);
+	useEffect(() => {
+		void paginationKey;
+		paginationAbortRef.current?.abort();
+		paginationAbortRef.current = null;
+		scrollRestorationRef.current = null;
+		setLoadingOlderKey(null);
+
+		return () => paginationAbortRef.current?.abort();
+	}, [paginationKey]);
+
+	const { data, error, isLoading, mutate } = useSWR<LogDataResponse>(
+		paginationKey,
+		fetcher,
+		{
+			keepPreviousData: true,
+			refreshInterval: pollingInterval,
+		},
+	);
+	const hasResolvedData = data !== undefined;
+	useEffect(() => {
+		if (error && hasResolvedData) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to refresh logs",
+				{ id: `logs-refresh-${paginationKey}` },
+			);
+		}
+	}, [error, hasResolvedData, paginationKey]);
+
 	const recentLogs = (data?.logs as unknown[] | undefined) || EMPTY_LOGS;
 	const logs = useMemo(() => {
 		const seenIds = new Set<string>();
@@ -702,7 +828,7 @@ export function LogViewer(props: LogViewerProps) {
 		olderLogs.length === 0 ? data?.hasMore || false : olderHasMore;
 
 	const loadOlderLogs = async () => {
-		if (isLoadingOlder || !hasMore) return;
+		if (isLoadingOlder || isLoading || !hasMore) return;
 
 		const oldestLog = logs[0] as { timestamp?: string } | undefined;
 		if (!oldestLog?.timestamp) return;
@@ -715,44 +841,60 @@ export function LogViewer(props: LogViewerProps) {
 			};
 		}
 
-		setIsLoadingOlder(true);
+		const requestKey = paginationKey;
+		const controller = new AbortController();
+		paginationAbortRef.current?.abort();
+		paginationAbortRef.current = controller;
+		setLoadingOlderKey(requestKey);
 		try {
 			const cursor = oldestLog.timestamp;
-			let endpoint: string;
-			const beforeParam = `&before=${encodeURIComponent(cursor)}`;
-			const serverParam = selectedServerId
-				? `&serverId=${selectedServerId}`
-				: "";
-
-			switch (props.variant) {
-				case "service-logs":
-					endpoint = `/api/services/${props.serviceId}/logs?limit=500&type=container${beforeParam}${serverParam}`;
-					break;
-				case "requests":
-					endpoint = `/api/services/${props.serviceId}/requests?limit=500${beforeParam}`;
-					break;
-				case "server-logs":
-					endpoint = `/api/servers/${props.serverId}/logs?limit=500${beforeParam}`;
-					break;
-				default:
-					return;
+			const endpoint = buildLogEndpoint(props, {
+				...logEndpointOptions,
+				before: cursor,
+			});
+			const response = await fetch(endpoint, {
+				cache: "no-store",
+				signal: controller.signal,
+			});
+			const result = (await response.json()) as LogDataResponse & {
+				message?: string;
+			};
+			if (paginationAbortRef.current !== controller) return;
+			if (!response.ok) {
+				throw new Error(result.message || "Failed to load older logs");
 			}
 
-			const response = await fetch(endpoint);
-			const result = await response.json();
-
 			if (result.logs && result.logs.length > 0) {
-				setOlderLogs((prev) => [...result.logs, ...prev]);
-				setOlderHasMore(result.hasMore || false);
+				setOlderState((current) => ({
+					key: requestKey,
+					logs: [
+						...result.logs,
+						...(current.key === requestKey ? current.logs : []),
+					],
+					hasMore: result.hasMore || false,
+				}));
 			} else {
-				setOlderHasMore(false);
+				setOlderState((current) => ({
+					key: requestKey,
+					logs: current.key === requestKey ? current.logs : [],
+					hasMore: false,
+				}));
 				scrollRestorationRef.current = null;
 			}
 		} catch (error) {
-			console.error("Failed to load older logs:", error);
+			if (paginationAbortRef.current !== controller) return;
 			scrollRestorationRef.current = null;
+			if (!(error instanceof DOMException && error.name === "AbortError")) {
+				console.error("Failed to load older logs:", error);
+				toast.error(
+					error instanceof Error ? error.message : "Failed to load older logs",
+				);
+			}
 		} finally {
-			setIsLoadingOlder(false);
+			if (paginationAbortRef.current === controller) {
+				paginationAbortRef.current = null;
+				setLoadingOlderKey(null);
+			}
 		}
 	};
 
@@ -765,68 +907,28 @@ export function LogViewer(props: LogViewerProps) {
 
 				const level = detectLevel(entry.message);
 				if (level && !levels.has(level)) return false;
-
-				if (
-					search &&
-					!entry.message.toLowerCase().includes(search.toLowerCase())
-				)
-					return false;
 			} else if (props.variant === "requests") {
 				const entry = log as RequestEntry;
 				const category = getStatusCategory(entry.status);
 				if (!statusFilter.has(category)) return false;
-
-				if (search) {
-					const searchLower = search.toLowerCase();
-					const matchesPath = entry.path.toLowerCase().includes(searchLower);
-					const matchesMethod = entry.method
-						.toLowerCase()
-						.includes(searchLower);
-					const matchesStatus = entry.status.toString().includes(search);
-					const matchesIp = entry.clientIp.includes(search);
-					if (!matchesPath && !matchesMethod && !matchesStatus && !matchesIp) {
-						return false;
-					}
-				}
-			} else if (props.variant === "build-logs") {
-				const entry = log as BuildLogEntry;
-				if (
-					search &&
-					!entry.message.toLowerCase().includes(search.toLowerCase())
-				)
-					return false;
 			} else if (props.variant === "server-logs") {
 				const entry = log as ServerLogEntry;
 				if (!levels.has(entry.level as LogLevel)) return false;
-				if (
-					search &&
-					!entry.message.toLowerCase().includes(search.toLowerCase())
-				)
-					return false;
-			} else if (props.variant === "rollout-logs") {
-				const entry = log as BuildLogEntry;
-				if (
-					search &&
-					!entry.message.toLowerCase().includes(search.toLowerCase())
-				)
-					return false;
 			}
 
 			return true;
 		});
-	}, [
-		logs,
-		props.variant,
-		search,
-		levels,
-		showStdout,
-		showStderr,
-		statusFilter,
-	]);
+	}, [logs, props.variant, levels, showStdout, showStderr, statusFilter]);
+	const logCount = logs.length;
 	const filteredLogCount = filteredLogs.length;
+	const newestFilteredLogTimestamp = (
+		filteredLogs.at(-1) as BaseEntry | undefined
+	)?.timestamp;
 
 	useLayoutEffect(() => {
+		void logCount;
 		void filteredLogCount;
+		void newestFilteredLogTimestamp;
 		const container = containerRef.current;
 		const restoration = scrollRestorationRef.current;
 
@@ -838,7 +940,7 @@ export function LogViewer(props: LogViewerProps) {
 		} else if (autoScroll && container) {
 			container.scrollTop = container.scrollHeight;
 		}
-	}, [filteredLogCount, autoScroll]);
+	}, [logCount, filteredLogCount, newestFilteredLogTimestamp, autoScroll]);
 
 	const config = useMemo(() => {
 		switch (props.variant) {
@@ -894,6 +996,7 @@ export function LogViewer(props: LogViewerProps) {
 						placeholder={config.searchPlaceholder}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
+						maxLength={MAX_LOG_SEARCH_LENGTH}
 						className="pl-8 pr-8 h-8"
 					/>
 					{search && (
@@ -929,6 +1032,13 @@ export function LogViewer(props: LogViewerProps) {
 					<ServerLogFilters levels={levels} onLevelsChange={setLevels} />
 				)}
 
+				{supportsTimeRange(props.variant) && (
+					<TimeRangeFilter
+						range={range}
+						onRangeChange={(nextRange) => void setRange(nextRange)}
+					/>
+				)}
+
 				{servers && servers.length > 1 && (
 					<ServerFilter
 						servers={servers}
@@ -941,7 +1051,7 @@ export function LogViewer(props: LogViewerProps) {
 					<Button
 						variant={autoScroll ? "default" : "outline"}
 						size="icon-sm"
-						onClick={() => setAutoScroll(!autoScroll)}
+						onClick={() => setAutoScroll((current) => !current)}
 						title={autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
 					>
 						<ArrowDownToLine className="size-4" />
@@ -959,7 +1069,7 @@ export function LogViewer(props: LogViewerProps) {
 							variant="ghost"
 							size="sm"
 							onClick={loadOlderLogs}
-							disabled={isLoadingOlder}
+							disabled={isLoadingOlder || isLoading}
 							className="gap-1 text-muted-foreground"
 						>
 							{isLoadingOlder ? (
@@ -972,14 +1082,25 @@ export function LogViewer(props: LogViewerProps) {
 					</div>
 				)}
 
-				{isLoading ? (
+				{error && logs.length === 0 ? (
+					<Empty className="h-full">
+						<EmptyTitle>Unable to load logs</EmptyTitle>
+						<EmptyContent>
+							<Button variant="outline" size="sm" onClick={() => void mutate()}>
+								Try again
+							</Button>
+						</EmptyContent>
+					</Empty>
+				) : isLoading && logs.length === 0 ? (
 					<div className="flex items-center justify-center h-full text-muted-foreground">
 						<Spinner className="size-5" />
 					</div>
 				) : filteredLogs.length === 0 ? (
 					<Empty className="h-full">
 						<EmptyTitle>
-							{logs.length === 0 ? config.emptyMessage : config.noMatchMessage}
+							{debouncedSearch.trim() || logs.length > 0
+								? config.noMatchMessage
+								: config.emptyMessage}
 						</EmptyTitle>
 					</Empty>
 				) : (
@@ -987,25 +1108,43 @@ export function LogViewer(props: LogViewerProps) {
 						{filteredLogs.map((entry) => {
 							if (props.variant === "service-logs") {
 								const e = entry as ServiceLogEntry;
-								return <ServiceLogRow key={e.id} entry={e} search={search} />;
+								return (
+									<ServiceLogRow
+										key={e.id}
+										entry={e}
+										search={debouncedSearch}
+									/>
+								);
 							}
 							if (props.variant === "requests") {
 								const e = entry as RequestEntry;
-								return <RequestRow key={e.id} entry={e} search={search} />;
+								return (
+									<RequestRow key={e.id} entry={e} search={debouncedSearch} />
+								);
 							}
 							if (props.variant === "server-logs") {
 								const e = entry as ServerLogEntry;
-								return <ServerLogRow key={e.id} entry={e} search={search} />;
+								return (
+									<ServerLogRow key={e.id} entry={e} search={debouncedSearch} />
+								);
 							}
 							if (props.variant === "rollout-logs") {
 								const e = entry as BuildLogEntry;
 								return (
-									<BuildLogRow key={e.timestamp} entry={e} search={search} />
+									<BuildLogRow
+										key={e.timestamp}
+										entry={e}
+										search={debouncedSearch}
+									/>
 								);
 							}
 							const e = entry as BuildLogEntry;
 							return (
-								<BuildLogRow key={e.timestamp} entry={e} search={search} />
+								<BuildLogRow
+									key={e.timestamp}
+									entry={e}
+									search={debouncedSearch}
+								/>
 							);
 						})}
 					</div>

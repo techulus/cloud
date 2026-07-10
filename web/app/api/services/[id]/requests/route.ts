@@ -1,5 +1,6 @@
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
+import { invalidLogQueryResponse, parseLogListParams } from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByService } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -20,17 +21,17 @@ export async function GET(
 
 	const { id: serviceId } = await params;
 	const url = new URL(request.url);
-	const limit = Math.min(
-		Number.parseInt(url.searchParams.get("limit") || "100", 10),
-		1000,
-	);
-	const before = url.searchParams.get("before") || undefined;
+	let queryParams: ReturnType<typeof parseLogListParams>;
+	try {
+		queryParams = parseLogListParams(url.searchParams, 100);
+	} catch (error) {
+		return invalidLogQueryResponse(error);
+	}
 
 	try {
 		const result = await queryLogsByService({
 			serviceId,
-			limit,
-			before,
+			...queryParams,
 			logType: "http",
 		});
 
@@ -50,6 +51,9 @@ export async function GET(
 		});
 	} catch (error) {
 		console.error("[logs:requests] failed to query HTTP logs:", error);
-		return Response.json({ logs: [], hasMore: false });
+		return Response.json(
+			{ message: "Failed to query request logs" },
+			{ status: 502 },
+		);
 	}
 }
