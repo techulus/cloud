@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { createBackup, deleteBackup, restoreBackup } from "@/actions/backups";
 import { updateServiceBackupSettings } from "@/actions/projects";
+import { LocalDate } from "@/components/core/local-date";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -32,7 +33,6 @@ import {
 	NativeSelectOption,
 } from "@/components/ui/native-select";
 import type { ServiceWithDetails as Service } from "@/db/types";
-import { formatDateTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type BackupItem = {
@@ -284,7 +284,7 @@ export const BackupTab = memo(function BackupTab({
 									<div>
 										<p className="font-medium text-sm">{backup.volumeName}</p>
 										<p className="text-xs text-muted-foreground">
-											{formatDateTime(backup.createdAt)}
+											<LocalDate value={backup.createdAt} />
 											{backup.sizeBytes &&
 												` · ${formatBytes(backup.sizeBytes)}`}
 											{backup.serverName && ` · ${backup.serverName}`}

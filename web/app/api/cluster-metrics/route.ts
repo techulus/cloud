@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { listServers } from "@/db/queries";
 import { auth } from "@/lib/auth";
+import { subtractMilliseconds } from "@/lib/date";
 import {
 	isMetricsEnabled,
 	METRIC_RANGE_OPTIONS,
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
 	const end = new Date();
 	const option = METRIC_RANGE_OPTIONS[range];
-	const start = new Date(end.getTime() - option.durationMs);
+	const start = subtractMilliseconds(end, option.durationMs);
 	const servers = await listServers();
 	const selectedServers =
 		serverId && serverId !== "all"

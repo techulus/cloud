@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { RolloutStatus } from "@/db/types";
-import { formatRelativeTime } from "@/lib/date";
+import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type RolloutListItem = {
@@ -94,18 +94,6 @@ const STAGE_LABELS: Record<string, string> = {
 function formatStage(stage: string | null): string {
 	if (!stage) return "Starting";
 	return STAGE_LABELS[stage] || stage;
-}
-
-function formatDuration(start: string, end: string | null): string {
-	const startDate = new Date(start);
-	const endDate = end ? new Date(end) : new Date();
-	const diff = endDate.getTime() - startDate.getTime();
-	const seconds = Math.floor(diff / 1000);
-	const minutes = Math.floor(seconds / 60);
-	if (minutes > 0) {
-		return `${minutes}m ${seconds % 60}s`;
-	}
-	return `${seconds}s`;
 }
 
 function RolloutHistorySkeleton({ actions }: { actions?: React.ReactNode }) {
@@ -209,7 +197,10 @@ export function RolloutHistory({
 										<span>{formatRelativeTime(rollout.createdAt)}</span>
 										<span className="ml-3">
 											Duration:{" "}
-											{formatDuration(rollout.createdAt, rollout.completedAt)}
+											{formatElapsedDurationBetween(
+												rollout.createdAt,
+												rollout.completedAt,
+											)}
 										</span>
 									</ItemDescription>
 								</ItemContent>

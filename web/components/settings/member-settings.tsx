@@ -11,6 +11,7 @@ import {
 	revokeInvitation,
 	updateMemberRole,
 } from "@/actions/members";
+import { LocalDate } from "@/components/core/local-date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,22 +45,11 @@ type Props = {
 	initialInvitations: InvitationRecord[];
 };
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
-
 const roleBadgeVariants = {
 	admin: "default",
 	developer: "secondary",
 	reader: "outline",
 } as const;
-
-function formatDate(value: string | Date) {
-	const date = value instanceof Date ? value : new Date(value);
-	if (Number.isNaN(date.getTime())) return "Unknown";
-	return dateFormatter.format(date);
-}
 
 export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 	const router = useRouter();
@@ -226,7 +216,8 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 									{member.email}
 								</p>
 								<p className="text-xs text-muted-foreground">
-									Joined {formatDate(member.createdAt)}
+									Joined{" "}
+									<LocalDate value={member.createdAt} fallback="Unknown" />
 								</p>
 							</div>
 							{member.role === "admin" ? (
@@ -287,7 +278,11 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 								<div className="min-w-0">
 									<p className="truncate font-medium">{invitation.email}</p>
 									<p className="text-xs text-muted-foreground">
-										Expires {formatDate(invitation.expiresAt)}
+										Expires{" "}
+										<LocalDate
+											value={invitation.expiresAt}
+											fallback="Unknown"
+										/>
 									</p>
 								</div>
 								<Badge variant="outline">{invitation.role}</Badge>

@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { db } from "@/db";
 import { getEmailAlertsConfig, getSmtpConfig } from "@/db/queries";
 import { environments, projects, servers, services } from "@/db/schema";
-import { formatDateTime } from "@/lib/date";
+import { formatDateTimeUtc } from "@/lib/date";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { Alert } from "./templates/alert";
 import { MemberInvitation } from "./templates/member-invitation";
@@ -152,7 +152,7 @@ export async function sendServerOfflineAlert(
 		...(options.serverIp
 			? [{ label: "IP Address", value: options.serverIp }]
 			: []),
-		{ label: "Detected At", value: formatDateTime(new Date()) },
+		{ label: "Detected At", value: formatDateTimeUtc(new Date()) },
 	];
 
 	await sendAlert({
@@ -203,7 +203,7 @@ export async function sendManualRecoveryRequiredAlert(
 			: []),
 		{ label: "Impacted Replicas", value: String(options.impactedReplicas) },
 		{ label: "Services", value: serviceSummary },
-		{ label: "Detected At", value: formatDateTime(new Date()) },
+		{ label: "Detected At", value: formatDateTimeUtc(new Date()) },
 	];
 
 	await sendAlert({

@@ -7,6 +7,7 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { deleteService } from "@/actions/projects";
+import { LocalDate } from "@/components/core/local-date";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
 import { PortsSection } from "@/components/service/details/ports-section";
 import { ReplicasSection } from "@/components/service/details/replicas-section";
@@ -46,11 +47,6 @@ const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
 type TwoFactorSessionUser = {
 	twoFactorEnabled?: boolean | null;
 };
-
-function formatBackupDate(value: Date | string | null | undefined) {
-	if (!value) return "an unknown time";
-	return new Date(value).toLocaleString();
-}
 
 export default function ConfigurationPage() {
 	const router = useRouter();
@@ -193,10 +189,13 @@ export default function ConfigurationPage() {
 															</span>{" "}
 															Restore will use the latest completed backups for
 															its volumes. The oldest selected backup is from{" "}
-															{formatBackupDate(
-																service.deletionBackupFallback
-																	?.oldestLatestBackupAt,
-															)}
+															<LocalDate
+																value={
+																	service.deletionBackupFallback
+																		?.oldestLatestBackupAt
+																}
+																fallback="an unknown time"
+															/>
 															; changes after that backup will not be restored.
 														</>
 													)}

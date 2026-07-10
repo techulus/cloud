@@ -11,6 +11,7 @@ import { db } from "@/db";
 import { account, memberInvitations, user } from "@/db/schema";
 import type { InvitableMemberRole } from "@/db/types";
 import { auth, requireAdminRole } from "@/lib/auth";
+import { addMilliseconds, DAY_IN_MILLISECONDS, isExpired } from "@/lib/date";
 import { sendMemberInviteEmail } from "@/lib/email";
 import {
 	createInviteToken,
@@ -18,7 +19,7 @@ import {
 	isInvitableMemberRole,
 } from "@/lib/members";
 
-const INVITE_EXPIRY_MS = 1000 * 60 * 60 * 24 * 7;
+const INVITE_EXPIRY_MS = 7 * DAY_IN_MILLISECONDS;
 
 const inviteMemberSchema = z.object({
 	email: z.string().trim().email(),
@@ -49,10 +50,6 @@ type CreateUserInput = {
 const createAuthUser = auth.api.createUser as (
 	data: CreateUserInput,
 ) => Promise<CreateUserResult>;
-
-function isExpired(expiresAt: Date) {
-	return expiresAt.getTime() <= Date.now();
-}
 
 async function requireAdminSession() {
 	const session = await requireAdminRole();
@@ -191,7 +188,7 @@ export async function inviteMember(input: {
 	}
 
 	const inviteUrl = `${baseUrl}/invite/${encodeURIComponent(token)}`;
-	const expiresAt = new Date(Date.now() + INVITE_EXPIRY_MS);
+	const expiresAt = addMilliseconds(new Date(), INVITE_EXPIRY_MS);
 
 	await db.insert(memberInvitations).values({
 		id: randomUUID(),

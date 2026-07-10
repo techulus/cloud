@@ -12,6 +12,7 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { addUtcDays, toDate } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
@@ -29,16 +30,6 @@ async function markServiceDeletionFailed(serviceId: string, error: unknown) {
 				error instanceof Error ? error.message : "Service operation failed",
 		})
 		.where(eq(services.id, serviceId));
-}
-
-function purgeDateFrom(date: Date) {
-	const purgeAfter = new Date(date);
-	purgeAfter.setDate(purgeAfter.getDate() + DELETED_SERVICE_RETENTION_DAYS);
-	return purgeAfter;
-}
-
-function restoreDate(value: Date | string | null) {
-	return value ? new Date(value) : null;
 }
 
 export const serviceDeletionWorkflow = inngest.createFunction(
@@ -145,59 +136,61 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 			if (newBackupIds.length > 0) {
 				const backupResults = await Promise.all(
 					newBackupIds.map((backupId) =>
-						group.parallel(async (): Promise<{
-							status: "completed" | "failed" | "pending" | "timed_out";
-							error?: string;
-						}> => {
-							const readBackup = async () =>
-								db
-									.select({
-										status: volumeBackups.status,
-										errorMessage: volumeBackups.errorMessage,
-									})
-									.from(volumeBackups)
-									.where(eq(volumeBackups.id, backupId))
-									.then((r) => r[0]);
+						group.parallel(
+							async (): Promise<{
+								status: "completed" | "failed" | "pending" | "timed_out";
+								error?: string;
+							}> => {
+								const readBackup = async () =>
+									db
+										.select({
+											status: volumeBackups.status,
+											errorMessage: volumeBackups.errorMessage,
+										})
+										.from(volumeBackups)
+										.where(eq(volumeBackups.id, backupId))
+										.then((r) => r[0]);
 
-							const before = await step.run(
-								`check-delete-backup-${backupId}-before`,
-								readBackup,
-							);
-							if (before?.status === "completed") {
-								return { status: "completed" as const };
-							}
-							if (before?.status === "failed") {
-								return {
-									status: "failed" as const,
-									error: before.errorMessage || "Deletion backup failed",
-								};
-							}
+								const before = await step.run(
+									`check-delete-backup-${backupId}-before`,
+									readBackup,
+								);
+								if (before?.status === "completed") {
+									return { status: "completed" as const };
+								}
+								if (before?.status === "failed") {
+									return {
+										status: "failed" as const,
+										error: before.errorMessage || "Deletion backup failed",
+									};
+								}
 
-							const wakeup = await step.waitForEvent(
-								`wait-delete-backup-status-${backupId}`,
-								{
-									event: inngestEvents.resourceStatusChanged,
-									timeout: "30m",
-									if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
-								},
-							);
+								const wakeup = await step.waitForEvent(
+									`wait-delete-backup-status-${backupId}`,
+									{
+										event: inngestEvents.resourceStatusChanged,
+										timeout: "30m",
+										if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
+									},
+								);
 
-							const after = await step.run(
-								`check-delete-backup-${backupId}-after`,
-								readBackup,
-							);
-							if (after?.status === "completed") {
-								return { status: "completed" as const };
-							}
-							if (after?.status === "failed") {
-								return {
-									status: "failed" as const,
-									error: after.errorMessage || "Deletion backup failed",
-								};
-							}
+								const after = await step.run(
+									`check-delete-backup-${backupId}-after`,
+									readBackup,
+								);
+								if (after?.status === "completed") {
+									return { status: "completed" as const };
+								}
+								if (after?.status === "failed") {
+									return {
+										status: "failed" as const,
+										error: after.errorMessage || "Deletion backup failed",
+									};
+								}
 
-							return { status: wakeup ? "pending" : "timed_out" } as const;
-						}),
+								return { status: wakeup ? "pending" : "timed_out" } as const;
+							},
+						),
 					),
 				);
 
@@ -271,7 +264,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.update(services)
 					.set({
 						deletedAt,
-						purgeAfter: purgeDateFrom(deletedAt),
+						purgeAfter: addUtcDays(deletedAt, DELETED_SERVICE_RETENTION_DAYS),
 						originalHostname: setup.service.hostname,
 						hostname: null,
 						deletionStatus: null,
@@ -437,8 +430,8 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						await db
 							.update(services)
 							.set({
-								deletedAt: restoreDate(setup.service.deletedAt),
-								purgeAfter: restoreDate(setup.service.purgeAfter),
+								deletedAt: toDate(setup.service.deletedAt),
+								purgeAfter: toDate(setup.service.purgeAfter),
 								hostname: null,
 								originalHostname: setup.service.originalHostname,
 								deletionStatus: "failed",
@@ -493,8 +486,8 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 					await db
 						.update(services)
 						.set({
-							deletedAt: restoreDate(setup.service.deletedAt),
-							purgeAfter: restoreDate(setup.service.purgeAfter),
+							deletedAt: toDate(setup.service.deletedAt),
+							purgeAfter: toDate(setup.service.purgeAfter),
 							hostname: null,
 							originalHostname: setup.service.originalHostname,
 							deletionStatus: "failed",
