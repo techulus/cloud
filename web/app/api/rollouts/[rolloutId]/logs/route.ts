@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { normalizeLogSearch } from "@/lib/log-query";
+import { invalidLogQueryResponse, normalizeLogSearch } from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByRollout } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -11,10 +11,7 @@ export async function GET(
 	try {
 		search = normalizeLogSearch(request.nextUrl.searchParams.get("q"));
 	} catch (error) {
-		return NextResponse.json(
-			{ message: error instanceof Error ? error.message : "Invalid search" },
-			{ status: 400 },
-		);
+		return invalidLogQueryResponse(error);
 	}
 
 	if (!isLoggingEnabled()) {

@@ -7,10 +7,6 @@ export const MAX_LOG_SEARCH_LENGTH = 200;
 const LOG_CURSOR_PATTERN =
 	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
-export function isLogTimeRange(value: string): value is LogTimeRange {
-	return LOG_TIME_RANGES.some((range) => range === value);
-}
-
 export function normalizeLogSearch(
 	value: string | null | undefined,
 ): string | undefined {
@@ -101,6 +97,34 @@ export function parseLogLimit(
 		throw new RangeError("Invalid log limit");
 	}
 	return Math.min(limit, maxValue);
+}
+
+export function parseLogListParams(
+	searchParams: URLSearchParams,
+	defaultLimit: number,
+): {
+	search: string | undefined;
+	before: string | undefined;
+	limit: number;
+	range: LogTimeRange;
+} {
+	const search = normalizeLogSearch(searchParams.get("q"));
+	const before = normalizeLogCursor(searchParams.get("before"));
+	const limit = parseLogLimit(searchParams.get("limit"), defaultLimit);
+	const rangeValue = searchParams.get("range") || DEFAULT_LOG_TIME_RANGE;
+	const range = LOG_TIME_RANGES.find((option) => option === rangeValue);
+	if (!range) {
+		throw new RangeError("Invalid log range");
+	}
+
+	return { search, before, limit, range };
+}
+
+export function invalidLogQueryResponse(error: unknown): Response {
+	return Response.json(
+		{ message: error instanceof Error ? error.message : "Invalid log query" },
+		{ status: 400 },
+	);
 }
 
 export function escapeLogRegex(value: string): string {

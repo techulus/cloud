@@ -1,12 +1,6 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import {
-	DEFAULT_LOG_TIME_RANGE,
-	isLogTimeRange,
-	normalizeLogCursor,
-	normalizeLogSearch,
-	parseLogLimit,
-} from "@/lib/log-query";
+import { invalidLogQueryResponse, parseLogListParams } from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByService } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -27,32 +21,18 @@ export async function GET(
 
 	const { id: serviceId } = await params;
 	const url = new URL(request.url);
-	let search: string | undefined;
-	let before: string | undefined;
-	let limit: number;
+	let queryParams: ReturnType<typeof parseLogListParams>;
 	try {
-		search = normalizeLogSearch(url.searchParams.get("q"));
-		before = normalizeLogCursor(url.searchParams.get("before"));
-		limit = parseLogLimit(url.searchParams.get("limit"), 100);
+		queryParams = parseLogListParams(url.searchParams, 100);
 	} catch (error) {
-		return Response.json(
-			{ message: error instanceof Error ? error.message : "Invalid search" },
-			{ status: 400 },
-		);
-	}
-	const rangeParam = url.searchParams.get("range") || DEFAULT_LOG_TIME_RANGE;
-	if (!isLogTimeRange(rangeParam)) {
-		return Response.json({ message: "Invalid log range" }, { status: 400 });
+		return invalidLogQueryResponse(error);
 	}
 
 	try {
 		const result = await queryLogsByService({
 			serviceId,
-			limit,
-			before,
+			...queryParams,
 			logType: "http",
-			search,
-			range: rangeParam,
 		});
 
 		const logs = result.logs.map((log) => ({

@@ -231,21 +231,6 @@ function useDebouncedValue(value: string, delay: number): string {
 	return debouncedValue;
 }
 
-function useLogData(props: LogViewerProps, options: LogEndpointOptions) {
-	const endpoint = buildLogEndpoint(props, options);
-	let pollingInterval = 2000;
-	if (props.variant === "build-logs" || props.variant === "rollout-logs") {
-		pollingInterval = props.isLive ? 2000 : 0;
-	} else if (props.variant === "server-logs") {
-		pollingInterval = 5000;
-	}
-
-	return useSWR<LogDataResponse>(endpoint, fetcher, {
-		keepPreviousData: true,
-		refreshInterval: pollingInterval,
-	});
-}
-
 function TimeRangeFilter({
 	range,
 	onRangeChange,
@@ -760,6 +745,12 @@ export function LogViewer(props: LogViewerProps) {
 		filterServerId: selectedServerId ?? undefined,
 	};
 	const paginationKey = buildLogEndpoint(props, logEndpointOptions);
+	let pollingInterval = 2000;
+	if (props.variant === "build-logs" || props.variant === "rollout-logs") {
+		pollingInterval = props.isLive ? 2000 : 0;
+	} else if (props.variant === "server-logs") {
+		pollingInterval = 5000;
+	}
 	const [olderState, setOlderState] = useState<{
 		key: string;
 		logs: unknown[];
@@ -782,9 +773,13 @@ export function LogViewer(props: LogViewerProps) {
 		return () => paginationAbortRef.current?.abort();
 	}, [paginationKey]);
 
-	const { data, error, isLoading, mutate } = useLogData(
-		props,
-		logEndpointOptions,
+	const { data, error, isLoading, mutate } = useSWR<LogDataResponse>(
+		paginationKey,
+		fetcher,
+		{
+			keepPreviousData: true,
+			refreshInterval: pollingInterval,
+		},
 	);
 	const hasResolvedData = data !== undefined;
 	useEffect(() => {

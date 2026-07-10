@@ -3,11 +3,11 @@ import {
 	DEFAULT_LOG_TIME_RANGE,
 	escapeLogRegex,
 	isLogCursor,
-	isLogTimeRange,
 	MAX_LOG_SEARCH_LENGTH,
 	normalizeLogCursor,
 	normalizeLogSearch,
 	parseLogLimit,
+	parseLogListParams,
 	splitLogSearchMatches,
 } from "@/lib/log-query";
 
@@ -21,9 +21,6 @@ describe("VictoriaLogs queries", () => {
 
 	it("validates log search and time range inputs", () => {
 		expect(DEFAULT_LOG_TIME_RANGE).toBe("24h");
-		expect(isLogTimeRange("1h")).toBe(true);
-		expect(isLogTimeRange("7d")).toBe(true);
-		expect(isLogTimeRange("30d")).toBe(false);
 		expect(normalizeLogSearch("  database error  ")).toBe("database error");
 		expect(normalizeLogSearch("   ")).toBeUndefined();
 		expect(() =>
@@ -51,6 +48,27 @@ describe("VictoriaLogs queries", () => {
 		expect(parseLogLimit("1001", 100)).toBe(1000);
 		expect(() => parseLogLimit("0", 100)).toThrow("Invalid log limit");
 		expect(() => parseLogLimit("abc", 100)).toThrow("Invalid log limit");
+
+		expect(
+			parseLogListParams(
+				new URLSearchParams({
+					q: " database error ",
+					before: "2026-07-10T01:02:03Z",
+					limit: "500",
+					range: "7d",
+				}),
+				100,
+			),
+		).toEqual({
+			search: "database error",
+			before: "2026-07-10T01:02:03Z",
+			limit: 500,
+			range: "7d",
+		});
+		expect(parseLogListParams(new URLSearchParams(), 100).range).toBe("24h");
+		expect(() =>
+			parseLogListParams(new URLSearchParams({ range: "30d" }), 100),
+		).toThrow("Invalid log range");
 
 		expect(splitLogSearchMatches("error and ERROR", "error")).toEqual([
 			{ text: "", isMatch: false },

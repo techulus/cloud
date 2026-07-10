@@ -29,6 +29,11 @@ describe("log routes", () => {
 			params: { limit: "abc" },
 			message: "Invalid log limit",
 		},
+		{
+			name: "an unsupported range",
+			params: { range: "30d" },
+			message: "Invalid log range",
+		},
 	])("rejects $name before querying VictoriaLogs", async ({
 		params,
 		message,

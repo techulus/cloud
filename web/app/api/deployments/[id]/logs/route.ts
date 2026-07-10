@@ -1,6 +1,10 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { normalizeLogCursor, parseLogLimit } from "@/lib/log-query";
+import {
+	invalidLogQueryResponse,
+	normalizeLogCursor,
+	parseLogLimit,
+} from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByDeployment } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -27,10 +31,7 @@ export async function GET(
 		limit = parseLogLimit(url.searchParams.get("limit"), 100);
 		after = normalizeLogCursor(url.searchParams.get("after"));
 	} catch (error) {
-		return Response.json(
-			{ message: error instanceof Error ? error.message : "Invalid request" },
-			{ status: 400 },
-		);
+		return invalidLogQueryResponse(error);
 	}
 
 	try {
