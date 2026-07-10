@@ -26,11 +26,6 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 const EMPTY_REPOS: GitHubRepo[] = [];
 
-function getValidGitHubRepoName(url: string) {
-	const match = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
-	return match ? match[1] : null;
-}
-
 export function GitHubRepoSelector({
 	value,
 	onChange,
@@ -61,7 +56,8 @@ export function GitHubRepoSelector({
 	}, [repos, search]);
 
 	const publicRepoFromSearch = useMemo(() => {
-		const repoName = getValidGitHubRepoName(search);
+		const match = search.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
+		const repoName = match ? match[1] : null;
 		if (!repoName) return null;
 		const alreadyInList = repos.some(
 			(r) => r.fullName.toLowerCase() === repoName.toLowerCase(),

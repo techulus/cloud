@@ -1,4 +1,10 @@
 import {
+	addMilliseconds,
+	getTimestamp,
+	SECOND_IN_MILLISECONDS,
+	subtractMilliseconds,
+} from "@/lib/date";
+import {
 	METRIC_RANGE_OPTIONS,
 	type MetricRange,
 	parseMetricRange,
@@ -323,8 +329,9 @@ export async function queryServiceMetrics(options: {
 	const serviceId = escapePromQL(options.serviceId);
 	const rangeWindow = formatPromDuration(window.stepSeconds);
 	const traefikFilter = `service=~"${serviceMatcher}"`;
-	const queryStart = new Date(
-		window.start.getTime() + window.stepSeconds * 1000,
+	const queryStart = addMilliseconds(
+		window.start,
+		window.stepSeconds * SECOND_IN_MILLISECONDS,
 	);
 
 	const [
@@ -671,9 +678,9 @@ export function getMetricWindow(
 	stepSeconds: number;
 } {
 	const option = METRIC_RANGE_OPTIONS[range];
-	const stepMs = option.stepSeconds * 1000;
-	const end = new Date(Math.floor(now.getTime() / stepMs) * stepMs);
-	const start = new Date(end.getTime() - option.durationMs);
+	const stepMs = option.stepSeconds * SECOND_IN_MILLISECONDS;
+	const end = new Date(Math.floor(getTimestamp(now) / stepMs) * stepMs);
+	const start = subtractMilliseconds(end, option.durationMs);
 	return {
 		start,
 		end,
@@ -707,10 +714,11 @@ function createServiceMetricBuckets(window: {
 	stepSeconds: number;
 }): ServiceMetricsBucket[] {
 	const buckets: ServiceMetricsBucket[] = [];
-	const stepMs = window.stepSeconds * 1000;
+	const stepMs = window.stepSeconds * SECOND_IN_MILLISECONDS;
+	const endMs = window.end.getTime();
 	for (
 		let timestampMs = window.start.getTime() + stepMs;
-		timestampMs <= window.end.getTime();
+		timestampMs <= endMs;
 		timestampMs += stepMs
 	) {
 		buckets.push({

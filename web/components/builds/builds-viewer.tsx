@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
 import type { Build, BuildStatus } from "@/db/types";
-import { formatRelativeTime } from "@/lib/date";
+import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type BuildListItem = Pick<
@@ -116,18 +116,6 @@ function StatusBadge({ status }: { status: BuildStatus }) {
 			{config.label}
 		</span>
 	);
-}
-
-function formatDuration(start: string, end: string | null): string {
-	const startDate = new Date(start);
-	const endDate = end ? new Date(end) : new Date();
-	const diff = endDate.getTime() - startDate.getTime();
-	const seconds = Math.floor(diff / 1000);
-	const minutes = Math.floor(seconds / 60);
-	if (minutes > 0) {
-		return `${minutes}m ${seconds % 60}s`;
-	}
-	return `${seconds}s`;
 }
 
 export function BuildsViewer({
@@ -280,7 +268,10 @@ export function BuildsViewer({
 									{build.startedAt && (
 										<span className="ml-3">
 											Duration:{" "}
-											{formatDuration(build.startedAt, build.completedAt)}
+											{formatElapsedDurationBetween(
+												build.startedAt,
+												build.completedAt,
+											)}
 										</span>
 									)}
 								</ItemDescription>

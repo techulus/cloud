@@ -26,6 +26,11 @@ import {
 	NativeSelectOption,
 } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+	formatCompactDateTime,
+	formatPreciseDateTime,
+	getTimestamp,
+} from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 import { METRIC_RANGE_KEYS, type MetricRange } from "@/lib/metric-ranges";
 import type {
@@ -95,6 +100,11 @@ const CHARTS: ChartConfig[] = [
 		bytesKey: "diskUsedBytes",
 		percentColor: "#f59e0b",
 	},
+];
+
+const CHART_THRESHOLDS = [
+	{ value: 70, color: "#f59e0b" },
+	{ value: 90, color: "#f43f5e" },
 ];
 
 const SERVER_COLORS = [
@@ -257,7 +267,7 @@ function MetricChartCard({
 								minTickGap={28}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={formatShortTime}
+								tickFormatter={(value) => formatCompactDateTime(value)}
 								className="text-xs"
 							/>
 							<YAxis
@@ -284,7 +294,7 @@ function MetricChartCard({
 								iconType="plainline"
 								wrapperStyle={{ paddingBottom: 12 }}
 							/>
-							{thresholdsForChart().map((threshold) => (
+							{CHART_THRESHOLDS.map((threshold) => (
 								<ReferenceLine
 									key={threshold.value}
 									y={threshold.value}
@@ -398,7 +408,7 @@ function MetricsTooltip({ active, payload, label }: MetricsTooltipProps) {
 
 	return (
 		<div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-md">
-			<p className="mb-1 font-medium">{formatTooltipTime(String(label))}</p>
+			<p className="mb-1 font-medium">{formatPreciseDateTime(String(label))}</p>
 			<div className="space-y-1">
 				{payload.map((item) => (
 					<div
@@ -437,21 +447,19 @@ function buildChartRows(series: ServerMetricsHistory[]): ChartRow[] {
 	}
 
 	return Array.from(rows.values()).sort(
-		(a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+		(a, b) => getTimestamp(a.timestamp, 0) - getTimestamp(b.timestamp, 0),
 	);
 }
-
-function thresholdsForChart() {
-	return [
-		{ value: 70, color: "#f59e0b" },
-		{ value: 90, color: "#f43f5e" },
-	];
-}
-
 function formatTooltipValue(item: TooltipPayload) {
 	const value = Number(item.value);
 	if (!Number.isFinite(value)) return "-";
-	if (isBytesSeries(String(item.dataKey))) return formatBytes(value);
+	const dataKey = String(item.dataKey);
+	if (
+		dataKey.startsWith("memoryUsedBytes:") ||
+		dataKey.startsWith("diskUsedBytes:")
+	) {
+		return formatBytes(value);
+	}
 	return `${value.toFixed(1)}%`;
 }
 
@@ -461,32 +469,6 @@ function getSeriesKey(metricKey: keyof MetricsHistory, serverId: string) {
 
 function getServerColor(index: number) {
 	return SERVER_COLORS[index % SERVER_COLORS.length];
-}
-
-function isBytesSeries(dataKey: string) {
-	return (
-		dataKey.startsWith("memoryUsedBytes:") ||
-		dataKey.startsWith("diskUsedBytes:")
-	);
-}
-
-function formatShortTime(value: string) {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(value));
-}
-
-function formatTooltipTime(value: string) {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-		second: "2-digit",
-	}).format(new Date(value));
 }
 
 function formatBytesCompact(value: number) {

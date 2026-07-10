@@ -1,10 +1,11 @@
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { MINUTE_IN_MILLISECONDS } from "@/lib/date";
 import { verifyEd25519Signature } from "./crypto";
 
-const TIMESTAMP_TOLERANCE_MS = 60 * 1000;
+const TIMESTAMP_TOLERANCE_MS = MINUTE_IN_MILLISECONDS;
 
 export type AuthResult =
 	| { success: true; serverId: string; serverName: string }
@@ -26,10 +27,10 @@ export async function verifyAgentRequest(
 		};
 	}
 
-	const timestampMs = Number.parseInt(timestamp, 10);
+	const timestampMs = Number(timestamp);
 	const now = Date.now();
 	if (
-		Number.isNaN(timestampMs) ||
+		!Number.isSafeInteger(timestampMs) ||
 		Math.abs(now - timestampMs) > TIMESTAMP_TOLERANCE_MS
 	) {
 		return {

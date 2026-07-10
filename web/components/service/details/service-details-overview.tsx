@@ -24,6 +24,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
+import {
+	formatCompactDate,
+	formatCompactDateTime,
+	getTimestamp,
+} from "@/lib/date";
 import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
@@ -220,23 +225,28 @@ function ServiceMetricsPanel({
 	const isUnavailable = Boolean(error) || stats?.metricsEnabled === false;
 	const hasMetricData = Boolean(stats && !isUnavailable);
 	const summaryItems = useMemo(
-		() => buildServiceMetricSummaryItems(chartMode, stats, chartRows, hasMetricData),
+		() =>
+			buildServiceMetricSummaryItems(
+				chartMode,
+				stats,
+				chartRows,
+				hasMetricData,
+			),
 		[chartMode, stats, chartRows, hasMetricData],
 	);
-
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
-			<div className="flex items-start justify-between gap-3">
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 				<div className="min-w-0">
 					{isLoading ? (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+						<div className="flex flex-nowrap items-end gap-x-5">
 							<Skeleton className="h-7 w-24" />
 							<Skeleton className="h-7 w-20" />
 						</div>
 					) : (
-						<div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+						<div className="flex flex-nowrap items-end gap-x-5">
 							{summaryItems.map((item) => (
-								<div key={item.label}>
+								<div key={item.label} className="shrink-0">
 									<p className="font-mono text-xl font-semibold tabular-nums tracking-tight">
 										{item.value}
 									</p>
@@ -246,14 +256,11 @@ function ServiceMetricsPanel({
 						</div>
 					)}
 				</div>
-				<div className="flex flex-col items-end gap-2">
-					<p className="text-sm text-muted-foreground">{formatToday()}</p>
-					<ServiceChartModeToggle
-						value={chartMode}
-						onChange={setChartMode}
-						disabled={isLoading || isUnavailable}
-					/>
-				</div>
+				<ServiceChartModeToggle
+					value={chartMode}
+					onChange={setChartMode}
+					disabled={isLoading || isUnavailable}
+				/>
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
@@ -300,7 +307,7 @@ function ServiceMetricsPanel({
 								minTickGap={32}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={formatShortDate}
+								tickFormatter={(value) => formatCompactDate(value)}
 								className="text-xs"
 							/>
 							<YAxis
@@ -371,7 +378,7 @@ function ServiceChartModeToggle({
 	];
 
 	return (
-		<div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+		<div className="flex w-full rounded-md border border-border bg-muted/30 p-0.5 sm:w-auto">
 			{options.map((option) => {
 				const isSelected = value === option.value;
 
@@ -383,7 +390,7 @@ function ServiceChartModeToggle({
 						disabled={disabled}
 						onClick={() => onChange(option.value)}
 						className={cn(
-							"rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors",
+							"flex-1 rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors sm:flex-none",
 							isSelected
 								? "bg-background text-foreground shadow-sm"
 								: "text-muted-foreground hover:text-foreground",
@@ -647,7 +654,7 @@ function ServiceMetricsTooltip({
 
 	return (
 		<div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
-			<p className="mb-1 font-medium">{formatTooltipDate(String(label))}</p>
+			<p className="mb-1 font-medium">{formatCompactDateTime(String(label))}</p>
 			<div className="space-y-1">
 				{items.map((item) => (
 					<div
@@ -819,7 +826,10 @@ function getSourceInfo(service: Service): SourceInfo {
 	if (service.sourceType === "github" && service.githubRepoUrl) {
 		return {
 			icon: Github,
-			label: formatGithubRepo(service.githubRepoUrl),
+			label: service.githubRepoUrl
+				.replace(/^https:\/\/github\.com\//, "")
+				.replace(/^git@github\.com:/, "")
+				.replace(/\.git$/, ""),
 			detail: "GitHub",
 			href: service.githubRepoUrl,
 			branch: service.githubBranch || "main",
@@ -877,12 +887,8 @@ function buildStatusSeries(stats?: ServiceMetricsResponse): StatusSeries[] {
 }
 
 function getStatusDataKey(status: string): string {
-	return `${getStatusDataKeyBase(status)}_total`;
-}
-
-function getStatusDataKeyBase(status: string): string {
 	const normalized = status.replace(/[^a-zA-Z0-9]/g, "_");
-	return `status_${normalized || "unknown"}`;
+	return `status_${normalized || "unknown"}_total`;
 }
 
 function getStatusColor(status: string, index: number): string {
@@ -893,13 +899,6 @@ function getStatusColor(status: string, index: number): string {
 		STATUS_CODE_COLOR_PALETTES[status.charAt(0)] ??
 		STATUS_CODE_COLOR_PALETTES.default;
 	return palette[index % palette.length];
-}
-
-function formatGithubRepo(repoUrl: string): string {
-	return repoUrl
-		.replace(/^https:\/\/github\.com\//, "")
-		.replace(/^git@github\.com:/, "")
-		.replace(/\.git$/, "");
 }
 
 function formatResources(service: Service): string {
@@ -917,15 +916,11 @@ function formatResources(service: Service): string {
 	return `${cpuLabel} · ${memoryLabel}`;
 }
 
-function getConfiguredReplicaCount(overview: OverviewData): number {
-	return overview.serverSummaries.reduce(
+function formatInstanceSummary(overview: OverviewData): string {
+	const configured = overview.serverSummaries.reduce(
 		(total, server) => total + server.configured,
 		0,
 	);
-}
-
-function formatInstanceSummary(overview: OverviewData): string {
-	const configured = getConfiguredReplicaCount(overview);
 	const serverCount = overview.serverSummaries.length;
 
 	if (configured === 0) {
@@ -953,16 +948,14 @@ function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
 
 function formatPortSummary(ports: Service["ports"]): string {
 	if (ports.length === 0) return "No Ports";
-	if (ports.length === 1) return formatPortLabel(ports[0]);
+	if (ports.length === 1) {
+		const port = ports[0];
+		const protocol = (port.protocol || "http").toUpperCase();
+		const external = port.externalPort ? ` -> :${port.externalPort}` : "";
+		return `${protocol} :${port.port}${external}`;
+	}
 
 	return formatCount(ports.length, "port");
-}
-
-function formatPortLabel(port: Service["ports"][number]): string {
-	const protocol = (port.protocol || "http").toUpperCase();
-	const external = port.externalPort ? ` -> :${port.externalPort}` : "";
-
-	return `${protocol} :${port.port}${external}`;
 }
 
 function formatCount(count: number, singular: string): string {
@@ -1201,8 +1194,8 @@ function getAverageRequestsPerSecond(stats: ServiceMetricsResponse): number {
 }
 
 function getStatsDurationSeconds(stats: ServiceMetricsResponse): number {
-	const windowStart = new Date(stats.windowStart).getTime();
-	const windowEnd = new Date(stats.windowEnd).getTime();
+	const windowStart = getTimestamp(stats.windowStart);
+	const windowEnd = getTimestamp(stats.windowEnd);
 
 	if (
 		Number.isFinite(windowStart) &&
@@ -1227,7 +1220,7 @@ function formatAxisTick(value: number, mode: ServiceChartMode): string {
 	if (mode === "latency") return formatDurationMs(value);
 	if (mode === "traffic") return formatBytes(value);
 	if (mode === "resources") return `${formatRateTick(value)}%`;
-	return formatRequestTick(value);
+	return formatCompactNumber(value);
 }
 
 function formatRateTick(value: number): string {
@@ -1241,10 +1234,6 @@ function getYAxisMargin(mode: ServiceChartMode): number {
 	if (mode === "latency") return -12;
 	if (mode === "resources") return -24;
 	return -20;
-}
-
-function formatRequestTick(value: number): string {
-	return formatCompactNumber(value);
 }
 
 function formatRequestCount(value: number): string {
@@ -1276,27 +1265,4 @@ function formatBytes(value: number): string {
 	}
 	const maximumFractionDigits = scaled >= 100 || unitIndex === 0 ? 0 : 1;
 	return `${scaled.toFixed(maximumFractionDigits)} ${units[unitIndex]}`;
-}
-
-function formatShortDate(value: string): string {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-	}).format(new Date(value));
-}
-
-function formatTooltipDate(value: string): string {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(value));
-}
-
-function formatToday(): string {
-	return new Intl.DateTimeFormat(undefined, {
-		day: "numeric",
-		month: "short",
-	}).format(new Date());
 }

@@ -1,5 +1,10 @@
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
+import {
+	invalidLogQueryResponse,
+	normalizeLogCursor,
+	parseLogLimit,
+} from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByDeployment } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -20,11 +25,14 @@ export async function GET(
 
 	const { id: deploymentId } = await params;
 	const url = new URL(request.url);
-	const limit = Math.min(
-		Number.parseInt(url.searchParams.get("limit") || "100", 10),
-		1000,
-	);
-	const after = url.searchParams.get("after") || undefined;
+	let limit: number;
+	let after: string | undefined;
+	try {
+		limit = parseLogLimit(url.searchParams.get("limit"), 100);
+		after = normalizeLogCursor(url.searchParams.get("after"));
+	} catch (error) {
+		return invalidLogQueryResponse(error);
+	}
 
 	try {
 		const result = await queryLogsByDeployment(deploymentId, limit, after);
@@ -43,6 +51,9 @@ export async function GET(
 		});
 	} catch (error) {
 		console.error("[logs:deployment] failed to query logs:", error);
-		return Response.json({ logs: [], hasMore: false });
+		return Response.json(
+			{ message: "Failed to query deployment logs" },
+			{ status: 502 },
+		);
 	}
 }

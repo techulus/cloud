@@ -2,6 +2,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
 import { assignSubnet } from "@/lib/wireguard";
@@ -30,8 +31,9 @@ export async function POST(request: NextRequest) {
 		} = parseResult.data;
 
 		const now = new Date();
-		const expiryThreshold = new Date(
-			now.getTime() - TOKEN_EXPIRY_HOURS * 60 * 60 * 1000,
+		const expiryThreshold = subtractMilliseconds(
+			now,
+			TOKEN_EXPIRY_HOURS * HOUR_IN_MILLISECONDS,
 		);
 
 		const serverResults = await db

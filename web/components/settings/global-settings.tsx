@@ -25,6 +25,7 @@ import {
 	updateProxyDomain,
 	upgradeControlPlane,
 } from "@/actions/settings";
+import { LocalDate } from "@/components/core/local-date";
 import { ApiKeySettings } from "@/components/settings/api-key-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { MemberSettings } from "@/components/settings/member-settings";
@@ -92,20 +93,8 @@ type Props = {
 	appVersion: string | null;
 };
 
-const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
-
 const CONTROL_PLANE_UPGRADE_DOCS_URL =
 	"https://docs.techulus.com/installation#manual-upgrades";
-
-function formatCheckedAt(value: string | null | undefined) {
-	if (!value) return "Never";
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return "Unknown";
-	return dateTimeFormatter.format(date);
-}
 
 export function GlobalSettings({
 	servers,
@@ -583,7 +572,10 @@ export function GlobalSettings({
 							<div>
 								<p className="text-xs text-muted-foreground">Last checked</p>
 								<p className="text-sm">
-									{formatCheckedAt(updateState?.checkedAt)}
+									<LocalDate
+										value={updateState?.checkedAt}
+										fallback={updateState?.checkedAt ? "Unknown" : "Never"}
+									/>
 								</p>
 							</div>
 						</div>

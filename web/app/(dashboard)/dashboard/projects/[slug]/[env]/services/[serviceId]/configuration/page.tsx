@@ -1,12 +1,13 @@
 "use client";
 
-import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { deleteService } from "@/actions/projects";
+import { DeleteConfirmationDialog } from "@/components/core/delete-confirmation-dialog";
+import { LocalDate } from "@/components/core/local-date";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
 import { PortsSection } from "@/components/service/details/ports-section";
 import { ReplicasSection } from "@/components/service/details/replicas-section";
@@ -19,51 +20,15 @@ import { StartCommandSection } from "@/components/service/details/start-command-
 import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
 import { VolumesSection } from "@/components/service/details/volumes-section";
 import { useService } from "@/components/service/service-layout-client";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import {
-	InputOTP,
-	InputOTPGroup,
-	InputOTPSlot,
-} from "@/components/ui/input-otp";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
-import { useSession } from "@/lib/auth-client";
+import type { DeleteConfirmation } from "@/lib/two-factor";
 
 const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
-
-type TwoFactorSessionUser = {
-	twoFactorEnabled?: boolean | null;
-};
-
-function formatBackupDate(value: Date | string | null | undefined) {
-	if (!value) return "an unknown time";
-	return new Date(value).toLocaleString();
-}
 
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
-	const { data: session, isPending: isSessionLoading } = useSession();
-	const sessionUser = session?.user as TwoFactorSessionUser | undefined;
 	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
-	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-	const [deleteTotpCode, setDeleteTotpCode] = useState("");
-	const [isDeleting, setIsDeleting] = useState(false);
-	const requiresDeleteConfirmation = Boolean(sessionUser?.twoFactorEnabled);
-	const isDeleteConfirmationIncomplete =
-		requiresDeleteConfirmation && deleteTotpCode.length !== 6;
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -83,41 +48,13 @@ export default function ConfigurationPage() {
 		toast.info("Changes saved. Deploy to apply them.");
 	}, [onUpdate]);
 
-	const resetDeleteConfirmation = useCallback(() => {
-		setDeleteTotpCode("");
-	}, []);
-
-	const handleDelete = async () => {
-		if (isDeleteConfirmationIncomplete) {
-			toast.error("Enter your 6-digit authenticator code");
-			return;
-		}
-
-		setIsDeleting(true);
-		try {
-			await deleteService(
-				service.id,
-				requiresDeleteConfirmation
-					? {
-							totpCode: deleteTotpCode,
-						}
-					: undefined,
-			);
-			await globalMutate(`/api/projects/${service.projectId}/services`);
-			toast.success(
-				service.stateful ? "Delete workflow started" : "Service deleted",
-			);
-			setDeleteDialogOpen(false);
-			resetDeleteConfirmation();
-			router.push(`/dashboard/projects/${projectSlug}/${envName}`);
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to delete service",
-			);
-			resetDeleteConfirmation();
-		} finally {
-			setIsDeleting(false);
-		}
+	const handleDelete = async (confirmation?: DeleteConfirmation) => {
+		await deleteService(service.id, confirmation);
+		await globalMutate(`/api/projects/${service.projectId}/services`);
+		toast.success(
+			service.stateful ? "Delete workflow started" : "Service deleted",
+		);
+		router.push(`/dashboard/projects/${projectSlug}/${envName}`);
 	};
 
 	return (
@@ -163,118 +100,55 @@ export default function ConfigurationPage() {
 									: "Once deleted, this service and all its deployments will be permanently removed."}
 							</p>
 						</ItemContent>
-						<AlertDialog
-							open={deleteDialogOpen}
-							onOpenChange={(open) => {
-								if (isDeleting) return;
-								setDeleteDialogOpen(open);
-								if (!open) resetDeleteConfirmation();
-							}}
-						>
-							<AlertDialogTrigger render={<Button variant="destructive" />}>
-								Delete Service
-							</AlertDialogTrigger>
-							<AlertDialogContent className="sm:max-w-md">
-								<AlertDialogHeader>
-									<AlertDialogTitle>Delete {service.name}?</AlertDialogTitle>
-									<AlertDialogDescription>
-										{service.stateful ? (
-											<>
-												This starts a backup-first delete workflow. The service
-												will be restorable from Deleted services until its
-												retention window expires.
-												{willReuseCompletedBackups &&
-													hasCompletedBackupForEveryVolume && (
-														<>
-															<br />
-															<br />
-															<span className="font-medium text-foreground">
-																This service is not currently running.
-															</span>{" "}
-															Restore will use the latest completed backups for
-															its volumes. The oldest selected backup is from{" "}
-															{formatBackupDate(
-																service.deletionBackupFallback
-																	?.oldestLatestBackupAt,
-															)}
-															; changes after that backup will not be restored.
-														</>
-													)}
-												{willReuseCompletedBackups &&
-													!hasCompletedBackupForEveryVolume && (
-														<>
-															<br />
-															<br />
-															<span className="font-medium text-destructive">
-																No completed backup is available for every
-																volume.
-															</span>{" "}
-															Delete will fail unless the service is running so
-															a fresh deletion backup can be created.
-														</>
-													)}
-											</>
-										) : (
-											"This action cannot be undone. This will permanently delete the service and all its deployments."
-										)}
-										{requiresDeleteConfirmation && (
-											<>
-												<br />
-												<br />
-												Enter your authenticator code to confirm this deletion.
-											</>
-										)}
-									</AlertDialogDescription>
-								</AlertDialogHeader>
-								{requiresDeleteConfirmation && (
-									<div className="space-y-3">
-										<div className="space-y-2">
-											<Label htmlFor="delete-service-totp-code">
-												Authenticator code
-											</Label>
-											<InputOTP
-												id="delete-service-totp-code"
-												maxLength={6}
-												pattern={REGEXP_ONLY_DIGITS}
-												inputMode="numeric"
-												autoComplete="one-time-code"
-												value={deleteTotpCode}
-												onChange={(value) =>
-													setDeleteTotpCode(value.replace(/\D/g, ""))
-												}
-												disabled={isDeleting}
-											>
-												<InputOTPGroup>
-													<InputOTPSlot index={0} />
-													<InputOTPSlot index={1} />
-													<InputOTPSlot index={2} />
-													<InputOTPSlot index={3} />
-													<InputOTPSlot index={4} />
-													<InputOTPSlot index={5} />
-												</InputOTPGroup>
-											</InputOTP>
-										</div>
-									</div>
-								)}
-								<AlertDialogFooter>
-									<AlertDialogCancel disabled={isDeleting}>
-										Cancel
-									</AlertDialogCancel>
-									<AlertDialogAction
-										variant="destructive"
-										onClick={handleDelete}
-										disabled={
-											isDeleting ||
-											isSessionLoading ||
-											isDeleteConfirmationIncomplete
-										}
-									>
-										{isDeleting ? <Spinner className="size-4" /> : null}
-										{isDeleting ? "Deleting..." : "Delete"}
-									</AlertDialogAction>
-								</AlertDialogFooter>
-							</AlertDialogContent>
-						</AlertDialog>
+						<DeleteConfirmationDialog
+							resourceName={service.name}
+							triggerLabel="Delete Service"
+							description={
+								service.stateful ? (
+									<>
+										This starts a backup-first delete workflow. The service will
+										be restorable from Deleted services until its retention
+										window expires.
+										{willReuseCompletedBackups &&
+											hasCompletedBackupForEveryVolume && (
+												<>
+													<br />
+													<br />
+													<span className="font-medium text-foreground">
+														This service is not currently running.
+													</span>{" "}
+													Restore will use the latest completed backups for its
+													volumes. The oldest selected backup is from{" "}
+													<LocalDate
+														value={
+															service.deletionBackupFallback
+																?.oldestLatestBackupAt
+														}
+														fallback="an unknown time"
+													/>
+													; changes after that backup will not be restored.
+												</>
+											)}
+										{willReuseCompletedBackups &&
+											!hasCompletedBackupForEveryVolume && (
+												<>
+													<br />
+													<br />
+													<span className="font-medium text-destructive">
+														No completed backup is available for every volume.
+													</span>{" "}
+													Delete will fail unless the service is running so a
+													fresh deletion backup can be created.
+												</>
+											)}
+									</>
+								) : (
+									"This action cannot be undone. This will permanently delete the service and all its deployments."
+								)
+							}
+							fallbackError="Failed to delete service"
+							onDelete={handleDelete}
+						/>
 					</Item>
 				</div>
 			</div>

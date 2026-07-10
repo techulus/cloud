@@ -1,5 +1,9 @@
 export const DEFAULT_AUTH_REDIRECT = "/dashboard";
 
+export type DeleteConfirmation = {
+	totpCode?: string;
+};
+
 const AUTH_REDIRECT_ORIGIN = "https://auth.local";
 
 function hasUnsafeAuthRedirectCharacter(value: string) {
@@ -36,4 +40,21 @@ export function getTotpSecret(totpURI: string) {
 	} catch {
 		return "";
 	}
+}
+
+export function getDeleteTotpCode(
+	twoFactorEnabled: boolean,
+	confirmation: DeleteConfirmation | undefined,
+	resource: string,
+) {
+	if (!twoFactorEnabled) return null;
+
+	const totpCode = confirmation?.totpCode;
+	if (typeof totpCode !== "string" || !/^\d{6}$/.test(totpCode)) {
+		throw new Error(
+			`Authenticator code is required to delete this ${resource}`,
+		);
+	}
+
+	return totpCode;
 }

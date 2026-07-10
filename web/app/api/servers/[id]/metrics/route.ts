@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
+import { subtractMilliseconds } from "@/lib/date";
 import {
 	emptyHistory,
 	isMetricsEnabled,
@@ -38,7 +39,7 @@ export async function GET(
 
 	const end = new Date();
 	const option = METRIC_RANGE_OPTIONS[range];
-	const start = new Date(end.getTime() - option.durationMs);
+	const start = subtractMilliseconds(end, option.durationMs);
 
 	try {
 		const [current, history] = await Promise.all([

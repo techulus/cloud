@@ -7,17 +7,6 @@ import { services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { startMigrationInternal } from "@/lib/migrations";
-
-export async function startMigration(
-	serviceId: string,
-	targetServerId: string,
-) {
-	await requireDeveloperRole();
-	await startMigrationInternal(serviceId, targetServerId);
-	revalidatePath(`/dashboard/projects`);
-	return { success: true };
-}
 
 export async function cancelMigration(serviceId: string) {
 	await requireDeveloperRole();

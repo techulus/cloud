@@ -1,6 +1,7 @@
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { isAPIError } from "better-auth/api";
 import { bearer, deviceAuthorization, twoFactor } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
 import { userAc } from "better-auth/plugins/admin/access";
@@ -9,6 +10,7 @@ import { db } from "@/db";
 import * as schema from "@/db/schema";
 import type { MemberRole } from "@/db/types";
 import { getUserRole, hasAnyRole } from "@/lib/members";
+import { type DeleteConfirmation, getDeleteTotpCode } from "@/lib/two-factor";
 
 const TECHULUS_CLI_CLIENT_ID = "techulus-cli";
 const APP_NAME = "Techulus Cloud";
@@ -94,6 +96,37 @@ export async function requireRole(allowedRoles: MemberRole[]) {
 
 export async function requireDeveloperRole() {
 	return requireRole(["admin", "developer"]);
+}
+
+export async function verifyDeleteConfirmation(
+	session: Awaited<ReturnType<typeof requireDeveloperRole>>,
+	confirmation: DeleteConfirmation | undefined,
+	resource: string,
+) {
+	if (!session) {
+		throw new Error("Unauthorized");
+	}
+
+	const totpCode = getDeleteTotpCode(
+		Boolean(
+			(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled,
+		),
+		confirmation,
+		resource,
+	);
+	if (!totpCode) return;
+
+	try {
+		await auth.api.verifyTOTP({
+			body: { code: totpCode },
+			headers: await headers(),
+		});
+	} catch (error) {
+		if (isAPIError(error)) {
+			throw new Error("Invalid authenticator code");
+		}
+		throw error;
+	}
 }
 
 export async function requireAdminRole() {

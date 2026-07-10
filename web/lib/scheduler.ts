@@ -9,6 +9,13 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
+import {
+	DAY_IN_MILLISECONDS,
+	isDateAfter,
+	MINUTE_IN_MILLISECONDS,
+	SECOND_IN_MILLISECONDS,
+	subtractMilliseconds,
+} from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	sendManualRecoveryRequiredAlert,
@@ -19,7 +26,7 @@ import {
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
 
-const STALE_THRESHOLD_MS = 75_000; // 75 seconds
+const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 
 async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
@@ -99,7 +106,7 @@ async function triggerRecoveryForOfflineServers(
 export async function checkAndRecoverStaleServers(
 	excludeServerId?: string,
 ): Promise<void> {
-	const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
+	const staleThreshold = subtractMilliseconds(new Date(), STALE_THRESHOLD_MS);
 
 	const conditions = [
 		eq(servers.status, "online"),
@@ -174,7 +181,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 					currentDate: service.lastScheduledDeploymentRunAt,
 				});
 				const nextScheduledRun = interval.next().toDate();
-				if (nextScheduledRun > now) {
+				if (isDateAfter(nextScheduledRun, now)) {
 					continue;
 				}
 			}
@@ -226,11 +233,14 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 	console.log("[scheduler] finished checking scheduled deployments");
 }
 
-const OLD_ITEM_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
-const AGENT_UPGRADE_TIMEOUT_MS = 5 * 60 * 1000;
+const OLD_ITEM_THRESHOLD_MS = 90 * DAY_IN_MILLISECONDS;
+const AGENT_UPGRADE_TIMEOUT_MS = 5 * MINUTE_IN_MILLISECONDS;
 
 export async function failTimedOutAgentUpgrades(): Promise<void> {
-	const timeoutThreshold = new Date(Date.now() - AGENT_UPGRADE_TIMEOUT_MS);
+	const timeoutThreshold = subtractMilliseconds(
+		new Date(),
+		AGENT_UPGRADE_TIMEOUT_MS,
+	);
 
 	const timedOut = await db
 		.update(servers)
@@ -268,10 +278,11 @@ export async function failTimedOutAgentUpgrades(): Promise<void> {
 }
 
 export async function cleanupStaleItems(): Promise<void> {
-	const workItemLeaseThreshold = new Date(
-		Date.now() - WORK_QUEUE_LEASE_DURATION_MS,
+	const workItemLeaseThreshold = subtractMilliseconds(
+		new Date(),
+		WORK_QUEUE_LEASE_DURATION_MS,
 	);
-	const oldThreshold = new Date(Date.now() - OLD_ITEM_THRESHOLD_MS);
+	const oldThreshold = subtractMilliseconds(new Date(), OLD_ITEM_THRESHOLD_MS);
 
 	// Pending work is intentionally retained so commands can run when an agent
 	// reconnects. Only exhausted processing attempts are failed here.

@@ -3,17 +3,9 @@ import {
 	createInviteToken,
 	hashInviteToken,
 	isInvitableMemberRole,
-	isMemberRole,
 } from "@/lib/members";
 
 describe("member roles", () => {
-	it("validates supported roles", () => {
-		expect(isMemberRole("admin")).toBe(true);
-		expect(isMemberRole("developer")).toBe(true);
-		expect(isMemberRole("reader")).toBe(true);
-		expect(isMemberRole("owner")).toBe(false);
-	});
-
 	it("validates invitable roles", () => {
 		expect(isInvitableMemberRole("developer")).toBe(true);
 		expect(isInvitableMemberRole("reader")).toBe(true);

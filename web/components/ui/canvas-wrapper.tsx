@@ -102,35 +102,6 @@ export function getStatusColorFromDeployments(
 	return defaultColors;
 }
 
-export type HealthColors = {
-	dot: string;
-	text: string;
-};
-
-const healthColorMap: Record<string, HealthColors> = {
-	healthy: {
-		dot: "bg-emerald-500",
-		text: "text-emerald-600 dark:text-emerald-400",
-	},
-	starting: {
-		dot: "bg-amber-500",
-		text: "text-amber-600 dark:text-amber-400",
-	},
-	unhealthy: {
-		dot: "bg-rose-500",
-		text: "text-rose-600 dark:text-rose-400",
-	},
-};
-
-const defaultHealthColors: HealthColors = {
-	dot: "bg-slate-400",
-	text: "text-slate-500",
-};
-
-export function getHealthColor(healthStatus: string): HealthColors {
-	return healthColorMap[healthStatus] || defaultHealthColors;
-}
-
 interface CanvasWrapperProps {
 	children?: React.ReactNode;
 	height?: string;

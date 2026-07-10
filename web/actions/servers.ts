@@ -7,8 +7,9 @@ import { ZodError } from "zod";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { enqueueAgentUpgrade } from "@/lib/agent-upgrades";
-import { requireDeveloperRole } from "@/lib/auth";
+import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { nameSchema } from "@/lib/schemas";
+import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage } from "@/lib/utils";
 
 function generateId(): string {
@@ -48,8 +49,12 @@ export async function createServer(name: string) {
 	}
 }
 
-export async function deleteServer(id: string) {
-	await requireDeveloperRole();
+export async function deleteServer(
+	id: string,
+	confirmation?: DeleteConfirmation,
+) {
+	const session = await requireDeveloperRole();
+	await verifyDeleteConfirmation(session, confirmation, "server");
 	await db.delete(servers).where(eq(servers.id, id));
 }
 
