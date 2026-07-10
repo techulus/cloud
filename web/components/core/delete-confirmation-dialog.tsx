@@ -77,11 +77,7 @@ export function DeleteConfirmationDialog({
 			setOpen(false);
 			resetConfirmation();
 		} catch (error) {
-			if (
-				!requiresConfirmation &&
-				error instanceof Error &&
-				error.message.startsWith("Authenticator code is required")
-			) {
+			if (!requiresConfirmation) {
 				await refetchSession();
 			}
 			toast.error(error instanceof Error ? error.message : fallbackError);
