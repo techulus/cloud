@@ -50,6 +50,9 @@ export async function GET(
 		});
 	} catch (error) {
 		console.error("[logs:deployment] failed to query logs:", error);
-		return Response.json({ logs: [], hasMore: false });
+		return Response.json(
+			{ message: "Failed to query deployment logs" },
+			{ status: 502 },
+		);
 	}
 }

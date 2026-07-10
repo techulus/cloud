@@ -66,6 +66,56 @@ describe("log routes", () => {
 		});
 	});
 
+	it("passes a validated after cursor to the deployment query", async () => {
+		const { GET, queryLogsByDeployment } = await loadDeploymentLogsRoute();
+		const cursor = "2026-07-10T01:02:03Z";
+		const response = await GET(
+			new Request(
+				`http://localhost/api/deployments/deployment-1/logs?after=${cursor}`,
+			),
+			{ params: Promise.resolve({ id: "deployment-1" }) },
+		);
+
+		expect(response.status).toBe(200);
+		expect(queryLogsByDeployment).toHaveBeenCalledWith(
+			"deployment-1",
+			100,
+			cursor,
+		);
+	});
+
+	it("rejects an invalid deployment cursor before querying logs", async () => {
+		const { GET, queryLogsByDeployment } = await loadDeploymentLogsRoute();
+		const url = new URL("http://localhost/api/deployments/deployment-1/logs");
+		url.searchParams.set("after", "2026-07-10T01:02:03Z | stats count()");
+
+		const response = await GET(new Request(url), {
+			params: Promise.resolve({ id: "deployment-1" }),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ message: "Invalid log cursor" });
+		expect(queryLogsByDeployment).not.toHaveBeenCalled();
+	});
+
+	it("returns a gateway error when deployment logs fail", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const queryLogsByDeployment = vi.fn(async () => {
+			throw new Error("VictoriaLogs unavailable");
+		});
+		const { GET } = await loadDeploymentLogsRoute(queryLogsByDeployment);
+
+		const response = await GET(
+			new Request("http://localhost/api/deployments/deployment-1/logs"),
+			{ params: Promise.resolve({ id: "deployment-1" }) },
+		);
+
+		expect(response.status).toBe(502);
+		expect(await response.json()).toEqual({
+			message: "Failed to query deployment logs",
+		});
+	});
+
 	it("rejects an injected manifest cursor before resolving the service", async () => {
 		vi.resetModules();
 		const getManifestStatus = vi.fn();
@@ -115,4 +165,27 @@ async function loadServiceLogsRoute(
 
 	const { GET } = await import("@/app/api/services/[id]/logs/route");
 	return { GET, queryLogsByService };
+}
+
+async function loadDeploymentLogsRoute(
+	queryLogsByDeployment = vi.fn(async () => ({ logs: [], hasMore: false })),
+) {
+	vi.resetModules();
+	vi.doMock("next/headers", () => ({
+		headers: async () => new Headers(),
+	}));
+	vi.doMock("@/lib/auth", () => ({
+		auth: {
+			api: {
+				getSession: async () => ({ user: { id: "user-1" } }),
+			},
+		},
+	}));
+	vi.doMock("@/lib/victoria-logs", () => ({
+		isLoggingEnabled: () => true,
+		queryLogsByDeployment,
+	}));
+
+	const { GET } = await import("@/app/api/deployments/[id]/logs/route");
+	return { GET, queryLogsByDeployment };
 }

@@ -166,7 +166,7 @@ export async function queryLogsByService(
 export async function queryLogsByDeployment(
 	deploymentId: string,
 	limit: number,
-	before?: string,
+	after?: string,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
@@ -174,9 +174,9 @@ export async function queryLogsByDeployment(
 	}
 
 	let query = formatLogSqlExactFilter("deployment_id", deploymentId);
-	const beforeCursor = normalizeLogCursor(before);
-	if (beforeCursor) {
-		query += ` _time:<${beforeCursor}`;
+	const afterCursor = normalizeLogCursor(after);
+	if (afterCursor) {
+		query += ` _time:>${afterCursor}`;
 	}
 	query += " | sort by (_time desc)";
 

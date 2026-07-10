@@ -130,6 +130,24 @@ describe("VictoriaLogs queries", () => {
 		);
 	});
 
+	it("queries deployment logs after the supplied cursor", async () => {
+		const { queryLogsByDeployment } = await loadVictoriaLogs();
+		let query = "";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				query = new URL(String(input)).searchParams.get("query") || "";
+				return jsonLinesResponse([]);
+			}),
+		);
+
+		await queryLogsByDeployment("deployment-1", 100, "2026-07-10T01:02:03Z");
+
+		expect(query).toContain("deployment_id:deployment-1");
+		expect(query).toContain("_time:>2026-07-10T01:02:03Z");
+		expect(query).not.toContain("_time:<2026-07-10T01:02:03Z");
+	});
+
 	it("searches every field exposed by the request-log search box", async () => {
 		const { queryLogsByService } = await loadVictoriaLogs();
 		let query = "";
