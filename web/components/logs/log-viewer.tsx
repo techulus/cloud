@@ -270,7 +270,7 @@ function TimeRangeFilter({
 					onValueChange={(value) => onRangeChange(value as LogTimeRange)}
 				>
 					{LOG_TIME_RANGES.map((option) => (
-						<DropdownMenuRadioItem key={option} value={option}>
+						<DropdownMenuRadioItem key={option} value={option} closeOnClick>
 							{LOG_TIME_RANGE_LABELS[option]}
 						</DropdownMenuRadioItem>
 					))}
