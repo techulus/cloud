@@ -244,7 +244,7 @@ function TimeRangeFilter({
 				{LOG_TIME_RANGE_LABELS[range]}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end">
+			<DropdownMenuContent align="end" className="min-w-40">
 				<DropdownMenuGroup>
 					<DropdownMenuLabel>Time range</DropdownMenuLabel>
 				</DropdownMenuGroup>
