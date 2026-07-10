@@ -1,11 +1,9 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { isAPIError } from "better-auth/api";
 import cronstrue from "cronstrue";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
 import {
@@ -30,7 +28,7 @@ import {
 	volumeBackups,
 	workQueue,
 } from "@/db/schema";
-import { auth, requireDeveloperRole } from "@/lib/auth";
+import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
@@ -54,13 +52,10 @@ import type {
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
+import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
-
-type ServiceDeleteConfirmation = {
-	totpCode?: string;
-};
 
 function isValidImageReferencePart(reference: string): boolean {
 	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -268,8 +263,12 @@ export async function createProject(name: string) {
 	}
 }
 
-export async function deleteProject(id: string) {
-	await requireDeveloperRole();
+export async function deleteProject(
+	id: string,
+	confirmation?: DeleteConfirmation,
+) {
+	const session = await requireDeveloperRole();
+	await verifyDeleteConfirmation(session, confirmation, "project");
 	const projectServices = await db
 		.select()
 		.from(services)
@@ -582,36 +581,10 @@ async function hardDeleteService(serviceId: string) {
 
 export async function deleteService(
 	serviceId: string,
-	confirmation?: ServiceDeleteConfirmation,
+	confirmation?: DeleteConfirmation,
 ) {
 	const session = await requireDeveloperRole();
-	if (!session) {
-		throw new Error("Unauthorized");
-	}
-
-	const twoFactorEnabled = Boolean(
-		(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled,
-	);
-
-	if (twoFactorEnabled) {
-		const totpCode = confirmation?.totpCode ?? "";
-
-		if (!/^\d{6}$/.test(totpCode)) {
-			throw new Error("Authenticator code is required to delete this service");
-		}
-
-		try {
-			await auth.api.verifyTOTP({
-				body: { code: totpCode },
-				headers: await headers(),
-			});
-		} catch (error) {
-			if (isAPIError(error)) {
-				throw new Error("Invalid authenticator code");
-			}
-			throw error;
-		}
-	}
+	await verifyDeleteConfirmation(session, confirmation, "service");
 
 	const service = await getService(serviceId);
 	if (!service) {

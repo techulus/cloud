@@ -1,23 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
 import { deleteServer } from "@/actions/servers";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { DeleteConfirmationDialog } from "@/components/core/delete-confirmation-dialog";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
+import type { DeleteConfirmation } from "@/lib/two-factor";
 
 export function ServerDangerZone({
 	serverId,
@@ -27,20 +16,11 @@ export function ServerDangerZone({
 	serverName: string;
 }) {
 	const router = useRouter();
-	const [isDeleting, setIsDeleting] = useState(false);
 
-	const handleDelete = async () => {
-		setIsDeleting(true);
-		try {
-			await deleteServer(serverId);
-			toast.success("Server deleted");
-			router.push("/dashboard");
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to delete server",
-			);
-			setIsDeleting(false);
-		}
+	const handleDelete = async (confirmation?: DeleteConfirmation) => {
+		await deleteServer(serverId, confirmation);
+		toast.success("Server deleted");
+		router.push("/dashboard");
 	};
 
 	return (
@@ -58,30 +38,13 @@ export function ServerDangerZone({
 							longer be available for deployments.
 						</p>
 					</ItemContent>
-					<AlertDialog>
-						<AlertDialogTrigger render={<Button variant="destructive" />}>
-							Delete Server
-						</AlertDialogTrigger>
-						<AlertDialogContent>
-							<AlertDialogHeader>
-								<AlertDialogTitle>Delete {serverName}?</AlertDialogTitle>
-								<AlertDialogDescription>
-									This action cannot be undone. This will permanently delete the
-									server and remove it from your infrastructure.
-								</AlertDialogDescription>
-							</AlertDialogHeader>
-							<AlertDialogFooter>
-								<AlertDialogCancel>Cancel</AlertDialogCancel>
-								<AlertDialogAction
-									variant="destructive"
-									onClick={handleDelete}
-									disabled={isDeleting}
-								>
-									{isDeleting ? "Deleting..." : "Delete"}
-								</AlertDialogAction>
-							</AlertDialogFooter>
-						</AlertDialogContent>
-					</AlertDialog>
+					<DeleteConfirmationDialog
+						resourceName={serverName}
+						triggerLabel="Delete Server"
+						description="This action cannot be undone. This will permanently delete the server and remove it from your infrastructure."
+						fallbackError="Failed to delete server"
+						onDelete={handleDelete}
+					/>
 				</Item>
 			</div>
 		</div>
