@@ -3,12 +3,14 @@ name: Updater CI
 on:
   pull_request:
     paths:
+      - "deployment/compose.postgres.yml"
       - "deployment/updater/**"
       - ".github/workflows/updater-ci.yml"
   push:
     branches:
       - main
     paths:
+      - "deployment/compose.postgres.yml"
       - "deployment/updater/**"
       - ".github/workflows/updater-ci.yml"
 
@@ -79,3 +81,27 @@ jobs:
         run: |
           mkdir -p dist
           go build -o dist/control-plane-updater-${{ matrix.goos }}-${{ matrix.goarch }} .
+
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    defaults:
+      run:
+        working-directory: deployment/updater
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build updater image
+        run: docker buildx build --pull --load --platform "${{ matrix.platform }}" --tag techulus-cloud-updater:test .
