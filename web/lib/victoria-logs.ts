@@ -1,3 +1,5 @@
+import { type LogTimeRange, normalizeLogSearch } from "@/lib/log-query";
+
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
 
@@ -64,6 +66,25 @@ function formatLogSqlExactFilter(field: string, value: string): string {
 	return `${field}:${trimmed}`;
 }
 
+export function formatLogSqlSearchFilter(
+	value: string | null | undefined,
+	fields: readonly string[] = ["_msg"],
+): string | undefined {
+	const search = normalizeLogSearch(value);
+	if (!search) return undefined;
+
+	const pattern = `(?i)${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
+	const quotedPattern = JSON.stringify(pattern);
+	const filters = fields.map((field) => {
+		if (!/^[a-zA-Z0-9_.-]+$/.test(field)) {
+			throw new Error(`Invalid log search field: ${field}`);
+		}
+		return `${field}:~${quotedPattern}`;
+	});
+
+	return filters.length === 1 ? filters[0] : `(${filters.join(" OR ")})`;
+}
+
 type QueryLogsByServiceOptions = {
 	serviceId: string;
 	limit: number;
@@ -71,12 +92,15 @@ type QueryLogsByServiceOptions = {
 	before?: string;
 	logType?: LogType;
 	serverId?: string;
+	search?: string;
+	range?: LogTimeRange;
 };
 
 export async function queryLogsByService(
 	options: QueryLogsByServiceOptions,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	const { serviceId, limit, after, before, logType, serverId } = options;
+	const { serviceId, limit, after, before, logType, serverId, search, range } =
+		options;
 
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
@@ -94,11 +118,23 @@ export async function queryLogsByService(
 	if (serverId) {
 		query += ` ${formatLogSqlExactFilter("server_id", serverId)}`;
 	}
+	if (range) {
+		query += ` _time:${range}`;
+	}
 	if (after) {
 		query += ` _time:>${after}`;
 	}
 	if (before) {
 		query += ` _time:<${before}`;
+	}
+	const searchFilter = formatLogSqlSearchFilter(
+		search,
+		logType === "http"
+			? ["_msg", "path", "method", "status", "client_ip"]
+			: ["_msg"],
+	);
+	if (searchFilter) {
+		query += ` ${searchFilter}`;
 	}
 	query += " | sort by (_time desc)";
 
@@ -179,19 +215,39 @@ export type AgentLog = {
 	log_type: "agent";
 };
 
-export async function queryLogsByServer(
-	serverId: string,
-	limit: number = 500,
-	before?: string,
-): Promise<{ logs: AgentLog[]; hasMore: boolean }> {
+type QueryLogsByServerOptions = {
+	serverId: string;
+	limit?: number;
+	before?: string;
+	search?: string;
+	range?: LogTimeRange;
+};
+
+export async function queryLogsByServer({
+	serverId,
+	limit = 500,
+	before,
+	search,
+	range,
+}: QueryLogsByServerOptions): Promise<{
+	logs: AgentLog[];
+	hasMore: boolean;
+}> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
 	let query = `${formatLogSqlExactFilter("server_id", serverId)} log_type:agent`;
+	if (range) {
+		query += ` _time:${range}`;
+	}
 	if (before) {
 		query += ` _time:<${before}`;
+	}
+	const searchFilter = formatLogSqlSearchFilter(search);
+	if (searchFilter) {
+		query += ` ${searchFilter}`;
 	}
 	query += " | sort by (_time desc)";
 
@@ -264,14 +320,19 @@ export async function ingestRolloutLog(
 
 export async function queryLogsByRollout(
 	rolloutId: string,
-	limit: number = 1000,
+	{ limit = 1000, search }: { limit?: number; search?: string } = {},
 ): Promise<{ logs: RolloutLog[] }> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	const query = `${formatLogSqlExactFilter("rollout_id", rolloutId)} log_type:rollout | sort by (_time)`;
+	let query = `${formatLogSqlExactFilter("rollout_id", rolloutId)} log_type:rollout`;
+	const searchFilter = formatLogSqlSearchFilter(search);
+	if (searchFilter) {
+		query += ` ${searchFilter}`;
+	}
+	query += " | sort by (_time)";
 
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
@@ -294,14 +355,19 @@ export async function queryLogsByRollout(
 
 export async function queryLogsByBuild(
 	buildId: string,
-	limit: number = 1000,
+	{ limit = 1000, search }: { limit?: number; search?: string } = {},
 ): Promise<{ logs: BuildLog[] }> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
 	}
 
-	const query = `build_id:${buildId} log_type:build | sort by (_time)`;
+	let query = `${formatLogSqlExactFilter("build_id", buildId)} log_type:build`;
+	const searchFilter = formatLogSqlSearchFilter(search);
+	if (searchFilter) {
+		query += ` ${searchFilter}`;
+	}
+	query += " | sort by (_time)";
 
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);

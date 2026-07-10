@@ -40,3 +40,5 @@ The control plane exposes logs at `https://logs.<ROOT_DOMAIN>` with basic auth. 
 ## Accessing Logs
 
 Logs are accessible from the web UI for each service, deployment, build, and server. The control plane queries Victoria Logs using LogSQL with filters for `service_id`, `deployment_id`, `server_id`, and time ranges.
+
+Searches run against Victoria Logs rather than only the entries currently loaded in the browser. Continuous service, request, and server log views default to the last 24 hours and support 1-hour, 6-hour, 24-hour, and 7-day ranges. These query ranges do not change the separate `VL_RETENTION` storage setting.

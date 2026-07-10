@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
+import { normalizeLogSearch } from "@/lib/log-query";
 import { isLoggingEnabled, queryLogsByRollout } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -6,13 +7,22 @@ export async function GET(
 	{ params }: { params: Promise<{ rolloutId: string }> },
 ) {
 	const { rolloutId } = await params;
+	let search: string | undefined;
+	try {
+		search = normalizeLogSearch(request.nextUrl.searchParams.get("q"));
+	} catch (error) {
+		return NextResponse.json(
+			{ message: error instanceof Error ? error.message : "Invalid search" },
+			{ status: 400 },
+		);
+	}
 
 	if (!isLoggingEnabled()) {
 		return NextResponse.json({ logs: [] });
 	}
 
 	try {
-		const { logs: rawLogs } = await queryLogsByRollout(rolloutId);
+		const { logs: rawLogs } = await queryLogsByRollout(rolloutId, { search });
 
 		const logs = rawLogs.map((log) => ({
 			timestamp: log._time,
@@ -23,6 +33,9 @@ export async function GET(
 		return NextResponse.json({ logs });
 	} catch (error) {
 		console.error("Failed to fetch rollout logs:", error);
-		return NextResponse.json({ logs: [] });
+		return NextResponse.json(
+			{ message: "Failed to query rollout logs" },
+			{ status: 502 },
+		);
 	}
 }
