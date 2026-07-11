@@ -132,6 +132,8 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 }
 
 func buildPodmanRunArgs(config *DeployConfig, image string) []string {
+	networkMAC := StableMACAddress(config.IPAddress)
+
 	args := []string{
 		"run", "-d",
 		"--name", config.Name,
@@ -155,9 +157,11 @@ func buildPodmanRunArgs(config *DeployConfig, image string) []string {
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
 	)
-
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
+		if networkMAC != "" {
+			args = append(args, "--mac-address", networkMAC)
+		}
 		if config.PublishLocalPorts {
 			for _, pm := range config.PortMappings {
 				portMapping := fmt.Sprintf("127.0.0.1:%d:%d", pm.HostPort, pm.ContainerPort)
