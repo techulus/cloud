@@ -184,7 +184,6 @@ export const SecretsSection = memo(function SecretsSection({
 			await mutate();
 			setPendingVars([]);
 			setPendingDeletes([]);
-			toast.success("Environment variables saved");
 			onUpdate();
 		} catch {
 			toast.error("Failed to save changes");
