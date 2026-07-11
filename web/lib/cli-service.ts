@@ -35,7 +35,7 @@ export type ManifestChange = {
 function getManifestResourceLimits(manifest: TechulusManifest) {
 	const resources = manifest.service.resources;
 	if (resources === undefined) {
-		return { cpuCores: null, memoryMb: null };
+		return null;
 	}
 
 	return {
@@ -557,6 +557,9 @@ async function syncResources(
 	changes: ManifestChange[],
 ) {
 	const desiredResources = getManifestResourceLimits(manifest);
+	if (desiredResources === null) {
+		return;
+	}
 	const desiredCpu = desiredResources.cpuCores;
 	const desiredMemory = desiredResources.memoryMb;
 
