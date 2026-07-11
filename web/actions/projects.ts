@@ -29,7 +29,6 @@ import {
 	workQueue,
 } from "@/db/schema";
 import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
-import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	isObservedReady,
@@ -429,7 +428,10 @@ const SERVICE_CARD_WIDTH = 320;
 export async function createService(input: CreateServiceInput) {
 	await requireDeveloperRole();
 	const { projectId, environmentId, name, image, github } = input;
-	const resourceLimits = input.resourceLimits ?? DEFAULT_RESOURCE_LIMITS;
+	const resourceLimits = input.resourceLimits ?? {
+		cpuCores: null,
+		memoryMb: null,
+	};
 	const env = await getEnvironment(environmentId);
 	if (!env) {
 		throw new Error("Environment not found");

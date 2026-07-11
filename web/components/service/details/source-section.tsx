@@ -75,7 +75,6 @@ export const SourceSection = memo(function SourceSection({
 				branch,
 				rootDir,
 			);
-			toast.success("Repository settings updated");
 			setIsEditing(false);
 			onUpdate?.();
 		} catch (error) {
@@ -99,7 +98,6 @@ export const SourceSection = memo(function SourceSection({
 			await updateServiceConfig(service.id, {
 				source: { type: "image", image: image.trim() },
 			});
-			toast.success("Docker image updated");
 			setIsEditing(false);
 			onUpdate?.();
 		} catch (error) {

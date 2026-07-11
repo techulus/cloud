@@ -81,7 +81,6 @@ export const ServerlessSection = memo(function ServerlessSection({
 				wakeTimeoutSeconds: parsed.wakeTimeoutSeconds,
 			});
 			onUpdate();
-			toast.success("Serverless settings saved. Deploy to apply.");
 		} catch (error) {
 			toast.error(
 				error instanceof Error

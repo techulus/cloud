@@ -287,9 +287,6 @@ service:
     image: nginx:1.27
   replicas:
     count: 1
-  resources:
-    cpuCores: 2
-    memoryMb: 1024
   ports:
     - port: 80
       public: false
