@@ -33,6 +33,9 @@ func TestInitCreatesManifest(t *testing.T) {
 	if !strings.Contains(string(raw), "image: nginx:1.27") {
 		t.Fatalf("manifest = %s", raw)
 	}
+	if strings.Contains(string(raw), "resources:") {
+		t.Fatalf("manifest should not set default resource limits: %s", raw)
+	}
 }
 
 func TestLogsRejectsInvalidTailBeforeConfig(t *testing.T) {
