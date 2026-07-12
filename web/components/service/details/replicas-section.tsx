@@ -145,6 +145,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 		: Object.values(localReplicas).reduce((sum, n) => sum + n, 0);
 	const formatServerRole = (server: ServerInfo) =>
 		server.isProxy ? "Proxy node" : "Worker node";
+	const workerUnavailableReason = service.serverlessEnabled
+		? "Disable serverless before deploying to worker nodes"
+		: null;
 
 	if (service.stateful) {
 		return (
@@ -209,11 +212,17 @@ export const ReplicasSection = memo(function ReplicasSection({
 										type="button"
 										key={server.id}
 										onClick={() => setSelectedServerId(server.id)}
+										disabled={service.serverlessEnabled && !server.isProxy}
+										title={
+											service.serverlessEnabled && !server.isProxy
+												? workerUnavailableReason || undefined
+												: undefined
+										}
 										className={`flex items-center gap-4 p-3 rounded-md text-left transition-colors ${
 											selectedServerId === server.id
 												? "bg-primary text-primary-foreground"
 												: "bg-muted hover:bg-muted/80"
-										}`}
+										} disabled:cursor-not-allowed disabled:opacity-50`}
 									>
 										<div className="flex-1 min-w-0">
 											<p className="font-medium truncate">{server.name}</p>
@@ -280,6 +289,11 @@ export const ReplicasSection = memo(function ReplicasSection({
 							{servers.map((server) => (
 								<div
 									key={server.id}
+									title={
+										service.serverlessEnabled && !server.isProxy
+											? workerUnavailableReason || undefined
+											: undefined
+									}
 									className="flex items-center justify-between gap-4 p-3 bg-muted rounded-md"
 								>
 									<div className="flex-1 min-w-0">
@@ -299,7 +313,10 @@ export const ReplicasSection = memo(function ReplicasSection({
 													(localReplicas[server.id] || 0) - 1,
 												)
 											}
-											disabled={(localReplicas[server.id] || 0) <= 0}
+											disabled={
+												(localReplicas[server.id] || 0) <= 0 ||
+												(service.serverlessEnabled && !server.isProxy)
+											}
 										>
 											-
 										</Button>
@@ -312,6 +329,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 													parseInt(e.target.value, 10) || 0,
 												)
 											}
+											disabled={service.serverlessEnabled && !server.isProxy}
 											min={0}
 											max={10}
 											className="w-16 h-8 text-center"
@@ -326,7 +344,10 @@ export const ReplicasSection = memo(function ReplicasSection({
 													(localReplicas[server.id] || 0) + 1,
 												)
 											}
-											disabled={(localReplicas[server.id] || 0) >= 10}
+											disabled={
+												(localReplicas[server.id] || 0) >= 10 ||
+												(service.serverlessEnabled && !server.isProxy)
+											}
 										>
 											+
 										</Button>

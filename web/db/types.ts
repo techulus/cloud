@@ -55,7 +55,9 @@ export type HealthStats = {
 
 export type ServiceWithDetails = Service & {
 	ports: ServicePort[];
-	configuredReplicas: Array<ServiceReplica & { serverName: string }>;
+	configuredReplicas: Array<
+		ServiceReplica & { serverName: string; serverIsProxy: boolean }
+	>;
 	deployments: Array<
 		Deployment & {
 			server: Pick<Server, "name" | "wireguardIp"> | null;

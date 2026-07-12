@@ -33,9 +33,14 @@ export const ServerlessSection = memo(function ServerlessSection({
 			),
 		[service.ports],
 	);
+	const hasWorkerReplica = service.configuredReplicas.some(
+		(replica) => replica.count > 0 && !replica.serverIsProxy,
+	);
 	const unavailableReason = !hasPublicHttpEndpoint
 		? "Add a public HTTP port with a domain to enable serverless"
-		: null;
+		: hasWorkerReplica
+			? "Serverless services can only be deployed to proxy nodes"
+			: null;
 	const optionsDisabled = !!unavailableReason || isSaving;
 
 	const parsed = useMemo(
