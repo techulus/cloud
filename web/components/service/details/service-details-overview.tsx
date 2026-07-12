@@ -33,7 +33,7 @@ import { isObservedStarting } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
-type ServiceMetricsResponse = {
+export type ServiceMetricsResponse = {
 	metricsEnabled: boolean;
 	range: string;
 	windowStart: string;
@@ -101,7 +101,7 @@ type ChartRow = {
 	totalRequests: number;
 } & Record<string, string | number | null>;
 
-type ServiceChartMode = "requests" | "latency" | "traffic" | "resources";
+export type ServiceChartMode = "requests" | "latency" | "traffic" | "resources";
 
 type StatusSeries = {
 	status: string;
@@ -203,18 +203,26 @@ export function ServiceDetailsOverview({ service }: { service: Service }) {
 	);
 }
 
-function ServiceMetricsPanel({
+export function ServiceMetricsPanel({
 	hasPublicHttp,
 	stats,
 	error,
 	isLoading,
+	fixedMode,
+	rangeLabel = "24h",
+	useRangeAwareTimeAxis = false,
 }: {
 	hasPublicHttp: boolean;
 	stats?: ServiceMetricsResponse;
 	error?: unknown;
 	isLoading: boolean;
+	fixedMode?: ServiceChartMode;
+	rangeLabel?: string;
+	useRangeAwareTimeAxis?: boolean;
 }) {
-	const [chartMode, setChartMode] = useState<ServiceChartMode>("requests");
+	const [selectedMode, setSelectedMode] =
+		useState<ServiceChartMode>("requests");
+	const chartMode = fixedMode ?? selectedMode;
 	const chartRows = useMemo(() => buildChartRows(stats), [stats]);
 	const statusSeries = useMemo(() => buildStatusSeries(stats), [stats]);
 	const activeSeries = useMemo(
@@ -231,12 +239,23 @@ function ServiceMetricsPanel({
 				stats,
 				chartRows,
 				hasMetricData,
+				rangeLabel,
 			),
-		[chartMode, stats, chartRows, hasMetricData],
+		[chartMode, stats, chartRows, hasMetricData, rangeLabel],
 	);
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div
+				className={cn(
+					"flex flex-col gap-3",
+					fixedMode
+						? "items-start"
+						: "sm:flex-row sm:items-start sm:justify-between",
+				)}
+			>
+				{fixedMode ? (
+					<h2 className="text-lg font-semibold capitalize">{fixedMode}</h2>
+				) : null}
 				<div className="min-w-0">
 					{isLoading ? (
 						<div className="flex flex-nowrap items-end gap-x-5">
@@ -256,11 +275,13 @@ function ServiceMetricsPanel({
 						</div>
 					)}
 				</div>
-				<ServiceChartModeToggle
-					value={chartMode}
-					onChange={setChartMode}
-					disabled={isLoading || isUnavailable}
-				/>
+				{fixedMode ? null : (
+					<ServiceChartModeToggle
+						value={chartMode}
+						onChange={setSelectedMode}
+						disabled={isLoading || isUnavailable}
+					/>
+				)}
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
@@ -307,7 +328,11 @@ function ServiceMetricsPanel({
 								minTickGap={32}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={(value) => formatCompactDate(value)}
+								tickFormatter={(value) =>
+									!useRangeAwareTimeAxis || rangeLabel === "7d"
+										? formatCompactDate(value)
+										: formatCompactDateTime(value)
+								}
 								className="text-xs"
 							/>
 							<YAxis
@@ -986,11 +1011,12 @@ function buildServiceMetricSummaryItems(
 	stats: ServiceMetricsResponse | undefined,
 	rows: ChartRow[],
 	hasMetricData: boolean,
+	rangeLabel = "24h",
 ): ServiceMetricSummaryItem[] {
 	if (mode === "requests") {
 		return [
 			{
-				label: "requests in 24h",
+				label: `requests in ${rangeLabel}`,
 				value:
 					hasMetricData && stats
 						? formatCompactNumber(stats.totalRequests)
