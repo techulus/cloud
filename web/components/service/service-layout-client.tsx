@@ -130,6 +130,7 @@ export function ServiceLayoutClient({
 	const basePath = `/dashboard/projects/${projectSlug}/${envName}/services/${service?.id}`;
 
 	const isConstrainedTab =
+		pathname.includes("/metrics") ||
 		pathname.includes("/configuration") ||
 		pathname.includes("/builds") ||
 		pathname.includes("/backups");
@@ -139,6 +140,7 @@ export function ServiceLayoutClient({
 	const tabs = [
 		{ name: "Deployments", href: basePath },
 		{ name: "Configuration", href: `${basePath}/configuration` },
+		{ name: "Metrics", href: `${basePath}/metrics` },
 		{ name: "Logs", href: `${basePath}/logs` },
 		...(hasPublicPorts
 			? [{ name: "Requests", href: `${basePath}/requests` }]
