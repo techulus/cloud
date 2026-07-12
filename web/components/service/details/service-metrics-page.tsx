@@ -37,7 +37,7 @@ export function ServiceMetricsPage() {
 	const { service } = useService();
 	const [range, setRange] = useQueryState(
 		"range",
-		parseAsStringLiteral(LOG_TIME_RANGES).withDefault("24h"),
+		parseAsStringLiteral(LOG_TIME_RANGES).withDefault("1h"),
 	);
 	const { data, error, isLoading } = useSWR<ServiceMetricsResponse>(
 		`/api/services/${service.id}/metrics?range=${range}`,
