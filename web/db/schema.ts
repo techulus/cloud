@@ -408,8 +408,8 @@ export const services = pgTable("services", {
 	healthCheckRetries: integer("health_check_retries").default(3),
 	healthCheckStartPeriod: integer("health_check_start_period").default(30),
 	startCommand: text("start_command"),
-	resourceCpuLimit: real("resource_cpu_limit").default(2),
-	resourceMemoryLimitMb: integer("resource_memory_limit_mb").default(1024),
+	resourceCpuLimit: real("resource_cpu_limit"),
+	resourceMemoryLimitMb: integer("resource_memory_limit_mb"),
 	serverlessEnabled: boolean("serverless_enabled").notNull().default(false),
 	serverlessSleepAfterSeconds: integer("serverless_sleep_after_seconds")
 		.notNull()

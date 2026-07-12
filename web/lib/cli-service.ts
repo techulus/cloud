@@ -23,7 +23,6 @@ import {
 	type TechulusManifest,
 	techulusManifestSchema,
 } from "@/lib/cli-manifest";
-import { DEFAULT_RESOURCE_LIMITS } from "@/lib/constants";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { slugify } from "@/lib/utils";
 
@@ -36,7 +35,7 @@ export type ManifestChange = {
 function getManifestResourceLimits(manifest: TechulusManifest) {
 	const resources = manifest.service.resources;
 	if (resources === undefined) {
-		return DEFAULT_RESOURCE_LIMITS;
+		return null;
 	}
 
 	return {
@@ -558,6 +557,9 @@ async function syncResources(
 	changes: ManifestChange[],
 ) {
 	const desiredResources = getManifestResourceLimits(manifest);
+	if (desiredResources === null) {
+		return;
+	}
 	const desiredCpu = desiredResources.cpuCores;
 	const desiredMemory = desiredResources.memoryMb;
 

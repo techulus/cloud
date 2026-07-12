@@ -76,6 +76,7 @@ export async function GET(
 						id: serviceReplicas.id,
 						serverId: serviceReplicas.serverId,
 						serverName: servers.name,
+						serverIsProxy: servers.isProxy,
 						count: serviceReplicas.count,
 					})
 					.from(serviceReplicas)
