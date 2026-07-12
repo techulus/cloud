@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	GatewayPort      = 18080
-	upstreamCacheTTL = 10 * time.Second
+	GatewayPort              = 18080
+	upstreamCacheTTL         = 10 * time.Second
+	proxyRetryResolveTimeout = 2 * time.Second
 )
 
 var (
@@ -183,28 +184,68 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upstream := upstreams[g.nextIndex(len(upstreams))]
+	proxyErr := g.proxyOnce(w, r, upstream)
+	if proxyErr == nil {
+		return
+	}
+	if requestCancelled(r, proxyErr) {
+		return
+	}
+
+	log.Printf("[serverless-gateway] proxy error for host %s to %s: %v", host, upstream.Url, proxyErr)
+	g.evictUpstreams(host)
+	if !retryableProxyRequest(r) {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	retryCtx, cancel := context.WithTimeout(r.Context(), proxyRetryResolveTimeout)
+	defer cancel()
+	retryUpstreams, err := g.getUpstreams(retryCtx, host)
+	if err != nil || len(retryUpstreams) == 0 {
+		if r.Context().Err() != nil {
+			return
+		}
+		if err == nil {
+			err = errors.New("no upstreams after cache eviction")
+		}
+		log.Printf("[serverless-gateway] proxy retry resolution failed for host %s: %v", host, err)
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	retryUpstream := selectRetryUpstream(retryUpstreams, upstream.Url, g.nextIndex(len(retryUpstreams)))
+	proxyErr = g.proxyOnce(w, r, retryUpstream)
+	if proxyErr == nil || requestCancelled(r, proxyErr) {
+		return
+	}
+	log.Printf("[serverless-gateway] proxy retry failed for host %s to %s: %v", host, retryUpstream.Url, proxyErr)
+	g.evictUpstreams(host)
+	http.Error(w, "bad gateway", http.StatusBadGateway)
+}
+
+func (g *Gateway) proxyOnce(w http.ResponseWriter, r *http.Request, upstream agenthttp.ServerlessUpstream) error {
 	target, err := url.Parse("http://" + upstream.Url)
 	if err != nil {
-		log.Printf("[serverless-gateway] invalid upstream %q for host %s: %v", upstream.Url, host, err)
-		http.Error(w, "bad upstream", http.StatusBadGateway)
-		return
+		return fmt.Errorf("invalid upstream %q: %w", upstream.Url, err)
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	originalHost := r.Host
+	originalProto := forwardedProto(r)
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = originalHost
 		req.Header.Set("X-Forwarded-Host", originalHost)
-		req.Header.Set("X-Forwarded-Proto", forwardedProto(r))
+		req.Header.Set("X-Forwarded-Proto", originalProto)
 	}
-	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
-		log.Printf("[serverless-gateway] proxy error for host %s to %s: %v", host, upstream.Url, err)
-		g.evictUpstreams(host)
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+	var proxyErr error
+	proxy.ErrorHandler = func(_ http.ResponseWriter, _ *http.Request, err error) {
+		proxyErr = err
 	}
 	proxy.ServeHTTP(w, r)
+	return proxyErr
 }
 
 func (g *Gateway) getUpstreams(ctx context.Context, host string) ([]agenthttp.ServerlessUpstream, error) {
@@ -1305,6 +1346,41 @@ func (g *Gateway) nextIndex(length int) int {
 		return 0
 	}
 	return int(atomic.AddUint64(&g.counter, 1)-1) % length
+}
+
+func retryableProxyRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.ContentLength != 0 || (r.Body != nil && r.Body != http.NoBody) {
+		return false
+	}
+	return !headerContainsToken(r.Header, "Connection", "upgrade") && r.Header.Get("Upgrade") == ""
+}
+
+func requestCancelled(r *http.Request, err error) bool {
+	return r.Context().Err() != nil || errors.Is(err, context.Canceled)
+}
+
+func selectRetryUpstream(upstreams []agenthttp.ServerlessUpstream, failedURL string, start int) agenthttp.ServerlessUpstream {
+	for offset := range len(upstreams) {
+		upstream := upstreams[(start+offset)%len(upstreams)]
+		if upstream.Url != failedURL {
+			return upstream
+		}
+	}
+	return upstreams[start%len(upstreams)]
+}
+
+func headerContainsToken(header http.Header, name string, token string) bool {
+	for _, value := range header.Values(name) {
+		for part := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeHost(host string) string {

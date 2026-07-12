@@ -5,9 +5,14 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,6 +167,160 @@ func assertProbeSet(t *testing.T, got []string, want ...string) {
 			t.Fatalf("probes = %+v, want %+v", got, want)
 		}
 	}
+}
+
+func TestServeHTTPRetriesStaleUpstreamForSafeRequest(t *testing.T) {
+	var requests atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(backend.Close)
+
+	gateway := testProxyGateway(t, backend.Listener.Addr().String())
+	gateway.cacheUpstreams("app.example.com", []agenthttp.ServerlessUpstream{{Url: "127.0.0.1:0"}})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://app.example.com/health", nil)
+	gateway.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("backend requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestServeHTTPDoesNotRetryUnsafeRequest(t *testing.T) {
+	var requests atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(backend.Close)
+
+	gateway := testProxyGateway(t, backend.Listener.Addr().String())
+	gateway.cacheUpstreams("app.example.com", []agenthttp.ServerlessUpstream{{Url: "127.0.0.1:0"}})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "http://app.example.com/items", strings.NewReader("item"))
+	gateway.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("backend requests = %d, want 0", requests.Load())
+	}
+}
+
+func TestServeHTTPDoesNotRetryUpgradeRequest(t *testing.T) {
+	var requests atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(backend.Close)
+
+	gateway := testProxyGateway(t, backend.Listener.Addr().String())
+	gateway.cacheUpstreams("app.example.com", []agenthttp.ServerlessUpstream{{Url: "127.0.0.1:0"}})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://app.example.com/socket", nil)
+	request.Header.Set("Connection", "keep-alive, Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	gateway.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("backend requests = %d, want 0", requests.Load())
+	}
+}
+
+func TestServeHTTPDoesNotEvictCacheWhenRequestIsCancelled(t *testing.T) {
+	gateway := testProxyGateway(t, "127.0.0.1:0")
+	cached := []agenthttp.ServerlessUpstream{{Url: "127.0.0.1:0"}}
+	gateway.cacheUpstreams("app.example.com", cached)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodGet, "http://app.example.com/", nil).WithContext(ctx)
+	gateway.ServeHTTP(httptest.NewRecorder(), request)
+
+	upstreams, ok := gateway.cachedUpstreams("app.example.com")
+	if !ok || len(upstreams) != 1 || upstreams[0].Url != cached[0].Url {
+		t.Fatalf("cached upstreams = %+v, ok=%t; want original cache entry", upstreams, ok)
+	}
+}
+
+func TestServeHTTPRetriesOnlyOnce(t *testing.T) {
+	retryAddress, accepts := acceptAndCloseAddress(t)
+	gateway := testProxyGateway(t, retryAddress)
+	gateway.cacheUpstreams("app.example.com", []agenthttp.ServerlessUpstream{{Url: "127.0.0.1:0"}})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://app.example.com/", nil)
+	gateway.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+	if _, ok := gateway.cachedUpstreams("app.example.com"); ok {
+		t.Fatal("failed retry left upstream cache populated")
+	}
+	if accepts.Load() != 1 {
+		t.Fatalf("retry upstream connections = %d, want 1", accepts.Load())
+	}
+}
+
+func testProxyGateway(t *testing.T, upstreamAddress string) *Gateway {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(upstreamAddress)
+	if err != nil {
+		t.Fatalf("split upstream address: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse upstream port: %v", err)
+	}
+	state := testExpectedState("running")
+	state.Containers[0].IPAddress = host
+	state.Serverless.Routes[0].Port = port
+	state.Serverless.Routes[0].Upstreams = nil
+	runtime := &fakeRuntime{
+		state: state,
+		containers: []container.Container{{
+			ID:           "ctr-local",
+			State:        "running",
+			DeploymentID: "dep_local",
+			ServiceID:    "svc_1",
+		}},
+	}
+	return NewGateway(runtime)
+}
+
+func acceptAndCloseAddress(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for closing upstream: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	var accepts atomic.Int32
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			accepts.Add(1)
+			conn.Close()
+		}
+	}()
+	return listener.Addr().String(), &accepts
 }
 
 func TestGetUpstreamsReturnsWhenFollowerContextIsCancelled(t *testing.T) {
