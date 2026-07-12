@@ -1068,8 +1068,12 @@ export async function updateServiceServerlessSettings(
 			}
 
 			const configuredReplicas = await tx
-				.select({ count: serviceReplicas.count })
+				.select({
+					count: serviceReplicas.count,
+					serverIsProxy: servers.isProxy,
+				})
 				.from(serviceReplicas)
+				.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 				.where(eq(serviceReplicas.serviceId, serviceId));
 			const totalConfiguredReplicas = configuredReplicas.reduce(
 				(total, replica) => total + replica.count,
@@ -1078,6 +1082,16 @@ export async function updateServiceServerlessSettings(
 
 			if (totalConfiguredReplicas < 1) {
 				throw new Error("Serverless services require at least one replica");
+			}
+
+			if (
+				configuredReplicas.some(
+					(replica) => replica.count > 0 && !replica.serverIsProxy,
+				)
+			) {
+				throw new Error(
+					"Serverless services can only be deployed to proxy nodes",
+				);
 			}
 		}
 
@@ -1224,20 +1238,55 @@ export async function updateServiceConfig(
 	}
 
 	if (config.replicas) {
-		await db
-			.delete(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, serviceId));
+		const replicas = config.replicas;
+		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+			);
 
-		for (const replica of config.replicas) {
-			if (replica.count > 0) {
-				await db.insert(serviceReplicas).values({
-					id: randomUUID(),
-					serviceId,
-					serverId: replica.serverId,
-					count: replica.count,
-				});
+			const [currentService] = await tx
+				.select({ serverlessEnabled: services.serverlessEnabled })
+				.from(services)
+				.where(eq(services.id, serviceId))
+				.limit(1);
+
+			if (currentService?.serverlessEnabled) {
+				const selectedServerIds = replicas
+					.filter((replica) => replica.count > 0)
+					.map((replica) => replica.serverId);
+				if (selectedServerIds.length > 0) {
+					const workerServers = await tx
+						.select({ id: servers.id })
+						.from(servers)
+						.where(
+							and(
+								inArray(servers.id, selectedServerIds),
+								eq(servers.isProxy, false),
+							),
+						);
+					if (workerServers.length > 0) {
+						throw new Error(
+							"Disable serverless before deploying to worker nodes",
+						);
+					}
+				}
 			}
-		}
+
+			await tx
+				.delete(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, serviceId));
+
+			for (const replica of replicas) {
+				if (replica.count > 0) {
+					await tx.insert(serviceReplicas).values({
+						id: randomUUID(),
+						serviceId,
+						serverId: replica.serverId,
+						count: replica.count,
+					});
+				}
+			}
+		});
 	}
 
 	return { success: true };
