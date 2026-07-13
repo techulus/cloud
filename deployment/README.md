@@ -90,22 +90,6 @@ start, so scaling `WEB_REPLICAS` does not run migrations from every replica.
 
 Schema is synced automatically by the one-shot `migrate` service via `drizzle-kit push --force`. This keeps deployment non-interactive, including schema changes Drizzle classifies as data-loss operations such as dropping columns. If schema sync fails, `web` startup is blocked; inspect the failure with `docker compose -f compose.production.yml logs migrate`.
 
-### Immutable service revision cutover
-
-Before deploying this release, stop rollout producers, verify no rollout is
-queued or in progress, and take a PostgreSQL backup. Then run this once against
-the database:
-
-```sql
-DELETE FROM deployments;
-```
-
-Port allocations are removed by cascade. The schema sync can then add the
-required revision reference without migrating legacy deployment state. After
-the new version starts, redeploy previously active services from their current
-configuration. Agents remove the orphaned containers; service volumes and
-backups are not deleted.
-
 **Future plan:** Once the schema stabilizes, switch to `drizzle-kit generate` + `drizzle-orm migrate()` with pre-generated SQL migration files. This will eliminate the esbuild/drizzle-kit dependency from the production image.
 
 ## Commands
