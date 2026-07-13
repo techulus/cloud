@@ -53,10 +53,17 @@ export function ServiceMetricsPage() {
 		<div className="space-y-4">
 			<div className="flex justify-end">
 				<DropdownMenu>
-					<DropdownMenuTrigger render={<Button variant="outline" />}>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="outline"
+								className="min-w-44 justify-between whitespace-nowrap"
+							/>
+						}
+					>
 						{LABELS[range]} <ChevronDown className="size-4" />
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end">
+					<DropdownMenuContent align="end" className="min-w-44">
 						<DropdownMenuRadioGroup
 							value={range}
 							onValueChange={(value) => setRange(value as typeof range)}
