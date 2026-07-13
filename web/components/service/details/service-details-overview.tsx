@@ -40,6 +40,8 @@ export type ServiceMetricsResponse = {
 	windowEnd: string;
 	stepSeconds: number;
 	totalRequests: number;
+	totalIngressBytes: number | null;
+	totalEgressBytes: number | null;
 	statusCodes: string[];
 	buckets: Array<{
 		timestamp: string;
@@ -1013,10 +1015,12 @@ function buildServiceMetricSummaryItems(
 	hasMetricData: boolean,
 	rangeLabel = "24h",
 ): ServiceMetricSummaryItem[] {
+	const summaryRangeLabel = stats?.range ?? rangeLabel;
+
 	if (mode === "requests") {
 		return [
 			{
-				label: `requests in ${rangeLabel}`,
+				label: `requests in ${summaryRangeLabel}`,
 				value:
 					hasMetricData && stats
 						? formatCompactNumber(stats.totalRequests)
@@ -1061,18 +1065,16 @@ function buildServiceMetricSummaryItems(
 	if (mode === "traffic") {
 		return [
 			{
-				label: "ingress",
-				value: formatNullableMetric(
-					getLatestValue(rows, "ingressBytesPerSecond"),
-					(value) => `${formatBytes(value)}/s`,
-				),
+				label: `ingress in ${summaryRangeLabel}`,
+				value: hasMetricData
+					? formatNullableMetric(stats?.totalIngressBytes ?? null, formatBytes)
+					: "-",
 			},
 			{
-				label: "egress",
-				value: formatNullableMetric(
-					getLatestValue(rows, "egressBytesPerSecond"),
-					(value) => `${formatBytes(value)}/s`,
-				),
+				label: `egress in ${summaryRangeLabel}`,
+				value: hasMetricData
+					? formatNullableMetric(stats?.totalEgressBytes ?? null, formatBytes)
+					: "-",
 			},
 		];
 	}
