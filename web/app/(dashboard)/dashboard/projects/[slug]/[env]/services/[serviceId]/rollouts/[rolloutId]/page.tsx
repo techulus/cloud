@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { RolloutDetails } from "@/components/service/details/rollout-details";
 import { db } from "@/db";
-import { projects, rollouts, serviceRevisions, services } from "@/db/schema";
+import { projects, rollouts, services } from "@/db/schema";
 
 async function getRollout(
 	projectSlug: string,
@@ -27,22 +27,8 @@ async function getRollout(
 	if (!service) return null;
 
 	const rollout = await db
-		.select({
-			id: rollouts.id,
-			serviceId: rollouts.serviceId,
-			serviceRevisionId: rollouts.serviceRevisionId,
-			status: rollouts.status,
-			currentStage: rollouts.currentStage,
-			createdAt: rollouts.createdAt,
-			completedAt: rollouts.completedAt,
-			revisionNumber: serviceRevisions.revisionNumber,
-			contentHash: serviceRevisions.contentHash,
-		})
+		.select()
 		.from(rollouts)
-		.innerJoin(
-			serviceRevisions,
-			eq(rollouts.serviceRevisionId, serviceRevisions.id),
-		)
 		.where(and(eq(rollouts.id, rolloutId), eq(rollouts.serviceId, serviceId)))
 		.then((r) => r[0]);
 

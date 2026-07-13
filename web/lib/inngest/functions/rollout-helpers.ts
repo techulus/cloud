@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { getService } from "@/db/queries";
 import {
 	deploymentPorts,
 	deployments,
@@ -11,7 +10,7 @@ import {
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
-import { findAvailableContainerIp } from "@/lib/wireguard";
+import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
@@ -31,12 +30,6 @@ export type DeploymentContext = {
 	isRollingUpdate: boolean;
 };
 
-export function isActiveDeploymentForRollout(deployment: {
-	trafficState: string;
-}) {
-	return deployment.trafficState === "active";
-}
-
 export function normalizeImage(image: string): string {
 	if (!image.includes("/")) {
 		return `docker.io/library/${image}`;
@@ -47,11 +40,21 @@ export function normalizeImage(image: string): string {
 	return image;
 }
 
-export function findAvailableHostPorts(
-	usedPorts: Iterable<number>,
+async function getUsedPorts(serverId: string): Promise<Set<number>> {
+	const existingPorts = await db
+		.select({ hostPort: deploymentPorts.hostPort })
+		.from(deploymentPorts)
+		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
+		.where(eq(deployments.serverId, serverId));
+
+	return new Set(existingPorts.map((port) => port.hostPort));
+}
+
+export async function allocateHostPorts(
+	serverId: string,
 	count: number,
-): number[] {
-	const unavailablePorts = new Set(usedPorts);
+): Promise<number[]> {
+	const unavailablePorts = await getUsedPorts(serverId);
 	const allocated: number[] = [];
 
 	for (
@@ -142,26 +145,6 @@ export async function validateServers(
 	}
 
 	return serverMap;
-}
-
-export async function prepareRollingUpdate(
-	serviceId: string,
-): Promise<{ deploymentIds: string[] }> {
-	const service = await getService(serviceId);
-	if (!service) {
-		return { deploymentIds: [] };
-	}
-
-	const existingDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-
-	const runningDeployments = existingDeployments.filter((d) =>
-		isActiveDeploymentForRollout(d),
-	);
-
-	return { deploymentIds: runningDeployments.map((d) => d.id) };
 }
 
 export async function cleanupTerminalDeployments(
@@ -264,78 +247,13 @@ export async function createDeploymentRecords(
 
 		for (let i = 0; i < placement.replicas; i++) {
 			const deploymentId = randomUUID();
+			const hostPorts = await allocateHostPorts(
+				server.id,
+				specification.ports.length,
+			);
+			const ipAddress = await assignContainerIp(server.id);
 
 			await db.transaction(async (tx) => {
-				await tx.execute(
-					sql`SELECT pg_advisory_xact_lock(hashtext(${`deployment-allocation:${server.id}`}))`,
-				);
-
-				if (specification.stateful) {
-					const lockedService = await tx
-						.select({ lockedServerId: services.lockedServerId })
-						.from(services)
-						.where(eq(services.id, serviceId))
-						.for("update")
-						.then((rows) => rows[0]);
-					if (!lockedService) {
-						throw new Error("Service not found");
-					}
-					if (
-						lockedService.lockedServerId &&
-						lockedService.lockedServerId !== server.id
-					) {
-						throw new Error(
-							`Stateful service is locked to server ${lockedService.lockedServerId}`,
-						);
-					}
-					if (!lockedService.lockedServerId) {
-						await tx
-							.update(services)
-							.set({ lockedServerId: server.id })
-							.where(eq(services.id, serviceId));
-					}
-				}
-
-				const [usedPortRows, subnet, usedIpRows] = await Promise.all([
-					tx
-						.select({ hostPort: deploymentPorts.hostPort })
-						.from(deploymentPorts)
-						.innerJoin(
-							deployments,
-							eq(deploymentPorts.deploymentId, deployments.id),
-						)
-						.where(eq(deployments.serverId, server.id)),
-					tx
-						.select({ subnetId: servers.subnetId })
-						.from(servers)
-						.where(eq(servers.id, server.id))
-						.then((rows) => rows[0]),
-					tx
-						.select({ ipAddress: deployments.ipAddress })
-						.from(deployments)
-						.where(
-							and(
-								eq(deployments.serverId, server.id),
-								isNotNull(deployments.ipAddress),
-							),
-						),
-				]);
-
-				if (!subnet?.subnetId) {
-					throw new Error(`Server ${server.name} has no subnet assigned`);
-				}
-
-				const hostPorts = findAvailableHostPorts(
-					usedPortRows.map((port) => port.hostPort),
-					specification.ports.length,
-				);
-				const ipAddress = findAvailableContainerIp(
-					subnet.subnetId,
-					usedIpRows.flatMap((deployment) =>
-						deployment.ipAddress ? [deployment.ipAddress] : [],
-					),
-				);
-
 				await tx.insert(deployments).values({
 					id: deploymentId,
 					serviceId,
@@ -365,7 +283,6 @@ export async function createDeploymentRecords(
 			await enqueueWork(server.id, "reconcile", {
 				reason: "rollout_deployment_created",
 				deploymentId,
-				revisionId,
 			});
 		}
 	}
@@ -373,18 +290,12 @@ export async function createDeploymentRecords(
 	return { deploymentIds };
 }
 
-export async function completeRolloutWithRevision(
+export async function completeRollout(
 	rolloutId: string,
 	serviceId: string,
-	context: Omit<DeploymentContext, "serverMap">,
+	context: Omit<DeploymentContext, "serverMap" | "revisionId">,
 ): Promise<{ completed: boolean; stoppedCount: number }> {
-	const {
-		placements,
-		revisionId,
-		specification,
-		totalReplicas,
-		isRollingUpdate,
-	} = context;
+	const { placements, specification, totalReplicas, isRollingUpdate } = context;
 	const lockedServerId = specification.stateful
 		? placements[0]?.serverId
 		: undefined;
@@ -419,7 +330,6 @@ export async function completeRolloutWithRevision(
 		await tx
 			.update(services)
 			.set({
-				activeRevisionId: revisionId,
 				replicas: totalReplicas,
 				...(lockedServerId ? { lockedServerId } : {}),
 			})
@@ -445,14 +355,17 @@ export async function checkForRollingUpdate(
 		return false;
 	}
 
-	const existingDeployments = await db
-		.select()
+	const existingDeployment = await db
+		.select({ id: deployments.id })
 		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
+		.where(
+			and(
+				eq(deployments.serviceId, serviceId),
+				eq(deployments.trafficState, "active"),
+			),
+		)
+		.limit(1)
+		.then((rows) => rows[0]);
 
-	const runningDeployments = existingDeployments.filter((d) =>
-		isActiveDeploymentForRollout(d),
-	);
-
-	return runningDeployments.length > 0;
+	return existingDeployment != null;
 }

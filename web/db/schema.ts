@@ -1,6 +1,5 @@
 import { relations, sql } from "drizzle-orm";
 import {
-	type AnyPgColumn,
 	bigint,
 	boolean,
 	foreignKey,
@@ -307,14 +306,6 @@ export type AgentHealth = {
 	version: string;
 	uptimeSecs: number;
 	capabilities?: string[];
-	reconciliationFailures?: Array<{
-		action: string;
-		deploymentId?: string;
-		description: string;
-		lastError: string;
-		attempts: number;
-		nextRetryAt: string;
-	}>;
 };
 
 export type AgentUpgradeStatus =
@@ -429,11 +420,6 @@ export const services = pgTable("services", {
 	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
 		.notNull()
 		.default(300),
-	activeRevisionId: text("active_revision_id").references(
-		(): AnyPgColumn => serviceRevisions.id,
-		{ onDelete: "set null" },
-	),
-	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
 		withTimezone: true,
@@ -570,29 +556,14 @@ export const serviceRevisions = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
-		revisionNumber: integer("revision_number").notNull(),
-		schemaVersion: integer("schema_version").notNull(),
 		specification: jsonb("specification")
 			.$type<ServiceRevisionSpec>()
 			.notNull(),
-		contentHash: text("content_hash").notNull(),
-		sourceMetadata:
-			jsonb("source_metadata").$type<
-				Record<string, string | number | boolean | null>
-			>(),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
 	},
 	(table) => [
-		uniqueIndex("service_revisions_service_revision_number_idx").on(
-			table.serviceId,
-			table.revisionNumber,
-		),
-		uniqueIndex("service_revisions_service_content_hash_idx").on(
-			table.serviceId,
-			table.contentHash,
-		),
 		unique("service_revisions_id_service_id_unique").on(
 			table.id,
 			table.serviceId,
@@ -668,10 +639,6 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
-		uniqueIndex("deployments_server_ip_address_idx").on(
-			table.serverId,
-			table.ipAddress,
-		),
 		index("deployments_runtime_desired_state_idx").on(
 			table.runtimeDesiredState,
 		),
@@ -692,7 +659,7 @@ export const rollouts = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
-		serviceRevisionId: text("service_revision_id").notNull(),
+		serviceRevisionId: text("service_revision_id"),
 		status: text("status", {
 			enum: ["queued", "in_progress", "completed", "failed", "rolled_back"],
 		})

@@ -6,13 +6,9 @@ import { rollouts, serviceReplicas } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { startMigrationInternal } from "@/lib/migrations";
-import type { RevisionSourceMetadata } from "@/lib/service-revisions";
 import { createRolloutWithServiceRevision } from "@/lib/service-revisions";
 
-export async function deployServiceInternal(
-	serviceId: string,
-	sourceMetadata: RevisionSourceMetadata = {},
-) {
+export async function deployServiceInternal(serviceId: string) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -52,10 +48,7 @@ export async function deployServiceInternal(
 		}
 	}
 
-	const { rolloutId } = await createRolloutWithServiceRevision(
-		serviceId,
-		sourceMetadata,
-	);
+	const { rolloutId } = await createRolloutWithServiceRevision(serviceId);
 
 	try {
 		await inngest.send(

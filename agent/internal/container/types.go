@@ -31,8 +31,6 @@ type DeployConfig struct {
 	ServiceID         string
 	ServiceName       string
 	DeploymentID      string
-	RevisionID        string
-	ContainerSpecHash string
 	WireGuardIP       string
 	IPAddress         string
 	PortMappings      []PortMapping
@@ -59,8 +57,6 @@ type Container struct {
 	Labels       map[string]string `json:"Labels"`
 	DeploymentID string
 	ServiceID    string
-	RevisionID   string
-	SpecHash     string
 }
 
 type containerInspect struct {

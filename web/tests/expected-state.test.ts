@@ -13,7 +13,6 @@ import {
 	buildServerlessTraefikRouteSets,
 	buildTraefikCertificateDomains,
 	buildTraefikRoutes,
-	selectRuntimeServiceRevisions,
 } from "@/lib/agent/expected-state";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
@@ -26,11 +25,9 @@ describe("expected-state pure builders", () => {
 			id: `rev_${serviceId}`,
 			name: serviceId,
 			serviceId,
-			schemaVersion: 1,
 			revisionId: `rev_${serviceId}`,
 			specification: {
 				schemaVersion: 1,
-				serviceId,
 				image: "nginx",
 				hostname: serviceId,
 				stateful: false,
@@ -121,8 +118,16 @@ describe("expected-state pure builders", () => {
 						},
 					],
 					secrets: [
-						{ key: "ZED", encryptedValue: "last" },
-						{ key: "ALPHA", encryptedValue: "first" },
+						{
+							key: "ZED",
+							encryptedValue: "last",
+							updatedAt: "2026-07-01T00:00:00.000Z",
+						},
+						{
+							key: "ALPHA",
+							encryptedValue: "first",
+							updatedAt: "2026-07-01T00:00:00.000Z",
+						},
 					],
 					volumes: [
 						{ name: "cache", containerPath: "/var/cache" },
@@ -184,57 +189,6 @@ describe("expected-state pure builders", () => {
 			deploymentId: "dep_bbbbbbbb",
 			desiredState: "stopped",
 		});
-	});
-
-	it("keeps the spec hash stable for duplicate container ports", () => {
-		const build = (hostPorts: number[]) =>
-			buildExpectedContainersFromRows({
-				deployments: [
-					{
-						id: "dep_dns",
-						serviceId: "svc_dns",
-						serviceRevisionId: "rev_svc_dns",
-						runtimeDesiredState: "running",
-					},
-				] as any,
-				services: [{ id: "svc_dns", name: "dns" }] as any,
-				revisions: [
-					revision("svc_dns", {
-						ports: [
-							{
-								containerPort: 53,
-								isPublic: true,
-								domain: null,
-								protocol: "tcp",
-								externalPort: null,
-								tlsPassthrough: false,
-							},
-							{
-								containerPort: 53,
-								isPublic: true,
-								domain: null,
-								protocol: "udp",
-								externalPort: null,
-								tlsPassthrough: false,
-							},
-						],
-					}),
-				],
-				deploymentPorts: hostPorts.map((hostPort) => ({
-					deploymentId: "dep_dns",
-					containerPort: 53,
-					hostPort,
-				})) as any,
-			})[0];
-
-		const first = build([30002, 30001]);
-		const second = build([30001, 30002]);
-
-		expect(first.ports).toEqual([
-			{ containerPort: 53, hostPort: 30001 },
-			{ containerPort: 53, hostPort: 30002 },
-		]);
-		expect(first.containerSpecHash).toBe(second.containerSpecHash);
 	});
 
 	it("rejects partial expected state when a deployment revision is missing", () => {
@@ -302,58 +256,6 @@ describe("expected-state pure builders", () => {
 				deploymentPorts: [],
 			}),
 		).toThrow("Deployment dep_incomplete_ports has incomplete port allocation");
-	});
-
-	it("contains multiple active revisions to the authoritative revision", () => {
-		const specification = runtimeRevision("svc_1").specification;
-		const result = selectRuntimeServiceRevisions([
-			{
-				deploymentId: "dep_old",
-				serviceId: "svc_1",
-				serviceName: "api",
-				serviceActiveRevisionId: "rev_old",
-				revisionId: "rev_old",
-				revisionServiceId: "svc_1",
-				revisionSchemaVersion: 1,
-				specification,
-			},
-			{
-				deploymentId: "dep_new",
-				serviceId: "svc_1",
-				serviceName: "api",
-				serviceActiveRevisionId: "rev_old",
-				revisionId: "rev_new",
-				revisionServiceId: "svc_1",
-				revisionSchemaVersion: 1,
-				specification,
-			},
-		]);
-
-		expect(result.services).toHaveLength(1);
-		expect(result.services[0]?.revisionId).toBe("rev_old");
-		expect(result.errors[0]).toContain("multiple active revisions");
-	});
-
-	it("excludes desired running state from the container creation hash", () => {
-		const build = (runtimeDesiredState: "running" | "stopped") =>
-			buildExpectedContainersFromRows({
-				deployments: [
-					{
-						id: "dep_1",
-						serviceId: "svc_1",
-						serviceRevisionId: "rev_svc_1",
-						ipAddress: "10.0.0.1",
-						runtimeDesiredState,
-					},
-				] as any,
-				services: [{ id: "svc_1", name: "api" }] as any,
-				revisions: [revision("svc_1")],
-				deploymentPorts: [],
-			})[0];
-
-		expect(build("running").containerSpecHash).toBe(
-			build("stopped").containerSpecHash,
-		);
 	});
 
 	it("keeps HTTP local upstreams before remote upstreams", () => {

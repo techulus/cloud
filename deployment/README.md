@@ -92,51 +92,14 @@ Schema is synced automatically by the one-shot `migrate` service via `drizzle-ki
 
 ### Immutable service revision cutover
 
-The service-revision release is a maintenance-window cutover. Do not start the
-new agents across the fleet at the same time.
-
-1. Pause builds, schedules, migrations, restores, and rollout workers. Verify
-   that no rollout is `queued` or `in_progress`. Verify every service has no
-   pending secret additions, edits, or removals; deploy or revert those changes
-   before the maintenance window.
-2. Set `EXPECTED_STATE_MAINTENANCE_MODE=true`. Stop every old agent so each
-   server keeps running its last applied container and cluster state.
-3. Stop the old `web` and `inngest` services. Take and verify a PostgreSQL
-   backup.
-4. Run the new `migrate` image. It executes
-   `scripts/cutover-service-revisions.ts` before `drizzle-kit push`. The script
-   aborts and rolls back if active rollouts exist or any runtime row cannot be
-   attached to a baseline revision.
-5. Start the new control plane while maintenance mode remains enabled. Install
-   the new agent binary on every server, but leave the agents stopped.
-6. Set `EXPECTED_STATE_MAINTENANCE_MODE=false` and restart the control plane.
-   Confirm server health identifies every stopped or old node as requiring the
-   `service_revision_v1` capability.
-7. Start one server agent. Its synchronous startup report must register the
-   capability before it requests expected state.
-8. Let that server recreate its pre-cutover containers one at a time. Verify
-   container health, volume mounts, DNS, HTTP and L4 routes, certificates,
-   WireGuard, and serverless behavior before starting the next server.
-9. Continue through the fleet. Handle stateful and single-replica services in
-   an explicit maintenance order, then resume workflow producers.
-
-Each recreation pulls and verifies the image before removing the old container.
-A failed pull leaves the old container running and backs off only that action;
-other container and cluster reconciliation continues.
-
-The agent waits for each recreated container before starting the next legacy
-recreation. Services with a health check must become healthy; services without
-one must remain running through a 30-second stabilization period.
-
-Pull-before-remove minimizes downtime but cannot eliminate it. The replacement
-uses the same static IP, so every container has a stop-to-start gap. Existing
-connections to that replica may reset. Multi-replica services remain available
-only through healthy replicas on other containers. Single-replica and stateful
-services have bounded customer-visible downtime. Verify a healthy remaining
-replica before allowing the next replica recreation.
-
-Keep `services.deployed_config` unchanged for the burn-in release. The
-application does not read or write it; it remains only as recovery evidence.
+Before deploying this release, stop rollout producers, verify no rollout is
+queued or in progress, and take a PostgreSQL backup. The migrate service creates
+one baseline revision for each existing deployment before applying the new
+schema. Existing containers keep running unchanged; subsequent deployments use
+immutable revision snapshots. Stale non-active deployment records are removed
+before the baseline is captured. The cutover aborts if an active deployment
+cannot be reconstructed safely from its stored deployed configuration; that
+legacy column is dropped after the backfill succeeds.
 
 **Future plan:** Once the schema stabilizes, switch to `drizzle-kit generate` + `drizzle-orm migrate()` with pre-generated SQL migration files. This will eliminate the esbuild/drizzle-kit dependency from the production image.
 

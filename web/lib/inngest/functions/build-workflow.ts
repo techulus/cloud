@@ -78,15 +78,12 @@ export const buildWorkflow = inngest.createFunction(
 				return { status: "failed", reason: result.data.error, buildId };
 			}
 
-			const manifestAlreadyCompleted = await step.run(
-				"check-existing-manifest",
-				async () => {
-					return hasCompletedManifestWorkItem({
-						serviceId,
-						buildId,
-					});
-				},
-			);
+			const manifestAlreadyCompleted = await step.run("check-existing-manifest", async () => {
+				return hasCompletedManifestWorkItem({
+					serviceId,
+					buildId,
+				});
+			});
 
 			if (!manifestAlreadyCompleted) {
 				const manifestResult = await step.waitForEvent("wait-manifest", {
@@ -117,7 +114,7 @@ export const buildWorkflow = inngest.createFunction(
 
 			if (shouldDeploy) {
 				await step.run("trigger-deploy", async () => {
-					await deployServiceInternal(serviceId, { trigger: "build", buildId });
+					await deployServiceInternal(serviceId);
 				});
 			}
 
@@ -166,15 +163,12 @@ export const buildWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "build_failed", buildGroupId };
 		}
 
-		const manifestAlreadyCompleted = await step.run(
-			"check-existing-group-manifest",
-			async () => {
-				return hasCompletedManifestWorkItem({
-					serviceId,
-					buildGroupId,
-				});
-			},
-		);
+		const manifestAlreadyCompleted = await step.run("check-existing-group-manifest", async () => {
+			return hasCompletedManifestWorkItem({
+				serviceId,
+				buildGroupId,
+			});
+		});
 
 		if (!manifestAlreadyCompleted) {
 			const manifestResult = await step.waitForEvent("wait-group-manifest", {
@@ -205,10 +199,7 @@ export const buildWorkflow = inngest.createFunction(
 
 		if (shouldDeploy) {
 			await step.run("trigger-deploy-group", async () => {
-				await deployServiceInternal(serviceId, {
-					trigger: "build_group",
-					buildGroupId,
-				});
+				await deployServiceInternal(serviceId);
 			});
 		}
 

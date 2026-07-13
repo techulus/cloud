@@ -18,10 +18,7 @@ import (
 
 var Version = "dev"
 
-const (
-	serverlessGatewayCapability = "serverless_gateway"
-	serviceRevisionCapability   = "service_revision_v1"
-)
+const serverlessGatewayCapability = "serverless_gateway"
 
 var (
 	agentStartTime    = time.Now()
@@ -36,10 +33,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		Containers: []agenthttp.ContainerStatus{},
 		DnsInSync:  a.dnsInSync,
 		AgentHealth: &agenthttp.AgentHealth{
-			Version:                Version,
-			UptimeSecs:             int64(time.Since(agentStartTime).Seconds()),
-			Capabilities:           a.agentCapabilities(),
-			ReconciliationFailures: a.SnapshotReconciliationFailures(),
+			Version:      Version,
+			UptimeSecs:   int64(time.Since(agentStartTime).Seconds()),
+			Capabilities: a.agentCapabilities(),
 		},
 	}
 
@@ -120,11 +116,10 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 }
 
 func (a *Agent) agentCapabilities() []string {
-	capabilities := []string{serviceRevisionCapability}
-	if a.IsProxy && a.serverlessGatewayRunning.Load() {
-		capabilities = append(capabilities, serverlessGatewayCapability)
+	if !a.IsProxy || !a.serverlessGatewayRunning.Load() {
+		return nil
 	}
-	return capabilities
+	return []string{serverlessGatewayCapability}
 }
 
 func (a *Agent) RecordDeploymentError(deploymentID string, err error) {

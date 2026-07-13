@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 export const SERVICE_REVISION_SCHEMA_VERSION = 1 as const;
 
 export function getDefaultServiceHostname(name: string): string {
@@ -34,6 +32,7 @@ export type ServiceRevisionPort = {
 export type ServiceRevisionSecret = {
 	key: string;
 	encryptedValue: string;
+	updatedAt: string;
 };
 
 export type ServiceRevisionVolume = {
@@ -43,7 +42,6 @@ export type ServiceRevisionVolume = {
 
 export type ServiceRevisionSpec = {
 	schemaVersion: typeof SERVICE_REVISION_SCHEMA_VERSION;
-	serviceId: string;
 	image: string;
 	hostname: string;
 	stateful: boolean;
@@ -66,7 +64,6 @@ export type ServiceRevisionSpec = {
 
 export type ServiceRevisionDraft = {
 	service: {
-		id: string;
 		name: string;
 		image: string;
 		hostname: string | null;
@@ -95,10 +92,30 @@ export type ServiceRevisionDraft = {
 	secrets: Array<{
 		key: string;
 		encryptedValue: string;
-		updatedAt?: Date | string;
+		updatedAt: Date | string;
 	}>;
 	volumes: Array<{ name: string; containerPath: string }>;
 };
+
+function validateServiceRevisionSpec(specification: ServiceRevisionSpec) {
+	const totalReplicas = specification.placements.reduce(
+		(sum, placement) => sum + placement.count,
+		0,
+	);
+
+	if (totalReplicas < 1) {
+		throw new Error("At least one replica is required");
+	}
+	if (totalReplicas > 10) {
+		throw new Error("Maximum 10 replicas allowed");
+	}
+	if (specification.stateful && totalReplicas !== 1) {
+		throw new Error("Stateful services can only have exactly 1 replica");
+	}
+	if (specification.stateful && specification.placements.length !== 1) {
+		throw new Error("Stateful services must be deployed to exactly one server");
+	}
+}
 
 function compareStrings(a: string, b: string) {
 	return a.localeCompare(b, "en");
@@ -109,9 +126,8 @@ export function buildServiceRevisionSpec(
 ): ServiceRevisionSpec {
 	const { service } = draft;
 
-	return {
+	const specification: ServiceRevisionSpec = {
 		schemaVersion: SERVICE_REVISION_SCHEMA_VERSION,
-		serviceId: service.id,
 		image: service.image.trim(),
 		hostname:
 			service.hostname?.trim() || getDefaultServiceHostname(service.name),
@@ -165,6 +181,10 @@ export function buildServiceRevisionSpec(
 			.map((secret) => ({
 				key: secret.key,
 				encryptedValue: secret.encryptedValue,
+				updatedAt:
+					secret.updatedAt instanceof Date
+						? secret.updatedAt.toISOString()
+						: secret.updatedAt,
 			}))
 			.sort((a, b) => compareStrings(a.key, b.key)),
 		volumes: draft.volumes
@@ -178,8 +198,6 @@ export function buildServiceRevisionSpec(
 					compareStrings(a.containerPath, b.containerPath),
 			),
 	};
-}
-
-export function hashServiceRevisionSpec(spec: ServiceRevisionSpec): string {
-	return createHash("sha256").update(JSON.stringify(spec)).digest("hex");
+	validateServiceRevisionSpec(specification);
+	return specification;
 }

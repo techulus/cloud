@@ -1,7 +1,4 @@
-import {
-	getDefaultServiceHostname,
-	type ServiceRevisionSpec,
-} from "@/lib/service-revision-spec";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 export type ReplicaConfig = {
 	serverId: string;
@@ -32,8 +29,7 @@ export type SourceConfig = {
 
 export type SecretConfig = {
 	key: string;
-	updatedAt?: string;
-	fingerprint?: string;
+	updatedAt: string;
 };
 
 export type VolumeConfig = {
@@ -84,7 +80,6 @@ export type ConfigChange = {
 
 export function buildCurrentConfig(
 	service: {
-		name: string;
 		image: string;
 		hostname: string | null;
 		healthCheckCmd: string | null;
@@ -109,11 +104,7 @@ export function buildCurrentConfig(
 		protocol?: "http" | "tcp" | "udp" | null;
 		tlsPassthrough?: boolean | null;
 	}[],
-	secrets?: {
-		key: string;
-		updatedAt: Date | string;
-		fingerprint?: string;
-	}[],
+	secrets?: { key: string; updatedAt: Date | string }[],
 	volumes?: { name: string; containerPath: string }[],
 ): DeployedConfig {
 	const hasResourceLimits =
@@ -124,7 +115,7 @@ export function buildCurrentConfig(
 			type: "image",
 			image: service.image,
 		},
-		hostname: service.hostname ?? getDefaultServiceHostname(service.name),
+		hostname: service.hostname ?? undefined,
 		stateful: service.stateful ?? false,
 		placement: {
 			replicas: replicas.reduce((sum, r) => sum + r.count, 0),
@@ -162,7 +153,6 @@ export function buildCurrentConfig(
 			key: s.key,
 			updatedAt:
 				s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
-			fingerprint: s.fingerprint,
 		})),
 		volumes: (volumes ?? []).map((v) => ({
 			name: v.name,
@@ -493,11 +483,7 @@ export function diffConfigs(
 				from: "(none)",
 				to: key,
 			});
-		} else if (
-			deployedSecret.fingerprint && currentSecret.fingerprint
-				? deployedSecret.fingerprint !== currentSecret.fingerprint
-				: deployedSecret.updatedAt !== currentSecret.updatedAt
-		) {
+		} else if (deployedSecret.updatedAt !== currentSecret.updatedAt) {
 			changes.push({
 				field: "Secret",
 				from: key,
@@ -553,52 +539,6 @@ export function diffConfigs(
 	return changes;
 }
 
-export function revisionSpecToDeployedConfig(
-	specification: ServiceRevisionSpec,
-	serverNames: Record<string, string>,
-	secretFingerprints: Record<string, string>,
-): DeployedConfig {
-	return {
-		source: { type: "image", image: specification.image },
-		hostname: specification.hostname,
-		stateful: specification.stateful,
-		placement: {
-			replicas: specification.placements.reduce(
-				(total, placement) => total + placement.count,
-				0,
-			),
-		},
-		replicas: specification.placements.map((placement) => ({
-			serverId: placement.serverId,
-			serverName: serverNames[placement.serverId] ?? placement.serverId,
-			count: placement.count,
-		})),
-		healthCheck: specification.healthCheck,
-		startCommand: specification.startCommand,
-		resourceLimits:
-			specification.resourceLimits.cpuCores != null ||
-			specification.resourceLimits.memoryMb != null
-				? {
-						cpuCores: specification.resourceLimits.cpuCores,
-						memoryMb: specification.resourceLimits.memoryMb,
-					}
-				: undefined,
-		ports: specification.ports.map((port) => ({
-			port: port.containerPort,
-			isPublic: port.isPublic,
-			domain: port.domain,
-			protocol: port.protocol,
-			tlsPassthrough: port.tlsPassthrough,
-		})),
-		serverless: specification.serverless,
-		secrets: specification.secrets.map((secret) => ({
-			key: secret.key,
-			fingerprint: secretFingerprints[secret.key],
-		})),
-		volumes: specification.volumes,
-	};
-}
-
 export function normalizeServerlessConfig(
 	config: ServerlessConfig | undefined,
 ): ServerlessConfig {
@@ -628,5 +568,46 @@ export function getCurrentServerlessConfig(service: {
 		wakeTimeoutSeconds:
 			service.serverlessWakeTimeoutSeconds ??
 			DEFAULT_SERVERLESS_WAKE_TIMEOUT_SECONDS,
+	};
+}
+
+export function revisionSpecToDeployedConfig(
+	specification: ServiceRevisionSpec,
+	serverNames: Record<string, string>,
+): DeployedConfig {
+	return {
+		source: { type: "image", image: specification.image },
+		hostname: specification.hostname,
+		stateful: specification.stateful,
+		placement: {
+			replicas: specification.placements.reduce(
+				(sum, placement) => sum + placement.count,
+				0,
+			),
+		},
+		replicas: specification.placements.map((placement) => ({
+			serverId: placement.serverId,
+			serverName: serverNames[placement.serverId] ?? "Unknown",
+			count: placement.count,
+		})),
+		healthCheck: specification.healthCheck,
+		startCommand: specification.startCommand,
+		resourceLimits: {
+			cpuCores: specification.resourceLimits.cpuCores,
+			memoryMb: specification.resourceLimits.memoryMb,
+		},
+		ports: specification.ports.map((port) => ({
+			port: port.containerPort,
+			isPublic: port.isPublic,
+			domain: port.domain,
+			protocol: port.protocol,
+			tlsPassthrough: port.tlsPassthrough,
+		})),
+		serverless: specification.serverless,
+		secrets: specification.secrets.map((secret) => ({
+			key: secret.key,
+			updatedAt: secret.updatedAt,
+		})),
+		volumes: specification.volumes,
 	};
 }

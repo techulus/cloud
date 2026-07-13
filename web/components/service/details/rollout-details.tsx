@@ -17,8 +17,6 @@ import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 type RolloutWithDates = Omit<Rollout, "createdAt" | "completedAt"> & {
 	createdAt: string | Date;
 	completedAt: string | Date | null;
-	revisionNumber: number;
-	contentHash: string;
 };
 
 const STATUS_CONFIG: Record<
@@ -137,12 +135,6 @@ export function RolloutDetails({
 			</div>
 
 			<div className="space-y-2">
-				<div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-					<span className="text-muted-foreground">Immutable revision </span>
-					<span className="font-medium">#{rollout.revisionNumber}</span>
-					<span className="text-muted-foreground"> · </span>
-					<code title={rollout.contentHash}>{rollout.contentHash}</code>
-				</div>
 				<h3 className="text-sm font-medium">Rollout Logs</h3>
 				<LogViewer
 					variant="rollout-logs"

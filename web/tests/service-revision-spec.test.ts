@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildServiceRevisionSpec,
-	hashServiceRevisionSpec,
 	type ServiceRevisionDraft,
 } from "@/lib/service-revision-spec";
 
@@ -10,7 +9,6 @@ function draft(
 ): ServiceRevisionDraft {
 	return {
 		service: {
-			id: "service-1",
 			name: "API Service",
 			image: "nginx:latest",
 			hostname: "api.internal",
@@ -50,8 +48,16 @@ function draft(
 			},
 		],
 		secrets: [
-			{ key: "TOKEN", encryptedValue: "ciphertext-2" },
-			{ key: "API_KEY", encryptedValue: "ciphertext-1" },
+			{
+				key: "TOKEN",
+				encryptedValue: "ciphertext-2",
+				updatedAt: "2026-07-01T00:00:00.000Z",
+			},
+			{
+				key: "API_KEY",
+				encryptedValue: "ciphertext-1",
+				updatedAt: "2026-07-01T00:00:00.000Z",
+			},
 		],
 		volumes: [
 			{ name: "logs", containerPath: "/logs" },
@@ -62,7 +68,7 @@ function draft(
 }
 
 describe("service revision specification", () => {
-	it("produces the same hash regardless of draft row ordering", () => {
+	it("normalizes draft row ordering", () => {
 		const first = buildServiceRevisionSpec(draft());
 		const reorderedDraft = draft();
 		reorderedDraft.placements.reverse();
@@ -72,9 +78,6 @@ describe("service revision specification", () => {
 		const second = buildServiceRevisionSpec(reorderedDraft);
 
 		expect(second).toEqual(first);
-		expect(hashServiceRevisionSpec(second)).toBe(
-			hashServiceRevisionSpec(first),
-		);
 	});
 
 	it("normalizes defaults once", () => {
@@ -94,14 +97,11 @@ describe("service revision specification", () => {
 		});
 	});
 
-	it("changes identity when encrypted secret content changes", () => {
-		const first = buildServiceRevisionSpec(draft());
-		const changedDraft = draft();
-		changedDraft.secrets[0].encryptedValue = "new-ciphertext";
-		const changed = buildServiceRevisionSpec(changedDraft);
+	it("rejects an invalid replica layout before it can be persisted", () => {
+		const input = draft({ placements: [] });
 
-		expect(hashServiceRevisionSpec(changed)).not.toBe(
-			hashServiceRevisionSpec(first),
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"At least one replica is required",
 		);
 	});
 });

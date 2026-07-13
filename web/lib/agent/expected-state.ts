@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -46,21 +45,8 @@ export type RuntimeServiceRevision = {
 	specification: ServiceRevisionSpec;
 };
 
-export type RuntimeServiceRevisionRow = {
-	deploymentId: string;
-	serviceId: string;
-	serviceName: string;
-	serviceActiveRevisionId: string | null;
-	revisionId: string;
-	revisionServiceId: string;
-	revisionSchemaVersion: number;
-	specification: ServiceRevisionSpec;
-};
-
 export type ExpectedContainer = {
 	deploymentId: string;
-	revisionId: string;
-	containerSpecHash: string;
 	serviceId: string;
 	serviceName: string;
 	name: string;
@@ -124,7 +110,6 @@ export type ServerlessRoute = {
 };
 
 export type AgentExpectedState = {
-	schemaVersion: 1;
 	serverName: string;
 	containers: ExpectedContainer[];
 	dns: { records: Array<{ name: string; ips: string[] }> };
@@ -193,7 +178,6 @@ export async function buildAgentExpectedState(
 	);
 
 	return {
-		schemaVersion: 1,
 		serverName: server.name,
 		containers,
 		dns: { records: dnsRecords },
@@ -206,13 +190,9 @@ export async function buildAgentExpectedState(
 async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 	const rows = await db
 		.select({
-			deploymentId: deployments.id,
 			serviceId: services.id,
 			serviceName: services.name,
-			serviceActiveRevisionId: services.activeRevisionId,
 			revisionId: serviceRevisions.id,
-			revisionServiceId: serviceRevisions.serviceId,
-			revisionSchemaVersion: serviceRevisions.schemaVersion,
 			specification: serviceRevisions.specification,
 		})
 		.from(deployments)
@@ -229,78 +209,23 @@ async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 			),
 		);
 
-	const { services: runtimeServices, errors } =
-		selectRuntimeServiceRevisions(rows);
-	for (const error of errors) {
-		console.error(`[expected-state] ${error}`);
-	}
-	return runtimeServices;
-}
-
-export function selectRuntimeServiceRevisions(
-	rows: RuntimeServiceRevisionRow[],
-): { services: RuntimeServiceRevision[]; errors: string[] } {
-	const rowsByService = groupBy(rows, (row) => row.serviceId);
-	const runtimeServices: RuntimeServiceRevision[] = [];
-	const errors: string[] = [];
-
-	for (const [serviceId, serviceRows] of [...rowsByService.entries()].sort(
-		([a], [b]) => a.localeCompare(b),
-	)) {
-		const invalidOwnership = serviceRows.find(
-			(row) => row.revisionServiceId !== serviceId,
-		);
-		if (invalidOwnership) {
-			errors.push(
-				`service ${serviceId} omitted: deployment ${invalidOwnership.deploymentId} revision belongs to another service`,
-			);
-			continue;
+	const runtimeServices = new Map<string, RuntimeServiceRevision>();
+	for (const row of rows) {
+		if (row.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION) {
+			throw new Error(`Service ${row.serviceId} uses an unsupported revision`);
 		}
-
-		const unsupported = serviceRows.find(
-			(row) =>
-				row.revisionSchemaVersion !== SERVICE_REVISION_SCHEMA_VERSION ||
-				row.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION,
-		);
-		if (unsupported) {
-			errors.push(
-				`service ${serviceId} omitted: deployment ${unsupported.deploymentId} uses an unsupported service revision`,
-			);
-			continue;
+		const existing = runtimeServices.get(row.serviceId);
+		if (existing && existing.revisionId !== row.revisionId) {
+			throw new Error(`Service ${row.serviceId} has multiple active revisions`);
 		}
-
-		const rowsByRevision = new Map(
-			serviceRows.map((row) => [row.revisionId, row]),
-		);
-		let selected: RuntimeServiceRevisionRow | undefined = [
-			...rowsByRevision.values(),
-		][0];
-		if (rowsByRevision.size > 1) {
-			const activeRevisionId = serviceRows[0]?.serviceActiveRevisionId;
-			selected = activeRevisionId
-				? rowsByRevision.get(activeRevisionId)
-				: undefined;
-			if (!selected) {
-				errors.push(
-					`service ${serviceId} omitted: multiple active revisions have no authoritative active revision`,
-				);
-				continue;
-			}
-			errors.push(
-				`service ${serviceId} has multiple active revisions; using authoritative revision ${selected.revisionId}`,
-			);
-		}
-
-		if (!selected) continue;
-		runtimeServices.push({
-			id: serviceId,
-			name: selected.serviceName,
-			revisionId: selected.revisionId,
-			specification: selected.specification,
+		runtimeServices.set(row.serviceId, {
+			id: row.serviceId,
+			name: row.serviceName,
+			revisionId: row.revisionId,
+			specification: row.specification,
 		});
 	}
-
-	return { services: runtimeServices, errors };
+	return [...runtimeServices.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 async function buildExpectedContainers(
@@ -397,13 +322,7 @@ export function buildExpectedContainersFromRows({
 			if (!revision) {
 				throw new Error(`Deployment ${dep.id} has no service revision`);
 			}
-			if (revision.serviceId !== dep.serviceId) {
-				throw new Error(
-					`Deployment ${dep.id} revision belongs to another service`,
-				);
-			}
 			if (
-				revision.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION ||
 				revision.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION
 			) {
 				throw new Error(
@@ -439,39 +358,24 @@ export function buildExpectedContainersFromRows({
 					name: volume.name,
 					containerPath: volume.containerPath,
 				}));
-			const creationSpec = {
-				image: normalizeImage(specification.image),
-				ipAddress: dep.ipAddress,
-				ports,
-				publishLocalPorts: specification.serverless.enabled,
-				env,
-				startCommand: specification.startCommand,
-				healthCheck: specification.healthCheck,
-				volumes,
-				resourceCpuLimit: specification.resourceLimits.cpuCores,
-				resourceMemoryLimitMb: specification.resourceLimits.memoryMb,
-			};
-
 			return [
 				{
 					deploymentId: dep.id,
-					revisionId: revision.id,
-					containerSpecHash: hashContainerCreationSpec(creationSpec),
 					serviceId: dep.serviceId,
 					serviceName: service.name,
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
 					desiredState:
 						dep.runtimeDesiredState === "stopped" ? "stopped" : "running",
-					image: creationSpec.image,
+					image: normalizeImage(specification.image),
 					ipAddress: dep.ipAddress,
 					ports,
-					publishLocalPorts: creationSpec.publishLocalPorts,
+					publishLocalPorts: specification.serverless.enabled,
 					env,
-					startCommand: creationSpec.startCommand,
-					healthCheck: creationSpec.healthCheck,
+					startCommand: specification.startCommand,
+					healthCheck: specification.healthCheck,
 					volumes,
-					resourceCpuLimit: creationSpec.resourceCpuLimit,
-					resourceMemoryLimitMb: creationSpec.resourceMemoryLimitMb,
+					resourceCpuLimit: specification.resourceLimits.cpuCores,
+					resourceMemoryLimitMb: specification.resourceLimits.memoryMb,
 				},
 			];
 		});
@@ -880,23 +784,6 @@ function buildEnv(secretRows: ServiceRevisionSecret[]) {
 		env[secret.key] = secret.encryptedValue;
 	}
 	return env;
-}
-
-function hashContainerCreationSpec(specification: {
-	image: string;
-	ipAddress: string | null;
-	ports: ExpectedContainer["ports"];
-	publishLocalPorts: boolean;
-	env: Record<string, string>;
-	startCommand: string | null;
-	healthCheck: ServiceRevisionSpec["healthCheck"];
-	volumes: ExpectedContainer["volumes"];
-	resourceCpuLimit: number | null;
-	resourceMemoryLimitMb: number | null;
-}) {
-	return createHash("sha256")
-		.update(JSON.stringify(specification))
-		.digest("hex");
 }
 
 function upstreamUrls(deployments: RoutableDeploymentRow[], port: number) {

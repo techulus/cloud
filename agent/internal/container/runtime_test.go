@@ -1,10 +1,7 @@
 package container
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -74,32 +71,5 @@ func TestBuildPodmanRunArgsDoesNotPublishStaticIPPortsByDefault(t *testing.T) {
 
 	if slices.Contains(args, "-p") {
 		t.Fatalf("args unexpectedly publish ports: %+v", args)
-	}
-}
-
-func TestDeployPullFailureLeavesExistingContainerUntouched(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "podman.log")
-	podmanPath := filepath.Join(tempDir, "podman")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$PODMAN_TEST_LOG\"\nif [ \"$1\" = pull ]; then exit 1; fi\n"
-	if err := os.WriteFile(podmanPath, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("PODMAN_TEST_LOG", logPath)
-
-	_, err := Deploy(&DeployConfig{
-		Name:  "existing-container",
-		Image: "registry.invalid/missing:latest",
-	})
-	if err == nil {
-		t.Fatal("expected image pull to fail")
-	}
-	commands, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if got := strings.TrimSpace(string(commands)); got != "pull" {
-		t.Fatalf("podman commands = %q, want only pull before failure", got)
 	}
 }

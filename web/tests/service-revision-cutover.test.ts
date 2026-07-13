@@ -5,7 +5,6 @@ import type { ServiceRevisionDraft } from "@/lib/service-revision-spec";
 function liveDraft(): ServiceRevisionDraft {
 	return {
 		service: {
-			id: "service-1",
 			name: "API",
 			image: "current:image",
 			hostname: "current-host",
@@ -94,6 +93,10 @@ describe("service revision cutover", () => {
 		const specification = buildCutoverServiceRevisionSpec({
 			liveDraft: liveDraft(),
 			deployedConfig: {
+				source: { type: "image", image: "deployed:image" },
+				replicas: [{ serverId: "deployed-server", count: 1 }],
+				healthCheck: null,
+				ports: [],
 				secrets: [{ key: "TOKEN", updatedAt: "2026-07-01T00:00:00.000Z" }],
 			},
 		});
@@ -112,27 +115,13 @@ describe("service revision cutover", () => {
 			buildCutoverServiceRevisionSpec({
 				liveDraft: draft,
 				deployedConfig: {
+					source: { type: "image", image: "deployed:image" },
+					replicas: [{ serverId: "deployed-server", count: 1 }],
+					healthCheck: null,
+					ports: [],
 					secrets: [{ key: "TOKEN", updatedAt: "2026-07-01T00:00:00.000Z" }],
 				},
 			}),
 		).toThrow("Secret TOKEN differs from the deployed snapshot");
-	});
-
-	it("uses live configuration for a service that has never been deployed", () => {
-		const draft = liveDraft();
-		const specification = buildCutoverServiceRevisionSpec({
-			liveDraft: draft,
-			deployedConfig: null,
-		});
-
-		expect(specification).toMatchObject({
-			image: draft.service.image,
-			hostname: draft.service.hostname,
-			placements: draft.placements,
-			healthCheck: { cmd: "current-health" },
-			startCommand: "current-command",
-			ports: [{ containerPort: 8080, externalPort: 443 }],
-			volumes: draft.volumes,
-		});
 	});
 });

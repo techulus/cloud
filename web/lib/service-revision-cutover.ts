@@ -2,43 +2,9 @@ import {
 	buildServiceRevisionSpec,
 	type ServiceRevisionDraft,
 } from "./service-revision-spec";
+import type { DeployedConfig } from "./service-config";
 
-export type CutoverDeployedConfig = {
-	source?: { image?: string };
-	hostname?: string | null;
-	stateful?: boolean;
-	replicas?: Array<{ serverId: string; count: number }>;
-	healthCheck?: {
-		cmd: string;
-		interval: number;
-		timeout: number;
-		retries: number;
-		startPeriod: number;
-	} | null;
-	startCommand?: string | null;
-	resourceLimits?: {
-		cpuCores?: number | null;
-		memoryMb?: number | null;
-	};
-	ports?: Array<{
-		port: number;
-		isPublic: boolean;
-		domain: string | null;
-		protocol?: "http" | "tcp" | "udp";
-		tlsPassthrough?: boolean;
-	}>;
-	serverless?: {
-		enabled: boolean;
-		sleepAfterSeconds: number;
-		wakeTimeoutSeconds: number;
-	};
-	secrets?: Array<{
-		key: string;
-		updatedAt?: string;
-	}>;
-	secretKeys?: string[];
-	volumes?: Array<{ name: string; containerPath: string }>;
-};
+export type CutoverDeployedConfig = DeployedConfig;
 
 function assertSecretsMatchDeployedSnapshot(
 	liveSecrets: ServiceRevisionDraft["secrets"],
@@ -85,11 +51,9 @@ export function buildCutoverServiceRevisionSpec({
 	deployedConfig,
 }: {
 	liveDraft: ServiceRevisionDraft;
-	deployedConfig: CutoverDeployedConfig | null;
+	deployedConfig: CutoverDeployedConfig;
 }) {
-	if (deployedConfig) {
-		assertSecretsMatchDeployedSnapshot(liveDraft.secrets, deployedConfig);
-	}
+	assertSecretsMatchDeployedSnapshot(liveDraft.secrets, deployedConfig);
 
 	const currentPortsByIdentity = new Map(
 		liveDraft.ports.map((port) => [
@@ -97,71 +61,49 @@ export function buildCutoverServiceRevisionSpec({
 			port,
 		]),
 	);
-	const deployedPorts = Array.isArray(deployedConfig?.ports)
-		? deployedConfig.ports.map((port) => {
-				const currentPort = currentPortsByIdentity.get(
-					`${port.port}:${port.protocol ?? "http"}`,
-				);
-				return {
-					port: port.port,
-					isPublic: port.isPublic,
-					domain: port.domain,
-					protocol: port.protocol ?? null,
-					externalPort: currentPort?.externalPort ?? null,
-					tlsPassthrough: port.tlsPassthrough ?? null,
-				};
-			})
-		: null;
-	const deployedHealthCheck = deployedConfig
-		? (deployedConfig.healthCheck ?? null)
-		: undefined;
+	const deployedPorts = deployedConfig.ports.map((port) => {
+		const currentPort = currentPortsByIdentity.get(
+			`${port.port}:${port.protocol ?? "http"}`,
+		);
+		return {
+			port: port.port,
+			isPublic: port.isPublic,
+			domain: port.domain,
+			protocol: port.protocol ?? null,
+			externalPort: currentPort?.externalPort ?? null,
+			tlsPassthrough: port.tlsPassthrough ?? null,
+		};
+	});
+	const deployedHealthCheck = deployedConfig.healthCheck ?? null;
 
 	return buildServiceRevisionSpec({
 		service: {
 			...liveDraft.service,
-			image: deployedConfig?.source?.image ?? liveDraft.service.image,
-			hostname: deployedConfig?.hostname ?? liveDraft.service.hostname,
-			stateful: deployedConfig?.stateful ?? liveDraft.service.stateful,
+			image: deployedConfig.source.image,
+			hostname: deployedConfig.hostname ?? liveDraft.service.hostname,
+			stateful: deployedConfig.stateful ?? liveDraft.service.stateful,
 			serverlessEnabled:
-				deployedConfig?.serverless?.enabled ??
+				deployedConfig.serverless?.enabled ??
 				liveDraft.service.serverlessEnabled,
 			serverlessSleepAfterSeconds:
-				deployedConfig?.serverless?.sleepAfterSeconds ??
+				deployedConfig.serverless?.sleepAfterSeconds ??
 				liveDraft.service.serverlessSleepAfterSeconds,
 			serverlessWakeTimeoutSeconds:
-				deployedConfig?.serverless?.wakeTimeoutSeconds ??
+				deployedConfig.serverless?.wakeTimeoutSeconds ??
 				liveDraft.service.serverlessWakeTimeoutSeconds,
-			healthCheckCmd: deployedConfig
-				? (deployedHealthCheck?.cmd ?? null)
-				: liveDraft.service.healthCheckCmd,
-			healthCheckInterval: deployedConfig
-				? (deployedHealthCheck?.interval ?? null)
-				: liveDraft.service.healthCheckInterval,
-			healthCheckTimeout: deployedConfig
-				? (deployedHealthCheck?.timeout ?? null)
-				: liveDraft.service.healthCheckTimeout,
-			healthCheckRetries: deployedConfig
-				? (deployedHealthCheck?.retries ?? null)
-				: liveDraft.service.healthCheckRetries,
-			healthCheckStartPeriod: deployedConfig
-				? (deployedHealthCheck?.startPeriod ?? null)
-				: liveDraft.service.healthCheckStartPeriod,
-			startCommand: deployedConfig
-				? (deployedConfig.startCommand ?? null)
-				: liveDraft.service.startCommand,
-			resourceCpuLimit: deployedConfig
-				? (deployedConfig.resourceLimits?.cpuCores ?? null)
-				: liveDraft.service.resourceCpuLimit,
-			resourceMemoryLimitMb: deployedConfig
-				? (deployedConfig.resourceLimits?.memoryMb ?? null)
-				: liveDraft.service.resourceMemoryLimitMb,
+			healthCheckCmd: deployedHealthCheck?.cmd ?? null,
+			healthCheckInterval: deployedHealthCheck?.interval ?? null,
+			healthCheckTimeout: deployedHealthCheck?.timeout ?? null,
+			healthCheckRetries: deployedHealthCheck?.retries ?? null,
+			healthCheckStartPeriod: deployedHealthCheck?.startPeriod ?? null,
+			startCommand: deployedConfig.startCommand ?? null,
+			resourceCpuLimit: deployedConfig.resourceLimits?.cpuCores ?? null,
+			resourceMemoryLimitMb: deployedConfig.resourceLimits?.memoryMb ?? null,
 		},
-		placements: Array.isArray(deployedConfig?.replicas)
-			? deployedConfig.replicas
-			: liveDraft.placements,
-		ports: deployedPorts ?? liveDraft.ports,
+		placements: deployedConfig.replicas,
+		ports: deployedPorts,
 		secrets: liveDraft.secrets,
-		volumes: Array.isArray(deployedConfig?.volumes)
+		volumes: Array.isArray(deployedConfig.volumes)
 			? deployedConfig.volumes
 			: liveDraft.volumes,
 	});

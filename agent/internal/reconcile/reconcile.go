@@ -69,8 +69,6 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		ServiceID:         exp.ServiceID,
 		ServiceName:       exp.ServiceName,
 		DeploymentID:      exp.DeploymentID,
-		RevisionID:        exp.RevisionID,
-		ContainerSpecHash: exp.ContainerSpecHash,
 		IPAddress:         exp.IPAddress,
 		PortMappings:      portMappings,
 		PublishLocalPorts: exp.PublishLocalPorts,

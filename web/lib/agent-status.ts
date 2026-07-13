@@ -159,7 +159,6 @@ async function applyDeploymentErrors(
 			})
 			.from(deployments)
 			.innerJoin(servers, eq(deployments.serverId, servers.id))
-			.innerJoin(services, eq(deployments.serviceId, services.id))
 			.innerJoin(
 				serviceRevisions,
 				eq(deployments.serviceRevisionId, serviceRevisions.id),
@@ -288,7 +287,6 @@ async function applyServerlessTransitions(
 				serverName: servers.name,
 			})
 			.from(deployments)
-			.innerJoin(services, eq(deployments.serviceId, services.id))
 			.innerJoin(
 				serviceRevisions,
 				eq(deployments.serviceRevisionId, serviceRevisions.id),

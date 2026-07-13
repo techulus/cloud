@@ -155,8 +155,6 @@ func buildPodmanRunArgs(config *DeployConfig, image string) []string {
 		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
-		"--label", fmt.Sprintf("techulus.service.revision=%s", config.RevisionID),
-		"--label", fmt.Sprintf("techulus.container.spec-hash=%s", config.ContainerSpecHash),
 	)
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
@@ -516,8 +514,6 @@ func List() ([]Container, error) {
 			Labels:       pc.Labels,
 			DeploymentID: pc.Labels["techulus.deployment.id"],
 			ServiceID:    pc.Labels["techulus.service.id"],
-			RevisionID:   pc.Labels["techulus.service.revision"],
-			SpecHash:     pc.Labels["techulus.container.spec-hash"],
 		}
 	}
 

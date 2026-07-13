@@ -5,8 +5,8 @@ import { deleteBackup } from "@/actions/backups";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
+	deploymentPorts,
 	deployments,
-	rollouts,
 	secrets,
 	services,
 	serviceVolumes,
@@ -14,10 +14,7 @@ import {
 } from "@/db/schema";
 import { addUtcDays, toDate } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import {
-	markDeploymentFailedRemoved,
-	markDeploymentRemoved,
-} from "@/lib/deployment-status";
+import { markDeploymentRemoved } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -244,6 +241,10 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 							containerId: deployment.containerId,
 						});
 					}
+
+					await db
+						.delete(deploymentPorts)
+						.where(eq(deploymentPorts.deploymentId, deployment.id));
 				}
 
 				await db
@@ -420,9 +421,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						.where(eq(services.id, serviceId));
 
 					try {
-						const result = await deployServiceInternal(serviceId, {
-							trigger: "restore",
-						});
+						const result = await deployServiceInternal(serviceId);
 						if (!("rolloutId" in result) || !result.rolloutId) {
 							throw new Error("Restore could not start a deployment");
 						}
@@ -484,33 +483,19 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			if (!healthyDeployment || failedDeployment) {
 				await step.run("mark-restore-deployment-failed", async () => {
-					await db.transaction(async (tx) => {
-						await tx
-							.update(deployments)
-							.set(markDeploymentFailedRemoved("restore_failed"))
-							.where(eq(deployments.rolloutId, deployResult.rolloutId));
-						await tx
-							.update(rollouts)
-							.set({
-								status: "failed",
-								currentStage: "restore_failed",
-								completedAt: new Date(),
-							})
-							.where(eq(rollouts.id, deployResult.rolloutId));
-						await tx
-							.update(services)
-							.set({
-								deletedAt: toDate(setup.service.deletedAt),
-								purgeAfter: toDate(setup.service.purgeAfter),
-								hostname: null,
-								originalHostname: setup.service.originalHostname,
-								deletionStatus: "failed",
-								deletionError:
-									failedDeployment?.failedStage ||
-									"Restore deployment did not become healthy",
-							})
-							.where(eq(services.id, serviceId));
-					});
+					await db
+						.update(services)
+						.set({
+							deletedAt: toDate(setup.service.deletedAt),
+							purgeAfter: toDate(setup.service.purgeAfter),
+							hostname: null,
+							originalHostname: setup.service.originalHostname,
+							deletionStatus: "failed",
+							deletionError:
+								failedDeployment?.failedStage ||
+								"Restore deployment did not become healthy",
+						})
+						.where(eq(services.id, serviceId));
 				});
 				return { status: "failed", reason: "deployment" };
 			}

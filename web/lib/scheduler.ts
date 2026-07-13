@@ -216,7 +216,7 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 			if (service.sourceType === "github") {
 				await triggerBuild(service.id, "scheduled");
 			} else {
-				await deployServiceInternal(service.id, { trigger: "scheduled" });
+				await deployServiceInternal(service.id);
 			}
 
 			console.log(

@@ -64,10 +64,6 @@ type Agent struct {
 	pendingDeploymentErrors      []agenthttp.DeploymentError
 	deployLockMutex              sync.Mutex
 	deploymentDeployLocks        map[string]*sync.Mutex
-	reconcileFailureMutex        sync.Mutex
-	reconcileFailures            map[string]reconcileActionFailure
-	legacyCutoverHealthWait      string
-	legacyCutoverHealthWaitSince time.Time
 	serverlessMutex              sync.Mutex
 	pendingServerlessTransitions []agenthttp.ServerlessTransition
 	pendingServerlessSleep       map[string]serverlessTransitionGuard
@@ -124,7 +120,6 @@ func NewAgent(
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,
 		deploymentDeployLocks:  map[string]*sync.Mutex{},
-		reconcileFailures:      map[string]reconcileActionFailure{},
 		pendingServerlessSleep: map[string]serverlessTransitionGuard{},
 		pendingServerlessWake:  map[string]serverlessTransitionGuard{},
 	}

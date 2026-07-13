@@ -6,7 +6,6 @@ import {
 	MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
 	revisionSpecToDeployedConfig,
 } from "@/lib/service-config";
-import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function deployedConfig(
 	overrides: Partial<DeployedConfig> = {},
@@ -27,7 +26,7 @@ function deployedConfig(
 }
 
 describe("service config", () => {
-	it("enforces the minimum serverless sleep timeout for draft config", () => {
+	it("enforces the minimum serverless sleep timeout", () => {
 		expect(
 			getCurrentServerlessConfig({
 				serverlessEnabled: true,
@@ -39,39 +38,32 @@ describe("service config", () => {
 		});
 	});
 
-	it("converts an immutable revision into the pending-change baseline", () => {
-		const specification: ServiceRevisionSpec = {
-			schemaVersion: 1,
-			serviceId: "service-1",
-			image: "nginx",
-			hostname: "api",
-			stateful: true,
-			serverless: {
-				enabled: true,
-				sleepAfterSeconds: 300,
-				wakeTimeoutSeconds: 120,
+	it("converts an immutable revision for pending-change comparisons", () => {
+		const config = revisionSpecToDeployedConfig(
+			{
+				schemaVersion: 1,
+				image: "nginx",
+				hostname: "api",
+				stateful: false,
+				serverless: {
+					enabled: false,
+					sleepAfterSeconds: 300,
+					wakeTimeoutSeconds: 300,
+				},
+				healthCheck: null,
+				startCommand: null,
+				resourceLimits: { cpuCores: null, memoryMb: null },
+				placements: [{ serverId: "server-1", count: 1 }],
+				ports: [],
+				secrets: [],
+				volumes: [],
 			},
-			healthCheck: null,
-			startCommand: null,
-			resourceLimits: { cpuCores: null, memoryMb: null },
-			placements: [{ serverId: "server-1", count: 1 }],
-			ports: [],
-			secrets: [{ key: "TOKEN", encryptedValue: "ciphertext" }],
-			volumes: [],
-		};
+			{ "server-1": "Sydney" },
+		);
 
-		expect(
-			revisionSpecToDeployedConfig(
-				specification,
-				{ "server-1": "Sydney" },
-				{ TOKEN: "fingerprint" },
-			),
-		).toMatchObject({
-			stateful: true,
-			serverless: { enabled: true },
-			replicas: [{ serverId: "server-1", serverName: "Sydney", count: 1 }],
-			secrets: [{ key: "TOKEN", fingerprint: "fingerprint" }],
-		});
+		expect(config.replicas).toEqual([
+			{ serverId: "server-1", serverName: "Sydney", count: 1 },
+		]);
 	});
 
 	it("reports serverless changes as pending config", () => {

@@ -1,6 +1,5 @@
 export const dynamic = "force-dynamic";
 
-import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
@@ -21,10 +20,6 @@ import {
 import { auth } from "@/lib/auth";
 import { getTimestamp } from "@/lib/date";
 import { revisionSpecToDeployedConfig } from "@/lib/service-config";
-
-function secretFingerprint(encryptedValue: string) {
-	return createHash("sha256").update(encryptedValue).digest("hex");
-}
 
 export async function GET(
 	request: Request,
@@ -67,7 +62,6 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
-				activeRevision,
 			] = await Promise.all([
 				db
 					.select()
@@ -91,11 +85,7 @@ export async function GET(
 					.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 					.where(eq(serviceReplicas.serviceId, service.id)),
 				db
-					.select({
-						key: secrets.key,
-						updatedAt: secrets.updatedAt,
-						encryptedValue: secrets.encryptedValue,
-					})
+					.select({ key: secrets.key, updatedAt: secrets.updatedAt })
 					.from(secrets)
 					.where(eq(secrets.serviceId, service.id)),
 				db
@@ -124,40 +114,39 @@ export async function GET(
 							.limit(1)
 							.then((r) => r[0] || null)
 					: Promise.resolve(null),
-				service.activeRevisionId
-					? db
-							.select({ specification: serviceRevisions.specification })
-							.from(serviceRevisions)
-							.where(eq(serviceRevisions.id, service.activeRevisionId))
-							.then((rows) => rows[0] ?? null)
-					: Promise.resolve(null),
 			]);
 
-			const revisionServerIds =
-				activeRevision?.specification.placements.map(
-					(placement) => placement.serverId,
-				) ?? [];
-			const revisionServers =
-				revisionServerIds.length > 0
-					? await db
-							.select({ id: servers.id, name: servers.name })
-							.from(servers)
-							.where(inArray(servers.id, revisionServerIds))
-					: [];
-			const serverNames = Object.fromEntries(
-				revisionServers.map((server) => [server.id, server.name]),
+			const activeDeployment = serviceDeployments.find(
+				(deployment) =>
+					deployment.trafficState === "active" &&
+					deployment.runtimeDesiredState !== "removed",
 			);
-			const secretFingerprints = Object.fromEntries(
-				activeRevision?.specification.secrets.map((secret) => [
-					secret.key,
-					secretFingerprint(secret.encryptedValue),
-				]) ?? [],
-			);
+			const activeRevision = activeDeployment
+				? await db
+						.select({ specification: serviceRevisions.specification })
+						.from(serviceRevisions)
+						.where(eq(serviceRevisions.id, activeDeployment.serviceRevisionId))
+						.then((rows) => rows[0])
+				: null;
+			const revisionServers = activeRevision
+				? await db
+						.select({ id: servers.id, name: servers.name })
+						.from(servers)
+						.where(
+							inArray(
+								servers.id,
+								activeRevision.specification.placements.map(
+									(placement) => placement.serverId,
+								),
+							),
+						)
+				: [];
 			const activeConfig = activeRevision
 				? revisionSpecToDeployedConfig(
 						activeRevision.specification,
-						serverNames,
-						secretFingerprints,
+						Object.fromEntries(
+							revisionServers.map((server) => [server.id, server.name]),
+						),
 					)
 				: null;
 
@@ -243,16 +232,12 @@ export async function GET(
 				ports,
 				configuredReplicas: replicas,
 				deployments: deploymentsWithDetails,
-				secrets: serviceSecrets.map((secret) => ({
-					key: secret.key,
-					updatedAt: secret.updatedAt,
-					fingerprint: secretFingerprint(secret.encryptedValue),
-				})),
-				activeConfig,
+				secrets: serviceSecrets,
 				rollouts: serviceRollouts,
 				volumes,
 				lockedServer,
 				latestBuild,
+				activeConfig,
 				deletionBackupFallback,
 			};
 		}),

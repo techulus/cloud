@@ -2,7 +2,6 @@
 
 import {
 	Activity,
-	AlertTriangle,
 	Container,
 	Cpu,
 	HardDrive,
@@ -12,7 +11,6 @@ import {
 import useSWR from "swr";
 import { HealthIndicator } from "@/components/cluster/health-indicator";
 import { ResourceBar } from "@/components/cluster/resource-bar";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { HealthStats, Server } from "@/db/types";
@@ -23,7 +21,6 @@ type ServerHealthData = {
 	networkHealth: Server["networkHealth"];
 	containerHealth: Server["containerHealth"];
 	agentHealth: Server["agentHealth"];
-	agentCompatibilityStatus: "compatible" | "upgrade_required" | null;
 };
 
 type ClusterHealthResponse = {
@@ -59,10 +56,6 @@ export function ServerHealthDetails({
 	const containerHealth =
 		serverData?.containerHealth ?? initialData.containerHealth;
 	const agentHealth = serverData?.agentHealth ?? initialData.agentHealth;
-	const agentCompatibilityStatus =
-		serverData?.agentCompatibilityStatus ??
-		initialData.agentCompatibilityStatus;
-	const reconciliationFailures = agentHealth?.reconciliationFailures ?? [];
 
 	if (!healthStats && !networkHealth && !containerHealth && !agentHealth) {
 		return null;
@@ -74,30 +67,6 @@ export function ServerHealthDetails({
 				<CardTitle>System Health</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-4">
-				{agentCompatibilityStatus === "upgrade_required" && (
-					<Alert variant="destructive">
-						<AlertTriangle />
-						<AlertTitle>Agent upgrade required</AlertTitle>
-						<AlertDescription>
-							This agent is incompatible with the current deployment protocol.
-							It will keep its cached state but cannot receive updates until it
-							is upgraded.
-						</AlertDescription>
-					</Alert>
-				)}
-				{reconciliationFailures.length > 0 && (
-					<Alert className="border-amber-500/50 bg-amber-500/5 text-amber-700 dark:text-amber-400">
-						<AlertTriangle />
-						<AlertTitle>Reconciliation delayed</AlertTitle>
-						<AlertDescription>
-							{reconciliationFailures.length} action
-							{reconciliationFailures.length === 1 ? " is" : "s are"} being
-							retried without blocking other server updates. Latest:{" "}
-							{reconciliationFailures[0]?.description} (
-							{reconciliationFailures[0]?.lastError}).
-						</AlertDescription>
-					</Alert>
-				)}
 				{healthStats && (
 					<div className="grid gap-4 sm:grid-cols-3">
 						<ResourceBar
@@ -135,16 +104,9 @@ export function ServerHealthDetails({
 								icon={<Container className="size-4" />}
 							/>
 							<HealthIndicator
-								healthy={
-									!!agentHealth &&
-									agentCompatibilityStatus !== "upgrade_required"
-								}
+								healthy={!!agentHealth}
 								label="Agent"
-								detail={
-									agentCompatibilityStatus === "upgrade_required"
-										? "Upgrade required"
-										: (agentHealth?.version ?? "Unknown")
-								}
+								detail={agentHealth?.version ?? "Unknown"}
 								icon={<Activity className="size-4" />}
 							/>
 						</div>

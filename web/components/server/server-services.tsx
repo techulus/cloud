@@ -1,5 +1,5 @@
-import { ArrowUpRight, Layers } from "lucide-react";
 import Link from "next/link";
+import { ArrowUpRight, Layers } from "lucide-react";
 import {
 	Card,
 	CardContent,
@@ -47,14 +47,8 @@ export async function ServerServices({ serverId }: { serverId: string }) {
 										href={`/dashboard/projects/${service.projectSlug}/${service.environmentName}/services/${service.serviceId}`}
 										className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-muted"
 									>
-										<span className="min-w-0">
-											<span className="block truncate font-medium">
-												{service.serviceName}
-											</span>
-											<span className="block font-mono text-muted-foreground text-xs">
-												revision {service.revisionNumber} ·{" "}
-												{service.revisionContentHash.slice(0, 12)}
-											</span>
+										<span className="min-w-0 truncate font-medium">
+											{service.serviceName}
 										</span>
 										<ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
 									</Link>

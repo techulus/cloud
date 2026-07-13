@@ -182,7 +182,6 @@ export default async function ServerDetailPage({
 						networkHealth: server.networkHealth,
 						containerHealth: server.containerHealth,
 						agentHealth: server.agentHealth,
-						agentCompatibilityStatus: server.agentCompatibilityStatus,
 					}}
 				/>
 

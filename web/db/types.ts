@@ -13,7 +13,6 @@ import type {
 	servers,
 	servicePorts,
 	serviceReplicas,
-	serviceRevisions,
 	services,
 	serviceVolumes,
 	user,
@@ -28,7 +27,6 @@ export type Service = typeof services.$inferSelect;
 export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;
 export type ServiceReplica = typeof serviceReplicas.$inferSelect;
-export type ServiceRevision = typeof serviceRevisions.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
@@ -57,6 +55,7 @@ export type HealthStats = {
 };
 
 export type ServiceWithDetails = Service & {
+	activeConfig?: DeployedConfig | null;
 	ports: ServicePort[];
 	configuredReplicas: Array<
 		ServiceReplica & { serverName: string; serverIsProxy: boolean }
@@ -70,13 +69,7 @@ export type ServiceWithDetails = Service & {
 		}
 	>;
 	volumes?: ServiceVolume[];
-	secrets?: Array<
-		Pick<Secret, "key"> & {
-			updatedAt: Date | string;
-			fingerprint: string;
-		}
-	>;
-	activeConfig?: DeployedConfig | null;
+	secrets?: Array<Pick<Secret, "key"> & { updatedAt: Date | string }>;
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;

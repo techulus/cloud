@@ -41,10 +41,12 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 				if actual.DeploymentID != expected.DeploymentID {
 					continue
 				}
-				if !runningContainerMatchesExpectedRevision(actual, expected) {
+				if normalizeImage(actual.Image) != normalizeImage(expected.Image) {
 					log.Printf(
-						"[serverless] recreate deployment %s because revision/spec changed",
+						"[serverless] recreate deployment %s because image changed (%s -> %s)",
 						Truncate(expected.DeploymentID, 8),
+						actual.Image,
+						expected.Image,
 					)
 					return a.Reconciler.Deploy(expected)
 				}
@@ -79,22 +81,13 @@ func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) er
 				if actual.DeploymentID != expected.DeploymentID || actual.State != "running" {
 					continue
 				}
-				if runningContainerMatchesExpectedRevision(actual, expected) {
+				if normalizeImage(actual.Image) == normalizeImage(expected.Image) {
 					return nil
 				}
 			}
 		}
 		return a.Reconciler.Deploy(expected)
 	})
-}
-
-func runningContainerMatchesExpectedRevision(
-	actual container.Container,
-	expected agenthttp.ExpectedContainer,
-) bool {
-	return actual.SpecHash != "" &&
-		actual.SpecHash == expected.ContainerSpecHash &&
-		actual.RevisionID == expected.RevisionID
 }
 
 func (a *Agent) withDeploymentDeployLock(deploymentID string, fn func() error) error {

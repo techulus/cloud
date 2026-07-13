@@ -72,7 +72,6 @@ services:
       - CONTROL_PLANE_UPDATER_URL=http://control-plane-updater:8080
       - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
-      - EXPECTED_STATE_MAINTENANCE_MODE=${EXPECTED_STATE_MAINTENANCE_MODE:-false}
     command: ["sh", "-c", "npx tsx scripts/cutover-service-revisions.ts && npx drizzle-kit push --force"]
     restart: on-failure
 
@@ -98,7 +97,6 @@ services:
       - CONTROL_PLANE_UPDATER_URL=http://control-plane-updater:8080
       - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
-      - EXPECTED_STATE_MAINTENANCE_MODE=${EXPECTED_STATE_MAINTENANCE_MODE:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully
