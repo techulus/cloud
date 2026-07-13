@@ -316,7 +316,7 @@ export function ServiceMetricsPanel({
 							margin={{
 								top: 8,
 								right: 4,
-								left: getYAxisMargin(chartMode),
+								left: fixedMode ? 0 : getYAxisMargin(chartMode),
 								bottom: 0,
 							}}
 						>
