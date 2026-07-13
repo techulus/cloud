@@ -1161,9 +1161,6 @@ export async function updateServiceConfig(
 	if (config.ports) {
 		if (config.ports.remove && config.ports.remove.length > 0) {
 			for (const portId of config.ports.remove) {
-				await db
-					.delete(deploymentPorts)
-					.where(eq(deploymentPorts.servicePortId, portId));
 				await db.delete(servicePorts).where(eq(servicePorts.id, portId));
 			}
 		}

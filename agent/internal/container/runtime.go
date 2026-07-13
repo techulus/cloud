@@ -71,8 +71,6 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	image := config.Image
 
-	exec.Command("podman", "rm", "-f", config.Name).Run()
-
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
 	pullCmd := exec.Command("podman", "pull", "--tls-verify=false", image)
@@ -92,6 +90,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	}
 
 	args := buildPodmanRunArgs(config, image)
+	exec.Command("podman", "rm", "-f", config.Name).Run()
 
 	logFunc("stdout", fmt.Sprintf("Starting container: %s", config.Name))
 

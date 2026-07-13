@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -9,8 +10,10 @@ import {
 	real,
 	text,
 	timestamp,
+	unique,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 export const user = pgTable("user", {
 	id: text("id").primaryKey(),
@@ -417,7 +420,6 @@ export const services = pgTable("services", {
 	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
 		.notNull()
 		.default(300),
-	deployedConfig: text("deployed_config"),
 	deploymentSchedule: text("deployment_schedule"),
 	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
 		withTimezone: true,
@@ -547,6 +549,29 @@ export const secrets = pgTable("secrets", {
 		.notNull(),
 });
 
+export const serviceRevisions = pgTable(
+	"service_revisions",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		specification: jsonb("specification")
+			.$type<ServiceRevisionSpec>()
+			.notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		unique("service_revisions_id_service_id_unique").on(
+			table.id,
+			table.serviceId,
+		),
+		index("service_revisions_service_id_idx").on(table.serviceId),
+	],
+);
+
 export const deployments = pgTable(
 	"deployments",
 	{
@@ -554,6 +579,7 @@ export const deployments = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
+		serviceRevisionId: text("service_revision_id").notNull(),
 		serverId: text("server_id")
 			.notNull()
 			.references(() => servers.id, { onDelete: "cascade" }),
@@ -611,12 +637,18 @@ export const deployments = pgTable(
 		index("deployments_container_id_idx").on(table.containerId),
 		index("deployments_rollout_id_idx").on(table.rolloutId),
 		index("deployments_service_id_idx").on(table.serviceId),
+		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
 		index("deployments_runtime_desired_state_idx").on(
 			table.runtimeDesiredState,
 		),
 		index("deployments_traffic_state_idx").on(table.trafficState),
 		index("deployments_observed_phase_idx").on(table.observedPhase),
+		foreignKey({
+			name: "deployments_service_revision_service_fk",
+			columns: [table.serviceRevisionId, table.serviceId],
+			foreignColumns: [serviceRevisions.id, serviceRevisions.serviceId],
+		}).onDelete("no action"),
 	],
 );
 
@@ -627,6 +659,7 @@ export const rollouts = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
+		serviceRevisionId: text("service_revision_id"),
 		status: text("status", {
 			enum: ["queued", "in_progress", "completed", "failed", "rolled_back"],
 		})
@@ -638,7 +671,15 @@ export const rollouts = pgTable(
 			.notNull(),
 		completedAt: timestamp("completed_at", { withTimezone: true }),
 	},
-	(table) => [index("rollouts_service_id_idx").on(table.serviceId)],
+	(table) => [
+		index("rollouts_service_id_idx").on(table.serviceId),
+		index("rollouts_service_revision_id_idx").on(table.serviceRevisionId),
+		foreignKey({
+			name: "rollouts_service_revision_service_fk",
+			columns: [table.serviceRevisionId, table.serviceId],
+			foreignColumns: [serviceRevisions.id, serviceRevisions.serviceId],
+		}).onDelete("no action"),
+	],
 );
 
 export const deploymentPorts = pgTable("deployment_ports", {
@@ -646,9 +687,7 @@ export const deploymentPorts = pgTable("deployment_ports", {
 	deploymentId: text("deployment_id")
 		.notNull()
 		.references(() => deployments.id, { onDelete: "cascade" }),
-	servicePortId: text("service_port_id")
-		.notNull()
-		.references(() => servicePorts.id, { onDelete: "cascade" }),
+	containerPort: integer("container_port").notNull(),
 	hostPort: integer("host_port").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true })
 		.defaultNow()
