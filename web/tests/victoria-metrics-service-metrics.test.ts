@@ -54,6 +54,7 @@ describe("VictoriaMetrics service metrics", () => {
 
 		const queries: string[] = [];
 		const starts: string[] = [];
+		const instantTimes: string[] = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request) => {
 			const url = new URL(String(input));
 			const query = url.searchParams.get("query") || "";
@@ -65,7 +66,7 @@ describe("VictoriaMetrics service metrics", () => {
 			expect(["/api/v1/query", "/api/v1/query_range"]).toContain(url.pathname);
 
 			if (url.pathname === "/api/v1/query") {
-				expect(url.searchParams.get("time")).toBe(String(END_TS));
+				instantTimes.push(url.searchParams.get("time") || "");
 				if (query.includes("traefik_service_requests_bytes_total")) {
 					return instantJsonResponse("460");
 				}
@@ -126,6 +127,7 @@ describe("VictoriaMetrics service metrics", () => {
 		});
 
 		expect(fetchMock).toHaveBeenCalledTimes(12);
+		expect(instantTimes).toEqual([String(END_TS), String(END_TS)]);
 		expect(queries.some((query) => query.includes("LogSQL"))).toBe(false);
 		expect(queries).toContain(
 			`sum by (code) (increase(traefik_service_requests_total{service=~"^${SERVICE_ID}(@file)?$"}[5m]))`,
