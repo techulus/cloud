@@ -93,13 +93,18 @@ Schema is synced automatically by the one-shot `migrate` service via `drizzle-ki
 ### Immutable service revision cutover
 
 Before deploying this release, stop rollout producers, verify no rollout is
-queued or in progress, and take a PostgreSQL backup. The migrate service creates
-one baseline revision for each existing deployment before applying the new
-schema. Existing containers keep running unchanged; subsequent deployments use
-immutable revision snapshots. Stale non-active deployment records are removed
-before the baseline is captured. The cutover aborts if an active deployment
-cannot be reconstructed safely from its stored deployed configuration; that
-legacy column is dropped after the backfill succeeds.
+queued or in progress, and take a PostgreSQL backup. Then run this once against
+the database:
+
+```sql
+DELETE FROM deployments;
+```
+
+Port allocations are removed by cascade. The schema sync can then add the
+required revision reference without migrating legacy deployment state. After
+the new version starts, redeploy previously active services from their current
+configuration. Agents remove the orphaned containers; service volumes and
+backups are not deleted.
 
 **Future plan:** Once the schema stabilizes, switch to `drizzle-kit generate` + `drizzle-orm migrate()` with pre-generated SQL migration files. This will eliminate the esbuild/drizzle-kit dependency from the production image.
 

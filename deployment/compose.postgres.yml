@@ -93,7 +93,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "npx tsx scripts/cutover-service-revisions.ts && npx drizzle-kit push --force"]
+    command: ["npx", "drizzle-kit", "push", "--force"]
     restart: on-failure
 
   web:
