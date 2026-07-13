@@ -11,14 +11,19 @@ export type DeploymentState = {
 	observedPhase: ObservedPhase;
 };
 
-export const runtimeExpectedStates = ["running", "stopped"] as const satisfies
-	readonly RuntimeDesiredState[];
+export const runtimeExpectedStates = [
+	"running",
+	"stopped",
+] as const satisfies readonly RuntimeDesiredState[];
 
-export const activeTrafficStates = ["active"] as const satisfies
-	readonly TrafficState[];
+export const activeTrafficStates = [
+	"active",
+] as const satisfies readonly TrafficState[];
 
-export const observedReadyPhases = ["healthy", "running"] as const satisfies
-	readonly ObservedPhase[];
+export const observedReadyPhases = [
+	"healthy",
+	"running",
+] as const satisfies readonly ObservedPhase[];
 
 export const observedStartingPhases = [
 	"pending",
@@ -86,4 +91,28 @@ export function markDeploymentFailedRemoved(failedStage: string) {
 		healthStatus: null,
 		failedStage,
 	};
+}
+
+export function selectNewestRevisionId(
+	revisions: Array<{ serviceRevisionId: string; revisionNumber: number }>,
+): string | null {
+	const revisionNumbers = new Map<string, number>();
+	for (const revision of revisions) {
+		revisionNumbers.set(
+			revision.serviceRevisionId,
+			Math.max(
+				revisionNumbers.get(revision.serviceRevisionId) ?? 0,
+				revision.revisionNumber,
+			),
+		);
+	}
+
+	return (
+		[...revisionNumbers]
+			.sort(
+				([firstId, firstNumber], [secondId, secondNumber]) =>
+					secondNumber - firstNumber || secondId.localeCompare(firstId),
+			)
+			.at(0)?.[0] ?? null
+	);
 }

@@ -115,59 +115,61 @@ export const migrationWorkflow = inngest.createFunction(
 
 		const backupResults = await Promise.all(
 			backupIds.map((backupId) =>
-				group.parallel(async (): Promise<{
-					status: "completed" | "failed" | "pending" | "timed_out";
-					error?: string;
-				}> => {
-					const readBackup = async () =>
-						db
-							.select({
-								status: volumeBackups.status,
-								errorMessage: volumeBackups.errorMessage,
-							})
-							.from(volumeBackups)
-							.where(eq(volumeBackups.id, backupId))
-							.then((r) => r[0]);
+				group.parallel(
+					async (): Promise<{
+						status: "completed" | "failed" | "pending" | "timed_out";
+						error?: string;
+					}> => {
+						const readBackup = async () =>
+							db
+								.select({
+									status: volumeBackups.status,
+									errorMessage: volumeBackups.errorMessage,
+								})
+								.from(volumeBackups)
+								.where(eq(volumeBackups.id, backupId))
+								.then((r) => r[0]);
 
-					const before = await step.run(
-						`check-backup-${backupId}-before`,
-						readBackup,
-					);
-					if (before?.status === "completed") {
-						return { status: "completed" as const };
-					}
-					if (before?.status === "failed") {
-						return {
-							status: "failed" as const,
-							error: before.errorMessage || "Backup failed",
-						};
-					}
+						const before = await step.run(
+							`check-backup-${backupId}-before`,
+							readBackup,
+						);
+						if (before?.status === "completed") {
+							return { status: "completed" as const };
+						}
+						if (before?.status === "failed") {
+							return {
+								status: "failed" as const,
+								error: before.errorMessage || "Backup failed",
+							};
+						}
 
-					const wakeup = await step.waitForEvent(
-						`wait-backup-status-${backupId}`,
-						{
-							event: inngestEvents.resourceStatusChanged,
-							timeout: "30m",
-							if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
-						},
-					);
+						const wakeup = await step.waitForEvent(
+							`wait-backup-status-${backupId}`,
+							{
+								event: inngestEvents.resourceStatusChanged,
+								timeout: "30m",
+								if: `async.data.type == "backup" && async.data.id == "${backupId}"`,
+							},
+						);
 
-					const after = await step.run(
-						`check-backup-${backupId}-after`,
-						readBackup,
-					);
-					if (after?.status === "completed") {
-						return { status: "completed" as const };
-					}
-					if (after?.status === "failed") {
-						return {
-							status: "failed" as const,
-							error: after.errorMessage || "Backup failed",
-						};
-					}
+						const after = await step.run(
+							`check-backup-${backupId}-after`,
+							readBackup,
+						);
+						if (after?.status === "completed") {
+							return { status: "completed" as const };
+						}
+						if (after?.status === "failed") {
+							return {
+								status: "failed" as const,
+								error: after.errorMessage || "Backup failed",
+							};
+						}
 
-					return { status: wakeup ? "pending" : "timed_out" } as const;
-				}),
+						return { status: wakeup ? "pending" : "timed_out" } as const;
+					},
+				),
 			),
 		);
 
@@ -185,7 +187,9 @@ export const migrationWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "backup_timeout" };
 		}
 
-		const backupStillPending = backupResults.some((r) => r.status === "pending");
+		const backupStillPending = backupResults.some(
+			(r) => r.status === "pending",
+		);
 		if (backupStillPending) {
 			await step.run("handle-backup-still-pending", async () => {
 				await db
@@ -287,8 +291,7 @@ export const migrationWorkflow = inngest.createFunction(
 					.update(services)
 					.set({
 						migrationStatus: "failed",
-						migrationError:
-							restoreFailure.data.error || "Restore failed",
+						migrationError: restoreFailure.data.error || "Restore failed",
 					})
 					.where(eq(services.id, serviceId));
 			});
@@ -317,7 +320,10 @@ export const migrationWorkflow = inngest.createFunction(
 				.set({ lockedServerId: targetServerId })
 				.where(eq(services.id, serviceId));
 
-			await deployServiceInternal(serviceId);
+			await deployServiceInternal(serviceId, {
+				trigger: "migration",
+				targetServerId,
+			});
 		});
 
 		await step.run("finalize-migration", async () => {

@@ -13,28 +13,56 @@ import {
 	buildServerlessTraefikRouteSets,
 	buildTraefikCertificateDomains,
 	buildTraefikRoutes,
+	selectRuntimeServiceRevisions,
 } from "@/lib/agent/expected-state";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 describe("expected-state pure builders", () => {
-	const deployedServerlessConfig = JSON.stringify({
-		source: { type: "image", image: "nginx" },
-		stateful: false,
-		replicas: [],
-		healthCheck: null,
-		ports: [
-			{
-				port: 3000,
-				isPublic: true,
-				domain: "sleepy.example.com",
-				protocol: "http",
+	function revision(
+		serviceId: string,
+		overrides: Partial<ServiceRevisionSpec> = {},
+	) {
+		return {
+			id: `rev_${serviceId}`,
+			name: serviceId,
+			serviceId,
+			schemaVersion: 1,
+			revisionId: `rev_${serviceId}`,
+			specification: {
+				schemaVersion: 1,
+				serviceId,
+				image: "nginx",
+				hostname: serviceId,
+				stateful: false,
+				serverless: {
+					enabled: false,
+					sleepAfterSeconds: 300,
+					wakeTimeoutSeconds: 300,
+				},
+				healthCheck: null,
+				startCommand: null,
+				resourceLimits: { cpuCores: null, memoryMb: null },
+				placements: [],
+				ports: [],
+				secrets: [],
+				volumes: [],
+				...overrides,
 			},
-		],
-		serverless: {
-			enabled: true,
-			sleepAfterSeconds: 300,
-			wakeTimeoutSeconds: 120,
-		},
-	});
+		} as any;
+	}
+
+	function runtimeRevision(
+		serviceId: string,
+		overrides: Partial<ServiceRevisionSpec> = {},
+	) {
+		const revisionRow = revision(serviceId, overrides);
+		return {
+			id: serviceId,
+			name: serviceId,
+			revisionId: revisionRow.id,
+			specification: revisionRow.specification,
+		};
+	}
 
 	it("groups container inputs by deployment and service deterministically", () => {
 		const containers = buildExpectedContainersFromRows({
@@ -42,6 +70,7 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_bbbbbbbb",
 					serviceId: "svc_1",
+					serviceRevisionId: "rev_svc_1",
 					ipAddress: "10.0.0.2",
 					runtimeDesiredState: "stopped",
 					trafficState: "active",
@@ -50,12 +79,57 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_aaaaaaaa",
 					serviceId: "svc_1",
+					serviceRevisionId: "rev_svc_1",
 					ipAddress: "10.0.0.1",
 					runtimeDesiredState: "running",
 					trafficState: "active",
 					observedPhase: "running",
 				},
 			] as any,
+			revisions: [
+				revision("svc_1", {
+					startCommand: "npm start",
+					healthCheck: {
+						cmd: "curl -f /health",
+						interval: 10,
+						timeout: 5,
+						retries: 3,
+						startPeriod: 30,
+					},
+					resourceLimits: { cpuCores: 1, memoryMb: 512 },
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 300,
+					},
+					ports: [
+						{
+							containerPort: 80,
+							isPublic: true,
+							domain: "api.example.com",
+							protocol: "http",
+							externalPort: null,
+							tlsPassthrough: false,
+						},
+						{
+							containerPort: 3000,
+							isPublic: false,
+							domain: null,
+							protocol: "http",
+							externalPort: null,
+							tlsPassthrough: false,
+						},
+					],
+					secrets: [
+						{ key: "ZED", encryptedValue: "last" },
+						{ key: "ALPHA", encryptedValue: "first" },
+					],
+					volumes: [
+						{ name: "cache", containerPath: "/var/cache" },
+						{ name: "data", containerPath: "/data" },
+					],
+				}),
+			],
 			services: [
 				{
 					id: "svc_1",
@@ -75,14 +149,8 @@ describe("expected-state pure builders", () => {
 			deploymentPorts: [
 				{ deploymentId: "dep_aaaaaaaa", hostPort: 30001, containerPort: 3000 },
 				{ deploymentId: "dep_aaaaaaaa", hostPort: 80, containerPort: 80 },
-			] as any,
-			secrets: [
-				{ serviceId: "svc_1", key: "ZED", encryptedValue: "last" },
-				{ serviceId: "svc_1", key: "ALPHA", encryptedValue: "first" },
-			] as any,
-			volumes: [
-				{ serviceId: "svc_1", name: "cache", containerPath: "/var/cache" },
-				{ serviceId: "svc_1", name: "data", containerPath: "/data" },
+				{ deploymentId: "dep_bbbbbbbb", hostPort: 30002, containerPort: 3000 },
+				{ deploymentId: "dep_bbbbbbbb", hostPort: 81, containerPort: 80 },
 			] as any,
 		});
 
@@ -116,6 +184,176 @@ describe("expected-state pure builders", () => {
 			deploymentId: "dep_bbbbbbbb",
 			desiredState: "stopped",
 		});
+	});
+
+	it("keeps the spec hash stable for duplicate container ports", () => {
+		const build = (hostPorts: number[]) =>
+			buildExpectedContainersFromRows({
+				deployments: [
+					{
+						id: "dep_dns",
+						serviceId: "svc_dns",
+						serviceRevisionId: "rev_svc_dns",
+						runtimeDesiredState: "running",
+					},
+				] as any,
+				services: [{ id: "svc_dns", name: "dns" }] as any,
+				revisions: [
+					revision("svc_dns", {
+						ports: [
+							{
+								containerPort: 53,
+								isPublic: true,
+								domain: null,
+								protocol: "tcp",
+								externalPort: null,
+								tlsPassthrough: false,
+							},
+							{
+								containerPort: 53,
+								isPublic: true,
+								domain: null,
+								protocol: "udp",
+								externalPort: null,
+								tlsPassthrough: false,
+							},
+						],
+					}),
+				],
+				deploymentPorts: hostPorts.map((hostPort) => ({
+					deploymentId: "dep_dns",
+					containerPort: 53,
+					hostPort,
+				})) as any,
+			})[0];
+
+		const first = build([30002, 30001]);
+		const second = build([30001, 30002]);
+
+		expect(first.ports).toEqual([
+			{ containerPort: 53, hostPort: 30001 },
+			{ containerPort: 53, hostPort: 30002 },
+		]);
+		expect(first.containerSpecHash).toBe(second.containerSpecHash);
+	});
+
+	it("rejects partial expected state when a deployment revision is missing", () => {
+		expect(() =>
+			buildExpectedContainersFromRows({
+				deployments: [
+					{
+						id: "dep_missing_revision",
+						serviceId: "svc_1",
+						serviceRevisionId: "rev_missing",
+						runtimeDesiredState: "running",
+					},
+				] as any,
+				services: [{ id: "svc_1", name: "api" }] as any,
+				revisions: [],
+				deploymentPorts: [],
+			}),
+		).toThrow("Deployment dep_missing_revision has no service revision");
+	});
+
+	it("omits deployments whose service was soft-deleted", () => {
+		expect(
+			buildExpectedContainersFromRows({
+				deployments: [
+					{
+						id: "dep_deleted_service",
+						serviceId: "svc_1",
+						serviceRevisionId: "rev_svc_1",
+						runtimeDesiredState: "running",
+					},
+				] as any,
+				services: [],
+				revisions: [revision("svc_1")],
+				deploymentPorts: [],
+			}),
+		).toEqual([]);
+	});
+
+	it("rejects partial expected state when deployment ports are incomplete", () => {
+		expect(() =>
+			buildExpectedContainersFromRows({
+				deployments: [
+					{
+						id: "dep_incomplete_ports",
+						serviceId: "svc_1",
+						serviceRevisionId: "rev_svc_1",
+						runtimeDesiredState: "running",
+					},
+				] as any,
+				services: [{ id: "svc_1", name: "api" }] as any,
+				revisions: [
+					revision("svc_1", {
+						ports: [
+							{
+								containerPort: 3000,
+								isPublic: false,
+								domain: null,
+								protocol: "http",
+								externalPort: null,
+								tlsPassthrough: false,
+							},
+						],
+					}),
+				],
+				deploymentPorts: [],
+			}),
+		).toThrow("Deployment dep_incomplete_ports has incomplete port allocation");
+	});
+
+	it("contains multiple active revisions to the authoritative revision", () => {
+		const specification = runtimeRevision("svc_1").specification;
+		const result = selectRuntimeServiceRevisions([
+			{
+				deploymentId: "dep_old",
+				serviceId: "svc_1",
+				serviceName: "api",
+				serviceActiveRevisionId: "rev_old",
+				revisionId: "rev_old",
+				revisionServiceId: "svc_1",
+				revisionSchemaVersion: 1,
+				specification,
+			},
+			{
+				deploymentId: "dep_new",
+				serviceId: "svc_1",
+				serviceName: "api",
+				serviceActiveRevisionId: "rev_old",
+				revisionId: "rev_new",
+				revisionServiceId: "svc_1",
+				revisionSchemaVersion: 1,
+				specification,
+			},
+		]);
+
+		expect(result.services).toHaveLength(1);
+		expect(result.services[0]?.revisionId).toBe("rev_old");
+		expect(result.errors[0]).toContain("multiple active revisions");
+	});
+
+	it("excludes desired running state from the container creation hash", () => {
+		const build = (runtimeDesiredState: "running" | "stopped") =>
+			buildExpectedContainersFromRows({
+				deployments: [
+					{
+						id: "dep_1",
+						serviceId: "svc_1",
+						serviceRevisionId: "rev_svc_1",
+						ipAddress: "10.0.0.1",
+						runtimeDesiredState,
+					},
+				] as any,
+				services: [{ id: "svc_1", name: "api" }] as any,
+				revisions: [revision("svc_1")],
+				deploymentPorts: [],
+			})[0];
+
+		expect(build("running").containerSpecHash).toBe(
+			build("stopped").containerSpecHash,
+		);
 	});
 
 	it("keeps HTTP local upstreams before remote upstreams", () => {
@@ -162,12 +400,22 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_sleeping",
 					serviceId: "svc_private",
+					serviceRevisionId: "rev_svc_private",
 					ipAddress: "10.0.0.10",
 					runtimeDesiredState: "running",
 					trafficState: "active",
 					observedPhase: "running",
 				},
 			] as any,
+			revisions: [
+				revision("svc_private", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 300,
+					},
+				}),
+			],
 			services: [
 				{
 					id: "svc_private",
@@ -177,8 +425,6 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deploymentPorts: [],
-			secrets: [],
-			volumes: [],
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -193,12 +439,14 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_stopped",
 					serviceId: "svc_private",
+					serviceRevisionId: "rev_svc_private",
 					ipAddress: "10.0.0.10",
 					runtimeDesiredState: "stopped",
 					trafficState: "active",
 					observedPhase: "sleeping",
 				},
 			] as any,
+			revisions: [revision("svc_private")],
 			services: [
 				{
 					id: "svc_private",
@@ -208,8 +456,6 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deploymentPorts: [],
-			secrets: [],
-			volumes: [],
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -225,12 +471,22 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_sleeping",
 					serviceId: "svc_public",
+					serviceRevisionId: "rev_svc_public",
 					ipAddress: "10.0.0.10",
 					runtimeDesiredState: "stopped",
 					trafficState: "active",
 					observedPhase: "sleeping",
 				},
 			] as any,
+			revisions: [
+				revision("svc_public", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 300,
+					},
+				}),
+			],
 			services: [
 				{
 					id: "svc_public",
@@ -240,8 +496,6 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deploymentPorts: [],
-			secrets: [],
-			volumes: [],
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -251,30 +505,37 @@ describe("expected-state pure builders", () => {
 		});
 	});
 
-	it("keeps deployed serverless sleeping while live serverless settings are disabled", () => {
+	it("keeps revision serverless behavior while draft settings are disabled", () => {
 		const containers = buildExpectedContainersFromRows({
 			deployments: [
 				{
 					id: "dep_sleeping",
 					serviceId: "svc_public",
+					serviceRevisionId: "rev_svc_public",
 					ipAddress: "10.0.0.10",
 					runtimeDesiredState: "stopped",
 					trafficState: "active",
 					observedPhase: "sleeping",
 				},
 			] as any,
+			revisions: [
+				revision("svc_public", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 120,
+					},
+				}),
+			],
 			services: [
 				{
 					id: "svc_public",
 					name: "public-api",
 					image: "nginx",
 					serverlessEnabled: false,
-					deployedConfig: deployedServerlessConfig,
 				},
 			] as any,
 			deploymentPorts: [],
-			secrets: [],
-			volumes: [],
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -290,6 +551,7 @@ describe("expected-state pure builders", () => {
 				{
 					id: "dep_draining",
 					serviceId: "svc_public",
+					serviceRevisionId: "rev_svc_public",
 					ipAddress: "10.0.0.10",
 					runtimeDesiredState: "stopped",
 					trafficState: "draining",
@@ -297,6 +559,15 @@ describe("expected-state pure builders", () => {
 					containerId: null,
 				},
 			] as any,
+			revisions: [
+				revision("svc_public", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 300,
+					},
+				}),
+			],
 			services: [
 				{
 					id: "svc_public",
@@ -306,8 +577,6 @@ describe("expected-state pure builders", () => {
 				},
 			] as any,
 			deploymentPorts: [],
-			secrets: [],
-			volumes: [],
 		});
 
 		expect(containers[0]).toMatchObject({
@@ -347,12 +616,14 @@ describe("expected-state pure builders", () => {
 		const services: Parameters<
 			typeof buildServerlessTraefikRouteSets
 		>[0]["services"] = [
-			{
-				id: "svc_serverless",
-				serverlessEnabled: true,
-				stateful: false,
-			},
-		] as Parameters<typeof buildServerlessTraefikRouteSets>[0]["services"];
+			runtimeRevision("svc_serverless", {
+				serverless: {
+					enabled: true,
+					sleepAfterSeconds: 300,
+					wakeTimeoutSeconds: 300,
+				},
+			}),
+		];
 		const ports: Parameters<typeof buildTraefikRoutes>[0]["ports"] = [
 			{
 				id: "port_1",
@@ -536,14 +807,14 @@ describe("expected-state pure builders", () => {
 		const routes = buildServerlessRoutesFromRows({
 			serverId: "proxy_1",
 			services: [
-				{
-					id: "svc_1",
-					serverlessEnabled: true,
-					stateful: false,
-					serverlessSleepAfterSeconds: 300,
-					serverlessWakeTimeoutSeconds: 120,
-				},
-			] as any,
+				runtimeRevision("svc_1", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 120,
+					},
+				}),
+			],
 			ports: [
 				{
 					id: "port_1",
@@ -619,14 +890,15 @@ describe("expected-state pure builders", () => {
 		const routes = buildServerlessRoutesFromRows({
 			serverId: "proxy_1",
 			services: [
-				{
-					id: "svc_stateful",
-					serverlessEnabled: true,
+				runtimeRevision("svc_stateful", {
 					stateful: true,
-					serverlessSleepAfterSeconds: 300,
-					serverlessWakeTimeoutSeconds: 120,
-				},
-			] as any,
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 120,
+					},
+				}),
+			],
 			ports: [
 				{
 					id: "port_1",
@@ -674,14 +946,14 @@ describe("expected-state pure builders", () => {
 		const routes = buildServerlessRoutesFromRows({
 			serverId: "proxy_1",
 			services: [
-				{
-					id: "svc_1",
-					serverlessEnabled: true,
-					stateful: false,
-					serverlessSleepAfterSeconds: 300,
-					serverlessWakeTimeoutSeconds: 120,
-				},
-			] as any,
+				runtimeRevision("svc_1", {
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 120,
+					},
+				}),
+			],
 			ports: [
 				{
 					id: "port_1",
@@ -726,20 +998,28 @@ describe("expected-state pure builders", () => {
 		).toEqual(["dep_new"]);
 	});
 
-	it("keeps wake metadata from deployed serverless config while live settings are disabled", () => {
+	it("keeps wake metadata and ports pinned to the active revision", () => {
+		const service = runtimeRevision("svc_1", {
+			serverless: {
+				enabled: true,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+			},
+			ports: [
+				{
+					containerPort: 3000,
+					isPublic: true,
+					domain: "sleepy.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
 		const routes = buildServerlessRoutesFromRows({
 			serverId: "proxy_1",
-			services: [
-				{
-					id: "svc_1",
-					serverlessEnabled: false,
-					stateful: false,
-					serverlessSleepAfterSeconds: 60,
-					serverlessWakeTimeoutSeconds: 60,
-					deployedConfig: deployedServerlessConfig,
-				},
-			] as any,
-			ports: [],
+			services: [service],
+			ports: buildRuntimeRoutePorts([service]),
 			deployments: [
 				{
 					id: "dep_sleeping",
@@ -770,18 +1050,26 @@ describe("expected-state pure builders", () => {
 		]);
 	});
 
-	it("keeps Traefik gateway route from deployed serverless ports while live ports are removed", () => {
-		const ports = buildRuntimeRoutePorts(
-			[
-				{
-					id: "svc_public",
-					serverlessEnabled: false,
-					stateful: false,
-					deployedConfig: deployedServerlessConfig,
+	it("keeps Traefik gateway routes pinned to revision ports", () => {
+		const ports = buildRuntimeRoutePorts([
+			runtimeRevision("svc_public", {
+				serverless: {
+					enabled: true,
+					sleepAfterSeconds: 300,
+					wakeTimeoutSeconds: 120,
 				},
-			] as any,
-			[],
-		);
+				ports: [
+					{
+						containerPort: 3000,
+						isPublic: true,
+						domain: "sleepy.example.com",
+						protocol: "http",
+						externalPort: null,
+						tlsPassthrough: false,
+					},
+				],
+			}),
+		]);
 
 		const routes = buildTraefikRoutes({
 			serverId: "proxy_1",

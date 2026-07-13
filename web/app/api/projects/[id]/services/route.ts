@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import {
@@ -12,12 +13,18 @@ import {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceRevisions,
 	services,
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { getTimestamp } from "@/lib/date";
+import { revisionSpecToDeployedConfig } from "@/lib/service-config";
+
+function secretFingerprint(encryptedValue: string) {
+	return createHash("sha256").update(encryptedValue).digest("hex");
+}
 
 export async function GET(
 	request: Request,
@@ -60,6 +67,7 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
+				activeRevision,
 			] = await Promise.all([
 				db
 					.select()
@@ -83,7 +91,11 @@ export async function GET(
 					.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 					.where(eq(serviceReplicas.serviceId, service.id)),
 				db
-					.select({ key: secrets.key, updatedAt: secrets.updatedAt })
+					.select({
+						key: secrets.key,
+						updatedAt: secrets.updatedAt,
+						encryptedValue: secrets.encryptedValue,
+					})
 					.from(secrets)
 					.where(eq(secrets.serviceId, service.id)),
 				db
@@ -112,7 +124,42 @@ export async function GET(
 							.limit(1)
 							.then((r) => r[0] || null)
 					: Promise.resolve(null),
+				service.activeRevisionId
+					? db
+							.select({ specification: serviceRevisions.specification })
+							.from(serviceRevisions)
+							.where(eq(serviceRevisions.id, service.activeRevisionId))
+							.then((rows) => rows[0] ?? null)
+					: Promise.resolve(null),
 			]);
+
+			const revisionServerIds =
+				activeRevision?.specification.placements.map(
+					(placement) => placement.serverId,
+				) ?? [];
+			const revisionServers =
+				revisionServerIds.length > 0
+					? await db
+							.select({ id: servers.id, name: servers.name })
+							.from(servers)
+							.where(inArray(servers.id, revisionServerIds))
+					: [];
+			const serverNames = Object.fromEntries(
+				revisionServers.map((server) => [server.id, server.name]),
+			);
+			const secretFingerprints = Object.fromEntries(
+				activeRevision?.specification.secrets.map((secret) => [
+					secret.key,
+					secretFingerprint(secret.encryptedValue),
+				]) ?? [],
+			);
+			const activeConfig = activeRevision
+				? revisionSpecToDeployedConfig(
+						activeRevision.specification,
+						serverNames,
+						secretFingerprints,
+					)
+				: null;
 
 			const deploymentsWithDetails = await Promise.all(
 				serviceDeployments.map(async (deployment) => {
@@ -121,13 +168,9 @@ export async function GET(
 							.select({
 								id: deploymentPorts.id,
 								hostPort: deploymentPorts.hostPort,
-								containerPort: servicePorts.port,
+								containerPort: deploymentPorts.containerPort,
 							})
 							.from(deploymentPorts)
-							.innerJoin(
-								servicePorts,
-								eq(deploymentPorts.servicePortId, servicePorts.id),
-							)
 							.where(eq(deploymentPorts.deploymentId, deployment.id)),
 						db
 							.select({ name: servers.name, wireguardIp: servers.wireguardIp })
@@ -200,7 +243,12 @@ export async function GET(
 				ports,
 				configuredReplicas: replicas,
 				deployments: deploymentsWithDetails,
-				secrets: serviceSecrets,
+				secrets: serviceSecrets.map((secret) => ({
+					key: secret.key,
+					updatedAt: secret.updatedAt,
+					fingerprint: secretFingerprint(secret.encryptedValue),
+				})),
+				activeConfig,
 				rollouts: serviceRollouts,
 				volumes,
 				lockedServer,

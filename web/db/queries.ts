@@ -5,10 +5,12 @@ import {
 	environments,
 	projects,
 	servers,
+	serviceRevisions,
 	services,
 	settings,
 } from "@/db/schema";
 import type { HealthStats } from "@/db/types";
+import { getAgentCompatibilityStatus } from "@/lib/agent-capabilities";
 import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
@@ -125,7 +127,15 @@ export async function getServerDetails(id: string) {
 		.where(eq(servers.id, id));
 
 	const server = serverResults[0];
-	return server ? { ...server, healthStats: null } : null;
+	return server
+		? {
+				...server,
+				healthStats: null,
+				agentCompatibilityStatus: getAgentCompatibilityStatus(
+					server.agentHealth,
+				),
+			}
+		: null;
 }
 
 export async function getClusterHealth() {
@@ -155,6 +165,7 @@ export async function getClusterHealth() {
 	const serversWithHealth = allServers.map((server) => ({
 		...server,
 		healthStats: metricSnapshotToHealthStats(metricsByServer.get(server.id)),
+		agentCompatibilityStatus: getAgentCompatibilityStatus(server.agentHealth),
 	}));
 	const serversWithCurrentMetrics = serversWithHealth.filter(
 		(server) => server.status === "online" && server.healthStats,
@@ -233,6 +244,8 @@ export async function getServerServices(serverId: string) {
 		.selectDistinctOn([services.id], {
 			deploymentId: deployments.id,
 			deploymentStatus: deployments.observedPhase,
+			revisionNumber: serviceRevisions.revisionNumber,
+			revisionContentHash: serviceRevisions.contentHash,
 			serviceId: services.id,
 			serviceName: services.name,
 			serviceImage: services.image,
@@ -243,6 +256,10 @@ export async function getServerServices(serverId: string) {
 		})
 		.from(deployments)
 		.innerJoin(services, eq(deployments.serviceId, services.id))
+		.innerJoin(
+			serviceRevisions,
+			eq(deployments.serviceRevisionId, serviceRevisions.id),
+		)
 		.innerJoin(projects, eq(services.projectId, projects.id))
 		.innerJoin(environments, eq(services.environmentId, environments.id))
 		.where(eq(deployments.serverId, serverId));

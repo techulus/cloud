@@ -3,11 +3,11 @@ import { db } from "@/db";
 import {
 	type AgentHealth,
 	type ContainerHealth,
-	deploymentPorts,
 	deployments,
 	type NetworkHealth,
 	rollouts,
 	servers,
+	serviceRevisions,
 	services,
 	workQueue,
 } from "@/db/schema";
@@ -29,7 +29,7 @@ import {
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
-import { getDeployedServerlessConfig } from "@/lib/service-config";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -153,17 +153,17 @@ async function applyDeploymentErrors(
 				rolloutId: deployments.rolloutId,
 				observedPhase: deployments.observedPhase,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
-				serverlessEnabled: services.serverlessEnabled,
-				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
-				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
-				stateful: services.stateful,
-				deployedConfig: services.deployedConfig,
+				revisionSpec: serviceRevisions.specification,
 				rolloutStatus: rollouts.status,
 				serverName: servers.name,
 			})
 			.from(deployments)
 			.innerJoin(servers, eq(deployments.serverId, servers.id))
 			.innerJoin(services, eq(deployments.serviceId, services.id))
+			.innerJoin(
+				serviceRevisions,
+				eq(deployments.serviceRevisionId, serviceRevisions.id),
+			)
 			.leftJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
 			.where(
 				and(
@@ -192,8 +192,7 @@ async function applyDeploymentErrors(
 			.set(
 				isServerlessWakeDeployment
 					? getServerlessWakeFailureUpdate({
-							serverlessEnabled:
-								getDeployedServerlessConfig(deployment).enabled,
+							serverlessEnabled: deployment.revisionSpec.serverless.enabled,
 							currentFailureCount: deployment.serverlessWakeFailureCount,
 							failedStage: "serverless_wake",
 						})
@@ -284,16 +283,16 @@ async function applyServerlessTransitions(
 				trafficState: deployments.trafficState,
 				observedPhase: deployments.observedPhase,
 				serverlessWakeFailureCount: deployments.serverlessWakeFailureCount,
-				serverlessEnabled: services.serverlessEnabled,
-				serverlessSleepAfterSeconds: services.serverlessSleepAfterSeconds,
-				serverlessWakeTimeoutSeconds: services.serverlessWakeTimeoutSeconds,
-				stateful: services.stateful,
-				deployedConfig: services.deployedConfig,
+				revisionSpec: serviceRevisions.specification,
 				serverIsProxy: servers.isProxy,
 				serverName: servers.name,
 			})
 			.from(deployments)
 			.innerJoin(services, eq(deployments.serviceId, services.id))
+			.innerJoin(
+				serviceRevisions,
+				eq(deployments.serviceRevisionId, serviceRevisions.id),
+			)
 			.innerJoin(servers, eq(deployments.serverId, servers.id))
 			.where(eq(deployments.id, transition.deploymentId))
 			.then((rows) => rows[0]);
@@ -418,7 +417,7 @@ async function applyServerlessTransitions(
 			.update(deployments)
 			.set(
 				getServerlessWakeFailureUpdate({
-					serverlessEnabled: getDeployedServerlessConfig(deployment).enabled,
+					serverlessEnabled: deployment.revisionSpec.serverless.enabled,
 					currentFailureCount: deployment.serverlessWakeFailureCount,
 					failedStage: "serverless_wake",
 				}),
@@ -565,10 +564,7 @@ function getInvalidServerlessTransitionReason({
 				runtimeDesiredState: string;
 				trafficState: string;
 				observedPhase: string;
-				serverlessEnabled: boolean;
-				serverlessSleepAfterSeconds: number;
-				serverlessWakeTimeoutSeconds: number;
-				deployedConfig: string | null;
+				revisionSpec: ServiceRevisionSpec;
 				serverIsProxy: boolean;
 		  }
 		| undefined;
@@ -577,7 +573,7 @@ function getInvalidServerlessTransitionReason({
 	if (deployment.serverId !== serverId)
 		return "deployment belongs to another server";
 	if (!deployment.serverIsProxy) return "server is not a proxy";
-	if (!getDeployedServerlessConfig(deployment).enabled) {
+	if (!deployment.revisionSpec.serverless.enabled) {
 		return "service is not serverless";
 	}
 	if (deployment.runtimeDesiredState === "removed") {
@@ -764,9 +760,6 @@ export async function applyStatusReport(
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was removed and container gone, deleting`,
 				);
-				await db
-					.delete(deploymentPorts)
-					.where(eq(deploymentPorts.deploymentId, dep.id));
 				await db.delete(deployments).where(eq(deployments.id, dep.id));
 			} else if (
 				isObservedActiveContainer(dep.observedPhase) &&
@@ -817,13 +810,20 @@ export async function applyStatusReport(
 					`[health:recover] found stuck deployment ${stuckDeployment.id}, attaching container ${container.containerId}`,
 				);
 
-				const service = await db
-					.select()
-					.from(services)
-					.where(eq(services.id, stuckDeployment.serviceId))
-					.then((r) => r[0]);
+				const [service, revision] = await Promise.all([
+					db
+						.select()
+						.from(services)
+						.where(eq(services.id, stuckDeployment.serviceId))
+						.then((r) => r[0]),
+					db
+						.select({ specification: serviceRevisions.specification })
+						.from(serviceRevisions)
+						.where(eq(serviceRevisions.id, stuckDeployment.serviceRevisionId))
+						.then((r) => r[0]),
+				]);
 
-				const hasHealthCheck = service?.healthCheckCmd != null;
+				const hasHealthCheck = revision?.specification.healthCheck != null;
 				const newStatus = hasHealthCheck ? "starting" : "healthy";
 
 				await db
@@ -913,17 +913,17 @@ export async function applyStatusReport(
 			deployment.runtimeDesiredState === "running" &&
 			["sleeping", "stopped"].includes(deployment.observedPhase)
 		) {
-			const service = await db
-				.select()
-				.from(services)
-				.where(eq(services.id, deployment.serviceId))
+			const revision = await db
+				.select({ specification: serviceRevisions.specification })
+				.from(serviceRevisions)
+				.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
 				.then((r) => r[0]);
 
-			if (service && getDeployedServerlessConfig(service).enabled) {
+			if (revision?.specification.serverless.enabled) {
 				Object.assign(
 					updateFields,
 					getStaleStoppedServerlessReportUpdate({
-						hasHealthCheck: service.healthCheckCmd != null,
+						hasHealthCheck: revision.specification.healthCheck != null,
 						healthStatus,
 					}),
 				);
@@ -938,13 +938,20 @@ export async function applyStatusReport(
 				continue;
 			}
 
-			const service = await db
-				.select()
-				.from(services)
-				.where(eq(services.id, deployment.serviceId))
-				.then((r) => r[0]);
+			const [revision, service] = await Promise.all([
+				db
+					.select({ specification: serviceRevisions.specification })
+					.from(serviceRevisions)
+					.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
+					.then((r) => r[0]),
+				db
+					.select({ migrationStatus: services.migrationStatus })
+					.from(services)
+					.where(eq(services.id, deployment.serviceId))
+					.then((r) => r[0]),
+			]);
 
-			const hasHealthCheck = service?.healthCheckCmd != null;
+			const hasHealthCheck = revision?.specification.healthCheck != null;
 			const newStatus = hasHealthCheck ? "starting" : "healthy";
 			updateFields.observedPhase = newStatus;
 			if (deployment.observedPhase === "waking") {

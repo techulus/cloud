@@ -716,7 +716,7 @@ export async function deployManifest(manifest: TechulusManifest) {
 		manifest.service.replicas.count,
 	);
 
-	const result = await deployServiceInternal(service.id);
+	const result = await deployServiceInternal(service.id, { trigger: "cli" });
 
 	return {
 		serviceId: service.id,

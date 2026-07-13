@@ -1,3 +1,4 @@
+import type { DeployedConfig } from "@/lib/service-config";
 import type {
 	builds,
 	deploymentPorts,
@@ -12,6 +13,7 @@ import type {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceRevisions,
 	services,
 	serviceVolumes,
 	user,
@@ -26,6 +28,7 @@ export type Service = typeof services.$inferSelect;
 export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;
 export type ServiceReplica = typeof serviceReplicas.$inferSelect;
+export type ServiceRevision = typeof serviceRevisions.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
@@ -67,7 +70,13 @@ export type ServiceWithDetails = Service & {
 		}
 	>;
 	volumes?: ServiceVolume[];
-	secrets?: Array<Pick<Secret, "key"> & { updatedAt: Date | string }>;
+	secrets?: Array<
+		Pick<Secret, "key"> & {
+			updatedAt: Date | string;
+			fingerprint: string;
+		}
+	>;
+	activeConfig?: DeployedConfig | null;
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;

@@ -352,7 +352,10 @@ export async function POST(
 				);
 
 				try {
-					await deployServiceInternal(build.serviceId);
+					await deployServiceInternal(build.serviceId, {
+						trigger: "agent_build",
+						buildId,
+					});
 				} catch (error) {
 					console.error("[build:complete] deployment failed:", error);
 					await db

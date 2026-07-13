@@ -12,6 +12,7 @@
     "admin:create": "node scripts/admin.mjs --create",
     "admin:reset-password": "node scripts/admin.mjs --reset-password",
     "db:push": "drizzle-kit push",
+    "db:cutover-service-revisions": "tsx scripts/cutover-service-revisions.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

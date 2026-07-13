@@ -1,19 +1,21 @@
 import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import { deployments, rollouts, servers } from "@/db/schema";
+import { deployments, rollouts, servers, services } from "@/db/schema";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
+import { getRolloutServiceRevision } from "@/lib/service-revisions";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import {
-	calculateServicePlacements,
+	calculateRevisionPlacements,
 	checkForRollingUpdate,
 	cleanupExistingDeployments,
 	cleanupTerminalDeployments,
+	completeRolloutWithRevision,
 	createDeploymentRecords,
-	issueCertificatesForService,
+	issueCertificatesForRevision,
 	prepareRollingUpdate,
-	saveDeployedConfig,
 	validateServers,
 } from "./rollout-helpers";
 import { handleRolloutFailure } from "./rollout-utils";
@@ -118,25 +120,28 @@ export const rolloutWorkflow = inngest.createFunction(
 			{ event: inngestEvents.rolloutCancelled, match: "data.rolloutId" },
 		],
 		onFailure: async ({ event }) => {
-			const { rolloutId } = event.data.event.data as {
+			const { rolloutId, serviceId } = event.data.event.data as {
 				rolloutId?: string;
+				serviceId?: string;
 			};
 
 			if (!rolloutId) return;
 
-			await db
-				.update(rollouts)
-				.set({
-					status: "failed",
-					currentStage: "workflow_failed",
-					completedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(rollouts.id, rolloutId),
-						inArray(rollouts.status, ["queued", "in_progress"]),
-					),
-				);
+			const targetServiceId =
+				serviceId ??
+				(await db
+					.select({ serviceId: rollouts.serviceId })
+					.from(rollouts)
+					.where(eq(rollouts.id, rolloutId))
+					.then((rows) => rows[0]?.serviceId));
+			if (!targetServiceId) return;
+
+			await handleRolloutFailure(
+				rolloutId,
+				targetServiceId,
+				"workflow_failed",
+				true,
+			);
 		},
 	},
 	async ({ event, step }) => {
@@ -193,6 +198,23 @@ export const rolloutWorkflow = inngest.createFunction(
 			return { status: "failed", rolloutId, reason: "queue_timeout" };
 		}
 
+		const revision = await step.run("load-service-revision", async () => {
+			const rolloutRevision = await getRolloutServiceRevision(rolloutId);
+			if (rolloutRevision.serviceId !== serviceId) {
+				throw new Error("Rollout revision does not belong to service");
+			}
+			const executionSpecification: ServiceRevisionSpec = {
+				...rolloutRevision.specification,
+				secrets: [],
+			};
+			return {
+				id: rolloutRevision.id,
+				serviceId: rolloutRevision.serviceId,
+				specification: executionSpecification,
+			};
+		});
+		const specification = revision.specification;
+
 		await step.run("log-rollout-started", async () => {
 			await ingestRolloutLog(
 				rolloutId,
@@ -203,12 +225,8 @@ export const rolloutWorkflow = inngest.createFunction(
 		});
 
 		const placementResult = await step.run("load-placements", async () => {
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
 			try {
-				const result = await calculateServicePlacements(service);
+				const result = calculateRevisionPlacements(specification);
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,
@@ -286,7 +304,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		});
 
 		const isRollingUpdate = await step.run("check-rolling-update", async () => {
-			return checkForRollingUpdate(serviceId);
+			return checkForRollingUpdate(serviceId, specification);
 		});
 
 		if (isRollingUpdate) {
@@ -319,7 +337,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				.set({ currentStage: "certificates" })
 				.where(eq(rollouts.id, rolloutId));
 			try {
-				const result = await issueCertificatesForService(serviceId);
+				const result = await issueCertificatesForRevision(specification);
 				if (result.issuedDomains.length > 0) {
 					await ingestRolloutLog(
 						rolloutId,
@@ -356,19 +374,24 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const { deploymentIds } = await step.run("create-deployments", async () => {
 			await db
+				.delete(deployments)
+				.where(
+					and(
+						eq(deployments.rolloutId, rolloutId),
+						eq(deployments.trafficState, "candidate"),
+					),
+				);
+
+			await db
 				.update(rollouts)
 				.set({ currentStage: "deploying" })
 				.where(eq(rollouts.id, rolloutId));
 
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
-
 			const serverMap = await validateServers(placements);
 
 			const result = await createDeploymentRecords(rolloutId, serviceId, {
-				service,
+				revisionId: revision.id,
+				specification,
 				placements,
 				serverMap,
 				totalReplicas,
@@ -386,8 +409,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		});
 
 		await step.run("start-health-check", async () => {
-			const service = await getService(serviceId);
-			const hasHealthCheck = service?.healthCheckCmd != null;
+			const hasHealthCheck = specification.healthCheck != null;
 
 			await db
 				.update(rollouts)
@@ -488,8 +510,19 @@ export const rolloutWorkflow = inngest.createFunction(
 			};
 		}
 
-		await step.run("start-dns-sync", async () => {
-			await db.transaction(async (tx) => {
+		const trafficPromoted = await step.run("start-dns-sync", async () => {
+			const promoted = await db.transaction(async (tx) => {
+				const activeRollout = await tx
+					.select({ status: rollouts.status })
+					.from(rollouts)
+					.where(eq(rollouts.id, rolloutId))
+					.for("update")
+					.then((rows) => rows[0]);
+
+				if (activeRollout?.status !== "in_progress") {
+					return false;
+				}
+
 				await tx
 					.update(rollouts)
 					.set({ currentStage: "dns_sync" })
@@ -519,7 +552,15 @@ export const rolloutWorkflow = inngest.createFunction(
 							),
 						),
 					);
+
+				await tx
+					.update(services)
+					.set({ activeRevisionId: revision.id })
+					.where(eq(services.id, serviceId));
+
+				return true;
 			});
+			if (!promoted) return false;
 
 			await ingestRolloutLog(
 				rolloutId,
@@ -527,7 +568,12 @@ export const rolloutWorkflow = inngest.createFunction(
 				"dns_sync",
 				"Routing traffic to new deployments",
 			);
+			return true;
 		});
+
+		if (!trafficPromoted) {
+			return { status: "cancelled", rolloutId };
+		}
 
 		const dnsResults = await Promise.all(
 			serverIds.map((serverId) =>
@@ -583,84 +629,34 @@ export const rolloutWorkflow = inngest.createFunction(
 			return { status: "rolled_back", rolloutId, reason: "dns_sync_timeout" };
 		}
 
-		if (isRollingUpdate) {
-			await step.run("stop-old-deployments", async () => {
-				const stoppedDeploymentsWithoutContainers = await db
-					.update(deployments)
-					.set({
-						runtimeDesiredState: "removed",
-						trafficState: "inactive",
-					})
-					.where(
-						and(
-							eq(deployments.serviceId, serviceId),
-							eq(deployments.trafficState, "draining"),
-							isNull(deployments.containerId),
-						),
-					)
-					.returning({ id: deployments.id });
-
-				const stoppingDeployments = await db
-					.update(deployments)
-					.set({
-						runtimeDesiredState: "removed",
-						trafficState: "inactive",
-					})
-					.where(
-						and(
-							eq(deployments.serviceId, serviceId),
-							eq(deployments.trafficState, "draining"),
-						),
-					)
-					.returning({ id: deployments.id });
-
-				const stoppedCount =
-					stoppedDeploymentsWithoutContainers.length +
-					stoppingDeployments.length;
-				if (stoppedCount > 0) {
-					await ingestRolloutLog(
-						rolloutId,
-						serviceId,
-						"dns_sync",
-						`Stopping ${stoppedCount} old deployment(s) after DNS sync`,
-					);
-				}
-			});
-		}
-
-		await step.run("save-deployed-config", async () => {
-			const service = await getService(serviceId);
-			if (!service) {
-				throw new Error("Service not found");
-			}
-
-			const serverMap = await validateServers(placements);
-
-			await saveDeployedConfig(serviceId, {
-				service,
+		const rolloutCompleted = await step.run("complete-rollout", async () => {
+			const result = await completeRolloutWithRevision(rolloutId, serviceId, {
+				revisionId: revision.id,
+				specification,
 				placements,
-				serverMap,
 				totalReplicas,
 				isRollingUpdate,
 			});
-		});
-
-		await step.run("complete-rollout", async () => {
-			await db
-				.update(rollouts)
-				.set({
-					status: "completed",
-					currentStage: "completed",
-					completedAt: new Date(),
-				})
-				.where(eq(rollouts.id, rolloutId));
+			if (!result.completed) return false;
+			if (result.stoppedCount > 0) {
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"dns_sync",
+					`Stopping ${result.stoppedCount} old deployment(s) after DNS sync`,
+				);
+			}
 			await ingestRolloutLog(
 				rolloutId,
 				serviceId,
 				"completed",
 				"Rollout completed successfully",
 			);
+			return true;
 		});
+		if (!rolloutCompleted) {
+			return { status: "cancelled", rolloutId };
+		}
 
 		return { status: "completed", rolloutId };
 	},

@@ -1,3 +1,8 @@
+import {
+	getDefaultServiceHostname,
+	type ServiceRevisionSpec,
+} from "@/lib/service-revision-spec";
+
 export type ReplicaConfig = {
 	serverId: string;
 	serverName: string;
@@ -27,7 +32,8 @@ export type SourceConfig = {
 
 export type SecretConfig = {
 	key: string;
-	updatedAt: string;
+	updatedAt?: string;
+	fingerprint?: string;
 };
 
 export type VolumeConfig = {
@@ -78,6 +84,7 @@ export type ConfigChange = {
 
 export function buildCurrentConfig(
 	service: {
+		name: string;
 		image: string;
 		hostname: string | null;
 		healthCheckCmd: string | null;
@@ -102,7 +109,11 @@ export function buildCurrentConfig(
 		protocol?: "http" | "tcp" | "udp" | null;
 		tlsPassthrough?: boolean | null;
 	}[],
-	secrets?: { key: string; updatedAt: Date | string }[],
+	secrets?: {
+		key: string;
+		updatedAt: Date | string;
+		fingerprint?: string;
+	}[],
 	volumes?: { name: string; containerPath: string }[],
 ): DeployedConfig {
 	const hasResourceLimits =
@@ -113,7 +124,7 @@ export function buildCurrentConfig(
 			type: "image",
 			image: service.image,
 		},
-		hostname: service.hostname ?? undefined,
+		hostname: service.hostname ?? getDefaultServiceHostname(service.name),
 		stateful: service.stateful ?? false,
 		placement: {
 			replicas: replicas.reduce((sum, r) => sum + r.count, 0),
@@ -151,6 +162,7 @@ export function buildCurrentConfig(
 			key: s.key,
 			updatedAt:
 				s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
+			fingerprint: s.fingerprint,
 		})),
 		volumes: (volumes ?? []).map((v) => ({
 			name: v.name,
@@ -481,7 +493,11 @@ export function diffConfigs(
 				from: "(none)",
 				to: key,
 			});
-		} else if (deployedSecret.updatedAt !== currentSecret.updatedAt) {
+		} else if (
+			deployedSecret.fingerprint && currentSecret.fingerprint
+				? deployedSecret.fingerprint !== currentSecret.fingerprint
+				: deployedSecret.updatedAt !== currentSecret.updatedAt
+		) {
 			changes.push({
 				field: "Secret",
 				from: key,
@@ -537,15 +553,50 @@ export function diffConfigs(
 	return changes;
 }
 
-export function parseDeployedConfig(
-	json: string | null,
-): DeployedConfig | null {
-	if (!json) return null;
-	try {
-		return JSON.parse(json) as DeployedConfig;
-	} catch {
-		return null;
-	}
+export function revisionSpecToDeployedConfig(
+	specification: ServiceRevisionSpec,
+	serverNames: Record<string, string>,
+	secretFingerprints: Record<string, string>,
+): DeployedConfig {
+	return {
+		source: { type: "image", image: specification.image },
+		hostname: specification.hostname,
+		stateful: specification.stateful,
+		placement: {
+			replicas: specification.placements.reduce(
+				(total, placement) => total + placement.count,
+				0,
+			),
+		},
+		replicas: specification.placements.map((placement) => ({
+			serverId: placement.serverId,
+			serverName: serverNames[placement.serverId] ?? placement.serverId,
+			count: placement.count,
+		})),
+		healthCheck: specification.healthCheck,
+		startCommand: specification.startCommand,
+		resourceLimits:
+			specification.resourceLimits.cpuCores != null ||
+			specification.resourceLimits.memoryMb != null
+				? {
+						cpuCores: specification.resourceLimits.cpuCores,
+						memoryMb: specification.resourceLimits.memoryMb,
+					}
+				: undefined,
+		ports: specification.ports.map((port) => ({
+			port: port.containerPort,
+			isPublic: port.isPublic,
+			domain: port.domain,
+			protocol: port.protocol,
+			tlsPassthrough: port.tlsPassthrough,
+		})),
+		serverless: specification.serverless,
+		secrets: specification.secrets.map((secret) => ({
+			key: secret.key,
+			fingerprint: secretFingerprints[secret.key],
+		})),
+		volumes: specification.volumes,
+	};
 }
 
 export function normalizeServerlessConfig(
@@ -578,51 +629,4 @@ export function getCurrentServerlessConfig(service: {
 			service.serverlessWakeTimeoutSeconds ??
 			DEFAULT_SERVERLESS_WAKE_TIMEOUT_SECONDS,
 	};
-}
-
-export function getDeployedServerlessConfig(service: {
-	deployedConfig?: string | null;
-	serverlessEnabled?: boolean | null;
-	serverlessSleepAfterSeconds?: number | null;
-	serverlessWakeTimeoutSeconds?: number | null;
-}): ServerlessConfig {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	return deployed?.serverless
-		? normalizeServerlessConfig(deployed.serverless)
-		: getCurrentServerlessConfig(service);
-}
-
-export function getDeployedStateful(service: {
-	deployedConfig?: string | null;
-	stateful?: boolean | null;
-}) {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	return deployed?.stateful ?? service.stateful ?? false;
-}
-
-export function isDeployedServerlessService(service: {
-	deployedConfig?: string | null;
-	stateful?: boolean | null;
-	serverlessEnabled?: boolean | null;
-	serverlessSleepAfterSeconds?: number | null;
-	serverlessWakeTimeoutSeconds?: number | null;
-}) {
-	return getDeployedServerlessConfig(service).enabled;
-}
-
-export function getDeployedServicePorts(
-	service: { id: string; deployedConfig?: string | null },
-	livePorts: PortConfig[],
-): PortConfig[] {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	if (!deployed?.ports) {
-		return livePorts;
-	}
-	return deployed.ports.map((port) => ({
-		port: port.port,
-		isPublic: port.isPublic,
-		domain: port.domain,
-		protocol: port.protocol ?? "http",
-		tlsPassthrough: port.tlsPassthrough,
-	}));
 }

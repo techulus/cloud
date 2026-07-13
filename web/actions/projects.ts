@@ -13,7 +13,6 @@ import {
 	getService,
 } from "@/db/queries";
 import {
-	deploymentPorts,
 	deployments,
 	environments,
 	githubRepos,
@@ -23,6 +22,7 @@ import {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceRevisions,
 	services,
 	serviceVolumes,
 	volumeBackups,
@@ -32,12 +32,13 @@ import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	isObservedReady,
+	markDeploymentFailedRemoved,
 	markDeploymentRemoved,
 	runtimeExpectedStates,
+	selectNewestRevisionId,
 } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
 import { blocksProjectDeletion } from "@/lib/project-deletion";
 import {
@@ -545,10 +546,6 @@ async function hardDeleteService(serviceId: string) {
 				containerId: dep.containerId,
 			});
 		}
-
-		await db
-			.delete(deploymentPorts)
-			.where(eq(deploymentPorts.deploymentId, dep.id));
 	}
 
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
@@ -889,7 +886,7 @@ export async function updateServiceGithubRepo(
 
 export async function deployService(serviceId: string) {
 	await requireDeveloperRole();
-	return deployServiceInternal(serviceId);
+	return deployServiceInternal(serviceId, { trigger: "ui" });
 }
 
 export async function deleteDeployments(serviceId: string) {
@@ -1161,9 +1158,6 @@ export async function updateServiceConfig(
 	if (config.ports) {
 		if (config.ports.remove && config.ports.remove.length > 0) {
 			for (const portId of config.ports.remove) {
-				await db
-					.delete(deploymentPorts)
-					.where(eq(deploymentPorts.servicePortId, portId));
 				await db.delete(servicePorts).where(eq(servicePorts.id, portId));
 			}
 		}
@@ -1354,15 +1348,86 @@ export async function restartService(serviceId: string) {
 
 export async function abortRollout(serviceId: string) {
 	await requireDeveloperRole();
-	const activeRollouts = await db
-		.select({ id: rollouts.id, status: rollouts.status })
-		.from(rollouts)
-		.where(
-			and(
-				eq(rollouts.serviceId, serviceId),
-				inArray(rollouts.status, ["queued", "in_progress"]),
-			),
-		);
+	const { activeRollouts, rolloutDeployments } = await db.transaction(
+		async (tx) => {
+			const activeRollouts = await tx
+				.select({ id: rollouts.id, status: rollouts.status })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, serviceId),
+						inArray(rollouts.status, ["queued", "in_progress"]),
+					),
+				)
+				.for("update");
+
+			if (activeRollouts.length === 0) {
+				return { activeRollouts, rolloutDeployments: [] };
+			}
+
+			const activeRolloutIds = activeRollouts.map((rollout) => rollout.id);
+			const rolloutDeployments = await tx
+				.select()
+				.from(deployments)
+				.where(inArray(deployments.rolloutId, activeRolloutIds));
+
+			await tx
+				.update(rollouts)
+				.set({
+					status: "failed",
+					currentStage: "aborted",
+					completedAt: new Date(),
+				})
+				.where(inArray(rollouts.id, activeRolloutIds));
+
+			await tx
+				.update(deployments)
+				.set({ trafficState: "active" })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.trafficState, "draining"),
+					),
+				);
+
+			await tx
+				.update(deployments)
+				.set(markDeploymentFailedRemoved("aborted"))
+				.where(inArray(deployments.rolloutId, activeRolloutIds));
+
+			const activeRevisionRows = await tx
+				.select({
+					serviceRevisionId: deployments.serviceRevisionId,
+					revisionNumber: serviceRevisions.revisionNumber,
+				})
+				.from(deployments)
+				.innerJoin(
+					serviceRevisions,
+					eq(deployments.serviceRevisionId, serviceRevisions.id),
+				)
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.trafficState, "active"),
+						inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+					),
+				);
+			const activeRevisionCount = new Set(
+				activeRevisionRows.map((row) => row.serviceRevisionId),
+			).size;
+			if (activeRevisionCount > 1) {
+				console.error(
+					`[rollout:abort] found ${activeRevisionCount} active revisions for ${serviceId}; selecting the newest`,
+				);
+			}
+			await tx
+				.update(services)
+				.set({ activeRevisionId: selectNewestRevisionId(activeRevisionRows) })
+				.where(eq(services.id, serviceId));
+
+			return { activeRollouts, rolloutDeployments };
+		},
+	);
 
 	if (activeRollouts.length === 0) {
 		return { success: false, error: "No in-progress rollout found" };
@@ -1370,32 +1435,20 @@ export async function abortRollout(serviceId: string) {
 
 	const activeRolloutIds = activeRollouts.map((rollout) => rollout.id);
 
-	await db
-		.update(rollouts)
-		.set({
-			status: "failed",
-			currentStage: "aborted",
-			completedAt: new Date(),
-		})
-		.where(inArray(rollouts.id, activeRolloutIds));
-
 	for (const rolloutId of activeRolloutIds) {
-		await inngest.send(
-			inngestEvents.rolloutCancelled.create({
-				rolloutId,
-			}),
-		);
+		await inngest
+			.send(
+				inngestEvents.rolloutCancelled.create({
+					rolloutId,
+				}),
+			)
+			.catch((error) => {
+				console.error(
+					`[rollout:${rolloutId}] failed to send cancellation event:`,
+					error,
+				);
+			});
 	}
-
-	await restoreDrainingDeploymentsForRollback(serviceId);
-
-	const rolloutDeployments =
-		activeRolloutIds.length > 0
-			? await db
-					.select()
-					.from(deployments)
-					.where(inArray(deployments.rolloutId, activeRolloutIds))
-			: [];
 
 	const serverContainers = new Map<string, string[]>();
 
@@ -1411,19 +1464,21 @@ export async function abortRollout(serviceId: string) {
 		await enqueueWork(serverId, "force_cleanup", {
 			serviceId,
 			containerIds,
+		}).catch((error) => {
+			console.error(
+				`[rollout] failed to enqueue cleanup on server ${serverId}:`,
+				error,
+			);
 		});
 	}
 
-	for (const dep of rolloutDeployments) {
-		await db
-			.delete(deploymentPorts)
-			.where(eq(deploymentPorts.deploymentId, dep.id));
-	}
-
-	if (activeRolloutIds.length > 0) {
+	const rolloutDeploymentIds = rolloutDeployments.map(
+		(deployment) => deployment.id,
+	);
+	if (rolloutDeploymentIds.length > 0) {
 		await db
 			.delete(deployments)
-			.where(inArray(deployments.rolloutId, activeRolloutIds));
+			.where(inArray(deployments.id, rolloutDeploymentIds));
 	}
 
 	const pendingWork =
@@ -1440,11 +1495,11 @@ export async function abortRollout(serviceId: string) {
 					)
 			: [];
 
-	const rolloutDeploymentIds = new Set(rolloutDeployments.map((d) => d.id));
+	const rolloutDeploymentIdSet = new Set(rolloutDeploymentIds);
 	const workToDelete = pendingWork.filter((w) => {
 		try {
 			const parsed = JSON.parse(w.payload);
-			return rolloutDeploymentIds.has(parsed.deploymentId);
+			return rolloutDeploymentIdSet.has(parsed.deploymentId);
 		} catch {
 			return false;
 		}

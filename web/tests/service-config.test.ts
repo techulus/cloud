@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
 	type DeployedConfig,
 	diffConfigs,
-	getDeployedServerlessConfig,
 	getCurrentServerlessConfig,
-	isDeployedServerlessService,
 	MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
+	revisionSpecToDeployedConfig,
 } from "@/lib/service-config";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function deployedConfig(
 	overrides: Partial<DeployedConfig> = {},
@@ -27,24 +27,7 @@ function deployedConfig(
 }
 
 describe("service config", () => {
-	it("uses deployed serverless settings as the runtime mode", () => {
-		const service = {
-			serverlessEnabled: false,
-			serverlessSleepAfterSeconds: 60,
-			serverlessWakeTimeoutSeconds: 60,
-			stateful: true,
-			deployedConfig: JSON.stringify(deployedConfig()),
-		};
-
-		expect(getDeployedServerlessConfig(service)).toMatchObject({
-			enabled: true,
-			sleepAfterSeconds: 300,
-			wakeTimeoutSeconds: 120,
-		});
-		expect(isDeployedServerlessService(service)).toBe(true);
-	});
-
-	it("enforces the minimum serverless sleep timeout for legacy config", () => {
+	it("enforces the minimum serverless sleep timeout for draft config", () => {
 		expect(
 			getCurrentServerlessConfig({
 				serverlessEnabled: true,
@@ -54,33 +37,41 @@ describe("service config", () => {
 		).toMatchObject({
 			sleepAfterSeconds: MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
 		});
-		expect(
-			getDeployedServerlessConfig({
-				deployedConfig: JSON.stringify(
-					deployedConfig({
-						serverless: {
-							enabled: true,
-							sleepAfterSeconds: 60,
-							wakeTimeoutSeconds: 120,
-						},
-					}),
-				),
-			}),
-		).toMatchObject({
-			sleepAfterSeconds: MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
-		});
 	});
 
-	it("allows deployed stateful services to be serverless", () => {
-		const service = {
-			serverlessEnabled: true,
+	it("converts an immutable revision into the pending-change baseline", () => {
+		const specification: ServiceRevisionSpec = {
+			schemaVersion: 1,
+			serviceId: "service-1",
+			image: "nginx",
+			hostname: "api",
 			stateful: true,
-			serverlessSleepAfterSeconds: 300,
-			serverlessWakeTimeoutSeconds: 120,
-			deployedConfig: JSON.stringify(deployedConfig({ stateful: true })),
+			serverless: {
+				enabled: true,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+			},
+			healthCheck: null,
+			startCommand: null,
+			resourceLimits: { cpuCores: null, memoryMb: null },
+			placements: [{ serverId: "server-1", count: 1 }],
+			ports: [],
+			secrets: [{ key: "TOKEN", encryptedValue: "ciphertext" }],
+			volumes: [],
 		};
 
-		expect(isDeployedServerlessService(service)).toBe(true);
+		expect(
+			revisionSpecToDeployedConfig(
+				specification,
+				{ "server-1": "Sydney" },
+				{ TOKEN: "fingerprint" },
+			),
+		).toMatchObject({
+			stateful: true,
+			serverless: { enabled: true },
+			replicas: [{ serverId: "server-1", serverName: "Sydney", count: 1 }],
+			secrets: [{ key: "TOKEN", fingerprint: "fingerprint" }],
+		});
 	});
 
 	it("reports serverless changes as pending config", () => {

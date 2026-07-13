@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"techulus/cloud-agent/internal/crypto"
@@ -17,12 +19,22 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	serverID   string
-	keyPair    *crypto.KeyPair
-	client     *http.Client
-	longClient *http.Client
-	dataDir    string
+	baseURL                string
+	serverID               string
+	keyPair                *crypto.KeyPair
+	client                 *http.Client
+	longClient             *http.Client
+	dataDir                string
+	upgradeLogMutex        sync.Mutex
+	lastUpgradeRequiredLog time.Time
+}
+
+type UpgradeRequiredError struct {
+	Message string
+}
+
+func (e *UpgradeRequiredError) Error() string {
+	return fmt.Sprintf("agent upgrade required: %s", e.Message)
 }
 
 func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
@@ -70,6 +82,8 @@ type VolumeMount struct {
 
 type ExpectedContainer struct {
 	DeploymentID          string            `json:"deploymentId"`
+	RevisionID            string            `json:"revisionId"`
+	ContainerSpecHash     string            `json:"containerSpecHash"`
 	ServiceID             string            `json:"serviceId"`
 	ServiceName           string            `json:"serviceName"`
 	Name                  string            `json:"name"`
@@ -153,9 +167,10 @@ type WireGuardPeer struct {
 }
 
 type ExpectedState struct {
-	ServerName string              `json:"serverName"`
-	Containers []ExpectedContainer `json:"containers"`
-	Dns        struct {
+	SchemaVersion int                 `json:"schemaVersion"`
+	ServerName    string              `json:"serverName"`
+	Containers    []ExpectedContainer `json:"containers"`
+	Dns           struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
 	Serverless struct {
@@ -200,6 +215,9 @@ func (c *Client) loadCachedExpectedState() (*ExpectedState, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
+	if err := validateExpectedState(&state); err != nil {
+		return nil, fmt.Errorf("cached expected state is invalid: %w", err)
+	}
 	return &state, nil
 }
 
@@ -219,12 +237,18 @@ func (c *Client) getExpectedState() (*ExpectedState, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusUpgradeRequired {
+			return nil, &UpgradeRequiredError{Message: string(body)}
+		}
 		return nil, fmt.Errorf("expected state request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var state ExpectedState
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return nil, fmt.Errorf("failed to decode expected state: %w", err)
+	}
+	if err := validateExpectedState(&state); err != nil {
+		return nil, err
 	}
 
 	if err := c.cacheExpectedState(&state); err != nil {
@@ -234,19 +258,54 @@ func (c *Client) getExpectedState() (*ExpectedState, error) {
 	return &state, nil
 }
 
+func validateExpectedState(state *ExpectedState) error {
+	if state.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported expected state schema version %d", state.SchemaVersion)
+	}
+	for _, expectedContainer := range state.Containers {
+		if expectedContainer.DeploymentID == "" {
+			return fmt.Errorf("expected container is missing deploymentId")
+		}
+		if expectedContainer.RevisionID == "" {
+			return fmt.Errorf("expected container %s is missing revisionId", expectedContainer.DeploymentID)
+		}
+		if expectedContainer.ContainerSpecHash == "" {
+			return fmt.Errorf("expected container %s is missing containerSpecHash", expectedContainer.DeploymentID)
+		}
+	}
+	return nil
+}
+
 func (c *Client) GetExpectedStateWithFallback() (*ExpectedState, bool, error) {
 	state, err := c.getExpectedState()
 	if err == nil {
 		return state, false, nil
 	}
 
-	log.Printf("[state] CP unreachable, attempting to use cached state: %v", err)
+	var upgradeRequired *UpgradeRequiredError
+	if errors.As(err, &upgradeRequired) {
+		if c.shouldLogUpgradeRequired() {
+			log.Printf("[state] UPGRADE REQUIRED: control plane rejected this agent; serving cached state until upgraded: %v", err)
+		}
+	} else {
+		log.Printf("[state] CP unreachable, attempting to use cached state: %v", err)
+	}
 	cachedState, cacheErr := c.loadCachedExpectedState()
 	if cacheErr != nil {
 		return nil, false, fmt.Errorf("CP unreachable and no cached state available: %w (cache error: %v)", err, cacheErr)
 	}
 
 	return cachedState, true, nil
+}
+
+func (c *Client) shouldLogUpgradeRequired() bool {
+	c.upgradeLogMutex.Lock()
+	defer c.upgradeLogMutex.Unlock()
+	if time.Since(c.lastUpgradeRequiredLog) < time.Minute {
+		return false
+	}
+	c.lastUpgradeRequiredLog = time.Now()
+	return true
 }
 
 type ContainerStatus struct {
@@ -268,9 +327,19 @@ type Resources struct {
 }
 
 type AgentHealth struct {
-	Version      string   `json:"version"`
-	UptimeSecs   int64    `json:"uptimeSecs"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	Version                string                  `json:"version"`
+	UptimeSecs             int64                   `json:"uptimeSecs"`
+	Capabilities           []string                `json:"capabilities,omitempty"`
+	ReconciliationFailures []ReconciliationFailure `json:"reconciliationFailures,omitempty"`
+}
+
+type ReconciliationFailure struct {
+	Action       string    `json:"action"`
+	DeploymentID string    `json:"deploymentId,omitempty"`
+	Description  string    `json:"description"`
+	LastError    string    `json:"lastError"`
+	Attempts     int       `json:"attempts"`
+	NextRetryAt  time.Time `json:"nextRetryAt"`
 }
 
 type StatusReport struct {

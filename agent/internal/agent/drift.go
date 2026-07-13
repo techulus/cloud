@@ -26,12 +26,15 @@ const (
 	actionStopExpectedContainer      reconcileActionKind = "stop_expected_container"
 	actionStartContainer             reconcileActionKind = "start_container"
 	actionRedeployContainer          reconcileActionKind = "redeploy_container"
+	actionWaitLegacyCutover          reconcileActionKind = "wait_legacy_cutover"
 	actionUpdateDNS                  reconcileActionKind = "update_dns"
 	actionUpdateTraefik              reconcileActionKind = "update_traefik"
 	actionUpdateCertificates         reconcileActionKind = "update_certificates"
 	actionWriteChallengeRoute        reconcileActionKind = "write_challenge_route"
 	actionUpdateWireGuard            reconcileActionKind = "update_wireguard"
 	actionStartWireGuard             reconcileActionKind = "start_wireguard"
+	legacyCutoverStabilizationDelay                      = 30 * time.Second
+	legacyCutoverMaxWait                                 = 5 * time.Minute
 )
 
 type reconcileAction struct {
@@ -144,23 +147,122 @@ func (a *Agent) handleProcessing() {
 
 	a.updateDnsInSync(a.expectedState, actual)
 	actions := a.planReconcile(a.expectedState, actual)
+	actions, waitingForCutoverHealth := a.gateLegacyCutoverRecreations(
+		actions,
+		actual,
+	)
 
 	if len(actions) == 0 {
+		if waitingForCutoverHealth {
+			return
+		}
+		a.clearReconcileFailures()
 		log.Printf("[processing] state converged, transitioning to IDLE")
 		a.transitionToIdle()
 		return
 	}
 
-	action := actions[0]
+	action, eligible, nextRetryAt := a.nextEligibleReconcileAction(actions, time.Now())
+	if !eligible {
+		log.Printf("[processing] all %d pending actions are backed off; next retry at %s", len(actions), nextRetryAt.Format(time.RFC3339))
+		return
+	}
 	if err := a.applyReconcileAction(action); err != nil {
-		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
+		failure := a.recordReconcileFailure(action, err, time.Now())
+		log.Printf("[processing] reconciliation action failed (attempt %d); continuing with remaining actions, retry at %s: %v", failure.Attempts, failure.NextRetryAt.Format(time.RFC3339), err)
 		a.RecordDeploymentError(action.DeploymentID, err)
 		a.RequestStatusReport("reconcile failed")
-		a.transitionToIdle()
 		return
 	}
 
+	a.clearReconcileFailure(action)
+	if a.legacyCutoverHealthWait == action.DeploymentID &&
+		(action.Kind == actionDeployMissingContainer ||
+			action.Kind == actionStartContainer ||
+			action.Kind == actionRedeployContainer) {
+		a.legacyCutoverHealthWaitSince = time.Now()
+	}
+	if isLegacyCutoverRecreation(action) {
+		a.legacyCutoverHealthWait = action.DeploymentID
+		a.legacyCutoverHealthWaitSince = time.Now()
+		log.Printf("[processing] waiting for deployment %s to stabilize before recreating another legacy container", action.DeploymentID)
+	}
 	a.RequestStatusReport("reconcile completed")
+}
+
+func isLegacyCutoverRecreation(action reconcileAction) bool {
+	return action.Kind == actionRedeployContainer &&
+		action.Actual != nil &&
+		action.Actual.SpecHash == "" &&
+		action.Expected != nil &&
+		action.Expected.ContainerSpecHash != ""
+}
+
+func (a *Agent) gateLegacyCutoverRecreations(
+	actions []reconcileAction,
+	actual *ActualState,
+) ([]reconcileAction, bool) {
+	if a.legacyCutoverHealthWait == "" {
+		return actions, false
+	}
+	var waitingExpected *agenthttp.ExpectedContainer
+	for _, expectedContainer := range a.expectedState.Containers {
+		if expectedContainer.DeploymentID == a.legacyCutoverHealthWait {
+			copy := expectedContainer
+			waitingExpected = &copy
+			break
+		}
+	}
+	if waitingExpected == nil {
+		a.legacyCutoverHealthWait = ""
+		a.legacyCutoverHealthWaitSince = time.Time{}
+		return actions, false
+	}
+
+	var waitingContainer *container.Container
+	for i := range actual.Containers {
+		if actual.Containers[i].DeploymentID == a.legacyCutoverHealthWait {
+			waitingContainer = &actual.Containers[i]
+			break
+		}
+	}
+	ready := false
+	if waitingContainer != nil && waitingContainer.State == "running" {
+		if waitingExpected.HealthCheck != nil {
+			ready = container.GetHealthStatus(waitingContainer.ID) == "healthy"
+		} else {
+			ready = time.Since(a.legacyCutoverHealthWaitSince) >= legacyCutoverStabilizationDelay
+		}
+	}
+	if ready {
+		log.Printf("[processing] deployment %s is stable; legacy recreation may continue", a.legacyCutoverHealthWait)
+		a.legacyCutoverHealthWait = ""
+		a.legacyCutoverHealthWaitSince = time.Time{}
+		return actions, false
+	}
+
+	if time.Since(a.legacyCutoverHealthWaitSince) >= legacyCutoverMaxWait {
+		deploymentID := a.legacyCutoverHealthWait
+		log.Printf("[processing] deployment %s did not stabilize; releasing legacy recreation gate", deploymentID)
+		a.legacyCutoverHealthWait = ""
+		a.legacyCutoverHealthWaitSince = time.Time{}
+		return []reconcileAction{{
+			Kind:         actionWaitLegacyCutover,
+			DeploymentID: deploymentID,
+			Description:  fmt.Sprintf("WAIT for legacy deployment %s to stabilize", deploymentID),
+			Expected:     waitingExpected,
+			Actual:       waitingContainer,
+		}}, false
+	}
+
+	filtered := make([]reconcileAction, 0, len(actions))
+	for _, action := range actions {
+		if isLegacyCutoverRecreation(action) {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	return filtered, true
 }
 
 func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {
@@ -287,7 +389,19 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 				continue
 			}
 
-			if normalizeImage(exp.Image) != normalizeImage(act.Image) {
+			if exp.ContainerSpecHash == "" || act.SpecHash != exp.ContainerSpecHash {
+				reason := "container specification changed"
+				if act.SpecHash == "" {
+					reason = "legacy container is missing revision labels"
+				}
+				actions = append(actions, reconcileAction{
+					Kind:         actionRedeployContainer,
+					Description:  fmt.Sprintf("REDEPLOY %s (%s)", exp.Name, reason),
+					DeploymentID: id,
+					Expected:     &expectedContainer,
+					Actual:       &actualContainer,
+				})
+			} else if normalizeImage(exp.Image) != normalizeImage(act.Image) {
 				actions = append(actions, reconcileAction{
 					Kind:         actionRedeployContainer,
 					Description:  fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image),
@@ -483,9 +597,6 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		}
 		if err := container.Start(action.Actual.ID); err != nil {
 			log.Printf("[reconcile] start failed, will redeploy: %v", err)
-			if err := container.Stop(action.Actual.ID); err != nil {
-				log.Printf("[reconcile] warning: failed to stop old container: %v", err)
-			}
 			if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 				return fmt.Errorf("failed to redeploy container: %w", err)
 			}
@@ -495,9 +606,6 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 	case actionRedeployContainer:
 		if action.Actual == nil || action.Expected == nil {
 			return fmt.Errorf("missing container state for %s", action.Kind)
-		}
-		if err := container.Stop(action.Actual.ID); err != nil {
-			log.Printf("[reconcile] warning: failed to stop old container: %v", err)
 		}
 		if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 			return fmt.Errorf("failed to redeploy container: %w", err)
@@ -555,6 +663,9 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 			return fmt.Errorf("failed to bring up WireGuard: %w", err)
 		}
 		return nil
+
+	case actionWaitLegacyCutover:
+		return fmt.Errorf("deployment %s did not stabilize within %s", action.DeploymentID, legacyCutoverMaxWait)
 
 	default:
 		return fmt.Errorf("unknown reconcile action: %s", action.Kind)

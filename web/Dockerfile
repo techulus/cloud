@@ -17,7 +17,7 @@ RUN npx next build
 
 FROM node:24-slim AS drizzle
 WORKDIR /drizzle
-RUN npm install drizzle-kit drizzle-orm
+RUN npm install drizzle-kit drizzle-orm pg tsx
 
 FROM node:24-slim AS runner
 WORKDIR /app
@@ -27,6 +27,8 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/db ./db
+COPY --from=builder /app/lib/service-revision-spec.ts ./lib/service-revision-spec.ts
+COPY --from=builder /app/lib/service-revision-cutover.ts ./lib/service-revision-cutover.ts
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=drizzle /drizzle/node_modules ./node_modules

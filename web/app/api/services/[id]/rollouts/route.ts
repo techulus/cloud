@@ -1,19 +1,33 @@
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { rollouts } from "@/db/schema";
+import { rollouts, serviceRevisions } from "@/db/schema";
 
 export async function GET(
-	request: NextRequest,
+	_request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const { id: serviceId } = await params;
 
 	const rolloutsList = await db
-		.select()
+		.select({
+			id: rollouts.id,
+			serviceId: rollouts.serviceId,
+			serviceRevisionId: rollouts.serviceRevisionId,
+			status: rollouts.status,
+			currentStage: rollouts.currentStage,
+			createdAt: rollouts.createdAt,
+			completedAt: rollouts.completedAt,
+			revisionNumber: serviceRevisions.revisionNumber,
+			contentHash: serviceRevisions.contentHash,
+		})
 		.from(rollouts)
+		.innerJoin(
+			serviceRevisions,
+			eq(rollouts.serviceRevisionId, serviceRevisions.id),
+		)
 		.where(eq(rollouts.serviceId, serviceId))
 		.orderBy(desc(rollouts.createdAt))
 		.limit(50);

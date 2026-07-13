@@ -12,6 +12,8 @@ import (
 	"techulus/cloud-agent/internal/serverless"
 )
 
+const startupStatusReportMaxAttempts = 12
+
 const (
 	traefikMetricsURL      = "http://127.0.0.1:9100/metrics"
 	traefikMetricsInterval = 15 * time.Second
@@ -63,6 +65,14 @@ func (a *Agent) Run(ctx context.Context) {
 		cleanupTickerC = cleanupTicker.C
 	}
 
+	if !retryStartupStatus(ctx, startupStatusReportMaxAttempts, 5*time.Second, func() bool {
+		return a.reportStatus("startup")
+	}) {
+		if ctx.Err() != nil {
+			return
+		}
+		log.Printf("[status] startup report unavailable after %d attempts; continuing with validated cached state", startupStatusReportMaxAttempts)
+	}
 	go a.StatusReportLoop(ctx)
 
 	a.Tick()
@@ -92,6 +102,36 @@ func (a *Agent) Run(ctx context.Context) {
 			go a.RunBuildCleanup()
 		}
 	}
+}
+
+func retryStartupStatus(
+	ctx context.Context,
+	maxAttempts int,
+	retryDelay time.Duration,
+	report func() bool,
+) bool {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if report() {
+			return true
+		}
+		if attempt == maxAttempts {
+			return false
+		}
+		log.Printf("[status] startup report failed; retrying before first expected-state fetch")
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return false
+		case <-timer.C:
+		}
+	}
+	return false
 }
 
 func (a *Agent) TraefikMetricsLoop(ctx context.Context) {
@@ -147,8 +187,6 @@ func (a *Agent) ForwardTraefikMetrics(ctx context.Context) error {
 }
 
 func (a *Agent) StatusReportLoop(ctx context.Context) {
-	a.reportStatus("startup")
-
 	timer := time.NewTimer(nextStatusReportDelay())
 	defer timer.Stop()
 
@@ -181,7 +219,7 @@ func (a *Agent) RequestStatusReport(reason string) {
 	}
 }
 
-func (a *Agent) reportStatus(reason string) {
+func (a *Agent) reportStatus(reason string) bool {
 	startedAt := time.Now()
 	report := a.BuildStatusReport(true)
 	reportedDeploymentErrorCount := len(report.DeploymentErrors)
@@ -190,7 +228,7 @@ func (a *Agent) reportStatus(reason string) {
 	response, err := a.Client.ReportStatus(report, completed, active, serverlessTransitions)
 	if err != nil {
 		log.Printf("[status] failed to report (%s) latency=%s: %v", reason, time.Since(startedAt).Round(time.Millisecond), err)
-		return
+		return false
 	}
 	a.ClearReportedDeploymentErrors(reportedDeploymentErrorCount)
 	a.AcknowledgeServerlessTransitions(response.ServerlessTransitionResults, len(serverlessTransitions))
@@ -198,6 +236,7 @@ func (a *Agent) reportStatus(reason string) {
 	a.LogRejectedActiveWorkItems(response.RejectedActiveWorkItems)
 	a.AcceptLeasedWorkItems(response.WorkItems)
 	log.Printf("[status] reported (%s) latency=%s", reason, time.Since(startedAt).Round(time.Millisecond))
+	return true
 }
 
 func nextStatusReportDelay() time.Duration {

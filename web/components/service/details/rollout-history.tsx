@@ -29,6 +29,8 @@ type RolloutListItem = {
 	currentStage: string | null;
 	createdAt: string;
 	completedAt: string | null;
+	revisionNumber: number;
+	contentHash: string;
 };
 
 const STATUS_CONFIG: Record<
@@ -194,6 +196,10 @@ export function RolloutHistory({
 										</span>
 									</ItemTitle>
 									<ItemDescription>
+										<span className="font-mono">
+											Revision {rollout.revisionNumber} ·{" "}
+											{rollout.contentHash.slice(0, 12)}
+										</span>
 										<span>{formatRelativeTime(rollout.createdAt)}</span>
 										<span className="ml-3">
 											Duration:{" "}
