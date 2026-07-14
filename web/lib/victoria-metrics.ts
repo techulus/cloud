@@ -79,6 +79,8 @@ export type ServiceMetrics = {
 	windowEnd: string;
 	stepSeconds: number;
 	totalRequests: number;
+	totalIngressBytes: number | null;
+	totalEgressBytes: number | null;
 	statusCodes: string[];
 	buckets: ServiceMetricsBucket[];
 };
@@ -310,6 +312,8 @@ export function createEmptyServiceMetrics(
 		windowEnd: window.end.toISOString(),
 		stepSeconds: window.stepSeconds,
 		totalRequests: 0,
+		totalIngressBytes: null,
+		totalEgressBytes: null,
 		statusCodes: [],
 		buckets: [],
 	};
@@ -328,6 +332,7 @@ export async function queryServiceMetrics(options: {
 	const serviceMatcher = buildTraefikServiceMatcher(options.serviceId);
 	const serviceId = escapePromQL(options.serviceId);
 	const rangeWindow = formatPromDuration(window.stepSeconds);
+	const totalWindow = formatPromDuration(window.durationMs / 1000);
 	const traefikFilter = `service=~"${serviceMatcher}"`;
 	const queryStart = addMilliseconds(
 		window.start,
@@ -345,6 +350,8 @@ export async function queryServiceMetrics(options: {
 		cpuResults,
 		memoryPercentResults,
 		memoryBytesResults,
+		totalIngressBytes,
+		totalEgressBytes,
 	] = await Promise.all([
 		queryRangePromQL(endpoint, {
 			query: `sum by (code) (increase(traefik_service_requests_total{${traefikFilter}}[${rangeWindow}]))`,
@@ -406,6 +413,16 @@ export async function queryServiceMetrics(options: {
 			end: window.end,
 			stepSeconds: window.stepSeconds,
 		}).catch(() => []),
+		queryInstantPromQL(
+			endpoint,
+			`sum(increase(traefik_service_requests_bytes_total{${traefikFilter}}[${totalWindow}]))`,
+			window.end,
+		).catch(() => null),
+		queryInstantPromQL(
+			endpoint,
+			`sum(increase(traefik_service_responses_bytes_total{${traefikFilter}}[${totalWindow}]))`,
+			window.end,
+		).catch(() => null),
 	]);
 
 	const buckets = createServiceMetricBuckets(window);
@@ -468,9 +485,38 @@ export async function queryServiceMetrics(options: {
 			(total, bucket) => total + bucket.totalRequests,
 			0,
 		),
+		totalIngressBytes,
+		totalEgressBytes,
 		statusCodes: sortStatusCodes([...statusCodes]),
 		buckets,
 	};
+}
+
+async function queryInstantPromQL(
+	endpoint: EndpointConfig,
+	query: string,
+	time: Date,
+): Promise<number | null> {
+	const url = new URL(`${endpoint.url}/api/v1/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("time", String(Math.floor(time.getTime() / 1000)));
+
+	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query metrics: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const data = (await response.json()) as VictoriaInstantResponse;
+	if (data.status !== "success") {
+		throw new Error(data.error || "Failed to query metrics");
+	}
+
+	const rawValue = data.data?.result?.[0]?.value?.[1];
+	if (rawValue === undefined) return null;
+	const value = Number.parseFloat(rawValue);
+	return Number.isFinite(value) ? value : null;
 }
 
 async function queryInstantMetric(

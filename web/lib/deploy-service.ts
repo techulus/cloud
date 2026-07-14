@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
@@ -7,6 +6,7 @@ import { rollouts, serviceReplicas } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { startMigrationInternal } from "@/lib/migrations";
+import { createRolloutWithServiceRevision } from "@/lib/service-revisions";
 
 export async function deployServiceInternal(serviceId: string) {
 	const service = await getService(serviceId);
@@ -48,14 +48,7 @@ export async function deployServiceInternal(serviceId: string) {
 		}
 	}
 
-	const rolloutId = randomUUID();
-
-	await db.insert(rollouts).values({
-		id: rolloutId,
-		serviceId,
-		status: "queued",
-		currentStage: "queued",
-	});
+	const { rolloutId } = await createRolloutWithServiceRevision(serviceId);
 
 	try {
 		await inngest.send(

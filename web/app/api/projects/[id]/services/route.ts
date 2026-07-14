@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import {
@@ -12,12 +12,14 @@ import {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceRevisions,
 	services,
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { getTimestamp } from "@/lib/date";
+import { revisionSpecToDeployedConfig } from "@/lib/service-config";
 
 export async function GET(
 	request: Request,
@@ -114,6 +116,40 @@ export async function GET(
 					: Promise.resolve(null),
 			]);
 
+			const activeDeployment = serviceDeployments.find(
+				(deployment) =>
+					deployment.trafficState === "active" &&
+					deployment.runtimeDesiredState !== "removed",
+			);
+			const activeRevision = activeDeployment
+				? await db
+						.select({ specification: serviceRevisions.specification })
+						.from(serviceRevisions)
+						.where(eq(serviceRevisions.id, activeDeployment.serviceRevisionId))
+						.then((rows) => rows[0])
+				: null;
+			const revisionServers = activeRevision
+				? await db
+						.select({ id: servers.id, name: servers.name })
+						.from(servers)
+						.where(
+							inArray(
+								servers.id,
+								activeRevision.specification.placements.map(
+									(placement) => placement.serverId,
+								),
+							),
+						)
+				: [];
+			const activeConfig = activeRevision
+				? revisionSpecToDeployedConfig(
+						activeRevision.specification,
+						Object.fromEntries(
+							revisionServers.map((server) => [server.id, server.name]),
+						),
+					)
+				: null;
+
 			const deploymentsWithDetails = await Promise.all(
 				serviceDeployments.map(async (deployment) => {
 					const [depPorts, server] = await Promise.all([
@@ -121,13 +157,9 @@ export async function GET(
 							.select({
 								id: deploymentPorts.id,
 								hostPort: deploymentPorts.hostPort,
-								containerPort: servicePorts.port,
+								containerPort: deploymentPorts.containerPort,
 							})
 							.from(deploymentPorts)
-							.innerJoin(
-								servicePorts,
-								eq(deploymentPorts.servicePortId, servicePorts.id),
-							)
 							.where(eq(deploymentPorts.deploymentId, deployment.id)),
 						db
 							.select({ name: servers.name, wireguardIp: servers.wireguardIp })
@@ -205,6 +237,7 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
+				activeConfig,
 				deletionBackupFallback,
 			};
 		}),

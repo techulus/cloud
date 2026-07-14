@@ -3,11 +3,9 @@ import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
-	secrets,
 	servers,
-	servicePorts,
+	serviceRevisions,
 	services,
-	serviceVolumes,
 } from "@/db/schema";
 import { getAllCertificatesForDomains } from "@/lib/acme-manager";
 import {
@@ -17,30 +15,35 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import {
-	getDeployedServerlessConfig,
-	getDeployedServicePorts,
-	isDeployedServerlessService,
-} from "@/lib/service-config";
-import { slugify } from "@/lib/utils";
+	SERVICE_REVISION_SCHEMA_VERSION,
+	type ServiceRevisionSecret,
+	type ServiceRevisionSpec,
+} from "@/lib/service-revision-spec";
 import { getWireGuardPeers } from "@/lib/wireguard";
 
 type Server = typeof servers.$inferSelect;
 type Service = typeof services.$inferSelect;
 type Deployment = typeof deployments.$inferSelect;
-type ServicePort = typeof servicePorts.$inferSelect;
+type ServiceRevision = typeof serviceRevisions.$inferSelect;
 const SERVERLESS_GATEWAY_PORT = 18080;
 
-type RouteServicePort = Pick<
-	ServicePort,
-	| "id"
-	| "serviceId"
-	| "port"
-	| "isPublic"
-	| "domain"
-	| "protocol"
-	| "externalPort"
-	| "tlsPassthrough"
->;
+type RouteServicePort = {
+	id: string;
+	serviceId: string;
+	port: number;
+	isPublic: boolean;
+	domain: string | null;
+	protocol: "http" | "tcp" | "udp";
+	externalPort: number | null;
+	tlsPassthrough: boolean;
+};
+
+export type RuntimeServiceRevision = {
+	id: string;
+	name: string;
+	revisionId: string;
+	specification: ServiceRevisionSpec;
+};
 
 export type ExpectedContainer = {
 	deploymentId: string;
@@ -127,18 +130,6 @@ type DeploymentPortRow = {
 	containerPort: number;
 };
 
-type SecretRow = {
-	serviceId: string;
-	key: string;
-	encryptedValue: string;
-};
-
-type VolumeRow = {
-	serviceId: string;
-	name: string;
-	containerPath: string;
-};
-
 type RoutableDeploymentRow = {
 	serviceId: string;
 	ipAddress: string | null;
@@ -172,16 +163,19 @@ export async function getServer(serverId: string) {
 export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
-	const allServices = await getActiveServices();
-	const containers = await buildExpectedContainers(server.id);
-	const dnsRecords = await buildDnsRecords(allServices);
-	const traefikConfig = await buildTraefikConfig(server, allServices);
+	const runtimeServices = await getRuntimeServiceRevisions();
+	const [containers, dnsRecords, traefikConfig, wireguardPeers] =
+		await Promise.all([
+			buildExpectedContainers(server.id),
+			buildDnsRecords(runtimeServices),
+			buildTraefikConfig(server, runtimeServices),
+			getWireGuardPeers(server.id, server.privateIp),
+		]);
 	const serverless = await buildServerlessExpectedState(
 		server,
-		allServices,
+		runtimeServices,
 		containers,
 	);
-	const wireguardPeers = await getWireGuardPeers(server.id, server.privateIp);
 
 	return {
 		serverName: server.name,
@@ -193,8 +187,45 @@ export async function buildAgentExpectedState(
 	};
 }
 
-async function getActiveServices() {
-	return db.select().from(services).where(isNull(services.deletedAt));
+async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
+	const rows = await db
+		.select({
+			serviceId: services.id,
+			serviceName: services.name,
+			revisionId: serviceRevisions.id,
+			specification: serviceRevisions.specification,
+		})
+		.from(deployments)
+		.innerJoin(services, eq(deployments.serviceId, services.id))
+		.innerJoin(
+			serviceRevisions,
+			eq(deployments.serviceRevisionId, serviceRevisions.id),
+		)
+		.where(
+			and(
+				isNull(services.deletedAt),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+				inArray(deployments.trafficState, activeTrafficStates),
+			),
+		);
+
+	const runtimeServices = new Map<string, RuntimeServiceRevision>();
+	for (const row of rows) {
+		if (row.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION) {
+			throw new Error(`Service ${row.serviceId} uses an unsupported revision`);
+		}
+		const existing = runtimeServices.get(row.serviceId);
+		if (existing && existing.revisionId !== row.revisionId) {
+			throw new Error(`Service ${row.serviceId} has multiple active revisions`);
+		}
+		runtimeServices.set(row.serviceId, {
+			id: row.serviceId,
+			name: row.serviceName,
+			revisionId: row.revisionId,
+			specification: row.specification,
+		});
+	}
+	return [...runtimeServices.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 async function buildExpectedContainers(
@@ -211,42 +242,28 @@ async function buildExpectedContainers(
 		);
 
 	const serviceIds = unique(serverDeployments.map((dep) => dep.serviceId));
+	const revisionIds = unique(
+		serverDeployments.map((dep) => dep.serviceRevisionId),
+	);
 	if (serviceIds.length === 0) return [];
 
-	const [activeServices, depPorts, serviceSecrets, volumes] = await Promise.all(
-		[
-			db
-				.select()
-				.from(services)
-				.where(
-					and(inArray(services.id, serviceIds), isNull(services.deletedAt)),
-				),
-			fetchDeploymentPorts(serverDeployments.map((dep) => dep.id)),
-			db
-				.select({
-					serviceId: secrets.serviceId,
-					key: secrets.key,
-					encryptedValue: secrets.encryptedValue,
-				})
-				.from(secrets)
-				.where(inArray(secrets.serviceId, serviceIds)),
-			db
-				.select({
-					serviceId: serviceVolumes.serviceId,
-					name: serviceVolumes.name,
-					containerPath: serviceVolumes.containerPath,
-				})
-				.from(serviceVolumes)
-				.where(inArray(serviceVolumes.serviceId, serviceIds)),
-		],
-	);
+	const [activeServices, revisions, depPorts] = await Promise.all([
+		db
+			.select()
+			.from(services)
+			.where(and(inArray(services.id, serviceIds), isNull(services.deletedAt))),
+		db
+			.select()
+			.from(serviceRevisions)
+			.where(inArray(serviceRevisions.id, revisionIds)),
+		fetchDeploymentPorts(serverDeployments.map((dep) => dep.id)),
+	]);
 
 	return buildExpectedContainersFromRows({
 		deployments: serverDeployments,
 		services: activeServices,
+		revisions,
 		deploymentPorts: depPorts,
-		secrets: serviceSecrets,
-		volumes,
 	});
 }
 
@@ -257,25 +274,27 @@ async function fetchDeploymentPorts(deploymentIds: string[]) {
 		.select({
 			deploymentId: deploymentPorts.deploymentId,
 			hostPort: deploymentPorts.hostPort,
-			containerPort: servicePorts.port,
+			containerPort: deploymentPorts.containerPort,
 		})
 		.from(deploymentPorts)
-		.innerJoin(servicePorts, eq(deploymentPorts.servicePortId, servicePorts.id))
-		.where(inArray(deploymentPorts.deploymentId, deploymentIds));
+		.where(inArray(deploymentPorts.deploymentId, deploymentIds))
+		.orderBy(
+			deploymentPorts.deploymentId,
+			deploymentPorts.containerPort,
+			deploymentPorts.hostPort,
+		);
 }
 
 export function buildExpectedContainersFromRows({
 	deployments: deploymentRows,
 	services: serviceRows,
+	revisions: revisionRows,
 	deploymentPorts: deploymentPortRows,
-	secrets: secretRows,
-	volumes: volumeRows,
 }: {
 	deployments: Deployment[];
 	services: Service[];
+	revisions: ServiceRevision[];
 	deploymentPorts: DeploymentPortRow[];
-	secrets: SecretRow[];
-	volumes: VolumeRow[];
 }): ExpectedContainer[] {
 	const servicesById = new Map(
 		serviceRows.map((service) => [service.id, service]),
@@ -284,16 +303,61 @@ export function buildExpectedContainersFromRows({
 		deploymentPortRows,
 		(port) => port.deploymentId,
 	);
-	const secretsByServiceId = groupBy(secretRows, (secret) => secret.serviceId);
-	const volumesByServiceId = groupBy(volumeRows, (volume) => volume.serviceId);
+	const revisionsById = new Map(
+		revisionRows.map((revision) => [revision.id, revision]),
+	);
 
 	return deploymentRows
 		.slice()
 		.sort((a, b) => a.id.localeCompare(b.id))
 		.flatMap((dep) => {
 			const service = servicesById.get(dep.serviceId);
-			if (!service) return [];
-
+			const revision = revisionsById.get(dep.serviceRevisionId);
+			if (!service) {
+				console.error(
+					`[expected-state] deployment ${dep.id} omitted because its service is deleted`,
+				);
+				return [];
+			}
+			if (!revision) {
+				throw new Error(`Deployment ${dep.id} has no service revision`);
+			}
+			if (
+				revision.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION
+			) {
+				throw new Error(
+					`Deployment ${dep.id} uses an unsupported service revision`,
+				);
+			}
+			const specification = revision.specification;
+			const ports = (portsByDeploymentId.get(dep.id) ?? [])
+				.slice()
+				.sort(
+					(a, b) =>
+						a.containerPort - b.containerPort || a.hostPort - b.hostPort,
+				)
+				.map((port) => ({
+					containerPort: port.containerPort,
+					hostPort: port.hostPort,
+				}));
+			const expectedContainerPorts = specification.ports
+				.map((port) => port.containerPort)
+				.sort((a, b) => a - b);
+			const allocatedContainerPorts = ports.map((port) => port.containerPort);
+			if (
+				JSON.stringify(expectedContainerPorts) !==
+				JSON.stringify(allocatedContainerPorts)
+			) {
+				throw new Error(`Deployment ${dep.id} has incomplete port allocation`);
+			}
+			const env = buildEnv(specification.secrets);
+			const volumes = specification.volumes
+				.slice()
+				.sort((a, b) => a.containerPath.localeCompare(b.containerPath))
+				.map((volume) => ({
+					name: volume.name,
+					containerPath: volume.containerPath,
+				}));
 			return [
 				{
 					deploymentId: dep.id,
@@ -302,28 +366,16 @@ export function buildExpectedContainersFromRows({
 					name: `${dep.serviceId}-${dep.id.slice(0, 8)}`,
 					desiredState:
 						dep.runtimeDesiredState === "stopped" ? "stopped" : "running",
-					image: normalizeImage(service.image),
+					image: normalizeImage(specification.image),
 					ipAddress: dep.ipAddress,
-					ports: (portsByDeploymentId.get(dep.id) ?? [])
-						.slice()
-						.sort((a, b) => a.containerPort - b.containerPort)
-						.map((p) => ({
-							containerPort: p.containerPort,
-							hostPort: p.hostPort,
-						})),
-					publishLocalPorts: isDeployedServerlessService(service),
-					env: buildEnv(secretsByServiceId.get(dep.serviceId) ?? []),
-					startCommand: service.startCommand || null,
-					healthCheck: buildHealthCheck(service),
-					volumes: (volumesByServiceId.get(dep.serviceId) ?? [])
-						.slice()
-						.sort((a, b) => a.containerPath.localeCompare(b.containerPath))
-						.map((v) => ({
-							name: v.name,
-							containerPath: v.containerPath,
-						})),
-					resourceCpuLimit: service.resourceCpuLimit,
-					resourceMemoryLimitMb: service.resourceMemoryLimitMb,
+					ports,
+					publishLocalPorts: specification.serverless.enabled,
+					env,
+					startCommand: specification.startCommand,
+					healthCheck: specification.healthCheck,
+					volumes,
+					resourceCpuLimit: specification.resourceLimits.cpuCores,
+					resourceMemoryLimitMb: specification.resourceLimits.memoryMb,
 				},
 			];
 		});
@@ -331,42 +383,39 @@ export function buildExpectedContainersFromRows({
 
 async function buildServerlessExpectedState(
 	server: Server,
-	allServices: Service[],
+	allServices: RuntimeServiceRevision[],
 	containers: ExpectedContainer[],
 ): Promise<{ routes: ServerlessRoute[] }> {
 	if (!server.isProxy) {
 		return { routes: [] };
 	}
 
-	const serverlessServices = allServices.filter(isDeployedServerlessService);
+	const serverlessServices = allServices.filter(
+		(service) => service.specification.serverless.enabled,
+	);
 	if (serverlessServices.length === 0) return { routes: [] };
 
 	const serviceIds = serverlessServices.map((service) => service.id);
-	const [ports, deploymentRows] = await Promise.all([
-		db
-			.select()
-			.from(servicePorts)
-			.where(inArray(servicePorts.serviceId, serviceIds)),
-		db
-			.select({
-				id: deployments.id,
-				serviceId: deployments.serviceId,
-				serverId: deployments.serverId,
-				ipAddress: deployments.ipAddress,
-				runtimeDesiredState: deployments.runtimeDesiredState,
-				trafficState: deployments.trafficState,
-				observedPhase: deployments.observedPhase,
-				serverIsProxy: servers.isProxy,
-			})
-			.from(deployments)
-			.innerJoin(servers, eq(deployments.serverId, servers.id))
-			.where(
-				and(
-					inArray(deployments.serviceId, serviceIds),
-					inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
-				),
+	const deploymentRows = await db
+		.select({
+			id: deployments.id,
+			serviceId: deployments.serviceId,
+			serverId: deployments.serverId,
+			ipAddress: deployments.ipAddress,
+			runtimeDesiredState: deployments.runtimeDesiredState,
+			trafficState: deployments.trafficState,
+			observedPhase: deployments.observedPhase,
+			serverIsProxy: servers.isProxy,
+		})
+		.from(deployments)
+		.innerJoin(servers, eq(deployments.serverId, servers.id))
+		.where(
+			and(
+				inArray(deployments.serviceId, serviceIds),
+				inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
 			),
-	]);
+		);
+	const ports = buildRuntimeRoutePorts(serverlessServices);
 
 	return {
 		routes: buildServerlessRoutesFromRows({
@@ -387,7 +436,7 @@ export function buildServerlessRoutesFromRows({
 	containers,
 }: {
 	serverId: string;
-	services: Service[];
+	services: RuntimeServiceRevision[];
 	ports: RouteServicePort[];
 	deployments: ServerlessDeploymentRow[];
 	containers: ExpectedContainer[];
@@ -403,10 +452,10 @@ export function buildServerlessRoutesFromRows({
 
 	return serviceRows
 		.flatMap((service) =>
-			getRuntimeServicePortsForRoutes(
+			(portsByServiceId.get(service.id) ?? []).map((port) => ({
 				service,
-				portsByServiceId.get(service.id) ?? [],
-			).map((port) => ({ service, port })),
+				port,
+			})),
 		)
 		.sort((a, b) => compareServicePorts(a.port, b.port))
 		.flatMap(({ service, port }) => {
@@ -451,10 +500,9 @@ export function buildServerlessRoutesFromRows({
 					serviceId: service.id,
 					domain: port.domain,
 					port: port.port,
-					sleepAfterSeconds:
-						getDeployedServerlessConfig(service).sleepAfterSeconds,
+					sleepAfterSeconds: service.specification.serverless.sleepAfterSeconds,
 					wakeTimeoutSeconds:
-						getDeployedServerlessConfig(service).wakeTimeoutSeconds,
+						service.specification.serverless.wakeTimeoutSeconds,
 					localDeploymentIds,
 					upstreams,
 				},
@@ -462,7 +510,7 @@ export function buildServerlessRoutesFromRows({
 		});
 }
 
-async function buildDnsRecords(allServices: Service[]) {
+async function buildDnsRecords(allServices: RuntimeServiceRevision[]) {
 	const serviceIds = allServices.map((service) => service.id);
 	if (serviceIds.length === 0) return [];
 
@@ -495,25 +543,21 @@ async function buildDnsRecords(allServices: Service[]) {
 
 			if (ips.length === 0) return [];
 
-			const hostname = service.hostname || slugify(service.name);
-			return [{ name: `${hostname}.internal`, ips }];
+			return [{ name: `${service.specification.hostname}.internal`, ips }];
 		})
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function buildTraefikConfig(server: Server, allServices: Service[]) {
+async function buildTraefikConfig(
+	server: Server,
+	allServices: RuntimeServiceRevision[],
+) {
 	const emptyConfig = { httpRoutes: [], tcpRoutes: [], udpRoutes: [] };
 	if (!server.isProxy) return emptyConfig;
 
 	const serviceIds = allServices.map((service) => service.id);
-	const [ports, routableDeployments, proxyHostedServerlessDeployments] =
+	const [routableDeployments, proxyHostedServerlessDeployments] =
 		await Promise.all([
-			serviceIds.length > 0
-				? db
-						.select()
-						.from(servicePorts)
-						.where(inArray(servicePorts.serviceId, serviceIds))
-				: Promise.resolve([]),
 			serviceIds.length > 0
 				? db
 						.select({
@@ -556,7 +600,7 @@ async function buildTraefikConfig(server: Server, allServices: Service[]) {
 			proxyHostedServerlessDeployments,
 		});
 
-	const routePorts = buildRuntimeRoutePorts(allServices, ports);
+	const routePorts = buildRuntimeRoutePorts(allServices);
 	const routes = buildTraefikRoutes({
 		serverId: server.id,
 		ports: routePorts,
@@ -687,7 +731,7 @@ export function buildServerlessTraefikRouteSets({
 	proxyHostedServerlessDeployments,
 }: {
 	serverId: string;
-	services: Service[];
+	services: RuntimeServiceRevision[];
 	proxyHostedServerlessDeployments: ProxyHostedServerlessDeploymentRow[];
 }) {
 	const proxyHostedServerlessServiceIds = new Set(
@@ -702,7 +746,7 @@ export function buildServerlessTraefikRouteSets({
 		serviceRows
 			.filter(
 				(service) =>
-					isDeployedServerlessService(service) &&
+					service.specification.serverless.enabled &&
 					proxyHostedServerlessServiceIds.has(service.id),
 			)
 			.map((service) => service.id),
@@ -732,19 +776,7 @@ export function buildTraefikCertificateDomains(ports: RouteServicePort[]) {
 	).sort();
 }
 
-function buildHealthCheck(service: Service): ExpectedContainer["healthCheck"] {
-	if (!service.healthCheckCmd) return null;
-
-	return {
-		cmd: service.healthCheckCmd,
-		interval: service.healthCheckInterval ?? 10,
-		timeout: service.healthCheckTimeout ?? 5,
-		retries: service.healthCheckRetries ?? 3,
-		startPeriod: service.healthCheckStartPeriod ?? 30,
-	};
-}
-
-function buildEnv(secretRows: SecretRow[]) {
+function buildEnv(secretRows: ServiceRevisionSecret[]) {
 	const env: Record<string, string> = {};
 	for (const secret of secretRows
 		.slice()
@@ -796,44 +828,20 @@ function groupBy<T, K>(items: T[], keyFn: (item: T) => K) {
 }
 
 export function buildRuntimeRoutePorts(
-	serviceRows: Service[],
-	portRows: ServicePort[],
+	serviceRows: RuntimeServiceRevision[],
 ): RouteServicePort[] {
-	const portsByServiceId = groupBy(portRows, (port) => port.serviceId);
 	return serviceRows.flatMap((service) =>
-		getRuntimeServicePortsForRoutes(
-			service,
-			portsByServiceId.get(service.id) ?? [],
-		),
-	);
-}
-
-function getRuntimeServicePortsForRoutes(
-	service: Service,
-	livePorts: RouteServicePort[],
-): RouteServicePort[] {
-	const ports = isDeployedServerlessService(service)
-		? getDeployedServicePorts(service, livePorts)
-		: livePorts;
-	return ports.map((port, index) => {
-		const routePort = port as Partial<RouteServicePort>;
-		return {
-			id:
-				typeof routePort.id === "string"
-					? routePort.id
-					: `${service.id}:deployed:${index}`,
+		service.specification.ports.map((port, index) => ({
+			id: `${service.revisionId}:${index}`,
 			serviceId: service.id,
-			port: port.port,
+			port: port.containerPort,
 			isPublic: port.isPublic,
 			domain: port.domain,
-			protocol: port.protocol ?? "http",
-			externalPort:
-				typeof routePort.externalPort === "number"
-					? routePort.externalPort
-					: null,
-			tlsPassthrough: routePort.tlsPassthrough ?? false,
-		};
-	});
+			protocol: port.protocol,
+			externalPort: port.externalPort,
+			tlsPassthrough: port.tlsPassthrough,
+		})),
+	);
 }
 
 function compareServicePorts(a: RouteServicePort, b: RouteServicePort) {

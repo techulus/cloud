@@ -1,3 +1,5 @@
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
+
 export type ReplicaConfig = {
 	serverId: string;
 	serverName: string;
@@ -399,8 +401,8 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedCpu = deployed.resourceLimits?.cpuCores;
-	const currentCpu = current.resourceLimits?.cpuCores;
+	const deployedCpu = deployed.resourceLimits?.cpuCores ?? null;
+	const currentCpu = current.resourceLimits?.cpuCores ?? null;
 	if (deployedCpu !== currentCpu) {
 		changes.push({
 			field: "CPU limit",
@@ -409,8 +411,8 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedMemory = deployed.resourceLimits?.memoryMb;
-	const currentMemory = current.resourceLimits?.memoryMb;
+	const deployedMemory = deployed.resourceLimits?.memoryMb ?? null;
+	const currentMemory = current.resourceLimits?.memoryMb ?? null;
 	if (deployedMemory !== currentMemory) {
 		changes.push({
 			field: "Memory limit",
@@ -537,17 +539,6 @@ export function diffConfigs(
 	return changes;
 }
 
-export function parseDeployedConfig(
-	json: string | null,
-): DeployedConfig | null {
-	if (!json) return null;
-	try {
-		return JSON.parse(json) as DeployedConfig;
-	} catch {
-		return null;
-	}
-}
-
 export function normalizeServerlessConfig(
 	config: ServerlessConfig | undefined,
 ): ServerlessConfig {
@@ -580,49 +571,43 @@ export function getCurrentServerlessConfig(service: {
 	};
 }
 
-export function getDeployedServerlessConfig(service: {
-	deployedConfig?: string | null;
-	serverlessEnabled?: boolean | null;
-	serverlessSleepAfterSeconds?: number | null;
-	serverlessWakeTimeoutSeconds?: number | null;
-}): ServerlessConfig {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	return deployed?.serverless
-		? normalizeServerlessConfig(deployed.serverless)
-		: getCurrentServerlessConfig(service);
-}
-
-export function getDeployedStateful(service: {
-	deployedConfig?: string | null;
-	stateful?: boolean | null;
-}) {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	return deployed?.stateful ?? service.stateful ?? false;
-}
-
-export function isDeployedServerlessService(service: {
-	deployedConfig?: string | null;
-	stateful?: boolean | null;
-	serverlessEnabled?: boolean | null;
-	serverlessSleepAfterSeconds?: number | null;
-	serverlessWakeTimeoutSeconds?: number | null;
-}) {
-	return getDeployedServerlessConfig(service).enabled;
-}
-
-export function getDeployedServicePorts(
-	service: { id: string; deployedConfig?: string | null },
-	livePorts: PortConfig[],
-): PortConfig[] {
-	const deployed = parseDeployedConfig(service.deployedConfig ?? null);
-	if (!deployed?.ports) {
-		return livePorts;
-	}
-	return deployed.ports.map((port) => ({
-		port: port.port,
-		isPublic: port.isPublic,
-		domain: port.domain,
-		protocol: port.protocol ?? "http",
-		tlsPassthrough: port.tlsPassthrough,
-	}));
+export function revisionSpecToDeployedConfig(
+	specification: ServiceRevisionSpec,
+	serverNames: Record<string, string>,
+): DeployedConfig {
+	return {
+		source: { type: "image", image: specification.image },
+		hostname: specification.hostname,
+		stateful: specification.stateful,
+		placement: {
+			replicas: specification.placements.reduce(
+				(sum, placement) => sum + placement.count,
+				0,
+			),
+		},
+		replicas: specification.placements.map((placement) => ({
+			serverId: placement.serverId,
+			serverName: serverNames[placement.serverId] ?? "Unknown",
+			count: placement.count,
+		})),
+		healthCheck: specification.healthCheck,
+		startCommand: specification.startCommand,
+		resourceLimits: {
+			cpuCores: specification.resourceLimits.cpuCores,
+			memoryMb: specification.resourceLimits.memoryMb,
+		},
+		ports: specification.ports.map((port) => ({
+			port: port.containerPort,
+			isPublic: port.isPublic,
+			domain: port.domain,
+			protocol: port.protocol,
+			tlsPassthrough: port.tlsPassthrough,
+		})),
+		serverless: specification.serverless,
+		secrets: specification.secrets.map((secret) => ({
+			key: secret.key,
+			updatedAt: secret.updatedAt,
+		})),
+		volumes: specification.volumes,
+	};
 }

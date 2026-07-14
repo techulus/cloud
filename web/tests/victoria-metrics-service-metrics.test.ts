@@ -41,6 +41,8 @@ describe("VictoriaMetrics service metrics", () => {
 			windowEnd: "2026-07-02T01:00:00.000Z",
 			stepSeconds: 60,
 			totalRequests: 0,
+			totalIngressBytes: null,
+			totalEgressBytes: null,
 			statusCodes: [],
 			buckets: [],
 		});
@@ -52,13 +54,26 @@ describe("VictoriaMetrics service metrics", () => {
 
 		const queries: string[] = [];
 		const starts: string[] = [];
+		const instantTimes: string[] = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request) => {
 			const url = new URL(String(input));
 			const query = url.searchParams.get("query") || "";
 			queries.push(query);
-			starts.push(url.searchParams.get("start") || "");
+			if (url.pathname === "/api/v1/query_range") {
+				starts.push(url.searchParams.get("start") || "");
+			}
 
-			expect(url.pathname).toBe("/api/v1/query_range");
+			expect(["/api/v1/query", "/api/v1/query_range"]).toContain(url.pathname);
+
+			if (url.pathname === "/api/v1/query") {
+				instantTimes.push(url.searchParams.get("time") || "");
+				if (query.includes("traefik_service_requests_bytes_total")) {
+					return instantJsonResponse("460");
+				}
+				if (query.includes("traefik_service_responses_bytes_total")) {
+					return instantJsonResponse("683051");
+				}
+			}
 
 			if (query.includes("traefik_service_requests_total")) {
 				return jsonResponse([
@@ -91,6 +106,9 @@ describe("VictoriaMetrics service metrics", () => {
 			if (query.includes("histogram_quantile(0.95")) {
 				return jsonResponse([{ metric: {}, values: [[END_TS, "0.123"]] }]);
 			}
+			if (query.includes("traefik_service_requests_bytes_total")) {
+				return jsonResponse([{ metric: {}, values: [[END_TS, "512"]] }]);
+			}
 			if (query.includes("traefik_service_responses_bytes_total")) {
 				return jsonResponse([{ metric: {}, values: [[END_TS, "2048"]] }]);
 			}
@@ -108,7 +126,8 @@ describe("VictoriaMetrics service metrics", () => {
 			now: new Date("2026-07-02T12:34:00Z"),
 		});
 
-		expect(fetchMock).toHaveBeenCalledTimes(10);
+		expect(fetchMock).toHaveBeenCalledTimes(12);
+		expect(instantTimes).toEqual([String(END_TS), String(END_TS)]);
 		expect(queries.some((query) => query.includes("LogSQL"))).toBe(false);
 		expect(queries).toContain(
 			`sum by (code) (increase(traefik_service_requests_total{service=~"^${SERVICE_ID}(@file)?$"}[5m]))`,
@@ -119,10 +138,18 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(queries).toContain(
 			`sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${SERVICE_ID}"}[5m]))`,
 		);
+		expect(queries).toContain(
+			`sum(increase(traefik_service_requests_bytes_total{service=~"^${SERVICE_ID}(@file)?$"}[1d]))`,
+		);
+		expect(queries).toContain(
+			`sum(increase(traefik_service_responses_bytes_total{service=~"^${SERVICE_ID}(@file)?$"}[1d]))`,
+		);
 		expect(
 			starts.every((start) => start === String(END_TS - 24 * 60 * 60 + 5 * 60)),
 		).toBe(true);
 		expect(stats.totalRequests).toBe(21);
+		expect(stats.totalIngressBytes).toBe(460);
+		expect(stats.totalEgressBytes).toBe(683051);
 		expect(stats.statusCodes).toEqual(["2xx", "3xx", "4xx", "5xx"]);
 		expect(stats.buckets).toHaveLength(288);
 		expect(stats.windowEnd).toBe("2026-07-02T12:30:00.000Z");
@@ -133,9 +160,37 @@ describe("VictoriaMetrics service metrics", () => {
 			totalRequests: 21,
 			statuses: { "2xx": 5, "3xx": 1, "4xx": 4, "5xx": 11 },
 			p95ResponseTimeMs: 123,
+			ingressBytesPerSecond: 512,
 			egressBytesPerSecond: 2048,
 			cpuUsagePercent: 42,
 		});
+	});
+
+	it("keeps service metrics available when traffic total queries fail", async () => {
+		vi.stubEnv("VICTORIA_METRICS_URL", "http://victoria.test");
+		vi.stubEnv("VICTORIA_METRICS_PRIVATE_URL", "");
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/v1/query") {
+					return new Response("Unavailable", { status: 503 });
+				}
+				return jsonResponse([]);
+			}),
+		);
+
+		const stats = await queryServiceMetrics({
+			serviceId: SERVICE_ID,
+			range: "1h",
+			now: new Date("2026-07-02T12:34:00Z"),
+		});
+
+		expect(stats.metricsEnabled).toBe(true);
+		expect(stats.totalIngressBytes).toBeNull();
+		expect(stats.totalEgressBytes).toBeNull();
+		expect(stats.buckets).toHaveLength(60);
 	});
 });
 
@@ -144,6 +199,15 @@ function jsonResponse(result: unknown[]) {
 		JSON.stringify({
 			status: "success",
 			data: { result },
+		}),
+	);
+}
+
+function instantJsonResponse(value: string) {
+	return new Response(
+		JSON.stringify({
+			status: "success",
+			data: { result: [{ metric: {}, value: [END_TS, value] }] },
 		}),
 	);
 }

@@ -7,11 +7,7 @@ import useSWR from "swr";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 import type { ConfigChange } from "@/lib/service-config";
-import {
-	buildCurrentConfig,
-	diffConfigs,
-	parseDeployedConfig,
-} from "@/lib/service-config";
+import { buildCurrentConfig, diffConfigs } from "@/lib/service-config";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_BUILD_STATUSES = [
@@ -77,7 +73,7 @@ export function ServiceLayoutClient({
 	const pendingChanges = useMemo(() => {
 		if (!service) return [];
 
-		const deployed = parseDeployedConfig(service.deployedConfig);
+		const deployed = service.activeConfig ?? null;
 		const replicas = (service.configuredReplicas || []).map((r) => ({
 			serverId: r.serverId,
 			serverName: r.serverName,
@@ -132,6 +128,7 @@ export function ServiceLayoutClient({
 	const isConstrainedTab =
 		pathname.includes("/metrics") ||
 		pathname.includes("/configuration") ||
+		pathname.includes("/changelog") ||
 		pathname.includes("/builds") ||
 		pathname.includes("/backups");
 
@@ -151,6 +148,7 @@ export function ServiceLayoutClient({
 		...(service?.stateful
 			? [{ name: "Backups", href: `${basePath}/backups` }]
 			: []),
+		{ name: "Changes", href: `${basePath}/changelog` },
 	];
 
 	const isActiveTab = (href: string) => {
