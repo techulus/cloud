@@ -1,17 +1,16 @@
 "use client";
 
+import { LogOut, Settings, User } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { LogOut, Settings, User } from "lucide-react";
 import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
 import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
 import { OfflineServersBanner } from "@/components/server/offline-servers-banner";
-import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -24,13 +23,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { signOut, useSession } from "@/lib/auth-client";
 
-function DashboardHeader({
-	email,
-	name,
-}: {
-	email: string;
-	name: string;
-}) {
+function DashboardHeader({ email, name }: { email: string; name: string }) {
 	const router = useRouter();
 	const breadcrumbs = useBreadcrumbs();
 	const getBreadcrumbKey = (
@@ -43,8 +36,8 @@ function DashboardHeader({
 	const showEllipsis = breadcrumbs.length > 2;
 
 	return (
-		<header className="border-b">
-			<div className="container max-w-full mx-auto px-4 h-14 flex items-center justify-between">
+		<header className="h-14 border-b">
+			<div className="container max-w-full mx-auto px-4 h-full flex items-center justify-between">
 				<div className="flex items-center gap-3">
 					<Link href="/dashboard" className="flex items-center">
 						<Image
@@ -119,11 +112,7 @@ function DashboardHeader({
 					>
 						<User className="size-4" />
 					</DropdownMenuTrigger>
-					<DropdownMenuContent
-						align="end"
-						sideOffset={8}
-						className="w-40"
-					>
+					<DropdownMenuContent align="end" sideOffset={8} className="w-40">
 						<DropdownMenuGroup>
 							<DropdownMenuLabel>
 								<span className="block truncate text-sm font-semibold">
@@ -183,10 +172,7 @@ export function DashboardLayoutClient({
 	return (
 		<BreadcrumbDataProvider>
 			<div className="min-h-screen">
-				<DashboardHeader
-					email={session.user.email}
-					name={session.user.name}
-				/>
+				<DashboardHeader email={session.user.email} name={session.user.name} />
 				<OfflineServersBanner />
 				<main>{children}</main>
 				<Toaster />

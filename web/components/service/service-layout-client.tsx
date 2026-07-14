@@ -128,6 +128,7 @@ export function ServiceLayoutClient({
 	const isConstrainedTab =
 		pathname.includes("/metrics") ||
 		pathname.includes("/configuration") ||
+		pathname.includes("/changelog") ||
 		pathname.includes("/builds") ||
 		pathname.includes("/backups");
 
@@ -147,6 +148,7 @@ export function ServiceLayoutClient({
 		...(service?.stateful
 			? [{ name: "Backups", href: `${basePath}/backups` }]
 			: []),
+		{ name: "Changes", href: `${basePath}/changelog` },
 	];
 
 	const isActiveTab = (href: string) => {

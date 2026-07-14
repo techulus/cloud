@@ -265,7 +265,6 @@ export function BuildDetails({
 
 				<Item variant="outline">
 					<ItemContent>
-						<ItemTitle>Timing</ItemTitle>
 						<ItemDescription as="div" className="space-y-1">
 							<div className="flex justify-between">
 								<span>Created</span>

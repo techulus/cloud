@@ -316,7 +316,7 @@ export function ServiceMetricsPanel({
 							margin={{
 								top: 8,
 								right: fixedMode ? 48 : 4,
-								left: fixedMode ? 0 : getYAxisMargin(chartMode),
+								left: 0,
 								bottom: 0,
 							}}
 						>
@@ -338,6 +338,7 @@ export function ServiceMetricsPanel({
 								className="text-xs"
 							/>
 							<YAxis
+								width={64}
 								tickLine={false}
 								axisLine={false}
 								tickFormatter={(value) =>
@@ -1255,13 +1256,6 @@ function formatRateTick(value: number): string {
 	if (value >= 100) return value.toFixed(0);
 	if (value >= 10) return value.toFixed(0);
 	return value.toFixed(1);
-}
-
-function getYAxisMargin(mode: ServiceChartMode): number {
-	if (mode === "traffic") return -4;
-	if (mode === "latency") return -12;
-	if (mode === "resources") return -24;
-	return -20;
 }
 
 function formatRequestCount(value: number): string {
