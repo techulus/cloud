@@ -66,6 +66,15 @@ describe("service config", () => {
 		]);
 	});
 
+	it("does not report null and omitted resource limits as pending", () => {
+		const deployed = deployedConfig({
+			resourceLimits: { cpuCores: null, memoryMb: null },
+		});
+		const current = deployedConfig();
+
+		expect(diffConfigs(deployed, current)).toEqual([]);
+	});
+
 	it("reports serverless changes as pending config", () => {
 		const changes = diffConfigs(deployedConfig(), {
 			source: { type: "image", image: "nginx" },

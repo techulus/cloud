@@ -569,6 +569,11 @@ export const serviceRevisions = pgTable(
 			table.serviceId,
 		),
 		index("service_revisions_service_id_idx").on(table.serviceId),
+		index("service_revisions_service_created_id_idx").on(
+			table.serviceId,
+			table.createdAt,
+			table.id,
+		),
 	],
 );
 

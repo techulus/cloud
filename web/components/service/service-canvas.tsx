@@ -856,7 +856,7 @@ export function ServiceCanvas({
 					<div className="absolute top-4 right-4">
 						<AddServiceMenu {...menuCallbacks} />
 					</div>
-					<div className="flex min-h-full items-center justify-center px-10 py-24">
+					<div className="flex min-h-full items-center justify-center px-10 py-6">
 						<div
 							className="relative"
 							style={{

@@ -401,8 +401,8 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedCpu = deployed.resourceLimits?.cpuCores;
-	const currentCpu = current.resourceLimits?.cpuCores;
+	const deployedCpu = deployed.resourceLimits?.cpuCores ?? null;
+	const currentCpu = current.resourceLimits?.cpuCores ?? null;
 	if (deployedCpu !== currentCpu) {
 		changes.push({
 			field: "CPU limit",
@@ -411,8 +411,8 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedMemory = deployed.resourceLimits?.memoryMb;
-	const currentMemory = current.resourceLimits?.memoryMb;
+	const deployedMemory = deployed.resourceLimits?.memoryMb ?? null;
+	const currentMemory = current.resourceLimits?.memoryMb ?? null;
 	if (deployedMemory !== currentMemory) {
 		changes.push({
 			field: "Memory limit",
