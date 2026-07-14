@@ -96,7 +96,7 @@ export const verification = pgTable(
 );
 
 export const twoFactor = pgTable(
-	"twoFactor",
+	"two_factor",
 	{
 		id: text("id").primaryKey(),
 		secret: text("secret").notNull(),
@@ -117,7 +117,7 @@ export const twoFactor = pgTable(
 );
 
 export const deviceCode = pgTable(
-	"deviceCode",
+	"device_code",
 	{
 		id: text("id").primaryKey(),
 		deviceCode: text("device_code").notNull(),
