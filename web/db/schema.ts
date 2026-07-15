@@ -383,119 +383,144 @@ export const environments = pgTable(
 	],
 );
 
-export const services = pgTable("services", {
-	id: text("id").primaryKey(),
-	projectId: text("project_id")
-		.notNull()
-		.references(() => projects.id, { onDelete: "cascade" }),
-	environmentId: text("environment_id")
-		.notNull()
-		.references(() => environments.id, { onDelete: "cascade" }),
-	name: text("name").notNull(),
-	hostname: text("hostname").unique(),
-	image: text("image").notNull(),
-	sourceType: text("source_type", { enum: ["image", "github"] })
-		.notNull()
-		.default("image"),
-	githubRepoUrl: text("github_repo_url"),
-	githubBranch: text("github_branch").default("main"),
-	githubRootDir: text("github_root_dir"),
-	replicas: integer("replicas").notNull().default(1),
-	stateful: boolean("stateful").notNull().default(false),
-	lockedServerId: text("locked_server_id").references(() => servers.id, {
-		onDelete: "set null",
-	}),
-	healthCheckCmd: text("health_check_cmd"),
-	healthCheckInterval: integer("health_check_interval").default(10),
-	healthCheckTimeout: integer("health_check_timeout").default(5),
-	healthCheckRetries: integer("health_check_retries").default(3),
-	healthCheckStartPeriod: integer("health_check_start_period").default(30),
-	startCommand: text("start_command"),
-	resourceCpuLimit: real("resource_cpu_limit"),
-	resourceMemoryLimitMb: integer("resource_memory_limit_mb"),
-	serverlessEnabled: boolean("serverless_enabled").notNull().default(false),
-	serverlessSleepAfterSeconds: integer("serverless_sleep_after_seconds")
-		.notNull()
-		.default(300),
-	serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
-		.notNull()
-		.default(300),
-	deploymentSchedule: text("deployment_schedule"),
-	lastScheduledDeploymentRunAt: timestamp("last_scheduled_deployment_run_at", {
-		withTimezone: true,
-	}),
-	backupEnabled: boolean("backup_enabled").default(false),
-	backupSchedule: text("backup_schedule"),
-	deletedAt: timestamp("deleted_at", { withTimezone: true }),
-	purgeAfter: timestamp("purge_after", { withTimezone: true }),
-	originalHostname: text("original_hostname"),
-	deletionStatus: text("deletion_status", {
-		enum: ["backing_up", "deleting", "restoring", "failed"],
-	}),
-	deletionError: text("deletion_error"),
-	canvasX: integer("canvas_x"),
-	canvasY: integer("canvas_y"),
-	migrationStatus: text("migration_status", {
-		enum: [
-			"stopping",
-			"backing_up",
-			"deploying_target",
-			"restoring",
-			"starting",
-			"failed",
-		],
-	}),
-	migrationTargetServerId: text("migration_target_server_id").references(
-		() => servers.id,
-		{ onDelete: "set null" },
-	),
-	migrationBackupId: text("migration_backup_id"),
-	migrationError: text("migration_error"),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const services = pgTable(
+	"services",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		environmentId: text("environment_id")
+			.notNull()
+			.references(() => environments.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		hostname: text("hostname").unique(),
+		image: text("image").notNull(),
+		sourceType: text("source_type", { enum: ["image", "github"] })
+			.notNull()
+			.default("image"),
+		githubRepoUrl: text("github_repo_url"),
+		githubBranch: text("github_branch").default("main"),
+		githubRootDir: text("github_root_dir"),
+		replicas: integer("replicas").notNull().default(1),
+		stateful: boolean("stateful").notNull().default(false),
+		lockedServerId: text("locked_server_id").references(() => servers.id, {
+			onDelete: "set null",
+		}),
+		healthCheckCmd: text("health_check_cmd"),
+		healthCheckInterval: integer("health_check_interval").default(10),
+		healthCheckTimeout: integer("health_check_timeout").default(5),
+		healthCheckRetries: integer("health_check_retries").default(3),
+		healthCheckStartPeriod: integer("health_check_start_period").default(30),
+		startCommand: text("start_command"),
+		resourceCpuLimit: real("resource_cpu_limit"),
+		resourceMemoryLimitMb: integer("resource_memory_limit_mb"),
+		serverlessEnabled: boolean("serverless_enabled").notNull().default(false),
+		serverlessSleepAfterSeconds: integer("serverless_sleep_after_seconds")
+			.notNull()
+			.default(300),
+		serverlessWakeTimeoutSeconds: integer("serverless_wake_timeout_seconds")
+			.notNull()
+			.default(300),
+		deploymentSchedule: text("deployment_schedule"),
+		lastScheduledDeploymentRunAt: timestamp(
+			"last_scheduled_deployment_run_at",
+			{
+				withTimezone: true,
+			},
+		),
+		backupEnabled: boolean("backup_enabled").default(false),
+		backupSchedule: text("backup_schedule"),
+		deletedAt: timestamp("deleted_at", { withTimezone: true }),
+		purgeAfter: timestamp("purge_after", { withTimezone: true }),
+		originalHostname: text("original_hostname"),
+		deletionStatus: text("deletion_status", {
+			enum: ["backing_up", "deleting", "restoring", "failed"],
+		}),
+		deletionError: text("deletion_error"),
+		canvasX: integer("canvas_x"),
+		canvasY: integer("canvas_y"),
+		migrationStatus: text("migration_status", {
+			enum: [
+				"stopping",
+				"backing_up",
+				"deploying_target",
+				"restoring",
+				"starting",
+				"failed",
+			],
+		}),
+		migrationTargetServerId: text("migration_target_server_id").references(
+			() => servers.id,
+			{ onDelete: "set null" },
+		),
+		migrationBackupId: text("migration_backup_id"),
+		migrationError: text("migration_error"),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("services_project_environment_idx").on(
+			table.projectId,
+			table.environmentId,
+		),
+		index("services_environment_id_idx").on(table.environmentId),
+	],
+);
 
-export const serviceReplicas = pgTable("service_replicas", {
-	id: text("id").primaryKey(),
-	serviceId: text("service_id")
-		.notNull()
-		.references(() => services.id, { onDelete: "cascade" }),
-	serverId: text("server_id")
-		.notNull()
-		.references(() => servers.id, { onDelete: "cascade" }),
-	count: integer("count").notNull().default(1),
-});
+export const serviceReplicas = pgTable(
+	"service_replicas",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		count: integer("count").notNull().default(1),
+	},
+	(table) => [index("service_replicas_service_id_idx").on(table.serviceId)],
+);
 
-export const servicePorts = pgTable("service_ports", {
-	id: text("id").primaryKey(),
-	serviceId: text("service_id")
-		.notNull()
-		.references(() => services.id, { onDelete: "cascade" }),
-	port: integer("port").notNull(),
-	isPublic: boolean("is_public").notNull().default(false),
-	domain: text("domain").unique(),
-	protocol: text("protocol", { enum: ["http", "tcp", "udp"] })
-		.notNull()
-		.default("http"),
-	externalPort: integer("external_port"),
-	tlsPassthrough: boolean("tls_passthrough").notNull().default(false),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const servicePorts = pgTable(
+	"service_ports",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		port: integer("port").notNull(),
+		isPublic: boolean("is_public").notNull().default(false),
+		domain: text("domain").unique(),
+		protocol: text("protocol", { enum: ["http", "tcp", "udp"] })
+			.notNull()
+			.default("http"),
+		externalPort: integer("external_port"),
+		tlsPassthrough: boolean("tls_passthrough").notNull().default(false),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [index("service_ports_service_id_idx").on(table.serviceId)],
+);
 
-export const serviceVolumes = pgTable("service_volumes", {
-	id: text("id").primaryKey(),
-	serviceId: text("service_id")
-		.notNull()
-		.references(() => services.id, { onDelete: "cascade" }),
-	name: text("name").notNull(),
-	containerPath: text("container_path").notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const serviceVolumes = pgTable(
+	"service_volumes",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		containerPath: text("container_path").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [index("service_volumes_service_id_idx").on(table.serviceId)],
+);
 
 export const volumeBackups = pgTable(
 	"volume_backups",
@@ -528,26 +553,38 @@ export const volumeBackups = pgTable(
 		completedAt: timestamp("completed_at", { withTimezone: true }),
 	},
 	(table) => [
-		index("volume_backups_volume_id_idx").on(table.volumeId),
-		index("volume_backups_service_id_idx").on(table.serviceId),
+		index("volume_backups_volume_status_created_at_idx").on(
+			table.volumeId,
+			table.status,
+			table.createdAt,
+		),
+		index("volume_backups_service_created_at_idx").on(
+			table.serviceId,
+			table.createdAt,
+		),
+		index("volume_backups_server_id_idx").on(table.serverId),
 		index("volume_backups_created_at_idx").on(table.createdAt),
 	],
 );
 
-export const secrets = pgTable("secrets", {
-	id: text("id").primaryKey(),
-	serviceId: text("service_id")
-		.notNull()
-		.references(() => services.id, { onDelete: "cascade" }),
-	key: text("key").notNull(),
-	encryptedValue: text("encrypted_value").notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const secrets = pgTable(
+	"secrets",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		key: text("key").notNull(),
+		encryptedValue: text("encrypted_value").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [index("secrets_service_id_idx").on(table.serviceId)],
+);
 
 export const serviceRevisions = pgTable(
 	"service_revisions",
@@ -568,7 +605,6 @@ export const serviceRevisions = pgTable(
 			table.id,
 			table.serviceId,
 		),
-		index("service_revisions_service_id_idx").on(table.serviceId),
 		index("service_revisions_service_created_id_idx").on(
 			table.serviceId,
 			table.createdAt,
@@ -644,11 +680,6 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
-		index("deployments_runtime_desired_state_idx").on(
-			table.runtimeDesiredState,
-		),
-		index("deployments_traffic_state_idx").on(table.trafficState),
-		index("deployments_observed_phase_idx").on(table.observedPhase),
 		foreignKey({
 			name: "deployments_service_revision_service_fk",
 			columns: [table.serviceRevisionId, table.serviceId],
@@ -677,7 +708,10 @@ export const rollouts = pgTable(
 		completedAt: timestamp("completed_at", { withTimezone: true }),
 	},
 	(table) => [
-		index("rollouts_service_id_idx").on(table.serviceId),
+		index("rollouts_service_created_at_idx").on(
+			table.serviceId,
+			table.createdAt,
+		),
 		index("rollouts_service_revision_id_idx").on(table.serviceRevisionId),
 		foreignKey({
 			name: "rollouts_service_revision_service_fk",
@@ -687,17 +721,23 @@ export const rollouts = pgTable(
 	],
 );
 
-export const deploymentPorts = pgTable("deployment_ports", {
-	id: text("id").primaryKey(),
-	deploymentId: text("deployment_id")
-		.notNull()
-		.references(() => deployments.id, { onDelete: "cascade" }),
-	containerPort: integer("container_port").notNull(),
-	hostPort: integer("host_port").notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const deploymentPorts = pgTable(
+	"deployment_ports",
+	{
+		id: text("id").primaryKey(),
+		deploymentId: text("deployment_id")
+			.notNull()
+			.references(() => deployments.id, { onDelete: "cascade" }),
+		containerPort: integer("container_port").notNull(),
+		hostPort: integer("host_port").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("deployment_ports_deployment_id_idx").on(table.deploymentId),
+	],
+);
 
 export const workQueue = pgTable(
 	"work_queue",
@@ -734,7 +774,11 @@ export const workQueue = pgTable(
 		attempts: integer("attempts").notNull().default(0),
 	},
 	(table) => [
-		index("work_queue_server_status_idx").on(table.serverId, table.status),
+		index("work_queue_server_status_created_at_idx").on(
+			table.serverId,
+			table.status,
+			table.createdAt,
+		),
 		uniqueIndex("work_queue_one_active_agent_upgrade_idx")
 			.on(table.serverId)
 			.where(
@@ -743,20 +787,24 @@ export const workQueue = pgTable(
 	],
 );
 
-export const githubInstallations = pgTable("github_installations", {
-	id: text("id").primaryKey(),
-	installationId: integer("installation_id").notNull().unique(),
-	accountLogin: text("account_login").notNull(),
-	accountType: text("account_type", {
-		enum: ["User", "Organization"],
-	}).notNull(),
-	userId: text("user_id")
-		.notNull()
-		.references(() => user.id, { onDelete: "cascade" }),
-	createdAt: timestamp("created_at", { withTimezone: true })
-		.defaultNow()
-		.notNull(),
-});
+export const githubInstallations = pgTable(
+	"github_installations",
+	{
+		id: text("id").primaryKey(),
+		installationId: integer("installation_id").notNull().unique(),
+		accountLogin: text("account_login").notNull(),
+		accountType: text("account_type", {
+			enum: ["User", "Organization"],
+		}).notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [index("github_installations_user_id_idx").on(table.userId)],
+);
 
 export const githubRepos = pgTable(
 	"github_repos",
@@ -781,7 +829,6 @@ export const githubRepos = pgTable(
 	},
 	(table) => [
 		index("github_repos_installation_id_idx").on(table.installationId),
-		index("github_repos_service_id_idx").on(table.serviceId),
 	],
 );
 
@@ -829,9 +876,10 @@ export const builds = pgTable(
 			.notNull(),
 	},
 	(table) => [
-		index("builds_status_idx").on(table.status),
-		index("builds_service_id_idx").on(table.serviceId),
+		index("builds_service_created_at_idx").on(table.serviceId, table.createdAt),
 		index("builds_github_repo_id_idx").on(table.githubRepoId),
+		index("builds_build_group_id_idx").on(table.buildGroupId),
+		index("builds_claimed_by_idx").on(table.claimedBy),
 	],
 );
 
