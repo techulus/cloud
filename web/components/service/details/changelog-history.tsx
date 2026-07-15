@@ -1,7 +1,6 @@
 "use client";
 
 import {
-	ArrowRight,
 	CheckCircle2,
 	Clock,
 	GitCommitHorizontal,
@@ -12,7 +11,6 @@ import {
 import Link from "next/link";
 import { useMemo } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Empty,
@@ -21,6 +19,7 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { RolloutStatus } from "@/db/types";
 import { formatDateTime, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
@@ -68,23 +67,19 @@ function RolloutBadge({
 		icon: Clock,
 		className: "text-muted-foreground",
 	};
-	const Icon = config.icon;
 
 	return (
-		<Badge
-			variant="outline"
+		<StatusBadge
+			icon={config.icon}
+			label={config.label}
+			isAnimated={rollout.status === "in_progress"}
 			className={config.className}
 			render={
 				<Link
 					href={`/dashboard/projects/${projectSlug}/${envName}/services/${serviceId}/rollouts/${rollout.id}`}
 				/>
 			}
-		>
-			<Icon
-				className={rollout.status === "in_progress" ? "animate-spin" : ""}
-			/>
-			{config.label}
-		</Badge>
+		/>
 	);
 }
 
@@ -127,18 +122,25 @@ function RevisionChanges({ item }: { item: ServiceRevisionChangelogItem }) {
 	}
 
 	return (
-		<div className="divide-y">
+		<div className="space-y-1.5 font-mono text-sm">
 			{item.comparison.changes.map((change) => (
 				<div
 					key={`${change.field}:${change.from}:${change.to}`}
-					className="grid gap-2 py-2.5 text-sm sm:grid-cols-[minmax(8rem,0.65fr)_minmax(0,1.35fr)] sm:gap-4"
+					className="flex items-baseline justify-between gap-4"
 				>
-					<div className="font-medium text-foreground">{change.field}</div>
-					<div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 text-muted-foreground">
-						<span className="break-words">{change.from}</span>
-						<ArrowRight className="size-3.5 shrink-0" />
-						<span className="break-words text-foreground">{change.to}</span>
-					</div>
+					<span className="shrink-0 text-muted-foreground">{change.field}</span>
+					<span className="flex min-w-0 items-baseline justify-end gap-1.5">
+						<span
+							className="truncate text-muted-foreground"
+							title={change.from}
+						>
+							{change.from}
+						</span>
+						<span className="shrink-0 text-muted-foreground">→</span>
+						<span className="truncate font-medium" title={change.to}>
+							{change.to}
+						</span>
+					</span>
 				</div>
 			))}
 		</div>
@@ -219,29 +221,30 @@ export function ChangelogHistory({
 					</EmptyDescription>
 				</Empty>
 			) : (
-				<div className="grid gap-2">
-					{revisions.map((revision) => (
-						<article
-							key={revision.id}
-							className="space-y-3 rounded-lg border p-4"
-						>
-							<div className="flex flex-wrap items-start justify-between gap-2">
-								<div>
-									<div className="font-medium">
+				<div>
+					{revisions.map((revision, index) => (
+						<article key={revision.id} className="relative pb-6 pl-6 last:pb-0">
+							{index < revisions.length - 1 ? (
+								<span className="absolute top-5 -bottom-1 left-[3.5px] w-px bg-border" />
+							) : null}
+							<div className="relative flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+								<span className="-left-6 absolute top-1/2 size-2 -translate-y-1/2 rounded-full bg-muted-foreground/40" />
+								<div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+									<span className="text-sm">
 										{revision.comparison.kind === "initial"
 											? "Initial revision"
 											: revision.comparison.kind === "changes" &&
 													revision.comparison.changes.length === 0
 												? "Redeployed"
 												: "Configuration updated"}
-									</div>
-									<div
+									</span>
+									<span
 										className="text-xs text-muted-foreground"
 										title={formatDateTime(revision.createdAt)}
 									>
 										{formatRelativeTime(revision.createdAt)} ·{" "}
 										{revision.id.slice(0, 8)}
-									</div>
+									</span>
 								</div>
 								{revision.rollout ? (
 									<RolloutBadge
@@ -252,7 +255,9 @@ export function ChangelogHistory({
 									/>
 								) : null}
 							</div>
-							<RevisionChanges item={revision} />
+							<div className="mt-2 rounded-md border px-3 py-2.5">
+								<RevisionChanges item={revision} />
+							</div>
 						</article>
 					))}
 				</div>

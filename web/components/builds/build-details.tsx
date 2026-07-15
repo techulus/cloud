@@ -27,6 +27,7 @@ import {
 	ItemDescription,
 	ItemTitle,
 } from "@/components/ui/item";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
@@ -46,56 +47,47 @@ const STATUS_CONFIG: Record<
 	{
 		icon: typeof CheckCircle2;
 		color: string;
-		bgColor: string;
 		label: string;
 	}
 > = {
 	pending: {
 		icon: Clock,
 		color: "text-slate-500",
-		bgColor: "bg-slate-500/10",
 		label: "Queued",
 	},
 	claimed: {
 		icon: CircleDashed,
 		color: "text-blue-500",
-		bgColor: "bg-blue-500/10",
 		label: "Starting",
 	},
 	cloning: {
 		icon: Loader2,
 		color: "text-blue-500",
-		bgColor: "bg-blue-500/10",
 		label: "Cloning",
 	},
 	building: {
 		icon: Loader2,
 		color: "text-blue-500",
-		bgColor: "bg-blue-500/10",
 		label: "Building",
 	},
 	pushing: {
 		icon: Loader2,
 		color: "text-blue-500",
-		bgColor: "bg-blue-500/10",
 		label: "Pushing",
 	},
 	completed: {
 		icon: CheckCircle2,
 		color: "text-green-500",
-		bgColor: "bg-green-500/10",
 		label: "Completed",
 	},
 	failed: {
 		icon: XCircle,
 		color: "text-red-500",
-		bgColor: "bg-red-500/10",
 		label: "Failed",
 	},
 	cancelled: {
 		icon: AlertCircle,
 		color: "text-slate-500",
-		bgColor: "bg-slate-500/10",
 		label: "Cancelled",
 	},
 };
@@ -128,7 +120,6 @@ export function BuildDetails({
 
 	const build = data?.build || initialBuild;
 	const config = STATUS_CONFIG[build.status];
-	const Icon = config.icon;
 	const isAnimated = ["cloning", "building", "pushing"].includes(build.status);
 
 	const handleCancel = async () => {
@@ -188,12 +179,12 @@ export function BuildDetails({
 				</Button>
 				<div className="flex-1">
 					<div className="flex items-center gap-3">
-						<span
-							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${config.color} ${config.bgColor}`}
-						>
-							<Icon className={`size-4 ${isAnimated ? "animate-spin" : ""}`} />
-							{config.label}
-						</span>
+						<StatusBadge
+							icon={config.icon}
+							label={config.label}
+							isAnimated={isAnimated}
+							className={config.color}
+						/>
 						<code className="font-mono text-sm">
 							{build.commitSha.slice(0, 7)}
 						</code>
