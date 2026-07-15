@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Rocket } from "lucide-react";
+import { Rocket } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { memo, useState } from "react";
 import { useSWRConfig } from "swr";
@@ -72,60 +72,59 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 			}}
 		>
 			<div className="overflow-hidden">
-				<div className="pb-4">
-					<div className="rounded-lg border bg-card p-4">
-						<div className="flex items-start justify-between gap-4">
-							<div className="flex items-start gap-3 min-w-0">
-								<div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-									<AlertTriangle className="size-4" />
-								</div>
-								<div className="min-w-0">
-									<p className="font-medium text-foreground">
-										{hasChanges
-											? `${changes.length} pending change${changes.length !== 1 ? "s" : ""}`
-											: "Ready to deploy"}
-									</p>
-									{hasChanges ? (
-										<div className="mt-2 space-y-1.5">
-											{changes.map((change, index) => (
-												<div
-													key={`${change.field}:${change.from}:${change.to}:${index}`}
-													className="flex items-center gap-2 text-sm"
-												>
-													<span className="font-medium shrink-0 text-muted-foreground">
-														{change.field}:
-													</span>
-													<span className="text-muted-foreground truncate">
-														{change.from}
-													</span>
-													<ArrowRight className="size-3 shrink-0 text-muted-foreground" />
-													<span className="text-foreground truncate">
-														{change.to}
-													</span>
-												</div>
-											))}
-										</div>
-									) : (
-										<p className="text-sm text-muted-foreground mt-1">
-											This service has no active deployments.
-										</p>
-									)}
-								</div>
-							</div>
-							<Button
-								size="sm"
-								onClick={handleDeploy}
-								disabled={isDeploying || totalReplicas === 0}
-							>
-								{isDeploying ? (
-									<Spinner className="size-4" />
-								) : (
-									<Rocket className="size-4" data-icon="inline-start" />
-								)}
-								{isGithubWithNoDeployments ? "Build" : "Deploy"}
-							</Button>
+				<div className="mx-auto max-w-5xl rounded-b-lg border border-amber-500/40 border-t-0 bg-amber-500/5">
+					<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+						<div className="flex items-center gap-2">
+							<span className="size-2 rounded-full bg-amber-500" />
+							<span className="text-sm font-medium">
+								{hasChanges
+									? `${changes.length} pending change${changes.length !== 1 ? "s" : ""}`
+									: "Ready to deploy"}
+							</span>
 						</div>
+						<Button
+							size="sm"
+							onClick={handleDeploy}
+							disabled={isDeploying || totalReplicas === 0}
+						>
+							{isDeploying ? (
+								<Spinner className="size-4" />
+							) : (
+								<Rocket className="size-4" data-icon="inline-start" />
+							)}
+							{isGithubWithNoDeployments ? "Build" : "Deploy"}
+						</Button>
 					</div>
+					{hasChanges ? (
+						<div className="space-y-1.5 border-amber-500/20 border-t px-3 py-2.5 font-mono text-sm">
+							{changes.map((change, index) => (
+								<div
+									key={`${change.field}:${change.from}:${change.to}:${index}`}
+									className="flex items-baseline justify-between gap-4"
+								>
+									<span className="shrink-0 text-muted-foreground">
+										{change.field}
+									</span>
+									<span className="flex min-w-0 items-baseline justify-end gap-1.5">
+										<span
+											className="truncate text-muted-foreground"
+											title={change.from}
+										>
+											{change.from}
+										</span>
+										<span className="shrink-0 text-muted-foreground">→</span>
+										<span className="truncate font-medium" title={change.to}>
+											{change.to}
+										</span>
+									</span>
+								</div>
+							))}
+						</div>
+					) : (
+						<p className="border-amber-500/20 border-t px-3 py-2.5 text-sm text-muted-foreground">
+							This service has no active deployments.
+						</p>
+					)}
 				</div>
 			</div>
 		</div>

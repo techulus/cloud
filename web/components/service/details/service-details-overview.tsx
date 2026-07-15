@@ -440,16 +440,31 @@ function ServiceConfigPanel({
 
 	return (
 		<div className="flex min-w-0 flex-col border-border border-t font-mono lg:border-t-0 lg:border-l">
-			<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2">
-				<div className="flex items-center gap-2">
-					<span className={cn("size-2 rounded-full", statusClasses.dot)} />
-					<span className={cn("font-bold", statusClasses.text)}>
-						{overview.status.label}
+			<div className="space-y-1.5 px-3 py-2.5 text-sm">
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-base">
+					<div className="flex items-center gap-2">
+						<span className={cn("size-2 rounded-full", statusClasses.dot)} />
+						<span className={cn("font-bold", statusClasses.text)}>
+							{overview.status.label}
+						</span>
+					</div>
+					<span className="text-muted-foreground tabular-nums">
+						{formatInstanceSummary(overview)}
 					</span>
 				</div>
-				<span className="text-sm text-muted-foreground tabular-nums">
-					{formatInstanceSummary(overview)}
-				</span>
+				{overview.serverSummaries.length === 0 ? (
+					<p className="text-muted-foreground">No servers configured</p>
+				) : (
+					overview.serverSummaries.map((server) => (
+						<ConfigRow key={server.id} label={server.name}>
+							<span className="tabular-nums">
+								{server.configured > 0
+									? `${server.running}/${server.configured} running`
+									: `${server.running} running`}
+							</span>
+						</ConfigRow>
+					))
+				)}
 			</div>
 
 			<div className="flex-1 divide-y divide-border border-border border-t text-sm">
@@ -457,6 +472,13 @@ function ServiceConfigPanel({
 					<ConfigRow label="Source">
 						<SourcePrimary source={overview.source} />
 					</ConfigRow>
+					{service.volumes && service.volumes.length > 0 ? (
+						<ConfigRow label="Volumes">
+							{service.volumes
+								.map((volume) => `${volume.name} → ${volume.containerPath}`)
+								.join(", ")}
+						</ConfigRow>
+					) : null}
 					{overview.source.branch ? (
 						<ConfigRow label="Branch">{overview.source.branch}</ConfigRow>
 					) : null}
@@ -465,31 +487,15 @@ function ServiceConfigPanel({
 							{service.githubRootDir}
 						</ConfigRow>
 					) : null}
-					<ConfigRow label="Start command" muted={!service.startCommand}>
-						{service.startCommand ? "Custom" : "Image default"}
-					</ConfigRow>
-					<ConfigRow label="Health check" muted={!service.healthCheckCmd}>
-						{service.healthCheckCmd ? "Configured" : "None"}
-					</ConfigRow>
-					<ConfigRow label="Resources" muted={!hasResourceLimits}>
-						{hasResourceLimits ? formatResources(service) : "Not set"}
-					</ConfigRow>
-				</div>
-
-				<div className="space-y-1.5 px-3 py-2.5">
-					{overview.serverSummaries.length === 0 ? (
-						<p className="text-muted-foreground">No servers configured</p>
-					) : (
-						overview.serverSummaries.map((server) => (
-							<ConfigRow key={server.id} label={server.name}>
-								<span className="tabular-nums">
-									{server.configured > 0
-										? `${server.running}/${server.configured} running`
-										: `${server.running} running`}
-								</span>
-							</ConfigRow>
-						))
-					)}
+					{service.startCommand ? (
+						<ConfigRow label="Start command">Custom</ConfigRow>
+					) : null}
+					{service.healthCheckCmd ? (
+						<ConfigRow label="Health check">Configured</ConfigRow>
+					) : null}
+					{hasResourceLimits ? (
+						<ConfigRow label="Resources">{formatResources(service)}</ConfigRow>
+					) : null}
 				</div>
 
 				<div className="space-y-1.5 px-3 py-2.5">
@@ -513,21 +519,14 @@ function ServiceConfigPanel({
 function ConfigRow({
 	label,
 	children,
-	muted = false,
 }: {
 	label: string;
 	children: ReactNode;
-	muted?: boolean;
 }) {
 	return (
 		<div className="flex items-baseline justify-between gap-4">
 			<span className="shrink-0 text-muted-foreground">{label}</span>
-			<span
-				className={cn(
-					"min-w-0 truncate text-right font-medium",
-					muted && "font-normal text-muted-foreground",
-				)}
-			>
+			<span className="min-w-0 truncate text-right font-medium">
 				{children}
 			</span>
 		</div>

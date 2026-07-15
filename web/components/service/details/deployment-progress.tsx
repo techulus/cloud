@@ -1,6 +1,5 @@
 "use client";
 
-import { Loader2, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -13,6 +12,7 @@ import type {
 	ServiceWithDetails as Service,
 } from "@/db/types";
 import type { ConfigChange } from "@/lib/service-config";
+import { cn } from "@/lib/utils";
 
 type StageInfo = {
 	id: string;
@@ -168,6 +168,19 @@ export function getBarState(
 	return { mode: "hidden" };
 }
 
+function StageProgress({ current, total }: { current: number; total: number }) {
+	const progress = total > 0 ? Math.min((current + 1) / total, 1) : 0;
+
+	return (
+		<div className="h-0.5 w-full bg-border/60">
+			<div
+				className="h-full bg-blue-500 transition-[width] duration-500 ease-out"
+				style={{ width: `${progress * 100}%` }}
+			/>
+		</div>
+	);
+}
+
 interface DeploymentProgressProps {
 	service: Service;
 	changes: ConfigChange[];
@@ -253,19 +266,17 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 	let content: React.ReactNode = null;
 
 	if (barState.mode === "building") {
+		const buildStageIndex = ACTIVE_BUILD_STATUSES.indexOf(barState.buildStatus);
+
 		content = (
-			<div className="rounded-lg border bg-card p-4">
-				<div className="flex items-center justify-between gap-4">
-					<div className="flex items-center gap-3">
-						<div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
-							<Loader2 className="size-4 animate-spin" />
-						</div>
-						<div>
-							<p className="font-medium text-foreground">Building</p>
-							<p className="text-sm text-muted-foreground">
-								{BUILD_STATUS_LABELS[barState.buildStatus] || "Building"}
-							</p>
-						</div>
+			<div className="mx-auto max-w-5xl overflow-hidden rounded-b-lg border border-blue-500/40 border-t-0 bg-blue-500/5">
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+					<div className="flex min-w-0 items-center gap-2 text-sm">
+						<span className="size-2 animate-pulse rounded-full bg-blue-500" />
+						<span className="font-medium">Building</span>
+						<span className="truncate text-muted-foreground">
+							{BUILD_STATUS_LABELS[barState.buildStatus] || "Building"}
+						</span>
 					</div>
 					<Button
 						variant="outline"
@@ -279,45 +290,48 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 						View Logs
 					</Button>
 				</div>
+				<StageProgress
+					current={buildStageIndex}
+					total={ACTIVE_BUILD_STATUSES.length}
+				/>
 			</div>
 		);
 	}
 
 	if (barState.mode === "deploying") {
-		const currentStage = STAGES[barState.stageIndex];
 		const isMigrating = !!service.migrationStatus;
 		const isMigrationFailed = service.migrationStatus === "failed";
 
-		let status = currentStage?.label || "Deploying";
-		if (barState.stage === "health_check" && !service.healthCheckCmd) {
-			status = "Starting container";
-		}
-		if (isMigrating && service.migrationStatus) {
-			status =
-				MIGRATION_STAGES[service.migrationStatus] ||
-				service.migrationStatus ||
-				"Migrating";
-		}
+		const migrationStatus =
+			isMigrating && service.migrationStatus
+				? MIGRATION_STAGES[service.migrationStatus] || service.migrationStatus
+				: null;
 
 		content = (
-			<div className="rounded-lg border bg-card p-4">
-				<div className="flex items-center justify-between gap-4">
-					<div className="flex items-center gap-3">
-						{isMigrationFailed ? (
-							<div className="p-2 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400">
-								<XCircle className="size-4" />
-							</div>
-						) : (
-							<div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
-								<Loader2 className="size-4 animate-spin" />
-							</div>
-						)}
-						<div>
-							<p className="font-medium text-foreground">
-								{isMigrating ? "Migrating" : "Deploying"}
-							</p>
-							<p className="text-sm text-muted-foreground">{status}</p>
-						</div>
+			<div
+				className={cn(
+					"mx-auto max-w-5xl overflow-hidden rounded-b-lg border border-t-0",
+					isMigrationFailed
+						? "border-red-500/40 bg-red-500/5"
+						: "border-blue-500/40 bg-blue-500/5",
+				)}
+			>
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+					<div className="flex min-w-0 items-center gap-2 text-sm">
+						<span
+							className={cn(
+								"size-2 rounded-full",
+								isMigrationFailed ? "bg-red-500" : "animate-pulse bg-blue-500",
+							)}
+						/>
+						<span className="font-medium">
+							{isMigrating ? "Migrating" : "Deploying"}
+						</span>
+						{migrationStatus ? (
+							<span className="truncate text-muted-foreground">
+								{migrationStatus}
+							</span>
+						) : null}
 					</div>
 					{isMigrating ? (
 						<Button
@@ -330,7 +344,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 						</Button>
 					) : (
 						<Button
-							variant="outline"
+							variant="destructive"
 							size="sm"
 							onClick={handleAbort}
 							disabled={isAborting}
@@ -339,6 +353,9 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 						</Button>
 					)}
 				</div>
+				{!isMigrating ? (
+					<StageProgress current={barState.stageIndex} total={STAGES.length} />
+				) : null}
 			</div>
 		);
 	}
@@ -351,9 +368,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 				opacity: isVisible ? 1 : 0,
 			}}
 		>
-			<div className="overflow-hidden">
-				{content && <div className="pb-4">{content}</div>}
-			</div>
+			<div className="overflow-hidden">{content}</div>
 		</div>
 	);
 });
