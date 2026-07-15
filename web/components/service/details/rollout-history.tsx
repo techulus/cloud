@@ -18,6 +18,7 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { RolloutStatus } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
@@ -66,18 +67,24 @@ const STATUS_CONFIG: Record<
 	},
 };
 
-function StatusBadge({ status }: { status: RolloutStatus }) {
+const STATUS_TITLES: Record<Exclude<RolloutStatus, "in_progress">, string> = {
+	queued: "Waiting to begin deployment",
+	completed: "Deployment completed successfully",
+	failed: "Deployment failed",
+	rolled_back: "Deployment rolled back",
+};
+
+function RolloutStatusBadge({ status }: { status: RolloutStatus }) {
 	const config = STATUS_CONFIG[status];
-	const Icon = config.icon;
 	const isAnimated = status === "in_progress";
 
 	return (
-		<span
-			className={`inline-flex items-center justify-center gap-1.5 w-28 px-2 py-1 rounded-md text-xs font-medium ${config.color} bg-current/10`}
-		>
-			<Icon className={`size-3.5 ${isAnimated ? "animate-spin" : ""}`} />
-			{config.label}
-		</span>
+		<StatusBadge
+			icon={config.icon}
+			label={config.label}
+			isAnimated={isAnimated}
+			className={config.color}
+		/>
 	);
 }
 
@@ -182,15 +189,13 @@ export function RolloutHistory({
 							href={`/dashboard/projects/${projectSlug}/${envName}/services/${serviceId}/rollouts/${rollout.id}`}
 						>
 							<Item variant="outline">
-								<StatusBadge status={rollout.status} />
+								<RolloutStatusBadge status={rollout.status} />
 								<ItemContent>
 									<ItemTitle>
 										<span className="truncate">
-											{rollout.status === "queued"
-												? "Queued"
-												: rollout.status === "in_progress"
-													? `Deploying — ${formatStage(rollout.currentStage)}`
-													: STATUS_CONFIG[rollout.status].label}
+											{rollout.status === "in_progress"
+												? `Deploying — ${formatStage(rollout.currentStage)}`
+												: STATUS_TITLES[rollout.status]}
 										</span>
 									</ItemTitle>
 									<ItemDescription>

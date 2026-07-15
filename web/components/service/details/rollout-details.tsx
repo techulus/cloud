@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { LogViewer } from "@/components/logs/log-viewer";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { Rollout, RolloutStatus, Service } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 
@@ -24,38 +25,32 @@ const STATUS_CONFIG: Record<
 	{
 		icon: typeof CheckCircle2;
 		color: string;
-		bgColor: string;
 		label: string;
 	}
 > = {
 	queued: {
 		icon: Clock,
 		color: "text-slate-500",
-		bgColor: "bg-slate-500/10",
 		label: "Queued",
 	},
 	in_progress: {
 		icon: Loader2,
 		color: "text-blue-500",
-		bgColor: "bg-blue-500/10",
 		label: "In Progress",
 	},
 	completed: {
 		icon: CheckCircle2,
 		color: "text-green-500",
-		bgColor: "bg-green-500/10",
 		label: "Completed",
 	},
 	failed: {
 		icon: XCircle,
 		color: "text-red-500",
-		bgColor: "bg-red-500/10",
 		label: "Failed",
 	},
 	rolled_back: {
 		icon: RotateCcw,
 		color: "text-orange-500",
-		bgColor: "bg-orange-500/10",
 		label: "Rolled Back",
 	},
 };
@@ -88,7 +83,6 @@ export function RolloutDetails({
 }) {
 	const router = useRouter();
 	const config = STATUS_CONFIG[rollout.status as RolloutStatus];
-	const Icon = config.icon;
 	const isLive =
 		rollout.status === "queued" || rollout.status === "in_progress";
 	const isAnimated = rollout.status === "in_progress";
@@ -109,12 +103,12 @@ export function RolloutDetails({
 				</Button>
 				<div className="flex-1 min-w-0">
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-						<span
-							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${config.color} ${config.bgColor}`}
-						>
-							<Icon className={`size-4 ${isAnimated ? "animate-spin" : ""}`} />
-							{config.label}
-						</span>
+						<StatusBadge
+							icon={config.icon}
+							label={config.label}
+							isAnimated={isAnimated}
+							className={config.color}
+						/>
 						{rollout.currentStage && isLive && (
 							<span className="text-sm text-muted-foreground">
 								{formatStage(rollout.currentStage)}
