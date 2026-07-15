@@ -34,19 +34,14 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { Build, BuildStatus } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
 type BuildListItem = Pick<
 	Build,
-	| "id"
-	| "commitSha"
-	| "commitMessage"
-	| "branch"
-	| "author"
-	| "status"
-	| "error"
+	"id" | "commitSha" | "commitMessage" | "branch" | "author" | "status"
 > & {
 	createdAt: string;
 	startedAt: string | null;
@@ -103,18 +98,17 @@ const STATUS_CONFIG: Record<
 	},
 };
 
-function StatusBadge({ status }: { status: BuildStatus }) {
+function BuildStatusBadge({ status }: { status: BuildStatus }) {
 	const config = STATUS_CONFIG[status];
-	const Icon = config.icon;
 	const isAnimated = ["cloning", "building", "pushing"].includes(status);
 
 	return (
-		<span
-			className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ${config.color} bg-current/10`}
-		>
-			<Icon className={`size-3.5 ${isAnimated ? "animate-spin" : ""}`} />
-			{config.label}
-		</span>
+		<StatusBadge
+			icon={config.icon}
+			label={config.label}
+			isAnimated={isAnimated}
+			className={config.color}
+		/>
 	);
 }
 
@@ -243,7 +237,7 @@ export function BuildsViewer({
 								)
 							}
 						>
-							<StatusBadge status={build.status} />
+							<BuildStatusBadge status={build.status} />
 							<ItemContent>
 								<ItemTitle>
 									<GitCommit className="size-3.5 text-muted-foreground" />
@@ -275,11 +269,6 @@ export function BuildsViewer({
 										</span>
 									)}
 								</ItemDescription>
-								{build.error && (
-									<pre className="mt-1 max-w-full overflow-x-auto break-words rounded bg-red-500/10 p-2 font-mono text-xs text-red-500 whitespace-pre-wrap">
-										{build.error}
-									</pre>
-								)}
 							</ItemContent>
 							<ItemActions onClick={(e) => e.stopPropagation()}>
 								{canCancel(build.status) && (

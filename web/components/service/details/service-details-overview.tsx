@@ -1,13 +1,6 @@
 "use client";
 
-import {
-	Activity,
-	Box,
-	Github,
-	Globe,
-	type LucideIcon,
-	Server,
-} from "lucide-react";
+import { Box, Github, type LucideIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import {
 	CartesianGrid,
@@ -20,7 +13,6 @@ import {
 } from "recharts";
 import useSWR from "swr";
 import { useService } from "@/components/service/service-layout-client";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ServiceWithDetails as Service } from "@/db/types";
@@ -442,148 +434,129 @@ function ServiceConfigPanel({
 	overview: OverviewData;
 }) {
 	const primaryEndpoint = getPrimaryEndpoint(overview.endpoints);
+	const statusClasses = STATUS_TONE_CLASSES[overview.status.tone];
+	const hasResourceLimits =
+		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
 
 	return (
-		<div className="min-w-0 border-border border-t p-4 lg:border-t-0 lg:border-l">
-			<div className="grid gap-3 sm:grid-cols-2">
-				<SummaryItem icon={Activity} label="Status">
-					<StatusValue status={overview.status} />
-					<p className="text-base font-medium">
-						{formatInstanceSummary(overview)}
-					</p>
-				</SummaryItem>
-				<SummaryItem icon={Server} label="Instances">
-					<ServerList servers={overview.serverSummaries} />
-					<ConfigChip>{formatResources(service)}</ConfigChip>
-				</SummaryItem>
+		<div className="flex min-w-0 flex-col border-border border-t font-mono lg:border-t-0 lg:border-l">
+			<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2">
+				<div className="flex items-center gap-2">
+					<span className={cn("size-2 rounded-full", statusClasses.dot)} />
+					<span className={cn("font-bold", statusClasses.text)}>
+						{overview.status.label}
+					</span>
+				</div>
+				<span className="text-sm text-muted-foreground tabular-nums">
+					{formatInstanceSummary(overview)}
+				</span>
+			</div>
 
-				<ConfigDigestItem
-					icon={overview.source.icon}
-					label="Runtime"
-					primary={<SourcePrimary source={overview.source} />}
-				>
-					<ConfigChip>
-						{overview.source.branch || overview.source.detail}
-					</ConfigChip>
+			<div className="flex-1 divide-y divide-border border-border border-t text-sm">
+				<div className="space-y-1.5 px-3 py-2.5">
+					<ConfigRow label="Source">
+						<SourcePrimary source={overview.source} />
+					</ConfigRow>
+					{overview.source.branch ? (
+						<ConfigRow label="Branch">{overview.source.branch}</ConfigRow>
+					) : null}
 					{service.githubRootDir ? (
-						<ConfigChip>{service.githubRootDir}</ConfigChip>
+						<ConfigRow label="Root directory">
+							{service.githubRootDir}
+						</ConfigRow>
 					) : null}
-					<ConfigChip>
-						{service.startCommand ? "Custom Command" : "Image Command"}
-					</ConfigChip>
-					<ConfigChip tone={service.healthCheckCmd ? "active" : "muted"}>
-						{service.healthCheckCmd ? "Health Check" : "No Health Check"}
-					</ConfigChip>
-				</ConfigDigestItem>
+					<ConfigRow label="Start command" muted={!service.startCommand}>
+						{service.startCommand ? "Custom" : "Image default"}
+					</ConfigRow>
+					<ConfigRow label="Health check" muted={!service.healthCheckCmd}>
+						{service.healthCheckCmd ? "Configured" : "None"}
+					</ConfigRow>
+					<ConfigRow label="Resources" muted={!hasResourceLimits}>
+						{hasResourceLimits ? formatResources(service) : "Not set"}
+					</ConfigRow>
+				</div>
 
-				<ConfigDigestItem
-					icon={Globe}
-					label="Network"
-					primary={<EndpointPrimary endpoint={primaryEndpoint} />}
-				>
-					<ConfigChip>{formatPortSummary(service.ports || [])}</ConfigChip>
+				<div className="space-y-1.5 px-3 py-2.5">
+					{overview.serverSummaries.length === 0 ? (
+						<p className="text-muted-foreground">No servers configured</p>
+					) : (
+						overview.serverSummaries.map((server) => (
+							<ConfigRow key={server.id} label={server.name}>
+								<span className="tabular-nums">
+									{server.configured > 0
+										? `${server.running}/${server.configured} running`
+										: `${server.running} running`}
+								</span>
+							</ConfigRow>
+						))
+					)}
+				</div>
+
+				<div className="space-y-1.5 px-3 py-2.5">
+					<ConfigRow label="Endpoint">
+						<EndpointPrimary endpoint={primaryEndpoint} />
+					</ConfigRow>
+					<ConfigRow label="Ports">
+						{formatPortSummary(service.ports || [])}
+					</ConfigRow>
 					{primaryEndpoint.kind !== "private" ? (
-						<ConfigChip>{`${service.hostname || service.name}.internal`}</ConfigChip>
+						<ConfigRow label="Internal DNS">
+							{`${service.hostname || service.name}.internal`}
+						</ConfigRow>
 					) : null}
-				</ConfigDigestItem>
+				</div>
 			</div>
 		</div>
 	);
 }
 
-function SummaryItem({
-	icon: Icon,
+function ConfigRow({
 	label,
 	children,
-	className,
+	muted = false,
 }: {
-	icon: LucideIcon;
 	label: string;
 	children: ReactNode;
-	className?: string;
+	muted?: boolean;
 }) {
 	return (
-		<div
-			className={cn(
-				"min-w-0 rounded-md border border-border bg-muted/20 p-4",
-				className,
-			)}
-		>
-			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-				<Icon className="size-4" />
-				<span>{label}</span>
-			</div>
-			<div className="mt-2 min-w-0 space-y-2 text-sm text-foreground">
+		<div className="flex items-baseline justify-between gap-4">
+			<span className="shrink-0 text-muted-foreground">{label}</span>
+			<span
+				className={cn(
+					"min-w-0 truncate text-right font-medium",
+					muted && "font-normal text-muted-foreground",
+				)}
+			>
 				{children}
-			</div>
+			</span>
 		</div>
-	);
-}
-
-function ConfigDigestItem({
-	icon: Icon,
-	label,
-	primary,
-	children,
-	className,
-}: {
-	icon: LucideIcon;
-	label: string;
-	primary: ReactNode;
-	children: ReactNode;
-	className?: string;
-}) {
-	return (
-		<div
-			className={cn(
-				"min-w-0 rounded-md border border-border bg-muted/20 p-4",
-				className,
-			)}
-		>
-			<div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-				<Icon className="size-4" />
-				<span>{label}</span>
-			</div>
-			<div className="mt-2 min-w-0 text-sm font-medium text-foreground">
-				{primary}
-			</div>
-			<div className="mt-2 flex flex-wrap gap-1.5">{children}</div>
-		</div>
-	);
-}
-
-function ConfigChip({
-	children,
-	tone = "muted",
-}: {
-	children: ReactNode;
-	tone?: "active" | "muted";
-}) {
-	return (
-		<Badge
-			variant={tone === "active" ? "secondary" : "outline"}
-			className={cn("max-w-full", tone === "muted" && "text-muted-foreground")}
-		>
-			<span className="truncate">{children}</span>
-		</Badge>
 	);
 }
 
 function SourcePrimary({ source }: { source: SourceInfo }) {
+	const Icon = source.icon;
+	const content = (
+		<>
+			<Icon className="mr-1.5 inline-block size-3.5 align-[-2px] text-muted-foreground" />
+			{source.label}
+		</>
+	);
+
 	if (source.href) {
 		return (
 			<a
 				href={source.href}
 				target="_blank"
 				rel="noopener noreferrer"
-				className="block min-w-0 truncate hover:text-primary"
+				className="hover:text-primary"
 			>
-				{source.label}
+				{content}
 			</a>
 		);
 	}
 
-	return <span className="block truncate">{source.label}</span>;
+	return content;
 }
 
 function EndpointPrimary({ endpoint }: { endpoint: EndpointItem }) {
@@ -593,48 +566,14 @@ function EndpointPrimary({ endpoint }: { endpoint: EndpointItem }) {
 				href={endpoint.href}
 				target="_blank"
 				rel="noopener noreferrer"
-				className="block min-w-0 truncate hover:text-primary"
+				className="hover:text-primary"
 			>
 				{endpoint.label}
 			</a>
 		);
 	}
 
-	return <span className="block truncate">{endpoint.label}</span>;
-}
-
-function StatusValue({ status }: { status: ServiceStatus }) {
-	const classes = STATUS_TONE_CLASSES[status.tone];
-
-	return (
-		<div className="flex items-center gap-2">
-			<span className={cn("size-2 rounded-full", classes.dot)} />
-			<span className={cn("text-base font-medium", classes.text)}>
-				{status.label}
-			</span>
-		</div>
-	);
-}
-
-function ServerList({ servers }: { servers: ServerSummary[] }) {
-	if (servers.length === 0) {
-		return <p className="text-muted-foreground">No servers configured</p>;
-	}
-
-	return (
-		<div className="flex flex-wrap gap-2">
-			{servers.map((server) => (
-				<Badge key={server.id} variant="outline" className="max-w-full">
-					<span className="truncate">{server.name}</span>
-					<span className="text-muted-foreground">
-						{server.configured > 0
-							? `${server.running}/${server.configured}`
-							: `${server.running} Running`}
-					</span>
-				</Badge>
-			))}
-		</div>
-	);
+	return <>{endpoint.label}</>;
 }
 
 function LegendMetric({
@@ -949,15 +888,13 @@ function formatInstanceSummary(overview: OverviewData): string {
 		(total, server) => total + server.configured,
 		0,
 	);
-	const serverCount = overview.serverSummaries.length;
-
 	if (configured === 0) {
 		return overview.runningDeployments > 0
-			? `${overview.runningDeployments} Running`
-			: "No Replicas";
+			? `${overview.runningDeployments} running`
+			: "No replicas";
 	}
 
-	return `${overview.runningDeployments}/${configured} Running Across ${formatCount(serverCount, "server")}`;
+	return `${overview.runningDeployments}/${configured} running`;
 }
 
 function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
