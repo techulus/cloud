@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { cache } from "react";
 import { db } from "@/db";
 import {
 	deployments,
@@ -96,7 +97,7 @@ export async function listServers() {
 	return db.select().from(servers).orderBy(servers.createdAt);
 }
 
-export async function getServerDetails(id: string) {
+export const getServerDetails = cache(async (id: string) => {
 	const serverResults = await db
 		.select({
 			id: servers.id,
@@ -126,7 +127,7 @@ export async function getServerDetails(id: string) {
 
 	const server = serverResults[0];
 	return server ? { ...server, healthStats: null } : null;
-}
+});
 
 export async function getClusterHealth() {
 	const allServers = await db

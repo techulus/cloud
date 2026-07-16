@@ -63,6 +63,7 @@ export async function GET(
 			current: null,
 			history: emptyHistory(),
 			range,
+			available: false,
 		});
 	}
 }

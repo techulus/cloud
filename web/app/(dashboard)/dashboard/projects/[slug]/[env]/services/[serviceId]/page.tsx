@@ -126,6 +126,8 @@ export default function DeploymentsPage() {
 
 	return (
 		<div>
+			<ServiceDetailsOverview service={service} />
+
 			<DeploymentProgress
 				service={service}
 				changes={pendingChanges}
@@ -142,8 +144,6 @@ export default function DeploymentsPage() {
 				onUpdate={onUpdate}
 				barMode={barState.mode}
 			/>
-
-			<ServiceDetailsOverview service={service} />
 
 			<div className="mt-4">
 				<RolloutHistory

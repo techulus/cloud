@@ -61,7 +61,7 @@ const STAGE_LABELS: Record<string, string> = {
 	certificates: "Issuing Certificates",
 	deploying: "Deploying",
 	health_check: "Health Check",
-	dns_sync: "DNS Sync",
+	dns_sync: "Routing traffic",
 	completed: "Completed",
 };
 

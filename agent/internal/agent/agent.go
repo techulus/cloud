@@ -46,6 +46,7 @@ type ActualState struct {
 	TraefikConfigHash     string
 	L4ConfigHash          string
 	CertificatesHash      string
+	TraefikReloaded       bool
 	ChallengeRouteWritten bool
 	WireguardHash         string
 }
@@ -54,6 +55,7 @@ type Agent struct {
 	state                        AgentState
 	stateMutex                   sync.RWMutex
 	reconcileRequested           chan struct{}
+	continueProcessing           chan struct{}
 	statusReportRequested        chan string
 	refreshMutex                 sync.Mutex
 	pendingExpectedStateRefresh  bool
@@ -78,6 +80,7 @@ type Agent struct {
 	DataDir                      string
 	expectedState                *agenthttp.ExpectedState
 	processingStart              time.Time
+	lastAppliedActionKey         string
 	LogCollector                 *logs.Collector
 	TraefikLogCollector          *logs.TraefikCollector
 	MetricsSender                MetricsSender
@@ -87,7 +90,6 @@ type Agent struct {
 	currentBuildID               string
 	IsProxy                      bool
 	serverlessGatewayRunning     atomic.Bool
-	dnsInSync                    bool
 	DisableDNS                   bool
 }
 
@@ -106,6 +108,7 @@ func NewAgent(
 	return &Agent{
 		state:                  StateIdle,
 		reconcileRequested:     make(chan struct{}, 1),
+		continueProcessing:     make(chan struct{}, 1),
 		statusReportRequested:  make(chan string, 1),
 		Client:                 client,
 		Reconciler:             reconciler,

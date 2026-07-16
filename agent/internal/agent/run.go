@@ -86,6 +86,8 @@ func (a *Agent) Run(ctx context.Context) {
 				a.consumeExpectedStateRefresh()
 			}
 			a.Tick()
+		case <-a.continueProcessing:
+			a.Tick()
 		case <-logTickerC:
 			a.CollectLogs()
 		case <-cleanupTickerC:

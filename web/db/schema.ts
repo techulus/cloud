@@ -702,6 +702,10 @@ export const rollouts = pgTable(
 			.notNull()
 			.default("queued"),
 		currentStage: text("current_stage"),
+		routingTargets: jsonb("routing_targets")
+			.$type<string[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

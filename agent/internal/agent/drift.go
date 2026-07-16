@@ -28,7 +28,6 @@ const (
 	actionRedeployContainer          reconcileActionKind = "redeploy_container"
 	actionUpdateDNS                  reconcileActionKind = "update_dns"
 	actionUpdateTraefik              reconcileActionKind = "update_traefik"
-	actionUpdateCertificates         reconcileActionKind = "update_certificates"
 	actionWriteChallengeRoute        reconcileActionKind = "write_challenge_route"
 	actionUpdateWireGuard            reconcileActionKind = "update_wireguard"
 	actionStartWireGuard             reconcileActionKind = "start_wireguard"
@@ -40,6 +39,20 @@ type reconcileAction struct {
 	DeploymentID string
 	Expected     *agenthttp.ExpectedContainer
 	Actual       *container.Container
+}
+
+func reconcileActionKey(action reconcileAction) string {
+	target := action.DeploymentID
+	if target == "" && action.Actual != nil {
+		target = action.Actual.ID
+		if target == "" {
+			target = action.Actual.Name
+		}
+	}
+	if target == "" && action.Expected != nil {
+		target = action.Expected.Name
+	}
+	return string(action.Kind) + "\x00" + target
 }
 
 func (a *Agent) Tick() {
@@ -65,6 +78,13 @@ func (a *Agent) RequestReconcile(reason string) {
 	}
 }
 
+func (a *Agent) signalContinueProcessing() {
+	select {
+	case a.continueProcessing <- struct{}{}:
+	default:
+	}
+}
+
 func (a *Agent) requestExpectedStateRefresh() {
 	a.refreshMutex.Lock()
 	defer a.refreshMutex.Unlock()
@@ -84,6 +104,10 @@ func (a *Agent) consumeExpectedStateRefresh() bool {
 }
 
 func (a *Agent) transitionToIdle() {
+	select {
+	case <-a.continueProcessing:
+	default:
+	}
 	a.SetState(StateIdle)
 	if a.consumeExpectedStateRefresh() {
 		log.Printf("[processing] fetching latest expected state after pending refresh")
@@ -112,8 +136,6 @@ func (a *Agent) handleIdle() {
 		return
 	}
 
-	a.updateDnsInSync(expected, actual)
-
 	actions := a.planReconcile(expected, actual)
 	if len(actions) > 0 {
 		log.Printf("[idle] drift detected, %d change(s) to apply:", len(actions))
@@ -123,7 +145,9 @@ func (a *Agent) handleIdle() {
 		log.Printf("[idle] transitioning to PROCESSING")
 		a.expectedState = expected
 		a.processingStart = time.Now()
+		a.lastAppliedActionKey = ""
 		a.SetState(StateProcessing)
+		a.signalContinueProcessing()
 		return
 	}
 }
@@ -142,7 +166,6 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
-	a.updateDnsInSync(a.expectedState, actual)
 	actions := a.planReconcile(a.expectedState, actual)
 
 	if len(actions) == 0 {
@@ -152,6 +175,12 @@ func (a *Agent) handleProcessing() {
 	}
 
 	action := actions[0]
+	actionKey := reconcileActionKey(action)
+	if actionKey == a.lastAppliedActionKey {
+		log.Printf("[processing] action made no observable progress, waiting for the next scheduled tick: %s", action.Description)
+		a.lastAppliedActionKey = ""
+		return
+	}
 	if err := a.applyReconcileAction(action); err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
 		a.RecordDeploymentError(action.DeploymentID, err)
@@ -160,19 +189,9 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
+	a.lastAppliedActionKey = actionKey
 	a.RequestStatusReport("reconcile completed")
-}
-
-func (a *Agent) updateDnsInSync(expected *agenthttp.ExpectedState, actual *ActualState) {
-	if a.DisableDNS {
-		a.dnsInSync = true
-		return
-	}
-	expectedDnsRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
-	for i, r := range expected.Dns.Records {
-		expectedDnsRecords[i] = dns.DnsRecord{Name: r.Name, Ips: r.Ips}
-	}
-	a.dnsInSync = dns.HashRecords(expectedDnsRecords) == actual.DnsConfigHash
+	a.signalContinueProcessing()
 }
 
 func (a *Agent) getActualState() (*ActualState, error) {
@@ -191,6 +210,10 @@ func (a *Agent) getActualState() (*ActualState, error) {
 		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
 		state.L4ConfigHash = traefik.GetCurrentL4ConfigHash()
 		state.CertificatesHash = traefik.GetCurrentCertificatesHash()
+		state.TraefikReloaded, err = traefik.DynamicConfigReloaded(a.DataDir)
+		if err != nil {
+			log.Printf("[traefik] failed to determine dynamic config reload state: %v", err)
+		}
 		state.ChallengeRouteWritten = traefik.ChallengeRouteExists()
 	}
 	return state, nil
@@ -332,32 +355,27 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 	if a.IsProxy {
 		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
 		expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName)
-		if expectedTraefikHash != actual.TraefikConfigHash {
-			actions = append(actions, reconcileAction{
-				Kind:        actionUpdateTraefik,
-				Description: fmt.Sprintf("UPDATE Traefik HTTP (%d routes)", len(expected.Traefik.HttpRoutes)),
-			})
-		}
-
 		tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
 		udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
 		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
-		if expectedL4Hash != actual.L4ConfigHash {
-			actions = append(actions, reconcileAction{
-				Kind:        actionUpdateTraefik,
-				Description: fmt.Sprintf("UPDATE Traefik L4 (%d TCP, %d UDP)", len(tcpRoutes), len(udpRoutes)),
-			})
-		}
-
 		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
 		for i, c := range expected.Traefik.Certificates {
 			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
 		}
 		expectedCertsHash := traefik.HashCertificates(expectedCerts)
-		if expectedCertsHash != actual.CertificatesHash {
+		if expectedTraefikHash != actual.TraefikConfigHash ||
+			expectedL4Hash != actual.L4ConfigHash ||
+			expectedCertsHash != actual.CertificatesHash ||
+			!actual.TraefikReloaded {
 			actions = append(actions, reconcileAction{
-				Kind:        actionUpdateCertificates,
-				Description: fmt.Sprintf("UPDATE Certificates (%d certs)", len(expected.Traefik.Certificates)),
+				Kind: actionUpdateTraefik,
+				Description: fmt.Sprintf(
+					"UPDATE Traefik (%d HTTP, %d TCP, %d UDP routes; %d certificates)",
+					len(expected.Traefik.HttpRoutes),
+					len(tcpRoutes),
+					len(udpRoutes),
+					len(expected.Traefik.Certificates),
+				),
 			})
 		}
 
@@ -455,7 +473,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		})
 		cancel()
 		if err != nil {
-			log.Printf("[reconcile] warning: failed to remove orphan container after retries: %v", err)
+			return fmt.Errorf("failed to remove orphan container after retries: %w", err)
 		}
 		return nil
 
@@ -464,7 +482,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
 		if err := container.ForceRemove(action.Actual.ID); err != nil {
-			log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
+			return fmt.Errorf("failed to remove orphan container: %w", err)
 		}
 		return nil
 
@@ -516,16 +534,6 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 
 	case actionUpdateTraefik:
 		return a.updateTraefik()
-
-	case actionUpdateCertificates:
-		expectedCerts := make([]traefik.Certificate, len(a.expectedState.Traefik.Certificates))
-		for i, c := range a.expectedState.Traefik.Certificates {
-			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
-		}
-		if err := traefik.UpdateCertificates(expectedCerts); err != nil {
-			return fmt.Errorf("failed to update certificates: %w", err)
-		}
-		return nil
 
 	case actionWriteChallengeRoute:
 		if a.expectedState.Traefik.ChallengeRoute == nil {
@@ -589,17 +597,55 @@ func (a *Agent) updateTraefik() error {
 		}
 		needsRestart = needsRestart || entryPointsRestart
 	}
-
-	log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
-	if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
-		return fmt.Errorf("failed to update Traefik: %w", err)
-	}
-
 	if needsRestart {
-		log.Printf("[reconcile] restarting Traefik to apply new entry points")
+		log.Printf("[reconcile] restarting Traefik to apply static configuration")
 		if err := traefik.ReloadTraefik(); err != nil {
 			return fmt.Errorf("failed to restart Traefik: %w", err)
 		}
+	}
+
+	expectedCerts := make([]traefik.Certificate, len(a.expectedState.Traefik.Certificates))
+	for i, certificate := range a.expectedState.Traefik.Certificates {
+		expectedCerts[i] = traefik.Certificate{
+			Domain:         certificate.Domain,
+			Certificate:    certificate.Certificate,
+			CertificateKey: certificate.CertificateKey,
+		}
+	}
+	expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, a.expectedState.ServerName)
+	expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
+	routesChanged := expectedTraefikHash != traefik.GetCurrentConfigHash() ||
+		expectedL4Hash != traefik.GetCurrentL4ConfigHash()
+	certificatesChanged := traefik.HashCertificates(expectedCerts) != traefik.GetCurrentCertificatesHash()
+	if !routesChanged && !certificatesChanged {
+		if err := traefik.EnsureDynamicConfigReloaded(a.DataDir, 15*time.Second); err != nil {
+			return fmt.Errorf("failed to recover Traefik config reload: %w", err)
+		}
+		return nil
+	}
+
+	baselineReload, err := traefik.LastSuccessfulReload()
+	if err != nil {
+		return fmt.Errorf("failed to capture Traefik reload baseline: %w", err)
+	}
+	if err := traefik.MarkDynamicConfigReloadPending(a.DataDir, baselineReload); err != nil {
+		return fmt.Errorf("failed to mark Traefik config reload pending: %w", err)
+	}
+
+	if certificatesChanged {
+		if err := traefik.UpdateCertificates(expectedCerts); err != nil {
+			return fmt.Errorf("failed to update Traefik certificates: %w", err)
+		}
+	}
+	if routesChanged {
+		log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
+		if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
+			return fmt.Errorf("failed to update Traefik: %w", err)
+		}
+	}
+
+	if err := traefik.WaitForSuccessfulReloadAfter(a.DataDir, baselineReload, 15*time.Second); err != nil {
+		return fmt.Errorf("failed to confirm Traefik config reload: %w", err)
 	}
 
 	return nil

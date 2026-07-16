@@ -1,9 +1,7 @@
 "use client";
 
 import { Activity, Network, Server } from "lucide-react";
-import Link from "next/link";
 import useSWR from "swr";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetcher } from "@/lib/fetcher";
 
@@ -21,13 +19,11 @@ type ClusterHealthData = {
 interface ClusterHealthSummaryProps {
 	initialData: ClusterHealthData;
 	showHeader?: boolean;
-	showMetricsLink?: boolean;
 }
 
 export function ClusterHealthSummary({
 	initialData,
 	showHeader = true,
-	showMetricsLink = true,
 }: ClusterHealthSummaryProps) {
 	const { data } = useSWR<ClusterHealthData>("/api/cluster-health", fetcher, {
 		fallbackData: initialData,
@@ -63,23 +59,11 @@ export function ClusterHealthSummary({
 	return (
 		<div className="space-y-4">
 			{showHeader && (
-				<div className="flex items-center justify-between gap-3">
-					<div className="min-w-0">
-						<h2 className="text-lg font-semibold">Cluster Health</h2>
-						<p className="text-sm text-muted-foreground">
-							Real-time infrastructure status
-						</p>
-					</div>
-					{showMetricsLink && (
-						<Button
-							variant="outline"
-							size="sm"
-							nativeButton={false}
-							render={<Link href="/dashboard/metrics" />}
-						>
-							Metrics
-						</Button>
-					)}
+				<div className="min-w-0">
+					<h2 className="text-lg font-semibold">Cluster Health</h2>
+					<p className="text-sm text-muted-foreground">
+						Real-time infrastructure status
+					</p>
 				</div>
 			)}
 			<div className="grid gap-4 sm:grid-cols-3">

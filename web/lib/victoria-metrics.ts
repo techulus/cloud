@@ -95,12 +95,6 @@ export type NodeMetricsHistory = {
 
 export type MetricsHistory = NodeMetricsHistory;
 
-export type ServerMetricsHistory = {
-	serverId: string;
-	serverName: string;
-	history: MetricsHistory;
-};
-
 const METRIC_NAMES = {
 	cpuUsagePercent: "techulus_node_cpu_usage_percent",
 	memoryUsagePercent: "techulus_node_memory_usage_percent",
@@ -242,62 +236,6 @@ export async function queryNodeMetricsHistory(options: {
 	);
 
 	return Object.fromEntries(entries) as NodeMetricsHistory;
-}
-
-export async function queryServersMetricsHistory(options: {
-	servers: Array<{ id: string; name: string }>;
-	start: Date;
-	end: Date;
-	stepSeconds: number;
-}): Promise<ServerMetricsHistory[]> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint || options.servers.length === 0) return [];
-
-	const [cpuMap, memPctMap, memBytesMap, diskPctMap, diskBytesMap] =
-		await Promise.all([
-			queryRangeMetricGroup(endpoint, {
-				metricName: METRIC_NAMES.cpuUsagePercent,
-				start: options.start,
-				end: options.end,
-				stepSeconds: options.stepSeconds,
-			}).catch(() => new Map<string, NodeMetricPoint[]>()),
-			queryRangeMetricGroup(endpoint, {
-				metricName: METRIC_NAMES.memoryUsagePercent,
-				start: options.start,
-				end: options.end,
-				stepSeconds: options.stepSeconds,
-			}).catch(() => new Map<string, NodeMetricPoint[]>()),
-			queryRangeMetricGroup(endpoint, {
-				metricName: METRIC_NAMES.memoryUsedBytes,
-				start: options.start,
-				end: options.end,
-				stepSeconds: options.stepSeconds,
-			}).catch(() => new Map<string, NodeMetricPoint[]>()),
-			queryRangeMetricGroup(endpoint, {
-				metricName: METRIC_NAMES.diskUsagePercent,
-				start: options.start,
-				end: options.end,
-				stepSeconds: options.stepSeconds,
-			}).catch(() => new Map<string, NodeMetricPoint[]>()),
-			queryRangeMetricGroup(endpoint, {
-				metricName: METRIC_NAMES.diskUsedBytes,
-				start: options.start,
-				end: options.end,
-				stepSeconds: options.stepSeconds,
-			}).catch(() => new Map<string, NodeMetricPoint[]>()),
-		]);
-
-	return options.servers.map((server) => ({
-		serverId: server.id,
-		serverName: server.name,
-		history: {
-			cpuUsagePercent: cpuMap.get(server.id) ?? [],
-			memoryUsagePercent: memPctMap.get(server.id) ?? [],
-			memoryUsedBytes: memBytesMap.get(server.id) ?? [],
-			diskUsagePercent: diskPctMap.get(server.id) ?? [],
-			diskUsedBytes: diskBytesMap.get(server.id) ?? [],
-		},
-	}));
 }
 
 export function createEmptyServiceMetrics(
@@ -623,54 +561,6 @@ async function queryRangeMetric(
 		}))
 		.filter((point) => Number.isFinite(point.value));
 }
-
-async function queryRangeMetricGroup(
-	endpoint: EndpointConfig,
-	options: {
-		metricName: string;
-		start: Date;
-		end: Date;
-		stepSeconds: number;
-	},
-): Promise<Map<string, NodeMetricPoint[]>> {
-	const url = new URL(`${endpoint.url}/api/v1/query_range`);
-	url.searchParams.set("query", options.metricName);
-	url.searchParams.set(
-		"start",
-		String(Math.floor(options.start.getTime() / 1000)),
-	);
-	url.searchParams.set("end", String(Math.floor(options.end.getTime() / 1000)));
-	url.searchParams.set("step", String(options.stepSeconds));
-
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query metrics range group: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const data = (await response.json()) as VictoriaMatrixResponse;
-	if (data.status !== "success") {
-		throw new Error(data.error || "Failed to query metrics range group");
-	}
-
-	const byServer = new Map<string, NodeMetricPoint[]>();
-	for (const result of data.data?.result ?? []) {
-		const serverId = result.metric.server_id;
-		if (!serverId) continue;
-		byServer.set(
-			serverId,
-			result.values
-				.map(([timestamp, rawValue]) => ({
-					timestamp: new Date(timestamp * 1000).toISOString(),
-					value: Number.parseFloat(rawValue),
-				}))
-				.filter((point) => Number.isFinite(point.value)),
-		);
-	}
-	return byServer;
-}
-
 async function queryRangePromQL(
 	endpoint: EndpointConfig,
 	options: {

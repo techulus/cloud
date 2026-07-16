@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
+import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
@@ -483,6 +484,34 @@ export const rolloutWorkflow = inngest.createFunction(
 			};
 		}
 
+		const routingTargetResult = await step.run(
+			"prepare-routing-sync",
+			async () => {
+				const isPublic = specification.ports.some((port) => port.isPublic);
+				const proxyServerIds = isPublic
+					? await db
+							.select({ id: servers.id })
+							.from(servers)
+							.where(
+								and(eq(servers.isProxy, true), eq(servers.status, "online")),
+							)
+							.then((rows) => rows.map((server) => server.id))
+					: [];
+				const targetIds = buildRoutingTargets({
+					workloadServerIds: serverIds,
+					proxyServerIds,
+					isPublic,
+				});
+				await db
+					.update(rollouts)
+					.set({ routingTargets: targetIds })
+					.where(eq(rollouts.id, rolloutId));
+
+				return { targetIds };
+			},
+		);
+		const routingTargetIds = routingTargetResult.targetIds;
+
 		await step.run("start-dns-sync", async () => {
 			await db.transaction(async (tx) => {
 				await tx
@@ -525,7 +554,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		});
 
 		const dnsResults = await Promise.all(
-			serverIds.map((serverId) =>
+			routingTargetIds.map((serverId) =>
 				step.waitForEvent(`wait-dns-${serverId}`, {
 					event: inngestEvents.serverDnsSynced,
 					timeout: "5m",
@@ -536,14 +565,14 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const dnsTimedOut = dnsResults.some((r) => r === null);
 		const dnsServerNames = await step.run("load-dns-server-names", async () => {
-			if (serverIds.length === 0) {
+			if (routingTargetIds.length === 0) {
 				return [];
 			}
 
 			return db
 				.select({ id: servers.id, name: servers.name })
 				.from(servers)
-				.where(inArray(servers.id, serverIds));
+				.where(inArray(servers.id, routingTargetIds));
 		});
 		const dnsServerNameById = new Map(
 			dnsServerNames.map((server) => [server.id, server.name]),
@@ -551,16 +580,17 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		for (let i = 0; i < dnsResults.length; i++) {
 			if (dnsResults[i] === null) {
-				const serverName = dnsServerNameById.get(serverIds[i]) || serverIds[i];
+				const serverName =
+					dnsServerNameById.get(routingTargetIds[i]) || routingTargetIds[i];
 				console.warn(
-					`[rollout:${rolloutId}] DNS sync timeout for server ${serverName}`,
+					`[rollout:${rolloutId}] routing sync timeout for server ${serverName}`,
 				);
-				await step.run(`log-dns-timeout-${serverIds[i]}`, async () => {
+				await step.run(`log-dns-timeout-${routingTargetIds[i]}`, async () => {
 					await ingestRolloutLog(
 						rolloutId,
 						serviceId,
 						"dns_sync",
-						`DNS sync timed out for server ${serverName}`,
+						`Routing sync timed out for server ${serverName}`,
 					);
 				});
 			}
@@ -591,7 +621,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					rolloutId,
 					serviceId,
 					"dns_sync",
-					`Stopping ${result.stoppedCount} old deployment(s) after DNS sync`,
+					`Stopping ${result.stoppedCount} old deployment(s) after routing sync`,
 				);
 			}
 			await ingestRolloutLog(

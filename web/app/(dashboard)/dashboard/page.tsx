@@ -4,7 +4,6 @@ import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summar
 import { CreateProjectDialog } from "@/components/project/create-project-dialog";
 import { CreateServerDialog } from "@/components/server/create-server-dialog";
 import { ServerList } from "@/components/server/server-list";
-import { Button } from "@/components/ui/button";
 import {
 	Empty,
 	EmptyContent,
@@ -96,15 +95,6 @@ export default async function DashboardPage() {
 						</p>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
-						{servers.length > 0 && (
-							<Button
-								variant="outline"
-								nativeButton={false}
-								render={<Link href="/dashboard/metrics" />}
-							>
-								Metrics
-							</Button>
-						)}
 						<CreateServerDialog />
 					</div>
 				</div>
@@ -113,7 +103,6 @@ export default async function DashboardPage() {
 					<ClusterHealthSummary
 						initialData={clusterHealth}
 						showHeader={false}
-						showMetricsLink={false}
 					/>
 				)}
 

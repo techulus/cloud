@@ -20,7 +20,7 @@ function StatusBadge({
 		<Badge
 			variant={variant}
 			className={cn(
-				"h-auto w-36 border-transparent bg-current/10 px-2 py-1 font-mono text-xs font-semibold uppercase [&>svg]:size-3.5!",
+				"h-auto border-transparent bg-current/10 px-2 py-1 font-mono text-[11px] font-bold uppercase [&>svg]:size-3.5!",
 				className,
 			)}
 			{...props}
