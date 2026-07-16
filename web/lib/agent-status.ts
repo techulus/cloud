@@ -28,6 +28,7 @@ import {
 } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
@@ -635,7 +636,7 @@ export type StatusReport = {
 	privateIp?: string;
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
-	dnsInSync?: boolean;
+	routingSyncedRolloutIds?: string[];
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
@@ -1209,24 +1210,30 @@ export async function applyStatusReport(
 		}
 	}
 
-	if (report.dnsInSync) {
-		const rolloutsInDnsSync = await db
-			.select({ id: rollouts.id })
+	const routingSyncRolloutIds = [
+		...new Set(report.routingSyncedRolloutIds || []),
+	].filter(Boolean);
+	if (routingSyncRolloutIds.length > 0) {
+		const reportedRollouts = await db
+			.select({
+				id: rollouts.id,
+				serviceId: rollouts.serviceId,
+				status: rollouts.status,
+				currentStage: rollouts.currentStage,
+				routingTargets: rollouts.routingTargets,
+			})
 			.from(rollouts)
-			.where(
-				and(
-					eq(rollouts.status, "in_progress"),
-					eq(rollouts.currentStage, "dns_sync"),
-				),
-			);
+			.where(inArray(rollouts.id, routingSyncRolloutIds));
+		const currentServerName = await getCurrentServerLogName();
 
-		for (const rollout of rolloutsInDnsSync) {
-			const currentServerName = await getCurrentServerLogName();
+		for (const rollout of reportedRollouts) {
+			if (!isRoutingSyncAcknowledgementEligible(rollout, serverId)) continue;
+
 			await ingestRolloutLog(
 				rollout.id,
-				"",
+				rollout.serviceId,
 				"dns_sync",
-				`DNS synced on server ${currentServerName}`,
+				`Routing synced on server ${currentServerName}`,
 			);
 			await inngest.send(
 				inngestEvents.serverDnsSynced.create({

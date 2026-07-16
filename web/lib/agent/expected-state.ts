@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	rollouts,
 	servers,
 	serviceRevisions,
 	services,
@@ -14,6 +15,7 @@ import {
 	observedReadyPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
+import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
 import {
 	SERVICE_REVISION_SCHEMA_VERSION,
 	type ServiceRevisionSecret,
@@ -111,6 +113,7 @@ export type ServerlessRoute = {
 
 export type AgentExpectedState = {
 	serverName: string;
+	routingSyncRolloutIds: string[];
 	containers: ExpectedContainer[];
 	dns: { records: Array<{ name: string; ips: string[] }> };
 	serverless: { routes: ServerlessRoute[] };
@@ -163,7 +166,16 @@ export async function getServer(serverId: string) {
 export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
+	// Read token candidates first. If promotion commits after this query, this
+	// response can contain the new routing state without a token (safe), but it
+	// can never pair a post-promotion token with pre-promotion routing state.
+	const routingSyncRollouts = await getRoutingSyncRollouts();
 	const runtimeServices = await getRuntimeServiceRevisions();
+	const routingSyncRolloutIds = selectRoutingSyncRolloutIds({
+		rollouts: routingSyncRollouts,
+		runtimeServices,
+		serverId: server.id,
+	});
 	const [containers, dnsRecords, traefikConfig, wireguardPeers] =
 		await Promise.all([
 			buildExpectedContainers(server.id),
@@ -179,12 +191,30 @@ export async function buildAgentExpectedState(
 
 	return {
 		serverName: server.name,
+		routingSyncRolloutIds,
 		containers,
 		dns: { records: dnsRecords },
 		serverless,
 		traefik: traefikConfig,
 		wireguard: { peers: wireguardPeers },
 	};
+}
+
+async function getRoutingSyncRollouts() {
+	return db
+		.select({
+			id: rollouts.id,
+			serviceId: rollouts.serviceId,
+			serviceRevisionId: rollouts.serviceRevisionId,
+			routingTargets: rollouts.routingTargets,
+		})
+		.from(rollouts)
+		.where(
+			and(
+				eq(rollouts.status, "in_progress"),
+				eq(rollouts.currentStage, "dns_sync"),
+			),
+		);
 }
 
 async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {

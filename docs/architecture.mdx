@@ -95,7 +95,7 @@ The agent uses hash comparisons for deterministic drift detection:
 
 - **Containers**: missing, orphaned, wrong state, or image mismatch.
 - **DNS**: hash of sorted records versus current DNS config.
-- **Traefik**: hash of sorted routes versus current Traefik config on proxy nodes.
+- **Traefik**: hash of sorted routes and certificates versus current config on proxy nodes, plus confirmation that Traefik successfully reloaded the newest dynamic files.
 - **WireGuard**: hash of sorted peers versus current `wg0.conf`.
 
 ### Container Reconciliation Order
@@ -105,25 +105,24 @@ The agent uses hash comparisons for deterministic drift detection:
 3. Deploy missing containers.
 4. Redeploy containers with wrong state or image mismatch.
 5. Update DNS records.
-6. Update Traefik routes on proxy nodes.
+6. Update Traefik certificates and routes on proxy nodes, then confirm a successful reload.
 7. Update WireGuard peers.
 
 ## Rollout Stages
 
 ```text
-pending -> pulling -> starting -> healthy -> dns_updating -> traefik_updating -> stopping_old -> running
+queued -> preparing -> certificates -> deploying -> health_check -> dns_sync -> completed
 ```
 
 | Stage | Description |
 | --- | --- |
-| `pending` | Deployment created and waiting for an agent |
-| `pulling` | Agent is pulling the container image |
-| `starting` | Container started and waiting for health checks |
-| `healthy` | Health check passed, or no health check is configured |
-| `dns_updating` | DNS records are being updated |
-| `traefik_updating` | Traefik routes are being updated |
-| `stopping_old` | Old deployment containers are being stopped |
-| `running` | Deployment is complete and serving traffic |
+| `queued` | Rollout is waiting for the previous rollout of the service to finish |
+| `preparing` | Placements and target servers are being validated |
+| `certificates` | Certificates for public domains are being provisioned |
+| `deploying` | Agents are creating and starting candidate containers |
+| `health_check` | Configured health checks are being evaluated; without one, a running container satisfies this stage |
+| `dns_sync` | Displayed as **Routing traffic**. Every frozen workload target must have matching DNS; every frozen proxy target must also have matching routes and certificates loaded by Traefik |
+| `completed` | Routing convergence is confirmed and old deployments can be stopped |
 
 Special states:
 
@@ -131,6 +130,10 @@ Special states:
 - `stopped`: the container was explicitly stopped.
 - `failed`: the deployment failed, such as during health checks.
 - `rolled_back`: rollout failed and reverted to the previous deployment.
+
+For each rollout, the control plane freezes the required target set immediately before promotion. Private services wait for their workload servers. Public services also wait for every proxy that was online at promotion. Agents acknowledge the exact rollout ID only after their expected snapshot converges; unrelated or stale acknowledgements cannot complete another rollout.
+
+With no configured health check, `healthy` means only that the container is running. Routing convergence prevents completion before network configuration is live, but application-level readiness remains the responsibility of a user-configured health check.
 
 ## Networking
 

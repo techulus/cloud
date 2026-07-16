@@ -153,6 +153,13 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 					<p className="text-xs text-muted-foreground">
 						Exit 0 = healthy, non-zero = unhealthy
 					</p>
+					{!state.cmd.trim() && (
+						<p className="text-xs text-amber-600 dark:text-amber-400">
+							Without a health check, deployment only confirms that the
+							container started. It does not verify that the application accepts
+							requests.
+						</p>
+					)}
 				</div>
 
 				<button

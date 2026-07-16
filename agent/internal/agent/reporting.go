@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/dns"
 	"techulus/cloud-agent/internal/health"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
+	"techulus/cloud-agent/internal/traefik"
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -31,7 +33,6 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		PublicIP:   a.PublicIP,
 		PrivateIP:  a.PrivateIP,
 		Containers: []agenthttp.ContainerStatus{},
-		DnsInSync:  a.dnsInSync,
 		AgentHealth: &agenthttp.AgentHealth{
 			Version:      Version,
 			UptimeSecs:   int64(time.Since(agentStartTime).Seconds()),
@@ -111,6 +112,7 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 	}
 
 	report.DeploymentErrors = a.SnapshotDeploymentErrors()
+	report.RoutingSyncedRolloutIds = a.routingSyncedRolloutIds()
 
 	return report
 }
@@ -120,6 +122,54 @@ func (a *Agent) agentCapabilities() []string {
 		return nil
 	}
 	return []string{serverlessGatewayCapability}
+}
+
+func (a *Agent) routingSyncedRolloutIds() []string {
+	expected := a.ExpectedState()
+	if expected == nil || len(expected.RoutingSyncRolloutIds) == 0 {
+		return nil
+	}
+
+	if !a.DisableDNS {
+		expectedRecords := make([]dns.DnsRecord, len(expected.Dns.Records))
+		for i, record := range expected.Dns.Records {
+			expectedRecords[i] = dns.DnsRecord{Name: record.Name, Ips: record.Ips}
+		}
+		if dns.HashRecords(expectedRecords) != dns.GetCurrentConfigHash() {
+			return nil
+		}
+	}
+
+	if a.IsProxy && !a.proxyRoutingStateConverged(expected) {
+		return nil
+	}
+
+	return append([]string(nil), expected.RoutingSyncRolloutIds...)
+}
+
+func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {
+	httpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
+	if traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName) != traefik.GetCurrentConfigHash() {
+		return false
+	}
+	tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
+	udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
+	if traefik.HashTCPRoutes(tcpRoutes)+traefik.HashUDPRoutes(udpRoutes) != traefik.GetCurrentL4ConfigHash() {
+		return false
+	}
+	certificates := make([]traefik.Certificate, len(expected.Traefik.Certificates))
+	for i, certificate := range expected.Traefik.Certificates {
+		certificates[i] = traefik.Certificate{
+			Domain:         certificate.Domain,
+			Certificate:    certificate.Certificate,
+			CertificateKey: certificate.CertificateKey,
+		}
+	}
+	if traefik.HashCertificates(certificates) != traefik.GetCurrentCertificatesHash() {
+		return false
+	}
+	reloaded, err := traefik.DynamicConfigReloaded(a.DataDir)
+	return err == nil && reloaded
 }
 
 func (a *Agent) RecordDeploymentError(deploymentID string, err error) {
