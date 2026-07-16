@@ -9,6 +9,7 @@ export function ServerTabs({ serverId }: { serverId: string }) {
 	const basePath = `/dashboard/servers/${serverId}`;
 	const tabs = [
 		{ name: "Overview", href: basePath },
+		{ name: "Metrics", href: `${basePath}/metrics` },
 		{ name: "Logs", href: `${basePath}/logs` },
 		{ name: "Settings", href: `${basePath}/settings` },
 	];

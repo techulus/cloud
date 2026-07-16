@@ -54,6 +54,7 @@ type ServerMetricsResponse = {
 	history: NodeMetricsHistory;
 	range: string;
 	enabled?: boolean;
+	available?: boolean;
 };
 
 type ClusterHealthResponse = {
@@ -152,7 +153,10 @@ function ServerMetricsPanel({
 		[metrics, mode],
 	);
 	const current = metrics?.current ?? initialMetrics;
-	const isUnavailable = Boolean(error) || metrics?.enabled === false;
+	const isUnavailable =
+		Boolean(error) ||
+		metrics?.enabled === false ||
+		metrics?.available === false;
 	const percent = getCurrentPercent(current, mode);
 	const bytes = getCurrentBytes(current, mode);
 
