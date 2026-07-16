@@ -41,6 +41,20 @@ type reconcileAction struct {
 	Actual       *container.Container
 }
 
+func reconcileActionKey(action reconcileAction) string {
+	target := action.DeploymentID
+	if target == "" && action.Actual != nil {
+		target = action.Actual.ID
+		if target == "" {
+			target = action.Actual.Name
+		}
+	}
+	if target == "" && action.Expected != nil {
+		target = action.Expected.Name
+	}
+	return string(action.Kind) + "\x00" + target
+}
+
 func (a *Agent) Tick() {
 	switch a.GetState() {
 	case StateIdle:
@@ -64,6 +78,13 @@ func (a *Agent) RequestReconcile(reason string) {
 	}
 }
 
+func (a *Agent) signalContinueProcessing() {
+	select {
+	case a.continueProcessing <- struct{}{}:
+	default:
+	}
+}
+
 func (a *Agent) requestExpectedStateRefresh() {
 	a.refreshMutex.Lock()
 	defer a.refreshMutex.Unlock()
@@ -83,6 +104,10 @@ func (a *Agent) consumeExpectedStateRefresh() bool {
 }
 
 func (a *Agent) transitionToIdle() {
+	select {
+	case <-a.continueProcessing:
+	default:
+	}
 	a.SetState(StateIdle)
 	if a.consumeExpectedStateRefresh() {
 		log.Printf("[processing] fetching latest expected state after pending refresh")
@@ -120,7 +145,9 @@ func (a *Agent) handleIdle() {
 		log.Printf("[idle] transitioning to PROCESSING")
 		a.expectedState = expected
 		a.processingStart = time.Now()
+		a.lastAppliedActionKey = ""
 		a.SetState(StateProcessing)
+		a.signalContinueProcessing()
 		return
 	}
 }
@@ -148,6 +175,12 @@ func (a *Agent) handleProcessing() {
 	}
 
 	action := actions[0]
+	actionKey := reconcileActionKey(action)
+	if actionKey == a.lastAppliedActionKey {
+		log.Printf("[processing] action made no observable progress, waiting for the next scheduled tick: %s", action.Description)
+		a.lastAppliedActionKey = ""
+		return
+	}
 	if err := a.applyReconcileAction(action); err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
 		a.RecordDeploymentError(action.DeploymentID, err)
@@ -156,7 +189,9 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
+	a.lastAppliedActionKey = actionKey
 	a.RequestStatusReport("reconcile completed")
+	a.signalContinueProcessing()
 }
 
 func (a *Agent) getActualState() (*ActualState, error) {
@@ -438,7 +473,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		})
 		cancel()
 		if err != nil {
-			log.Printf("[reconcile] warning: failed to remove orphan container after retries: %v", err)
+			return fmt.Errorf("failed to remove orphan container after retries: %w", err)
 		}
 		return nil
 
@@ -447,7 +482,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
 		if err := container.ForceRemove(action.Actual.ID); err != nil {
-			log.Printf("[reconcile] warning: failed to remove orphan: %v", err)
+			return fmt.Errorf("failed to remove orphan container: %w", err)
 		}
 		return nil
 
