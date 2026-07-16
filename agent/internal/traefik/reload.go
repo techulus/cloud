@@ -37,7 +37,7 @@ func fetchLastSuccessfulReload() (time.Time, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return time.Time{}, fmt.Errorf("Traefik metrics returned %s", response.Status)
+		return time.Time{}, fmt.Errorf("traefik metrics returned %s", response.Status)
 	}
 	return parseLastSuccessfulReload(response.Body)
 }
@@ -149,7 +149,7 @@ func WaitForSuccessfulReloadAfter(stateDir string, baseline time.Time, timeout t
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("Traefik did not confirm a successful config reload within %s", timeout)
+			return fmt.Errorf("traefik did not confirm a successful config reload within %s", timeout)
 		}
 		time.Sleep(reloadPollInterval)
 	}
