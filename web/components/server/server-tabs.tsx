@@ -15,7 +15,10 @@ export function ServerTabs({ serverId }: { serverId: string }) {
 
 	return (
 		<div className="overflow-x-auto px-4 py-3">
-			<nav className="inline-flex w-max items-center rounded-lg bg-muted p-[3px]">
+			<nav
+				aria-label="Server sections"
+				className="inline-flex w-max items-center rounded-lg bg-muted p-[3px]"
+			>
 				{tabs.map((tab) => {
 					const isActive =
 						tab.href === basePath
@@ -26,6 +29,7 @@ export function ServerTabs({ serverId }: { serverId: string }) {
 						<Link
 							key={tab.href}
 							href={tab.href}
+							aria-current={isActive ? "page" : undefined}
 							className={cn(
 								"shrink-0 whitespace-nowrap rounded-md border border-transparent px-3 py-1.5 text-sm font-medium transition-all",
 								isActive

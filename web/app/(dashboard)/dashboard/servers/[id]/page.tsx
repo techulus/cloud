@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { AgentUpdateNudge } from "@/components/server/agent-update-nudge";
-import { ServerDetailsOverview } from "@/components/server/server-health-details";
+import { ServerDetailsOverview } from "@/components/server/server-details-overview";
 import { ServerServices } from "@/components/server/server-services";
 import {
 	Card,

@@ -73,6 +73,7 @@ type ChartRow = {
 
 type TooltipPayload = {
 	dataKey?: string;
+	name?: string;
 	value?: unknown;
 };
 
@@ -159,7 +160,7 @@ function ServerMetricsPanel({
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 				<div className="min-w-0">
-					{isLoading && !metrics ? (
+					{isLoading && !metrics && !current ? (
 						<div className="flex flex-nowrap items-end gap-x-5">
 							<Skeleton className="h-7 w-24" />
 							{mode !== "cpu" ? <Skeleton className="h-7 w-20" /> : null}
@@ -449,8 +450,8 @@ function ServerMetricsTooltip({
 						key={item.dataKey}
 						className="flex items-center justify-between gap-5"
 					>
-						<span className="capitalize text-muted-foreground">
-							{item.dataKey}
+						<span className="text-muted-foreground">
+							{item.name ?? (item.dataKey === "bytes" ? "Used" : "Usage")}
 						</span>
 						<span className="font-mono font-medium tabular-nums">
 							{item.dataKey === "bytes"
@@ -507,7 +508,7 @@ function getCurrentBytes(
 
 function formatHealth(healthy: boolean | undefined, detail: string) {
 	if (healthy === undefined) return "Unknown";
-	return healthy ? detail : "Unavailable";
+	return healthy ? detail : `${detail} · unavailable`;
 }
 
 function formatPercent(value: number | null) {
