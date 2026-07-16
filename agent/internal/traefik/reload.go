@@ -109,11 +109,15 @@ func dynamicFilesReloaded(lastReload time.Time) (bool, error) {
 	return !lastReload.Before(newestConfig.Truncate(time.Second)), nil
 }
 
-func MarkDynamicConfigReloadPending(stateDir string) error {
+func MarkDynamicConfigReloadPending(stateDir string, baseline time.Time) error {
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		return err
 	}
-	return atomicWrite(pendingReloadMarkerPath(stateDir), nil, 0644)
+	return atomicWrite(
+		pendingReloadMarkerPath(stateDir),
+		[]byte(baseline.Format(time.RFC3339Nano)),
+		0644,
+	)
 }
 
 func EnsureDynamicConfigReloaded(stateDir string, timeout time.Duration) error {
@@ -121,15 +125,19 @@ func EnsureDynamicConfigReloaded(stateDir string, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
+	pendingBaseline, pending, markerErr := pendingReloadBaseline(stateDir)
 	reloaded, err := dynamicFilesReloaded(lastReload)
 	if err != nil {
 		return err
 	}
-	if reloaded {
+	if !pending && reloaded {
+		return nil
+	}
+	if pending && markerErr == nil && lastReload.After(pendingBaseline) && reloaded {
 		return clearPendingReloadMarker(stateDir)
 	}
 
-	if err := MarkDynamicConfigReloadPending(stateDir); err != nil {
+	if err := MarkDynamicConfigReloadPending(stateDir, lastReload); err != nil {
 		return err
 	}
 	if err := restartTraefik(); err != nil {
@@ -157,6 +165,21 @@ func WaitForSuccessfulReloadAfter(stateDir string, baseline time.Time, timeout t
 
 func pendingReloadMarkerPath(stateDir string) string {
 	return filepath.Join(stateDir, pendingReloadMarkerName)
+}
+
+func pendingReloadBaseline(stateDir string) (time.Time, bool, error) {
+	data, err := os.ReadFile(pendingReloadMarkerPath(stateDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, true, err
+	}
+	baseline, err := time.Parse(time.RFC3339Nano, string(data))
+	if err != nil {
+		return time.Time{}, true, err
+	}
+	return baseline, true, nil
 }
 
 func clearPendingReloadMarker(stateDir string) error {

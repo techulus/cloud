@@ -593,7 +593,7 @@ func (a *Agent) updateTraefik() error {
 	if err != nil {
 		return fmt.Errorf("failed to capture Traefik reload baseline: %w", err)
 	}
-	if err := traefik.MarkDynamicConfigReloadPending(a.DataDir); err != nil {
+	if err := traefik.MarkDynamicConfigReloadPending(a.DataDir, baselineReload); err != nil {
 		return fmt.Errorf("failed to mark Traefik config reload pending: %w", err)
 	}
 

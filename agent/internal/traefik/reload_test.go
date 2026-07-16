@@ -98,7 +98,7 @@ func TestWaitForSuccessfulReloadClearsPendingMarker(t *testing.T) {
 	if err := os.Chtimes(routesPath, baseline.Add(time.Second), baseline.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkDynamicConfigReloadPending(stateDir); err != nil {
+	if err := MarkDynamicConfigReloadPending(stateDir, baseline); err != nil {
 		t.Fatal(err)
 	}
 
@@ -138,7 +138,7 @@ func TestEnsureDynamicConfigReloadedRecoversIdenticalConfigWithoutRestart(t *tes
 		restartCount++
 		return nil
 	}
-	if err := MarkDynamicConfigReloadPending(stateDir); err != nil {
+	if err := MarkDynamicConfigReloadPending(stateDir, configTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,7 +153,7 @@ func TestEnsureDynamicConfigReloadedRecoversIdenticalConfigWithoutRestart(t *tes
 	}
 }
 
-func TestEnsureDynamicConfigReloadedRestartsForStaleConfig(t *testing.T) {
+func TestEnsureDynamicConfigReloadedRestartsWhenPendingMetricOnlyMatchesFileSecond(t *testing.T) {
 	originalDir := dynamicConfigDir
 	originalReader := readLastSuccessfulReload
 	originalRestart := restartTraefik
@@ -165,7 +165,7 @@ func TestEnsureDynamicConfigReloadedRestartsForStaleConfig(t *testing.T) {
 
 	dynamicConfigDir = t.TempDir()
 	stateDir := t.TempDir()
-	configTime := time.Unix(101, 0)
+	configTime := time.Unix(101, 500)
 	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
 	if err := os.WriteFile(routesPath, []byte("http: {}\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -173,15 +173,18 @@ func TestEnsureDynamicConfigReloadedRestartsForStaleConfig(t *testing.T) {
 	if err := os.Chtimes(routesPath, configTime, configTime); err != nil {
 		t.Fatal(err)
 	}
-	reloadTime := time.Unix(100, 0)
+	reloadTime := time.Unix(101, 0)
 	readLastSuccessfulReload = func() (time.Time, error) {
 		return reloadTime, nil
 	}
 	restartCount := 0
 	restartTraefik = func() error {
 		restartCount++
-		reloadTime = configTime.Add(time.Second)
+		reloadTime = time.Unix(102, 0)
 		return nil
+	}
+	if err := MarkDynamicConfigReloadPending(stateDir, reloadTime); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := EnsureDynamicConfigReloaded(stateDir, time.Second); err != nil {
@@ -209,7 +212,7 @@ func TestWaitForSuccessfulReloadTimesOutAndKeepsMarker(t *testing.T) {
 		return baseline, nil
 	}
 	reloadPollInterval = time.Millisecond
-	if err := MarkDynamicConfigReloadPending(stateDir); err != nil {
+	if err := MarkDynamicConfigReloadPending(stateDir, baseline); err != nil {
 		t.Fatal(err)
 	}
 

@@ -15,6 +15,7 @@ import {
 	observedReadyPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
+import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
 import {
 	SERVICE_REVISION_SCHEMA_VERSION,
 	type ServiceRevisionSecret,
@@ -165,20 +166,23 @@ export async function getServer(serverId: string) {
 export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
+	// Read token candidates first. If promotion commits after this query, this
+	// response can contain the new routing state without a token (safe), but it
+	// can never pair a post-promotion token with pre-promotion routing state.
+	const routingSyncRollouts = await getRoutingSyncRollouts();
 	const runtimeServices = await getRuntimeServiceRevisions();
-	const [
-		containers,
-		dnsRecords,
-		traefikConfig,
-		wireguardPeers,
-		routingSyncRolloutIds,
-	] = await Promise.all([
-		buildExpectedContainers(server.id),
-		buildDnsRecords(runtimeServices),
-		buildTraefikConfig(server, runtimeServices),
-		getWireGuardPeers(server.id, server.privateIp),
-		getRoutingSyncRolloutIds(server.id),
-	]);
+	const routingSyncRolloutIds = selectRoutingSyncRolloutIds({
+		rollouts: routingSyncRollouts,
+		runtimeServices,
+		serverId: server.id,
+	});
+	const [containers, dnsRecords, traefikConfig, wireguardPeers] =
+		await Promise.all([
+			buildExpectedContainers(server.id),
+			buildDnsRecords(runtimeServices),
+			buildTraefikConfig(server, runtimeServices),
+			getWireGuardPeers(server.id, server.privateIp),
+		]);
 	const serverless = await buildServerlessExpectedState(
 		server,
 		runtimeServices,
@@ -196,9 +200,14 @@ export async function buildAgentExpectedState(
 	};
 }
 
-async function getRoutingSyncRolloutIds(serverId: string): Promise<string[]> {
-	const activeRollouts = await db
-		.select({ id: rollouts.id, routingTargets: rollouts.routingTargets })
+async function getRoutingSyncRollouts() {
+	return db
+		.select({
+			id: rollouts.id,
+			serviceId: rollouts.serviceId,
+			serviceRevisionId: rollouts.serviceRevisionId,
+			routingTargets: rollouts.routingTargets,
+		})
 		.from(rollouts)
 		.where(
 			and(
@@ -206,10 +215,6 @@ async function getRoutingSyncRolloutIds(serverId: string): Promise<string[]> {
 				eq(rollouts.currentStage, "dns_sync"),
 			),
 		);
-
-	return activeRollouts
-		.filter((rollout) => rollout.routingTargets.includes(serverId))
-		.map((rollout) => rollout.id);
 }
 
 async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {

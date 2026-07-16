@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildRoutingTargets,
 	isRoutingSyncAcknowledgementEligible,
+	selectRoutingSyncRolloutIds,
 } from "@/lib/routing-sync";
 
 describe("routing sync targets", () => {
@@ -55,5 +56,42 @@ describe("routing sync acknowledgements", () => {
 				"worker-1",
 			),
 		).toBe(false);
+	});
+});
+
+describe("routing sync snapshot tokens", () => {
+	const promotedRollout = {
+		id: "rollout-1",
+		serviceId: "service-1",
+		serviceRevisionId: "revision-2",
+		routingTargets: ["worker-1", "proxy-1"],
+	};
+
+	it("withholds a token until the routing snapshot uses its promoted revision", () => {
+		expect(
+			selectRoutingSyncRolloutIds({
+				rollouts: [promotedRollout],
+				runtimeServices: [{ id: "service-1", revisionId: "revision-1" }],
+				serverId: "proxy-1",
+			}),
+		).toEqual([]);
+
+		expect(
+			selectRoutingSyncRolloutIds({
+				rollouts: [promotedRollout],
+				runtimeServices: [{ id: "service-1", revisionId: "revision-2" }],
+				serverId: "proxy-1",
+			}),
+		).toEqual(["rollout-1"]);
+	});
+
+	it("withholds a revision-matched token from non-target servers", () => {
+		expect(
+			selectRoutingSyncRolloutIds({
+				rollouts: [promotedRollout],
+				runtimeServices: [{ id: "service-1", revisionId: "revision-2" }],
+				serverId: "proxy-2",
+			}),
+		).toEqual([]);
 	});
 });
