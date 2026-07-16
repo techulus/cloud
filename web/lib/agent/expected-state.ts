@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	rollouts,
 	servers,
 	serviceRevisions,
 	services,
@@ -111,6 +112,7 @@ export type ServerlessRoute = {
 
 export type AgentExpectedState = {
 	serverName: string;
+	routingSyncRolloutIds: string[];
 	containers: ExpectedContainer[];
 	dns: { records: Array<{ name: string; ips: string[] }> };
 	serverless: { routes: ServerlessRoute[] };
@@ -164,13 +166,19 @@ export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
 	const runtimeServices = await getRuntimeServiceRevisions();
-	const [containers, dnsRecords, traefikConfig, wireguardPeers] =
-		await Promise.all([
-			buildExpectedContainers(server.id),
-			buildDnsRecords(runtimeServices),
-			buildTraefikConfig(server, runtimeServices),
-			getWireGuardPeers(server.id, server.privateIp),
-		]);
+	const [
+		containers,
+		dnsRecords,
+		traefikConfig,
+		wireguardPeers,
+		routingSyncRolloutIds,
+	] = await Promise.all([
+		buildExpectedContainers(server.id),
+		buildDnsRecords(runtimeServices),
+		buildTraefikConfig(server, runtimeServices),
+		getWireGuardPeers(server.id, server.privateIp),
+		getRoutingSyncRolloutIds(server.id),
+	]);
 	const serverless = await buildServerlessExpectedState(
 		server,
 		runtimeServices,
@@ -179,12 +187,29 @@ export async function buildAgentExpectedState(
 
 	return {
 		serverName: server.name,
+		routingSyncRolloutIds,
 		containers,
 		dns: { records: dnsRecords },
 		serverless,
 		traefik: traefikConfig,
 		wireguard: { peers: wireguardPeers },
 	};
+}
+
+async function getRoutingSyncRolloutIds(serverId: string): Promise<string[]> {
+	const activeRollouts = await db
+		.select({ id: rollouts.id, routingTargets: rollouts.routingTargets })
+		.from(rollouts)
+		.where(
+			and(
+				eq(rollouts.status, "in_progress"),
+				eq(rollouts.currentStage, "dns_sync"),
+			),
+		);
+
+	return activeRollouts
+		.filter((rollout) => rollout.routingTargets.includes(serverId))
+		.map((rollout) => rollout.id);
 }
 
 async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {

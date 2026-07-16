@@ -60,4 +60,4 @@ Health check statuses:
 | `healthy` | Check is passing |
 | `unhealthy` | Check has failed after retries |
 
-If no health check command is set, the deployment proceeds immediately after the container starts.
+If no health check command is set, deployment readiness only confirms that the container started. The platform still waits for DNS, proxy routes, certificates, and a successful Traefik configuration reload before marking the rollout complete, but it does not verify that the application inside the container accepts requests. Configure a health check when application readiness matters.

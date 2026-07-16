@@ -46,6 +46,7 @@ type ActualState struct {
 	TraefikConfigHash     string
 	L4ConfigHash          string
 	CertificatesHash      string
+	TraefikReloaded       bool
 	ChallengeRouteWritten bool
 	WireguardHash         string
 }
@@ -87,7 +88,6 @@ type Agent struct {
 	currentBuildID               string
 	IsProxy                      bool
 	serverlessGatewayRunning     atomic.Bool
-	dnsInSync                    bool
 	DisableDNS                   bool
 }
 

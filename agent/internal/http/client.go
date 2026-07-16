@@ -153,9 +153,10 @@ type WireGuardPeer struct {
 }
 
 type ExpectedState struct {
-	ServerName string              `json:"serverName"`
-	Containers []ExpectedContainer `json:"containers"`
-	Dns        struct {
+	ServerName            string              `json:"serverName"`
+	RoutingSyncRolloutIds []string            `json:"routingSyncRolloutIds,omitempty"`
+	Containers            []ExpectedContainer `json:"containers"`
+	Dns                   struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
 	Serverless struct {
@@ -274,16 +275,16 @@ type AgentHealth struct {
 }
 
 type StatusReport struct {
-	Resources        *Resources              `json:"resources,omitempty"`
-	PublicIP         string                  `json:"publicIp,omitempty"`
-	PrivateIP        string                  `json:"privateIp,omitempty"`
-	Meta             map[string]string       `json:"meta,omitempty"`
-	Containers       []ContainerStatus       `json:"containers"`
-	DeploymentErrors []DeploymentError       `json:"deploymentErrors,omitempty"`
-	DnsInSync        bool                    `json:"dnsInSync,omitempty"`
-	NetworkHealth    *health.NetworkHealth   `json:"networkHealth,omitempty"`
-	ContainerHealth  *health.ContainerHealth `json:"containerHealth,omitempty"`
-	AgentHealth      *AgentHealth            `json:"agentHealth,omitempty"`
+	Resources               *Resources              `json:"resources,omitempty"`
+	PublicIP                string                  `json:"publicIp,omitempty"`
+	PrivateIP               string                  `json:"privateIp,omitempty"`
+	Meta                    map[string]string       `json:"meta,omitempty"`
+	Containers              []ContainerStatus       `json:"containers"`
+	DeploymentErrors        []DeploymentError       `json:"deploymentErrors,omitempty"`
+	RoutingSyncedRolloutIds []string                `json:"routingSyncedRolloutIds,omitempty"`
+	NetworkHealth           *health.NetworkHealth   `json:"networkHealth,omitempty"`
+	ContainerHealth         *health.ContainerHealth `json:"containerHealth,omitempty"`
+	AgentHealth             *AgentHealth            `json:"agentHealth,omitempty"`
 }
 
 type CompletedWorkItem struct {
