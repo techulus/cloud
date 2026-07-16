@@ -63,19 +63,23 @@ export function AgentUpdateNudge({
 
 	return (
 		<>
-			<button
-				type="button"
-				className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors w-full"
-				onClick={() => setOpen(true)}
-			>
-				<ArrowUpCircle className="size-4 shrink-0" />
-				<span>
-					Agent update available:{" "}
-					<span className="font-mono">{currentVersion}</span>
-					{" → "}
-					<span className="font-mono">{latestVersion}</span>
-				</span>
-			</button>
+			<div className="mx-auto max-w-5xl rounded-b-lg border border-amber-500/40 border-t-0 bg-amber-500/5">
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+					<div className="flex items-center gap-2">
+						<span className="size-2 rounded-full bg-amber-500" />
+						<span className="text-sm font-medium">
+							Agent update available:{" "}
+							<span className="font-mono">{currentVersion}</span>
+							{" → "}
+							<span className="font-mono">{latestVersion}</span>
+						</span>
+					</div>
+					<Button size="sm" onClick={() => setOpen(true)}>
+						<ArrowUpCircle className="size-4" data-icon="inline-start" />
+						Update
+					</Button>
+				</div>
+			</div>
 
 			<Dialog open={open} onOpenChange={setOpen}>
 				<DialogContent className="sm:max-w-lg">

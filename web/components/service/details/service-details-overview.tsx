@@ -565,7 +565,7 @@ function EndpointPrimary({ endpoint }: { endpoint: EndpointItem }) {
 				href={endpoint.href}
 				target="_blank"
 				rel="noopener noreferrer"
-				className="hover:text-primary"
+				className="text-primary underline decoration-primary/40 underline-offset-4 transition-colors hover:decoration-primary focus-visible:decoration-primary focus-visible:outline-none"
 			>
 				{endpoint.label}
 			</a>

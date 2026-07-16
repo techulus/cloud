@@ -1,10 +1,8 @@
-import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {
 	return (
 		<>
-			<SetBreadcrumbs items={[{ label: "Dashboard", href: "/dashboard" }]} />
 			<div
 				aria-hidden="true"
 				className="container max-w-7xl mx-auto px-4 py-6 space-y-6"
