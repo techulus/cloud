@@ -6,9 +6,13 @@ import { rollouts, serviceReplicas } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { startMigrationInternal } from "@/lib/migrations";
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { createRolloutWithServiceRevision } from "@/lib/service-revisions";
 
-export async function deployServiceInternal(serviceId: string) {
+export async function deployServiceInternal(
+	serviceId: string,
+	actor: ServiceRevisionActor | null,
+) {
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
@@ -42,13 +46,16 @@ export async function deployServiceInternal(serviceId: string) {
 			if (service.migrationStatus) {
 				throw new Error("Migration already in progress");
 			}
-			await startMigrationInternal(serviceId, targetServerId);
+			await startMigrationInternal(serviceId, targetServerId, actor);
 			revalidatePath(`/dashboard/projects`);
 			return { migrationStarted: true };
 		}
 	}
 
-	const { rolloutId } = await createRolloutWithServiceRevision(serviceId);
+	const { rolloutId } = await createRolloutWithServiceRevision(
+		serviceId,
+		actor,
+	);
 
 	try {
 		await inngest.send(

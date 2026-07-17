@@ -4,10 +4,12 @@ import { getBackupStorageConfig } from "@/db/queries";
 import { deployments, services, serviceVolumes } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 
 export async function startMigrationInternal(
 	serviceId: string,
 	targetServerId: string,
+	actor: ServiceRevisionActor | null,
 ) {
 	const storageConfig = await getBackupStorageConfig();
 	if (!storageConfig) {
@@ -88,6 +90,7 @@ export async function startMigrationInternal(
 			sourceDeploymentId: deployment.id,
 			sourceContainerId: deployment.containerId,
 			volumes: volumes.map((v) => ({ id: v.id, name: v.name })),
+			actor,
 		}),
 	);
 

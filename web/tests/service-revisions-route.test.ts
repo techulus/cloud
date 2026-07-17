@@ -123,12 +123,18 @@ describe("service revisions route", () => {
 					createdAt: new Date("2026-07-13T02:00:00Z"),
 					cursorCreatedAt: "2026-07-13 02:00:00+00",
 					specification: revisionSpec("app:v2", "secret-new"),
+					actor: {
+						type: "user",
+						userId: "private-user-id",
+						name: "Ada Lovelace",
+					},
 				},
 				{
 					id: "revision-1",
 					createdAt: new Date("2026-07-13T01:00:00Z"),
 					cursorCreatedAt: "2026-07-13 01:00:00+00",
 					specification: revisionSpec("app:v1", "secret-old"),
+					actor: { type: "user", name: "Missing internal ID" },
 				},
 			],
 			[{ id: "server-1", name: "Sydney" }],
@@ -148,6 +154,7 @@ describe("service revisions route", () => {
 		expect(response.status).toBe(200);
 		expect(body.revisions[0]).toMatchObject({
 			id: "revision-2",
+			actor: { type: "user", name: "Ada Lovelace" },
 			rollout: { id: "rollout-2", status: "completed" },
 			comparison: {
 				kind: "changes",
@@ -158,6 +165,8 @@ describe("service revisions route", () => {
 			},
 		});
 		expect(body.revisions[1].comparison).toEqual({ kind: "initial" });
+		expect(body.revisions[1].actor).toBeNull();
+		expect(JSON.stringify(body)).not.toContain("private-user-id");
 		expect(JSON.stringify(body)).not.toContain("secret-new");
 		expect(JSON.stringify(body)).not.toContain("secret-old");
 		expect(JSON.stringify(body)).not.toContain("specification");

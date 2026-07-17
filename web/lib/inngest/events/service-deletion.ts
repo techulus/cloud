@@ -1,3 +1,5 @@
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
+
 export type ServiceDeletionEvents = {
 	"service-deletion/started": {
 		data: {
@@ -10,6 +12,7 @@ export type ServiceDeletionEvents = {
 			serviceId: string;
 			targetServerId: string | null;
 			backupIds: string[];
+			actor?: ServiceRevisionActor | null;
 		};
 	};
 };

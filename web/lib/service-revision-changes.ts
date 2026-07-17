@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RolloutStatus } from "@/db/types";
+import type { DisplayServiceRevisionActor } from "@/lib/service-revision-actor";
 import type {
 	ServiceRevisionHealthCheck,
 	ServiceRevisionPort,
@@ -69,6 +70,7 @@ export type ServiceRevisionComparison =
 export type ServiceRevisionChangelogItem = {
 	id: string;
 	createdAt: string;
+	actor: DisplayServiceRevisionActor | null;
 	comparison: ServiceRevisionComparison;
 	rollout: {
 		id: string;
