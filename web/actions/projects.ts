@@ -844,6 +844,25 @@ export async function updateServiceHostname(
 	return { success: true, hostname: sanitized };
 }
 
+export async function updateServiceName(serviceId: string, name: string) {
+	await requireDeveloperRole();
+	try {
+		const validatedName = nameSchema.parse(name);
+
+		await db
+			.update(services)
+			.set({ name: validatedName })
+			.where(eq(services.id, serviceId));
+
+		return { success: true, name: validatedName };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid service name"));
+		}
+		throw error;
+	}
+}
+
 export async function updateServiceGithubRepo(
 	serviceId: string,
 	repoUrl: string | null,

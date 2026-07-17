@@ -1,11 +1,10 @@
 "use client";
 
-import { Terminal } from "lucide-react";
 import { memo, useState } from "react";
 import { updateServiceStartCommand } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const StartCommandSection = memo(function StartCommandSection({
@@ -47,18 +46,12 @@ export const StartCommandSection = memo(function StartCommandSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Terminal
-						className={`size-5 ${hasStartCommand ? "text-blue-500" : "text-muted-foreground"}`}
-					/>
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Start Command</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Start Command"
+			summary={service.startCommand || "Default"}
+			summaryMuted={!hasStartCommand}
+		>
+			<div className="space-y-4">
 				<div className="space-y-2">
 					<label htmlFor="start-command" className="text-sm font-medium">
 						Command
@@ -95,6 +88,6 @@ export const StartCommandSection = memo(function StartCommandSection({
 					</div>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });
