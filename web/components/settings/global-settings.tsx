@@ -18,7 +18,6 @@ import { toast } from "sonner";
 import {
 	checkControlPlaneUpdatesNow,
 	refreshControlPlaneAboutStatus,
-	refreshControlPlaneUpgradeStatus,
 	updateAcmeEmail,
 	updateBuildServers,
 	updateBuildTimeout,
@@ -103,7 +102,9 @@ export function GlobalSettings({
 	appVersion,
 }: Props) {
 	const router = useRouter();
-	const [tab, setTab] = useQueryState("tab", { defaultValue: "build" });
+	const [tab, setTab] = useQueryState("tab", {
+		defaultValue: "infrastructure",
+	});
 	const previousTabRef = useRef<string | null>(null);
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
@@ -122,12 +123,11 @@ export function GlobalSettings({
 	const [isSavingProxyDomain, setIsSavingProxyDomain] = useState(false);
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
-	const [isRefreshingUpgrade, setIsRefreshingUpgrade] = useState(false);
 	const [controlPlaneUpgradeDialogOpen, setControlPlaneUpgradeDialogOpen] =
 		useState(false);
 
 	useEffect(() => {
-		const openedAbout = tab === "about" && previousTabRef.current !== "about";
+		const openedAbout = tab === "update" && previousTabRef.current !== "update";
 		previousTabRef.current = tab;
 
 		if (!openedAbout) return;
@@ -251,7 +251,6 @@ export function GlobalSettings({
 		setIsStartingUpgrade(true);
 		try {
 			await upgradeControlPlane(targetVersion);
-			toast.success("Control plane upgrade started");
 			setControlPlaneUpgradeDialogOpen(false);
 			router.refresh();
 		} catch (error) {
@@ -260,29 +259,6 @@ export function GlobalSettings({
 			);
 		} finally {
 			setIsStartingUpgrade(false);
-		}
-	};
-
-	const handleRefreshUpgradeStatus = async () => {
-		setIsRefreshingUpgrade(true);
-		try {
-			const state = await refreshControlPlaneUpgradeStatus();
-			if (state.status === "succeeded") {
-				toast.success("Upgrade completed");
-			} else if (state.status === "failed") {
-				toast.error(state.error ?? "Upgrade failed");
-			} else {
-				toast.info(`Upgrade status: ${state.status}`);
-			}
-			router.refresh();
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Failed to refresh upgrade status",
-			);
-		} finally {
-			setIsRefreshingUpgrade(false);
 		}
 	};
 
@@ -304,14 +280,11 @@ export function GlobalSettings({
 	return (
 		<Tabs value={tab} onValueChange={(value) => setTab(value)}>
 			<TabsList className="w-full justify-start overflow-x-auto">
-				<TabsTrigger value="build" className="px-4 shrink-0">
-					Build
-				</TabsTrigger>
 				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
 				</TabsTrigger>
 				<TabsTrigger value="email" className="px-4 shrink-0">
-					Email
+					Notifications
 				</TabsTrigger>
 				<TabsTrigger value="security" className="px-4 shrink-0">
 					Security
@@ -324,12 +297,12 @@ export function GlobalSettings({
 						Members
 					</TabsTrigger>
 				)}
-				<TabsTrigger value="about" className="px-4 shrink-0">
-					About
+				<TabsTrigger value="update" className="px-4 shrink-0">
+					Update
 				</TabsTrigger>
 			</TabsList>
 
-			<TabsContent value="build" className="space-y-6 pt-4">
+			<TabsContent value="infrastructure" className="space-y-6 pt-4">
 				{servers.length === 0 && (
 					<Empty className="border py-10">
 						<EmptyMedia variant="icon">
@@ -444,9 +417,6 @@ export function GlobalSettings({
 						)}
 					</div>
 				</div>
-			</TabsContent>
-
-			<TabsContent value="infrastructure" className="space-y-6 pt-4">
 				<div className="rounded-lg border">
 					<Item className="border-0 border-b rounded-none">
 						<ItemMedia variant="icon">
@@ -547,7 +517,7 @@ export function GlobalSettings({
 				</TabsContent>
 			)}
 
-			<TabsContent value="about" className="space-y-6 pt-4">
+			<TabsContent value="update" className="space-y-6 pt-4">
 				<div className="rounded-lg border">
 					<Item className="border-0 border-b rounded-none">
 						<ItemMedia variant="icon">
@@ -558,25 +528,33 @@ export function GlobalSettings({
 						</ItemContent>
 					</Item>
 					<div className="p-4 space-y-4">
-						<div className="grid gap-3 sm:grid-cols-3">
-							<div>
-								<p className="text-xs text-muted-foreground">Current version</p>
-								<p className="font-mono text-sm">{displayVersion}</p>
+						<div className="space-y-1.5 rounded-md border px-3 py-2.5 font-mono text-sm">
+							<div className="flex items-baseline justify-between gap-4">
+								<span className="shrink-0 text-muted-foreground">
+									Current version
+								</span>
+								<span className="min-w-0 truncate text-right font-medium">
+									{displayVersion}
+								</span>
 							</div>
-							<div>
-								<p className="text-xs text-muted-foreground">Latest version</p>
-								<p className="font-mono text-sm">
+							<div className="flex items-baseline justify-between gap-4">
+								<span className="shrink-0 text-muted-foreground">
+									Latest version
+								</span>
+								<span className="min-w-0 truncate text-right font-medium">
 									{updateState?.latestVersion ?? "Not checked"}
-								</p>
+								</span>
 							</div>
-							<div>
-								<p className="text-xs text-muted-foreground">Last checked</p>
-								<p className="text-sm">
+							<div className="flex items-baseline justify-between gap-4">
+								<span className="shrink-0 text-muted-foreground">
+									Last checked
+								</span>
+								<span className="min-w-0 truncate text-right font-medium">
 									<LocalDate
 										value={updateState?.checkedAt}
 										fallback={updateState?.checkedAt ? "Unknown" : "Never"}
 									/>
-								</p>
+								</span>
 							</div>
 						</div>
 
@@ -702,35 +680,13 @@ export function GlobalSettings({
 					</div>
 				</div>
 
-				{upgradeState && upgradeState.status !== "idle" && (
-					<div className="rounded-lg border p-4 text-sm">
-						<div className="flex flex-wrap items-center justify-between gap-2">
-							<div>
-								<p className="font-medium">
-									Upgrade status: {upgradeState.status}
-									{upgradeState.targetVersion
-										? ` (${upgradeState.targetVersion})`
-										: ""}
-								</p>
-								{upgradeState.error && (
-									<p className="text-destructive">{upgradeState.error}</p>
-								)}
-							</div>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={handleRefreshUpgradeStatus}
-								disabled={isRefreshingUpgrade}
-							>
-								{isRefreshingUpgrade ? "Refreshing..." : "Refresh status"}
-							</Button>
-						</div>
-						{upgradeState.logs.length > 0 && (
-							<code className="mt-3 block max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs font-mono text-muted-foreground">
-								{upgradeState.logs.slice(-20).join("\n")}
-							</code>
-						)}
+				{upgradeState?.status === "failed" && (
+					<div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+						Last update
+						{upgradeState.targetVersion
+							? ` to ${upgradeState.targetVersion}`
+							: ""}{" "}
+						failed{upgradeState.error ? `: ${upgradeState.error}` : "."}
 					</div>
 				)}
 			</TabsContent>

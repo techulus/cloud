@@ -30,6 +30,7 @@ export const migrationWorkflow = inngest.createFunction(
 			sourceDeploymentId,
 			sourceContainerId,
 			volumes,
+			actor = null,
 		} = event.data;
 
 		const storageConfig = await step.run("validate-storage", async () => {
@@ -317,7 +318,7 @@ export const migrationWorkflow = inngest.createFunction(
 				.set({ lockedServerId: targetServerId })
 				.where(eq(services.id, serviceId));
 
-			await deployServiceInternal(serviceId);
+			await deployServiceInternal(serviceId, actor);
 		});
 
 		await step.run("finalize-migration", async () => {

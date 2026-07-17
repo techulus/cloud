@@ -1,12 +1,11 @@
 "use client";
 
 import cronstrue from "cronstrue";
-import { Clock } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { updateServiceSchedule } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const ScheduleSection = memo(function ScheduleSection({
@@ -75,18 +74,12 @@ export const ScheduleSection = memo(function ScheduleSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Clock
-						className={`size-5 ${hasSchedule ? "text-blue-500" : "text-muted-foreground"}`}
-					/>
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Deployment Schedule</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Deployment Schedule"
+			summary={service.deploymentSchedule || "None"}
+			summaryMuted={!hasSchedule}
+		>
+			<div className="space-y-4">
 				<div className="space-y-2">
 					<label htmlFor="deployment-schedule" className="text-sm font-medium">
 						Cron Expression
@@ -140,6 +133,6 @@ export const ScheduleSection = memo(function ScheduleSection({
 					</div>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

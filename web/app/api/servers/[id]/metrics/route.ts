@@ -1,10 +1,10 @@
 import { headers } from "next/headers";
+import { getServerDetails } from "@/db/queries";
 import { auth } from "@/lib/auth";
-import { subtractMilliseconds } from "@/lib/date";
 import {
 	emptyHistory,
+	getMetricWindow,
 	isMetricsEnabled,
-	METRIC_RANGE_OPTIONS,
 	parseMetricRange,
 	queryNodeMetricsHistory,
 	queryNodeMetricsSnapshot,
@@ -26,6 +26,11 @@ export async function GET(
 	const { id: serverId } = await params;
 	const url = new URL(request.url);
 	const range = parseMetricRange(url.searchParams.get("range"));
+	const server = await getServerDetails(serverId);
+
+	if (!server) {
+		return Response.json({ message: "Server not found" }, { status: 404 });
+	}
 
 	if (!isMetricsEnabled()) {
 		warnMissingMetricsConfig("server");
@@ -37,9 +42,7 @@ export async function GET(
 		});
 	}
 
-	const end = new Date();
-	const option = METRIC_RANGE_OPTIONS[range];
-	const start = subtractMilliseconds(end, option.durationMs);
+	const { start, end, stepSeconds } = getMetricWindow(range);
 
 	try {
 		const [current, history] = await Promise.all([
@@ -48,7 +51,7 @@ export async function GET(
 				serverId,
 				start,
 				end,
-				stepSeconds: option.stepSeconds,
+				stepSeconds,
 			}),
 		]);
 

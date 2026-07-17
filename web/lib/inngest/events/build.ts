@@ -1,3 +1,5 @@
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
+
 export type BuildEvents = {
 	"build/trigger": {
 		data: {
@@ -8,6 +10,7 @@ export type BuildEvents = {
 			commitMessage: string;
 			branch: string;
 			author?: string;
+			actor?: ServiceRevisionActor | null;
 			githubDeploymentId?: number;
 		};
 	};
@@ -16,6 +19,7 @@ export type BuildEvents = {
 			buildId: string;
 			serviceId: string;
 			buildGroupId: string | null;
+			actor?: ServiceRevisionActor | null;
 		};
 	};
 	"build/cancelled": {

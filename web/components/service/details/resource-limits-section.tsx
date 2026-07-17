@@ -1,11 +1,10 @@
 "use client";
 
-import { Gauge } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { updateServiceResourceLimits } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -148,18 +147,16 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Gauge
-						className={`size-5 ${hasLimits ? "text-blue-500" : "text-muted-foreground"}`}
-					/>
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Resource Limits</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Resource Limits"
+			summary={
+				hasLimits
+					? `${service.resourceCpuLimit ?? "?"} CPU · ${service.resourceMemoryLimitMb ?? "?"} MB`
+					: "No limit"
+			}
+			summaryMuted={!hasLimits}
+		>
+			<div className="space-y-4">
 				<div className="space-y-2">
 					<label
 						htmlFor="resource-limits-preset"
@@ -258,6 +255,6 @@ export const ResourceLimitsSection = memo(function ResourceLimitsSection({
 					</div>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

@@ -10,12 +10,16 @@ import {
 	services,
 	serviceVolumes,
 } from "@/db/schema";
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import {
 	buildServiceRevisionSpec,
 	SERVICE_REVISION_SCHEMA_VERSION,
 } from "@/lib/service-revision-spec";
 
-export async function createRolloutWithServiceRevision(serviceId: string) {
+export async function createRolloutWithServiceRevision(
+	serviceId: string,
+	actor: ServiceRevisionActor | null,
+) {
 	return db.transaction(
 		async (tx) => {
 			const service = await tx
@@ -64,7 +68,7 @@ export async function createRolloutWithServiceRevision(serviceId: string) {
 			});
 			const revision = await tx
 				.insert(serviceRevisions)
-				.values({ id: randomUUID(), serviceId, specification })
+				.values({ id: randomUUID(), serviceId, specification, actor })
 				.returning()
 				.then((rows) => rows[0]);
 			if (!revision) {

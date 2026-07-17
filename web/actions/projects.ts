@@ -692,7 +692,8 @@ export async function deleteService(
 }
 
 export async function restoreDeletedService(serviceId: string) {
-	await requireDeveloperRole();
+	const session = await requireDeveloperRole();
+	if (!session) throw new Error("Unauthorized");
 	const service = await db
 		.select()
 		.from(services)
@@ -788,6 +789,11 @@ export async function restoreDeletedService(serviceId: string) {
 				serviceId,
 				targetServerId,
 				backupIds,
+				actor: {
+					type: "user",
+					userId: session.user.id,
+					name: session.user.name,
+				},
 			}),
 		);
 	} catch (error) {
@@ -836,6 +842,25 @@ export async function updateServiceHostname(
 		.where(eq(services.id, serviceId));
 
 	return { success: true, hostname: sanitized };
+}
+
+export async function updateServiceName(serviceId: string, name: string) {
+	await requireDeveloperRole();
+	try {
+		const validatedName = nameSchema.parse(name);
+
+		await db
+			.update(services)
+			.set({ name: validatedName })
+			.where(eq(services.id, serviceId));
+
+		return { success: true, name: validatedName };
+	} catch (error) {
+		if (error instanceof ZodError) {
+			throw new Error(getZodErrorMessage(error, "Invalid service name"));
+		}
+		throw error;
+	}
 }
 
 export async function updateServiceGithubRepo(
@@ -888,8 +913,13 @@ export async function updateServiceGithubRepo(
 }
 
 export async function deployService(serviceId: string) {
-	await requireDeveloperRole();
-	return deployServiceInternal(serviceId);
+	const session = await requireDeveloperRole();
+	if (!session) throw new Error("Unauthorized");
+	return deployServiceInternal(serviceId, {
+		type: "user",
+		userId: session.user.id,
+		name: session.user.name,
+	});
 }
 
 export async function deleteDeployments(serviceId: string) {

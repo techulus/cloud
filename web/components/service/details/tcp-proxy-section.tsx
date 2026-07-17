@@ -1,11 +1,11 @@
 "use client";
 
-import { Check, Copy, Lock, Network, Plus, X } from "lucide-react";
+import { Check, Copy, Lock, Plus, X } from "lucide-react";
 import { memo, useState } from "react";
 import { updateServiceConfig } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
@@ -97,16 +97,16 @@ export const TCPProxySection = memo(function TCPProxySection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Network className="size-5 text-muted-foreground" />
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>TCP/UDP Proxy</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="TCP/UDP Proxy"
+			summary={
+				tcpUdpPorts.length > 0
+					? tcpUdpPorts.map((p) => `${p.port}/${p.protocol}`).join(", ")
+					: "None"
+			}
+			summaryMuted={tcpUdpPorts.length === 0}
+		>
+			<div className="space-y-4">
 				<p className="text-sm text-muted-foreground">
 					Expose TCP/UDP ports directly through the proxy for non-HTTP services.
 				</p>
@@ -232,6 +232,6 @@ export const TCPProxySection = memo(function TCPProxySection({
 					</Button>
 				</div>
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

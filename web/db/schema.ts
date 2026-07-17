@@ -13,6 +13,7 @@ import {
 	unique,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 export const user = pgTable("user", {
@@ -596,6 +597,7 @@ export const serviceRevisions = pgTable(
 		specification: jsonb("specification")
 			.$type<ServiceRevisionSpec>()
 			.notNull(),
+		actor: jsonb("actor").$type<ServiceRevisionActor | null>(),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

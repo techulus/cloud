@@ -1,20 +1,20 @@
 "use client";
 
+import { Eye, EyeOff, Plus, Save, X } from "lucide-react";
 import {
-	useState,
-	useEffect,
-	useCallback,
-	useRef,
-	memo,
 	type ClipboardEvent,
+	memo,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
 } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
+import { createSecretsBatch, deleteSecretsBatch } from "@/actions/secrets";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Key, Plus, X, Save, Eye, EyeOff } from "lucide-react";
-import { toast } from "sonner";
-import { createSecretsBatch, deleteSecretsBatch } from "@/actions/secrets";
 import type { Secret, ServiceWithDetails as Service } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
@@ -192,17 +192,21 @@ export const SecretsSection = memo(function SecretsSection({
 		}
 	};
 
+	const secretCount = secrets?.length ?? 0;
+
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Key className="size-5 text-muted-foreground" />
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Environment Variables</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Environment Variables"
+			summary={
+				isLoading
+					? "…"
+					: secretCount > 0
+						? `${secretCount} variable${secretCount !== 1 ? "s" : ""}`
+						: "None"
+			}
+			summaryMuted={isLoading || secretCount === 0}
+		>
+			<div className="space-y-4">
 				{isLoading ? (
 					<div className="text-sm text-muted-foreground">Loading...</div>
 				) : secrets && secrets.length > 0 ? (
@@ -355,6 +359,6 @@ export const SecretsSection = memo(function SecretsSection({
 					</p>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

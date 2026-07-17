@@ -42,7 +42,8 @@ export async function cancelBuild(buildId: string) {
 }
 
 export async function retryBuild(buildId: string) {
-	await requireDeveloperRole();
+	const session = await requireDeveloperRole();
+	if (!session) throw new Error("Unauthorized");
 	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
@@ -71,6 +72,7 @@ export async function retryBuild(buildId: string) {
 			commitMessage: build.commitMessage ?? "Retry build",
 			branch: build.branch,
 			author: build.author ?? undefined,
+			actor: { type: "user", userId: session.user.id, name: session.user.name },
 		}),
 	);
 
@@ -81,7 +83,14 @@ export async function triggerBuild(
 	serviceId: string,
 	trigger: "manual" | "scheduled" = "manual",
 ) {
-	await requireDeveloperRole();
+	const session = await requireDeveloperRole();
+	const actor = session
+		? {
+				type: "user" as const,
+				userId: session.user.id,
+				name: session.user.name,
+			}
+		: ({ type: "system" } as const);
 	const [service] = await db
 		.select()
 		.from(services)
@@ -114,6 +123,7 @@ export async function triggerBuild(
 				commitSha: "HEAD",
 				commitMessage: triggerMessage,
 				branch: githubRepo.deployBranch || githubRepo.defaultBranch || "main",
+				actor,
 			}),
 		);
 
@@ -131,6 +141,7 @@ export async function triggerBuild(
 			commitSha: "HEAD",
 			commitMessage: triggerMessage,
 			branch: service.githubBranch || "main",
+			actor,
 		}),
 	);
 

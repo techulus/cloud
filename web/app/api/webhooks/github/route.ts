@@ -48,6 +48,7 @@ type PushPayload = {
 	installation?: {
 		id: number;
 	};
+	sender: { id: number; login: string };
 };
 
 async function handleInstallationEvent(payload: InstallationPayload) {
@@ -204,6 +205,11 @@ async function handlePushEvent(payload: PushPayload) {
 			branch,
 			author: head_commit.author.username || head_commit.author.name,
 			githubDeploymentId,
+			actor: {
+				type: "github",
+				githubUserId: payload.sender.id,
+				login: payload.sender.login,
+			},
 		}),
 	);
 

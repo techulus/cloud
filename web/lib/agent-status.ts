@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	type AgentHealth,
@@ -738,7 +738,7 @@ export async function applyStatusReport(
 		.map((c) => c.deploymentId)
 		.filter((id) => id !== "");
 
-	const activeDeployments = await db
+	const trackedDeployments = await db
 		.select({
 			id: deployments.id,
 			containerId: deployments.containerId,
@@ -749,11 +749,14 @@ export async function applyStatusReport(
 		.where(
 			and(
 				eq(deployments.serverId, serverId),
-				isNotNull(deployments.containerId),
+				or(
+					isNotNull(deployments.containerId),
+					eq(deployments.runtimeDesiredState, "removed"),
+				),
 			),
 		);
 
-	for (const dep of activeDeployments) {
+	for (const dep of trackedDeployments) {
 		if (!reportedDeploymentIds.includes(dep.id)) {
 			if (dep.runtimeDesiredState === "removed") {
 				console.log(

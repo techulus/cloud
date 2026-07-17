@@ -51,7 +51,7 @@ export const buildWorkflow = inngest.createFunction(
 		],
 	},
 	async ({ event, step }) => {
-		const { buildId, serviceId, buildGroupId } = event.data;
+		const { buildId, serviceId, buildGroupId, actor = null } = event.data;
 
 		if (!buildGroupId) {
 			const result = await step.waitForEvent("wait-single-build", {
@@ -114,7 +114,7 @@ export const buildWorkflow = inngest.createFunction(
 
 			if (shouldDeploy) {
 				await step.run("trigger-deploy", async () => {
-					await deployServiceInternal(serviceId);
+					await deployServiceInternal(serviceId, actor);
 				});
 			}
 
@@ -199,7 +199,7 @@ export const buildWorkflow = inngest.createFunction(
 
 		if (shouldDeploy) {
 			await step.run("trigger-deploy-group", async () => {
-				await deployServiceInternal(serviceId);
+				await deployServiceInternal(serviceId, actor);
 			});
 		}
 

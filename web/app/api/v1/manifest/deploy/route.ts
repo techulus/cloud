@@ -21,7 +21,11 @@ export async function POST(request: Request) {
 	}
 
 	try {
-		const result = await deployManifest(parsed.data);
+		const result = await deployManifest(parsed.data, {
+			type: "user",
+			userId: sessionResult.session.user.id,
+			name: sessionResult.session.user.name,
+		});
 		return Response.json(result);
 	} catch (error) {
 		return Response.json(

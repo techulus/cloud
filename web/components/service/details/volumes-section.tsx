@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, memo } from "react";
+import { Lock, Plus, Trash2 } from "lucide-react";
+import { memo, useState } from "react";
+import { addServiceVolume, removeServiceVolume } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { HardDrive, Trash2, Plus, Lock } from "lucide-react";
-import { addServiceVolume, removeServiceVolume } from "@/actions/projects";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const VolumesSection = memo(function VolumesSection({
@@ -53,16 +53,16 @@ export const VolumesSection = memo(function VolumesSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<HardDrive className="size-5 text-muted-foreground" />
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Volumes</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Volumes"
+			summary={
+				volumes.length > 0
+					? `${volumes.length} volume${volumes.length !== 1 ? "s" : ""}`
+					: "None"
+			}
+			summaryMuted={volumes.length === 0}
+		>
+			<div className="space-y-4">
 				{service.lockedServerId && (
 					<div className="flex items-center gap-2 text-sm text-muted-foreground">
 						<Lock className="h-3 w-3" />
@@ -130,6 +130,6 @@ export const VolumesSection = memo(function VolumesSection({
 					</Button>
 				</div>
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

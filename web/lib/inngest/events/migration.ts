@@ -1,3 +1,5 @@
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
+
 export type MigrationEvents = {
 	"migration/started": {
 		data: {
@@ -7,6 +9,7 @@ export type MigrationEvents = {
 			sourceDeploymentId: string;
 			sourceContainerId: string;
 			volumes: { id: string; name: string }[];
+			actor?: ServiceRevisionActor | null;
 		};
 	};
 	"migration/cancelled": {

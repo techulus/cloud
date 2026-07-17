@@ -147,6 +147,14 @@ function RevisionChanges({ item }: { item: ServiceRevisionChangelogItem }) {
 	);
 }
 
+function actorByline(item: ServiceRevisionChangelogItem): string {
+	if (item.actor?.type === "user") return `by ${item.actor.name}`;
+	if (item.actor?.type === "github")
+		return `by @${item.actor.login} via GitHub`;
+	if (item.actor?.type === "system") return "by System";
+	return "actor unknown";
+}
+
 export function ChangelogHistory({
 	serviceId,
 	projectSlug,
@@ -244,6 +252,8 @@ export function ChangelogHistory({
 									>
 										{formatRelativeTime(revision.createdAt)} ·{" "}
 										{revision.id.slice(0, 8)}
+										{" · "}
+										{actorByline(revision)}
 									</span>
 								</div>
 								{revision.rollout ? (

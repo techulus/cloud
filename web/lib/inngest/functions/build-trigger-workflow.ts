@@ -24,6 +24,7 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			branch,
 			author,
 			githubDeploymentId,
+			actor = null,
 		} = event.data;
 
 		const { buildIds, buildGroupId } = await step.run(
@@ -68,6 +69,7 @@ export const buildTriggerWorkflow = inngest.createFunction(
 					buildId: buildIds[0],
 					serviceId,
 					buildGroupId,
+					actor,
 				}),
 			);
 		});
