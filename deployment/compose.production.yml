@@ -210,7 +210,7 @@ services:
     restart: unless-stopped
 
   inngest:
-    image: inngest/inngest:latest
+    image: inngest/inngest:v1.37.0
     env_file:
       - ./.env
     environment:
