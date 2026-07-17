@@ -16,11 +16,13 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Server } from "@/db/types";
 import {
+	formatCompactDate,
 	formatCompactDateTime,
 	formatRelativeTime,
 	getTimestamp,
 } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
+import type { MetricRange } from "@/lib/metric-ranges";
 import { cn } from "@/lib/utils";
 import type {
 	NodeMetricPoint,
@@ -47,12 +49,12 @@ type ServerOverview = Pick<
 	| "agentHealth"
 >;
 
-type ServerMetricMode = "cpu" | "memory" | "disk";
+export type ServerMetricMode = "cpu" | "memory" | "disk";
 
-type ServerMetricsResponse = {
+export type ServerMetricsResponse = {
 	current: NodeMetricsSnapshot | null;
 	history: NodeMetricsHistory;
-	range: string;
+	range: MetricRange;
 	enabled?: boolean;
 	available?: boolean;
 };
@@ -136,23 +138,28 @@ export function ServerDetailsOverview({
 	);
 }
 
-function ServerMetricsPanel({
+export function ServerMetricsPanel({
 	metrics,
 	initialMetrics,
 	error,
 	isLoading,
+	fixedMode,
+	range = "24h",
 }: {
 	metrics?: ServerMetricsResponse;
-	initialMetrics: NodeMetricsSnapshot | null;
+	initialMetrics?: NodeMetricsSnapshot | null;
 	error?: unknown;
 	isLoading: boolean;
+	fixedMode?: ServerMetricMode;
+	range?: MetricRange;
 }) {
-	const [mode, setMode] = useState<ServerMetricMode>("cpu");
+	const [selectedMode, setSelectedMode] = useState<ServerMetricMode>("cpu");
+	const mode = fixedMode ?? selectedMode;
 	const rows = useMemo(
 		() => buildChartRows(metrics?.history, mode),
 		[metrics, mode],
 	);
-	const current = metrics?.current ?? initialMetrics;
+	const current = metrics?.current ?? initialMetrics ?? null;
 	const isUnavailable =
 		Boolean(error) ||
 		metrics?.enabled === false ||
@@ -162,7 +169,17 @@ function ServerMetricsPanel({
 
 	return (
 		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div
+				className={cn(
+					"flex flex-col gap-3",
+					fixedMode
+						? "items-start"
+						: "sm:flex-row sm:items-start sm:justify-between",
+				)}
+			>
+				{fixedMode ? (
+					<h2 className="text-lg font-semibold capitalize">{fixedMode}</h2>
+				) : null}
 				<div className="min-w-0">
 					{isLoading && !metrics && !current ? (
 						<div className="flex flex-nowrap items-end gap-x-5">
@@ -173,22 +190,24 @@ function ServerMetricsPanel({
 						<div className="flex flex-nowrap items-end gap-x-5">
 							<MetricSummary
 								value={formatPercent(percent)}
-								label={mode.toUpperCase()}
+								label={fixedMode ? "Usage" : mode.toUpperCase()}
 							/>
 							{mode !== "cpu" ? (
 								<MetricSummary
 									value={formatBytes(bytes)}
-									label={`${mode} used`}
+									label={fixedMode ? "Used" : `${mode} used`}
 								/>
 							) : null}
 						</div>
 					)}
 				</div>
-				<ServerMetricTabs
-					value={mode}
-					onChange={setMode}
-					disabled={isLoading || isUnavailable}
-				/>
+				{fixedMode ? null : (
+					<ServerMetricTabs
+						value={mode}
+						onChange={setSelectedMode}
+						disabled={isLoading || isUnavailable}
+					/>
+				)}
 			</div>
 
 			<div className="min-h-40 min-w-0 flex-1">
@@ -197,7 +216,13 @@ function ServerMetricsPanel({
 				) : isUnavailable ? (
 					<MetricsState message="Server metrics unavailable" />
 				) : rows.length === 0 ? (
-					<MetricsState message="No resource metrics in this range" />
+					<MetricsState
+						message={
+							fixedMode
+								? `No ${mode} metrics in this range`
+								: "No resource metrics in this range"
+						}
+					/>
 				) : (
 					<ResponsiveContainer
 						width="100%"
@@ -225,7 +250,11 @@ function ServerMetricsPanel({
 								minTickGap={32}
 								tickLine={false}
 								axisLine={false}
-								tickFormatter={(value) => formatCompactDateTime(value)}
+								tickFormatter={(value) =>
+									range === "7d" || range === "30d"
+										? formatCompactDate(value)
+										: formatCompactDateTime(value)
+								}
 								className="text-xs"
 							/>
 							<YAxis
