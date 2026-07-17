@@ -69,7 +69,7 @@ services:
     restart: unless-stopped
 
   inngest:
-    image: inngest/inngest
+    image: inngest/inngest:v1.37.0
     ports:
       - "8288:8288"
       - "8289:8289"
