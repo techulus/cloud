@@ -24,6 +24,7 @@ import {
 	techulusManifestSchema,
 } from "@/lib/cli-manifest";
 import { deployServiceInternal } from "@/lib/deploy-service";
+import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { slugify } from "@/lib/utils";
 
 export type ManifestChange = {
@@ -690,7 +691,10 @@ export async function applyManifest(
 	};
 }
 
-export async function deployManifest(manifest: TechulusManifest) {
+export async function deployManifest(
+	manifest: TechulusManifest,
+	actor: ServiceRevisionActor | null,
+) {
 	const project = await findProjectByManifest(manifest);
 	if (!project) {
 		throw new Error("Project not found");
@@ -716,7 +720,7 @@ export async function deployManifest(manifest: TechulusManifest) {
 		manifest.service.replicas.count,
 	);
 
-	const result = await deployServiceInternal(service.id);
+	const result = await deployServiceInternal(service.id, actor);
 
 	return {
 		serviceId: service.id,

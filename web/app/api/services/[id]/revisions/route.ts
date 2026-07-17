@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { rollouts, servers, serviceRevisions, services } from "@/db/schema";
 import { requireRequestSession } from "@/lib/api-auth";
+import { sanitizeServiceRevisionActor } from "@/lib/service-revision-actor";
 import {
 	diffServiceRevisionSpecs,
 	parseServiceRevisionSpec,
@@ -82,6 +83,7 @@ export async function GET(
 			createdAt: serviceRevisions.createdAt,
 			cursorCreatedAt: sql<string>`${serviceRevisions.createdAt}::text`,
 			specification: serviceRevisions.specification,
+			actor: serviceRevisions.actor,
 		})
 		.from(serviceRevisions)
 		.where(
@@ -195,6 +197,7 @@ export async function GET(
 			return {
 				id: revision.id,
 				createdAt: revision.createdAt.toISOString(),
+				actor: sanitizeServiceRevisionActor(revision.actor),
 				comparison,
 				rollout: rollout ? { id: rollout.id, status: rollout.status } : null,
 			};

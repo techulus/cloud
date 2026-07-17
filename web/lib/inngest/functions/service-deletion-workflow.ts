@@ -292,7 +292,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 		triggers: [inngestEvents.serviceRestoreStarted],
 	},
 	async ({ event, step, group }) => {
-		const { serviceId, targetServerId, backupIds } = event.data;
+		const { serviceId, targetServerId, backupIds, actor = null } = event.data;
 
 		try {
 			const setup = await step.run("setup-restore", async () => {
@@ -421,7 +421,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						.where(eq(services.id, serviceId));
 
 					try {
-						const result = await deployServiceInternal(serviceId);
+						const result = await deployServiceInternal(serviceId, actor);
 						if (!("rolloutId" in result) || !result.rolloutId) {
 							throw new Error("Restore could not start a deployment");
 						}
