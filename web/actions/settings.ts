@@ -100,11 +100,9 @@ export async function upgradeControlPlane(targetVersion: string) {
 	return state;
 }
 
-export async function refreshControlPlaneUpgradeStatus() {
-	await requireAdminSession();
-	const state = await refreshControlPlaneUpgradeState();
-	revalidatePath("/dashboard/settings");
-	return state;
+export async function getControlPlaneUpgradeStatus() {
+	await requireAuth();
+	return refreshControlPlaneUpgradeState();
 }
 
 export async function refreshControlPlaneAboutStatus() {
