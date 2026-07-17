@@ -1,6 +1,35 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/db", () => ({ db: {} }));
+const mocks = vi.hoisted(() => {
+	const selectResults: unknown[][] = [];
+
+	function createQuery(result: unknown[] = []) {
+		const query = {
+			from: vi.fn(() => query),
+			set: vi.fn(() => query),
+			where: vi.fn(() => query),
+			returning: vi.fn(() => query),
+			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			then: (
+				resolve: (value: unknown[]) => unknown,
+				reject?: (reason: unknown) => unknown,
+			) => Promise.resolve(result).then(resolve, reject),
+		};
+
+		return query;
+	}
+
+	return {
+		selectResults,
+		db: {
+			select: vi.fn(() => createQuery(selectResults.shift() ?? [])),
+			update: vi.fn(() => createQuery()),
+			delete: vi.fn(() => createQuery()),
+		},
+	};
+});
+
+vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/inngest/client", () => ({
 	inngest: { send: vi.fn() },
 }));
@@ -18,11 +47,19 @@ vi.mock("@/lib/work-queue", () => ({
 }));
 
 import {
+	applyStatusReport,
 	getSleepTransitionDeploymentIds,
 	getStaleStoppedServerlessReportUpdate,
 	getStoppedContainerReportUpdate,
 	shouldAttachReportedContainer,
 } from "@/lib/agent-status";
+
+beforeEach(() => {
+	mocks.selectResults.length = 0;
+	mocks.db.select.mockClear();
+	mocks.db.update.mockClear();
+	mocks.db.delete.mockClear();
+});
 
 describe("agent status serverless attachment", () => {
 	it("does not attach reported containers to sleeping deployments", () => {
@@ -102,11 +139,60 @@ describe("agent status serverless attachment", () => {
 					null,
 					42,
 					{ type: "sleep", deploymentId: "", containerId: "ctr_empty" },
-					{ type: "sleep", deploymentId: "dep_sleep", containerId: "ctr_sleep" },
+					{
+						type: "sleep",
+						deploymentId: "dep_sleep",
+						containerId: "ctr_sleep",
+					},
 					{ type: "wake_started", deploymentId: "dep_wake" },
 					{ type: "sleep", deploymentId: "dep_missing_container" },
 				]),
 			),
 		).toEqual(["dep_sleep"]);
+	});
+});
+
+describe("agent status deployment cleanup", () => {
+	it("deletes a removed containerless deployment missing from the report", async () => {
+		mocks.selectResults.push([
+			{
+				id: "deployment_removed",
+				containerId: null,
+				runtimeDesiredState: "removed",
+				observedPhase: "sleeping",
+			},
+		]);
+
+		await applyStatusReport("server_1", { containers: [] });
+
+		expect(mocks.db.delete).toHaveBeenCalledTimes(1);
+	});
+
+	it("retains a removed containerless deployment that reappears in the report", async () => {
+		const deployment = {
+			id: "deployment_removed",
+			serviceId: "service_1",
+			serviceRevisionId: "revision_1",
+			serverId: "server_1",
+			containerId: null,
+			runtimeDesiredState: "removed",
+			trafficState: "inactive",
+			observedPhase: "sleeping",
+			rolloutId: "rollout_1",
+		};
+		mocks.selectResults.push([deployment], [deployment]);
+
+		await applyStatusReport("server_1", {
+			containers: [
+				{
+					deploymentId: deployment.id,
+					containerId: "container_1",
+					status: "running",
+					healthStatus: "none",
+				},
+			],
+		});
+
+		expect(mocks.db.delete).not.toHaveBeenCalled();
 	});
 });
