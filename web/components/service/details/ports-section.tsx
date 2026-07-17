@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, memo } from "react";
+import { Globe, HelpCircle, Lock, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { memo, useState } from "react";
 import isFQDN from "validator/es/lib/isFQDN";
 import isPort from "validator/es/lib/isPort";
+import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
+import { EditableText } from "@/components/core/editable-text";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
 	Dialog,
 	DialogContent,
@@ -13,10 +16,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
-import { Globe, Lock, Settings, X, HelpCircle, Plus } from "lucide-react";
-import { updateServiceConfig, updateServiceHostname } from "@/actions/projects";
-import { EditableText } from "@/components/core/editable-text";
+import { Input } from "@/components/ui/input";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
 
@@ -121,16 +121,14 @@ export const PortsSection = memo(function PortsSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Settings className="size-5 text-muted-foreground" />
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Ports</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Ports"
+			summary={
+				httpPorts.length > 0 ? httpPorts.map((p) => p.port).join(", ") : "None"
+			}
+			summaryMuted={httpPorts.length === 0}
+		>
+			<div className="space-y-4">
 				<div className="flex items-center gap-1 text-sm">
 					<Lock className="h-4 w-4 text-muted-foreground" />
 					<span className="text-muted-foreground">Private endpoint:</span>
@@ -200,6 +198,6 @@ export const PortsSection = memo(function PortsSection({
 					</Button>
 				</div>
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

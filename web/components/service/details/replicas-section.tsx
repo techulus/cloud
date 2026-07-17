@@ -4,6 +4,7 @@ import { AlertTriangle, Lock, Server } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { updateServiceConfig } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import {
 	Empty,
@@ -12,7 +13,6 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
 import type {
 	Server as ServerType,
@@ -149,18 +149,21 @@ export const ReplicasSection = memo(function ReplicasSection({
 		? "Disable serverless before deploying to worker nodes"
 		: null;
 
+	const configuredTotal = configuredReplicas.reduce(
+		(sum, r) => sum + r.count,
+		0,
+	);
+
 	if (service.stateful) {
 		return (
-			<div className="rounded-lg border">
-				<Item className="border-0 border-b rounded-none">
-					<ItemMedia variant="icon">
-						<Server className="size-5 text-muted-foreground" />
-					</ItemMedia>
-					<ItemContent>
-						<ItemTitle>Placement</ItemTitle>
-					</ItemContent>
-				</Item>
-				<div className="p-4 space-y-4">
+			<ConfigSection
+				title="Placement"
+				summary={
+					service.lockedServer?.name || service.lockedServerId || "Not placed"
+				}
+				summaryMuted={!service.lockedServerId}
+			>
+				<div className="space-y-4">
 					{isLoading ? (
 						<div className="flex justify-center py-4">
 							<Spinner />
@@ -254,21 +257,21 @@ export const ReplicasSection = memo(function ReplicasSection({
 						</>
 					)}
 				</div>
-			</div>
+			</ConfigSection>
 		);
 	}
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<Server className="size-5 text-muted-foreground" />
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Replicas</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Replicas"
+			summary={
+				configuredTotal > 0
+					? `${configuredTotal} replica${configuredTotal !== 1 ? "s" : ""}`
+					: "No replicas"
+			}
+			summaryMuted={configuredTotal === 0}
+		>
+			<div className="space-y-4">
 				{isLoading ? (
 					<div className="flex justify-center py-4">
 						<Spinner />
@@ -376,6 +379,6 @@ export const ReplicasSection = memo(function ReplicasSection({
 					</>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });

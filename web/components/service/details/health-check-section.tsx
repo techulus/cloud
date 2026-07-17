@@ -1,11 +1,11 @@
 "use client";
 
-import { ChevronDown, HeartPulse } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { memo, useMemo, useReducer, useState } from "react";
 import { updateServiceHealthCheck } from "@/actions/projects";
+import { ConfigSection } from "@/components/service/details/config-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import type { ServiceWithDetails as Service } from "@/db/types";
 
 type HealthCheckState = {
@@ -126,18 +126,12 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 	};
 
 	return (
-		<div className="rounded-lg border">
-			<Item className="border-0 border-b rounded-none">
-				<ItemMedia variant="icon">
-					<HeartPulse
-						className={`size-5 ${hasHealthCheck ? "text-green-500" : "text-muted-foreground"}`}
-					/>
-				</ItemMedia>
-				<ItemContent>
-					<ItemTitle>Health Check</ItemTitle>
-				</ItemContent>
-			</Item>
-			<div className="p-4 space-y-4">
+		<ConfigSection
+			title="Health Check"
+			summary={service.healthCheckCmd || "Not configured"}
+			summaryMuted={!hasHealthCheck}
+		>
+			<div className="space-y-4">
 				<div className="space-y-2">
 					<label htmlFor="health-check-command" className="text-sm font-medium">
 						Command
@@ -278,6 +272,6 @@ export const HealthCheckSection = memo(function HealthCheckSection({
 					</div>
 				)}
 			</div>
-		</div>
+		</ConfigSection>
 	);
 });
