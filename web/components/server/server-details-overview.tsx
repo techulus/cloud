@@ -337,13 +337,13 @@ export function ServerMetricsPanel({
 					<LegendMetric
 						color={MODE_COLORS[mode].percent}
 						label="Usage"
-						value={formatPercent(getLatestValue(rows, "percent"))}
+						value={formatPercent(percent)}
 					/>
 					{mode !== "cpu" ? (
 						<LegendMetric
 							color={MODE_COLORS[mode].bytes}
 							label="Used"
-							value={formatBytes(getLatestValue(rows, "bytes"))}
+							value={formatBytes(bytes)}
 						/>
 					) : null}
 				</div>
@@ -579,14 +579,6 @@ function addPoints(
 		row[key] = point.value;
 		rows.set(point.timestamp, row);
 	}
-}
-
-function getLatestValue(rows: ChartRow[], key: "percent" | "bytes") {
-	for (let i = rows.length - 1; i >= 0; i--) {
-		const value = rows[i][key];
-		if (value !== undefined && Number.isFinite(value)) return value;
-	}
-	return null;
 }
 
 function getCurrentPercent(

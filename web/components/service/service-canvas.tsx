@@ -773,7 +773,7 @@ export function ServiceCanvas({
 							environments={environments}
 							selectedEnvName={envName}
 							projectSlug={projectSlug}
-							className="absolute top-4 left-4"
+							className="absolute top-4 left-4 z-10"
 						/>
 						<Empty>
 							<EmptyMedia variant="icon">

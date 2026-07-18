@@ -3,6 +3,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { createEnvironment, deleteEnvironment } from "@/actions/projects";
 import {
 	AlertDialog,
@@ -105,7 +106,9 @@ export function EnvironmentManagement({
 				await deleteEnvironment(envId);
 				router.refresh();
 			} catch (err) {
-				console.error("Failed to delete environment:", err);
+				toast.error(
+					err instanceof Error ? err.message : "Failed to delete environment",
+				);
 			} finally {
 				setDeletingId(null);
 			}
@@ -180,6 +183,8 @@ export function EnvironmentManagement({
 										size="icon"
 										className="size-7 shrink-0"
 										disabled={deletingId === env.id}
+										aria-label={`Delete ${env.name}`}
+										title={`Delete ${env.name}`}
 									/>
 								}
 							>
