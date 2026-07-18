@@ -49,6 +49,13 @@ Agents build images using one of two methods:
 | Railpack | No Dockerfile present — Railpack auto-detects the framework and generates a build plan |
 | Dockerfile | A `Dockerfile` exists in the repository (or specified root directory) |
 
+### Custom Dockerfile Path
+
+To use a Dockerfile at a different path or with a different name, set a `TECHULUS_DOCKERFILE_PATH` environment variable on the service, e.g. `TECHULUS_DOCKERFILE_PATH=docker/prod.Dockerfile`.
+
+- The path is relative to the build context (the repository root, or the service's root directory if set).
+- When set, the Dockerfile build method is always used — if the file doesn't exist, the build fails instead of falling back to Railpack.
+
 Images are built with BuildKit, tagged with the commit SHA, and pushed to the [private registry](/infrastructure/registry).
 
 Build statuses:

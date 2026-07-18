@@ -226,9 +226,22 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		b.sendLog(config, fmt.Sprintf("Using root directory: %s", config.RootDir))
 	}
 
-	dockerfilePath := filepath.Join(contextDir, "Dockerfile")
+	dockerfileRelPath := "Dockerfile"
 	hasDockerfile := false
-	if _, err := os.Stat(dockerfilePath); err == nil {
+	forcedDockerfile := false
+	if customPath := config.Secrets["TECHULUS_DOCKERFILE_PATH"]; customPath != "" {
+		if !filepath.IsLocal(customPath) {
+			return fmt.Errorf("TECHULUS_DOCKERFILE_PATH must be a relative path within the build context, got %q", customPath)
+		}
+		resolved := filepath.Join(contextDir, customPath)
+		if info, err := os.Stat(resolved); err != nil || info.IsDir() {
+			b.sendLog(config, fmt.Sprintf("TECHULUS_DOCKERFILE_PATH is set but %s was not found in the repository", customPath))
+			return fmt.Errorf("TECHULUS_DOCKERFILE_PATH %q not found in build context", customPath)
+		}
+		dockerfileRelPath = filepath.Clean(customPath)
+		hasDockerfile = true
+		forcedDockerfile = true
+	} else if _, err := os.Stat(filepath.Join(contextDir, "Dockerfile")); err == nil {
 		hasDockerfile = true
 	}
 
@@ -254,8 +267,12 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", archImageUri)
 
 	if hasDockerfile {
-		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
-		b.sendLog(config, "Using existing Dockerfile")
+		log.Printf("[build:%s] building with Dockerfile %s via buildctl for %s", truncateStr(config.BuildID, 8), dockerfileRelPath, platform)
+		if forcedDockerfile {
+			b.sendLog(config, fmt.Sprintf("Using Dockerfile %s (from TECHULUS_DOCKERFILE_PATH)", dockerfileRelPath))
+		} else {
+			b.sendLog(config, "Using existing Dockerfile")
+		}
 		b.sendLog(config, fmt.Sprintf("Building and pushing %s", archImageUri))
 
 		args := []string{
@@ -263,7 +280,8 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"build",
 			"--frontend", "dockerfile.v0",
 			"--local", "context=.",
-			"--local", "dockerfile=.",
+			"--local", fmt.Sprintf("dockerfile=%s", filepath.Dir(dockerfileRelPath)),
+			"--opt", fmt.Sprintf("filename=%s", filepath.Base(dockerfileRelPath)),
 			"--opt", fmt.Sprintf("platform=%s", platform),
 			"--output", archOutputFlag,
 		}

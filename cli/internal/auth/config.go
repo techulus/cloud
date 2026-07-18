@@ -33,9 +33,6 @@ func ConfigRootFor(goos, home string, getenv func(string) string) string {
 	if xdg := getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return xdg
 	}
-	if goos == "darwin" {
-		return filepath.Join(home, "Library", "Application Support")
-	}
 	if goos == "windows" {
 		if appData := getenv("APPDATA"); appData != "" {
 			return appData
