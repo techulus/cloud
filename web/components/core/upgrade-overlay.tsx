@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { getControlPlaneUpgradeStatus } from "@/actions/settings";
 import type { ControlPlaneUpgradeState } from "@/lib/control-plane-updates";
 
 const POLL_INTERVAL_MS = 4000;
@@ -27,7 +26,12 @@ export function ControlPlaneUpgradeOverlay({
 
 		const interval = setInterval(async () => {
 			try {
-				const state = await getControlPlaneUpgradeStatus();
+				// Polled via a route handler instead of a server action: action IDs
+				// change across builds, so once the updated control plane comes up
+				// the old action reference 404s forever and the overlay never clears.
+				const response = await fetch("/api/update-status");
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
+				const state: ControlPlaneUpgradeState = await response.json();
 				if (cancelled) return;
 
 				if (state.status === "succeeded") {

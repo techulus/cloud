@@ -8,7 +8,6 @@ import { requireAdminRole, requireAuth } from "@/lib/auth";
 import {
 	checkAndPersistControlPlaneUpdate,
 	refreshControlPlaneAboutState,
-	refreshControlPlaneUpgradeState,
 	startControlPlaneUpgrade,
 } from "@/lib/control-plane-updates";
 import { buildTimeoutSchema } from "@/lib/schemas";
@@ -98,11 +97,6 @@ export async function upgradeControlPlane(targetVersion: string) {
 	const state = await startControlPlaneUpgrade(targetVersion);
 	revalidatePath("/dashboard/settings");
 	return state;
-}
-
-export async function getControlPlaneUpgradeStatus() {
-	await requireAuth();
-	return refreshControlPlaneUpgradeState();
 }
 
 export async function refreshControlPlaneAboutStatus() {
