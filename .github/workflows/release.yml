@@ -91,6 +91,7 @@ jobs:
 
           if [ "${{ matrix.goos }}" != "windows" ]; then
             version="${GITHUB_REF_NAME#v}"
+            version="${version//\//-}"
             package_dir=$(mktemp -d)
             cp "$binary" "$package_dir/tc"
             tar -czf "tc_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C "$package_dir" tc
