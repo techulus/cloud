@@ -73,6 +73,7 @@ export type ServiceWithDetails = Service & {
 	rollouts?: Rollout[];
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;
+	hasGithubAppRepo?: boolean;
 	deletionBackupFallback?: {
 		volumeCount: number;
 		backedUpVolumeCount: number;

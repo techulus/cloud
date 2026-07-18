@@ -159,6 +159,9 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		}
 		b.sendLog(config, fmt.Sprintf("Cloned branch %s", branch))
 	} else {
+		if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
+			return fmt.Errorf("invalid exact commit SHA")
+		}
 		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", config.CloneURL, buildDir)
 		output, err := b.runCommand(cmd, config)
 		if err != nil {
@@ -168,8 +171,9 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
 
 		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "origin", config.CommitSha, "--depth", "1")
-		if _, err := b.runCommand(cmd, config); err != nil {
-			log.Printf("[build:%s] fetch specific sha failed (might be HEAD): %v", truncateStr(config.BuildID, 8), err)
+		output, err = b.runCommand(cmd, config)
+		if err != nil {
+			return fmt.Errorf("git fetch specific commit failed: %s: %w", output, err)
 		}
 
 		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", config.CommitSha)

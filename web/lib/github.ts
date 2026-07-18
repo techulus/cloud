@@ -128,6 +128,93 @@ function validateRepoFullName(repoFullName: string): void {
 	}
 }
 
+export type GitHubCommit = {
+	sha: string;
+	message: string;
+	author: string | null;
+	date: string;
+};
+
+export function isFullCommitSha(value: string): boolean {
+	return /^[0-9a-f]{40}$/i.test(value);
+}
+
+type GitHubCommitResponse = {
+	sha: string;
+	author: { login: string } | null;
+	commit: {
+		message: string;
+		author: { name: string; date: string } | null;
+	};
+};
+
+function mapGitHubCommit(commit: GitHubCommitResponse): GitHubCommit {
+	return {
+		sha: commit.sha,
+		message: commit.commit.message,
+		author: commit.author?.login ?? commit.commit.author?.name ?? null,
+		date: commit.commit.author?.date ?? "",
+	};
+}
+
+async function githubCommitRequest<T>(
+	installationId: number,
+	repoFullName: string,
+	suffix: string,
+): Promise<T> {
+	validateRepoFullName(repoFullName);
+	if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+		throw new Error("Invalid GitHub installation ID");
+	}
+
+	const token = await getInstallationToken(installationId);
+	const response = await fetch(
+		`https://api.github.com/repos/${repoFullName}/commits${suffix}`,
+		{
+			headers: {
+				Accept: "application/vnd.github+json",
+				Authorization: `Bearer ${token}`,
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		},
+	);
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new Error(
+			`GitHub commit request failed (${response.status}): ${detail || response.statusText}`,
+		);
+	}
+	return response.json() as Promise<T>;
+}
+
+export async function listGitHubCommits(
+	installationId: number,
+	repoFullName: string,
+	branch: string,
+): Promise<GitHubCommit[]> {
+	if (!branch.trim()) throw new Error("GitHub branch is not configured");
+	const commits = await githubCommitRequest<GitHubCommitResponse[]>(
+		installationId,
+		repoFullName,
+		`?sha=${encodeURIComponent(branch)}&per_page=50`,
+	);
+	return commits.map(mapGitHubCommit);
+}
+
+export async function getGitHubCommit(
+	installationId: number,
+	repoFullName: string,
+	sha: string,
+): Promise<GitHubCommit> {
+	if (!isFullCommitSha(sha)) throw new Error("Invalid commit SHA");
+	const commit = await githubCommitRequest<GitHubCommitResponse>(
+		installationId,
+		repoFullName,
+		`/${encodeURIComponent(sha)}`,
+	);
+	return mapGitHubCommit(commit);
+}
+
 type DeploymentState =
 	| "pending"
 	| "in_progress"

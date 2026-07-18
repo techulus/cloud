@@ -7,6 +7,7 @@ import {
 	builds,
 	deploymentPorts,
 	deployments,
+	githubRepos,
 	rollouts,
 	secrets,
 	servers,
@@ -62,6 +63,7 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
+				githubRepo,
 			] = await Promise.all([
 				db
 					.select()
@@ -112,6 +114,13 @@ export async function GET(
 							.where(eq(builds.serviceId, service.id))
 							.orderBy(desc(builds.createdAt))
 							.limit(1)
+							.then((r) => r[0] || null)
+					: Promise.resolve(null),
+				service.sourceType === "github"
+					? db
+							.select({ id: githubRepos.id })
+							.from(githubRepos)
+							.where(eq(githubRepos.serviceId, service.id))
 							.then((r) => r[0] || null)
 					: Promise.resolve(null),
 			]);
@@ -237,6 +246,7 @@ export async function GET(
 				volumes,
 				lockedServer,
 				latestBuild,
+				hasGithubAppRepo: githubRepo !== null,
 				activeConfig,
 				deletionBackupFallback,
 			};

@@ -874,7 +874,16 @@ export async function updateServiceGithubRepo(
 			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
 		}
 
-		await db.update(services).set(updateData).where(eq(services.id, serviceId));
+		await db.transaction(async (tx) => {
+			await tx
+				.update(services)
+				.set(updateData)
+				.where(eq(services.id, serviceId));
+			await tx
+				.update(githubRepos)
+				.set({ deployBranch: normalizedBranch })
+				.where(eq(githubRepos.serviceId, serviceId));
+		});
 
 		return { success: true };
 	} catch (error) {
