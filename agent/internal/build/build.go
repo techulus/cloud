@@ -193,6 +193,9 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	if err != nil {
 		return err
 	}
+	if config.CommitSha != "HEAD" && !strings.EqualFold(resolvedCommitSha, config.CommitSha) {
+		return fmt.Errorf("checked out commit %s, expected %s", resolvedCommitSha, config.CommitSha)
+	}
 	config.ResolvedCommitSha = resolvedCommitSha
 	b.sendLog(config, fmt.Sprintf("Resolved commit %s", truncateStr(resolvedCommitSha, 8)))
 	return nil
