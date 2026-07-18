@@ -17,8 +17,22 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { cancelBuild, retryBuild, triggerBuild } from "@/actions/builds";
+import {
+	cancelBuild,
+	retryBuild,
+	triggerBuild,
+	triggerManualBuild,
+} from "@/actions/builds";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	Empty,
 	EmptyDescription,
@@ -46,6 +60,13 @@ type BuildListItem = Pick<
 	createdAt: string;
 	startedAt: string | null;
 	completedAt: string | null;
+};
+
+type Commit = {
+	sha: string;
+	message: string;
+	author: string | null;
+	date: string;
 };
 
 const STATUS_CONFIG: Record<
@@ -114,15 +135,19 @@ function BuildStatusBadge({ status }: { status: BuildStatus }) {
 
 export function BuildsViewer({
 	serviceId,
+	hasGithubAppRepo,
 	projectSlug,
 	envName,
 }: {
 	serviceId: string;
+	hasGithubAppRepo: boolean;
 	projectSlug: string;
 	envName: string;
 }) {
 	const router = useRouter();
 	const [isTriggering, setIsTriggering] = useState(false);
+	const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+	const [selectedSha, setSelectedSha] = useState<string | null>(null);
 	const [cancellingId, setCancellingId] = useState<string | null>(null);
 	const [retryingId, setRetryingId] = useState<string | null>(null);
 
@@ -135,8 +160,27 @@ export function BuildsViewer({
 	);
 
 	const builds = data?.builds || [];
+	const {
+		data: commitData,
+		error: commitError,
+		isLoading: commitsLoading,
+	} = useSWR<{ branch: string; commits: Commit[] }>(
+		isCommitDialogOpen && hasGithubAppRepo
+			? `/api/services/${serviceId}/github/commits`
+			: null,
+		fetcher,
+		{
+			onSuccess: (result) =>
+				setSelectedSha((current) => current ?? result.commits[0]?.sha ?? null),
+		},
+	);
 
 	const handleTriggerBuild = async () => {
+		if (hasGithubAppRepo) {
+			setSelectedSha(null);
+			setIsCommitDialogOpen(true);
+			return;
+		}
 		setIsTriggering(true);
 		try {
 			await triggerBuild(serviceId);
@@ -145,6 +189,23 @@ export function BuildsViewer({
 		} catch (error) {
 			toast.error(
 				error instanceof Error ? error.message : "Failed to trigger build",
+			);
+		} finally {
+			setIsTriggering(false);
+		}
+	};
+
+	const handleDeployCommit = async () => {
+		if (!selectedSha) return;
+		setIsTriggering(true);
+		try {
+			await triggerManualBuild(serviceId, selectedSha);
+			toast.success("Commit queued for deployment");
+			setIsCommitDialogOpen(false);
+			await mutate();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to deploy commit",
 			);
 		} finally {
 			setIsTriggering(false);
@@ -197,6 +258,84 @@ export function BuildsViewer({
 
 	return (
 		<div className="space-y-4">
+			<Dialog
+				open={isCommitDialogOpen}
+				onOpenChange={(open) => !isTriggering && setIsCommitDialogOpen(open)}
+			>
+				<DialogContent className="sm:max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>Deploy a commit</DialogTitle>
+						<DialogDescription>
+							Choose one of the latest commits from the configured source
+							branch.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+						<span className="text-muted-foreground">Source branch</span>{" "}
+						<code className="ml-2 font-mono">{commitData?.branch ?? "…"}</code>
+					</div>
+					<div className="max-h-[50vh] overflow-y-auto rounded-md border">
+						{commitsLoading ? (
+							<div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+								<Spinner /> Loading commits…
+							</div>
+						) : commitError ? (
+							<div className="p-6 text-center text-destructive">
+								{commitError.message || "Failed to load commits"}
+							</div>
+						) : commitData?.commits.length === 0 ? (
+							<div className="p-8 text-center text-muted-foreground">
+								No commits found on this branch.
+							</div>
+						) : (
+							<div role="radiogroup" aria-label="Commit to deploy">
+								{commitData?.commits.map((commit) => (
+									<label
+										key={commit.sha}
+										className="flex cursor-pointer gap-3 border-b p-3 last:border-b-0 hover:bg-muted/50 has-[:checked]:bg-muted"
+									>
+										<input
+											type="radio"
+											name="commit"
+											value={commit.sha}
+											checked={selectedSha === commit.sha}
+											onChange={() => setSelectedSha(commit.sha)}
+											className="mt-1 accent-primary"
+										/>
+										<div className="min-w-0 flex-1">
+											<div className="truncate font-medium">
+												{commit.message.split("\n")[0] || "No message"}
+											</div>
+											<div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+												<code>{commit.sha.slice(0, 7)}</code>
+												{commit.author && <span>by {commit.author}</span>}
+												{commit.date && (
+													<span>{formatRelativeTime(commit.date)}</span>
+												)}
+											</div>
+										</div>
+									</label>
+								))}
+							</div>
+						)}
+					</div>
+					<DialogFooter>
+						<DialogClose
+							render={<Button variant="outline" />}
+							disabled={isTriggering}
+						>
+							Cancel
+						</DialogClose>
+						<Button
+							onClick={handleDeployCommit}
+							disabled={!selectedSha || isTriggering || Boolean(commitError)}
+						>
+							{isTriggering && <Loader2 className="size-4 animate-spin" />}
+							Deploy commit
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<div className="flex items-center justify-between">
 				<div>
 					<h2 className="text-lg font-semibold">Builds</h2>
