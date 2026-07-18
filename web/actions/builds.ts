@@ -4,7 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
-import { getGitHubCommit, isFullCommitSha } from "@/lib/github";
+import { isFullCommitSha, listGitHubCommits } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
@@ -155,14 +155,22 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 		throw new Error("Service is not connected to GitHub");
 	}
 
-	const commit = await getGitHubCommit(
+	const branch =
+		result.githubRepo.deployBranch || result.githubRepo.defaultBranch || "main";
+	const commits = await listGitHubCommits(
 		result.githubRepo.installationId,
 		result.githubRepo.repoFullName,
-		canonicalSha,
+		branch,
 	);
-	if (commit.sha.toLowerCase() !== canonicalSha) {
-		throw new Error("GitHub returned an unexpected commit SHA");
+	const commit = commits.find(
+		(candidate) => candidate.sha.toLowerCase() === canonicalSha,
+	);
+	if (!commit) {
+		throw new Error(
+			"Selected commit is no longer among the latest 50 commits on the source branch",
+		);
 	}
+
 	await inngest.send(
 		inngestEvents.buildTrigger.create({
 			serviceId,
@@ -170,10 +178,7 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 			githubRepoId: result.githubRepo.id,
 			commitSha: commit.sha.toLowerCase(),
 			commitMessage: commit.message.substring(0, 500),
-			branch:
-				result.githubRepo.deployBranch ||
-				result.githubRepo.defaultBranch ||
-				"main",
+			branch,
 			author: commit.author ?? undefined,
 		}),
 	);

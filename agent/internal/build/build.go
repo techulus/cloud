@@ -162,7 +162,7 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
 			return fmt.Errorf("invalid exact commit SHA")
 		}
-		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", config.CloneURL, buildDir)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "50", "--branch", branch, "--single-branch", config.CloneURL, buildDir)
 		output, err := b.runCommand(cmd, config)
 		if err != nil {
 			return fmt.Errorf("git clone failed: %s: %w", output, err)
@@ -170,10 +170,15 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 
 		b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
 
-		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "origin", config.CommitSha, "--depth", "1")
-		output, err = b.runCommand(cmd, config)
+		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
+		_, err = b.runCommand(cmd, config)
 		if err != nil {
-			return fmt.Errorf("git fetch specific commit failed: %s: %w", output, err)
+			b.sendLog(config, "Selected commit is outside the shallow clone; fetching full branch history")
+			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--unshallow", "origin", branch)
+			output, err = b.runCommand(cmd, config)
+			if err != nil {
+				return fmt.Errorf("git fetch full branch history failed: %s: %w", output, err)
+			}
 		}
 
 		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", config.CommitSha)

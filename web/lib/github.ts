@@ -201,20 +201,6 @@ export async function listGitHubCommits(
 	return commits.map(mapGitHubCommit);
 }
 
-export async function getGitHubCommit(
-	installationId: number,
-	repoFullName: string,
-	sha: string,
-): Promise<GitHubCommit> {
-	if (!isFullCommitSha(sha)) throw new Error("Invalid commit SHA");
-	const commit = await githubCommitRequest<GitHubCommitResponse>(
-		installationId,
-		repoFullName,
-		`/${encodeURIComponent(sha)}`,
-	);
-	return mapGitHubCommit(commit);
-}
-
 type DeploymentState =
 	| "pending"
 	| "in_progress"
