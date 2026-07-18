@@ -15,7 +15,7 @@ func TestConfigPathForPlatforms(t *testing.T) {
 		{
 			name: "darwin",
 			goos: "darwin",
-			want: filepath.Join("/home/alice", "Library", "Application Support", ConfigDirName, "config.json"),
+			want: filepath.Join("/home/alice", ".config", ConfigDirName, "config.json"),
 		},
 		{
 			name: "linux xdg",
