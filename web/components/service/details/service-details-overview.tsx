@@ -441,7 +441,7 @@ function ServiceConfigPanel({
 	return (
 		<div className="flex min-w-0 flex-col border-border border-t font-mono lg:border-t-0 lg:border-l">
 			<div className="space-y-1.5 px-3 py-2.5 text-sm">
-				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-base">
+				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
 					<div className="flex items-center gap-2">
 						<span className={cn("size-2 rounded-full", statusClasses.dot)} />
 						<span className={cn("font-bold", statusClasses.text)}>
