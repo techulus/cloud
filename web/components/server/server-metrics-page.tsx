@@ -71,7 +71,7 @@ export function ServerMetricsPage({ serverId }: { serverId: string }) {
 
 			<div className="space-y-4">
 				{MODES.map((mode) => (
-					<div key={mode} className="h-80 rounded-lg border border-border">
+					<div key={mode} className="h-88 rounded-lg border border-border">
 						<ServerMetricsPanel
 							metrics={data}
 							error={error}

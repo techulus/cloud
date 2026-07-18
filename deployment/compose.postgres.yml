@@ -183,7 +183,7 @@ services:
     restart: unless-stopped
 
   victoria-logs:
-    image: victoriametrics/victoria-logs:latest
+    image: victoriametrics/victoria-logs:v1.51.0
     env_file:
       - ./.env
     volumes:
@@ -207,7 +207,7 @@ services:
     restart: unless-stopped
 
   victoria-metrics:
-    image: victoriametrics/victoria-metrics:latest
+    image: victoriametrics/victoria-metrics:v1.147.0
     env_file:
       - ./.env
     volumes:
@@ -231,7 +231,7 @@ services:
     restart: unless-stopped
 
   inngest:
-    image: inngest/inngest:latest
+    image: inngest/inngest:v1.37.0
     env_file:
       - ./.env
     environment:

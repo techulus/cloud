@@ -1,8 +1,12 @@
 package build
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +79,53 @@ func TestCleanupStaleBuildDirsRemovesOnlyOldDirectories(t *testing.T) {
 	assertMissing(t, oldDir)
 	assertExists(t, youngDir)
 	assertExists(t, filePath)
+}
+
+func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "work")
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "init", "--initial-branch", "main", workDir)
+	runGit(t, "-C", workDir, "config", "user.name", "Test User")
+	runGit(t, "-C", workDir, "config", "user.email", "test@example.com")
+
+	var selectedSHA string
+	for i := range 60 {
+		filePath := filepath.Join(workDir, "history.txt")
+		if err := os.WriteFile(filePath, []byte(strconv.Itoa(i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, "-C", workDir, "add", "history.txt")
+		runGit(t, "-C", workDir, "commit", "-m", "commit "+strconv.Itoa(i))
+		if i == 5 {
+			selectedSHA = runGit(t, "-C", workDir, "rev-parse", "HEAD")
+		}
+	}
+	runGit(t, "clone", "--bare", workDir, remoteDir)
+
+	buildDir := filepath.Join(t.TempDir(), "build")
+	config := &Config{
+		BuildID:   "build-1",
+		CloneURL:  "file://" + remoteDir,
+		CommitSha: selectedSHA,
+		Branch:    "main",
+	}
+	builder := NewBuilder(t.TempDir(), nil)
+
+	if err := builder.clone(context.Background(), config, buildDir); err != nil {
+		t.Fatal(err)
+	}
+	if config.ResolvedCommitSha != selectedSHA {
+		t.Fatalf("resolved commit = %s, want %s", config.ResolvedCommitSha, selectedSHA)
+	}
+}
+
+func runGit(t *testing.T, args ...string) string {
+	t.Helper()
+	output, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %s: %v", args, output, err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func assertExists(t *testing.T, path string) {

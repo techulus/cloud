@@ -85,11 +85,11 @@ function RolloutBadge({
 
 function ChangelogSkeleton() {
 	return (
-		<div className="mx-auto grid max-w-5xl gap-2">
+		<div className="space-y-6">
 			{[1, 2, 3].map((item) => (
-				<div key={item} className="space-y-3 rounded-lg border p-4">
-					<Skeleton className="h-5 w-52" />
-					<Skeleton className="h-16 w-full" />
+				<div key={item} className="space-y-2">
+					<Skeleton className="h-4 w-64 max-w-full" />
+					<Skeleton className="h-12 w-full" />
 				</div>
 			))}
 		</div>
@@ -201,7 +201,7 @@ export function ChangelogHistory({
 
 	if (error) {
 		return (
-			<Empty className="mx-auto max-w-5xl border py-12">
+			<Empty className="border py-12">
 				<EmptyMedia variant="icon">
 					<XCircle />
 				</EmptyMedia>
@@ -217,7 +217,7 @@ export function ChangelogHistory({
 	}
 
 	return (
-		<div className="mx-auto max-w-5xl">
+		<div>
 			{revisions.length === 0 ? (
 				<Empty className="border py-12">
 					<EmptyMedia variant="icon">

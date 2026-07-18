@@ -4,6 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
+import { isFullCommitSha, listGitHubCommits } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 
@@ -142,6 +143,54 @@ export async function triggerBuild(
 			commitMessage: triggerMessage,
 			branch: service.githubBranch || "main",
 			actor,
+		}),
+	);
+
+	return { success: true };
+}
+
+export async function triggerManualBuild(serviceId: string, commitSha: string) {
+	await requireDeveloperRole();
+	if (!isFullCommitSha(commitSha)) {
+		throw new Error("Commit SHA must be a full 40-character hexadecimal SHA");
+	}
+
+	const canonicalSha = commitSha.toLowerCase();
+	const [result] = await db
+		.select({ service: services, githubRepo: githubRepos })
+		.from(services)
+		.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
+	if (!result) throw new Error("Active GitHub App-connected service not found");
+	if (result.service.sourceType !== "github") {
+		throw new Error("Service is not connected to GitHub");
+	}
+
+	const branch =
+		result.githubRepo.deployBranch || result.githubRepo.defaultBranch || "main";
+	const commits = await listGitHubCommits(
+		result.githubRepo.installationId,
+		result.githubRepo.repoFullName,
+		branch,
+	);
+	const commit = commits.find(
+		(candidate) => candidate.sha.toLowerCase() === canonicalSha,
+	);
+	if (!commit) {
+		throw new Error(
+			"Selected commit is no longer among the latest 50 commits on the source branch",
+		);
+	}
+
+	await inngest.send(
+		inngestEvents.buildTrigger.create({
+			serviceId,
+			trigger: "manual",
+			githubRepoId: result.githubRepo.id,
+			commitSha: commit.sha.toLowerCase(),
+			commitMessage: commit.message.substring(0, 500),
+			branch,
+			author: commit.author ?? undefined,
 		}),
 	);
 
