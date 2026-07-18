@@ -92,6 +92,15 @@ const MODE_OPTIONS: Array<{ value: ServerMetricMode; label: string }> = [
 	{ value: "disk", label: "Disk" },
 ];
 
+const MODE_COLORS: Record<
+	ServerMetricMode,
+	{ percent: string; bytes: string }
+> = {
+	cpu: { percent: "var(--chart-1)", bytes: "var(--chart-1)" },
+	memory: { percent: "var(--chart-2)", bytes: "var(--chart-4)" },
+	disk: { percent: "var(--chart-3)", bytes: "var(--chart-5)" },
+};
+
 export function ServerDetailsOverview({
 	server,
 	initialMetrics,
@@ -166,22 +175,30 @@ export function ServerMetricsPanel({
 		metrics?.available === false;
 	const percent = getCurrentPercent(current, mode);
 	const bytes = getCurrentBytes(current, mode);
+	const showSkeleton = isLoading && !metrics && !current;
 
 	return (
-		<div className="flex h-full min-h-72 flex-col gap-4 p-4">
+		<div
+			className={cn(
+				"flex h-full min-h-72 flex-col gap-4 p-4",
+				fixedMode && "pb-6",
+			)}
+		>
 			<div
 				className={cn(
 					"flex flex-col gap-3",
 					fixedMode
-						? "items-start"
+						? "items-start sm:flex-row sm:justify-between"
 						: "sm:flex-row sm:items-start sm:justify-between",
 				)}
 			>
 				{fixedMode ? (
-					<h2 className="text-lg font-semibold capitalize">{fixedMode}</h2>
+					<h2 className="text-lg font-semibold">
+						{MODE_OPTIONS.find((option) => option.value === fixedMode)?.label}
+					</h2>
 				) : null}
 				<div className="min-w-0">
-					{isLoading && !metrics && !current ? (
+					{showSkeleton ? (
 						<div className="flex flex-nowrap items-end gap-x-5">
 							<Skeleton className="h-7 w-24" />
 							{mode !== "cpu" ? <Skeleton className="h-7 w-20" /> : null}
@@ -225,6 +242,7 @@ export function ServerMetricsPanel({
 					/>
 				) : (
 					<ResponsiveContainer
+						className="tracking-tight"
 						width="100%"
 						height="100%"
 						minWidth={1}
@@ -255,7 +273,7 @@ export function ServerMetricsPanel({
 										? formatCompactDate(value)
 										: formatCompactDateTime(value)
 								}
-								className="text-xs"
+								className="text-[10px]"
 							/>
 							<YAxis
 								yAxisId="percent"
@@ -264,7 +282,7 @@ export function ServerMetricsPanel({
 								tickLine={false}
 								axisLine={false}
 								tickFormatter={(value) => `${value}%`}
-								className="text-xs"
+								className="text-[10px]"
 							/>
 							{mode !== "cpu" ? (
 								<YAxis
@@ -274,7 +292,7 @@ export function ServerMetricsPanel({
 									tickLine={false}
 									axisLine={false}
 									tickFormatter={formatBytesCompact}
-									className="text-xs"
+									className="text-[10px]"
 								/>
 							) : null}
 							<Tooltip
@@ -290,7 +308,7 @@ export function ServerMetricsPanel({
 								type="monotone"
 								dataKey="percent"
 								name="Usage"
-								stroke="var(--chart-1)"
+								stroke={MODE_COLORS[mode].percent}
 								strokeWidth={2}
 								dot={false}
 								connectNulls
@@ -302,7 +320,7 @@ export function ServerMetricsPanel({
 									type="monotone"
 									dataKey="bytes"
 									name="Used"
-									stroke="var(--chart-3)"
+									stroke={MODE_COLORS[mode].bytes}
 									strokeWidth={2}
 									dot={false}
 									connectNulls
@@ -313,6 +331,44 @@ export function ServerMetricsPanel({
 					</ResponsiveContainer>
 				)}
 			</div>
+
+			{rows.length > 0 && !isUnavailable ? (
+				<div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+					<LegendMetric
+						color={MODE_COLORS[mode].percent}
+						label="Usage"
+						value={formatPercent(getLatestValue(rows, "percent"))}
+					/>
+					{mode !== "cpu" ? (
+						<LegendMetric
+							color={MODE_COLORS[mode].bytes}
+							label="Used"
+							value={formatBytes(getLatestValue(rows, "bytes"))}
+						/>
+					) : null}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function LegendMetric({
+	color,
+	label,
+	value,
+}: {
+	color: string;
+	label: string;
+	value: string;
+}) {
+	return (
+		<div className="flex items-center gap-2">
+			<span
+				className="size-2.5 rounded-full"
+				style={{ backgroundColor: color }}
+			/>
+			<span className="text-muted-foreground">{label}</span>
+			<span className="font-medium tabular-nums">{value}</span>
 		</div>
 	);
 }
@@ -523,6 +579,14 @@ function addPoints(
 		row[key] = point.value;
 		rows.set(point.timestamp, row);
 	}
+}
+
+function getLatestValue(rows: ChartRow[], key: "percent" | "bytes") {
+	for (let i = rows.length - 1; i >= 0; i--) {
+		const value = rows[i][key];
+		if (value !== undefined && Number.isFinite(value)) return value;
+	}
+	return null;
 }
 
 function getCurrentPercent(

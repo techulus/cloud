@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { EnvironmentManagement } from "@/components/project/environment-management";
 import {
-	ProjectSettingsPanel,
 	ProjectDangerZone,
+	ProjectSettingsPanel,
 } from "@/components/project/project-settings-panel";
 import { getProjectBySlug, listEnvironments } from "@/db/queries";
 
@@ -34,7 +34,9 @@ export default async function ProjectSettingsPage({
 				]}
 			/>
 			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
-				<ProjectSettingsPanel project={project} />
+				<div className="divide-y rounded-lg border">
+					<ProjectSettingsPanel project={project} />
+				</div>
 
 				<EnvironmentManagement
 					projectId={project.id}

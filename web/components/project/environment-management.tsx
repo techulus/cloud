@@ -1,20 +1,9 @@
 "use client";
 
-import { useState, useOptimistic, useTransition } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Layers, Plus, Trash2 } from "lucide-react";
+import { useOptimistic, useState, useTransition } from "react";
 import { createEnvironment, deleteEnvironment } from "@/actions/projects";
-import type { Environment } from "@/db/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@/components/ui/dialog";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,14 +15,17 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import {
-	Item,
-	ItemContent,
-	ItemGroup,
-	ItemMedia,
-	ItemTitle,
-	ItemActions,
-} from "@/components/ui/item";
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import type { Environment } from "@/db/types";
 
 type OptimisticAction =
 	| { type: "add"; environment: Environment }
@@ -121,17 +113,17 @@ export function EnvironmentManagement({
 	};
 
 	return (
-		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<div>
-					<h2 className="text-lg font-semibold">Environments</h2>
+		<div className="divide-y rounded-lg border">
+			<div className="flex items-center justify-between gap-4 px-3 py-2.5">
+				<div className="min-w-0">
+					<p className="text-sm font-medium">Environments</p>
 					<p className="text-sm text-muted-foreground">
 						Organize services by environment (e.g., production, staging)
 					</p>
 				</div>
 				<Dialog open={isOpen} onOpenChange={setIsOpen}>
-					<DialogTrigger render={<Button size="sm" />}>
-						<Plus className="h-4 w-4 mr-1" />
+					<DialogTrigger render={<Button size="sm" variant="outline" />}>
+						<Plus className="h-4 w-4" />
 						Add
 					</DialogTrigger>
 					<DialogContent className="sm:max-w-md">
@@ -169,55 +161,53 @@ export function EnvironmentManagement({
 					</DialogContent>
 				</Dialog>
 			</div>
-
-			<ItemGroup className="rounded-lg border py-3">
-				{optimisticEnvironments.map((env) => (
-					<Item key={env.id}>
-						<ItemMedia variant="icon">
-							<Layers className="size-5" />
-						</ItemMedia>
-						<ItemContent>
-							<ItemTitle>{env.name}</ItemTitle>
-						</ItemContent>
-						<ItemActions>
-							{env.name !== "production" && (
-								<AlertDialog>
-									<AlertDialogTrigger
-										render={
-											<Button
-												variant="ghost"
-												size="icon"
-												disabled={deletingId === env.id}
-											/>
-										}
+			{optimisticEnvironments.map((env) => (
+				<div
+					key={env.id}
+					className="flex min-h-11 items-center justify-between gap-4 px-3 py-1.5"
+				>
+					<span className="truncate font-mono text-sm">{env.name}</span>
+					{env.name === "production" ? (
+						<span className="shrink-0 font-mono text-xs text-muted-foreground">
+							default
+						</span>
+					) : (
+						<AlertDialog>
+							<AlertDialogTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon"
+										className="size-7 shrink-0"
+										disabled={deletingId === env.id}
+									/>
+								}
+							>
+								<Trash2 className="h-4 w-4 text-destructive" />
+							</AlertDialogTrigger>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>Delete {env.name}?</AlertDialogTitle>
+									<AlertDialogDescription>
+										This will permanently delete this environment and all
+										services within it. This action cannot be undone.
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>Cancel</AlertDialogCancel>
+									<AlertDialogAction
+										variant="destructive"
+										onClick={() => handleDelete(env.id)}
+										disabled={deletingId === env.id}
 									>
-										<Trash2 className="h-4 w-4 text-destructive" />
-									</AlertDialogTrigger>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>Delete {env.name}?</AlertDialogTitle>
-											<AlertDialogDescription>
-												This will permanently delete this environment and all
-												services within it. This action cannot be undone.
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<AlertDialogFooter>
-											<AlertDialogCancel>Cancel</AlertDialogCancel>
-											<AlertDialogAction
-												variant="destructive"
-												onClick={() => handleDelete(env.id)}
-												disabled={deletingId === env.id}
-											>
-												{deletingId === env.id ? "Deleting..." : "Delete"}
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
-							)}
-						</ItemActions>
-					</Item>
-				))}
-			</ItemGroup>
+										{deletingId === env.id ? "Deleting..." : "Delete"}
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					)}
+				</div>
+			))}
 		</div>
 	);
 }

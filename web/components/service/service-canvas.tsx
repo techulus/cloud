@@ -851,9 +851,9 @@ export function ServiceCanvas({
 						environments={environments}
 						selectedEnvName={envName}
 						projectSlug={projectSlug}
-						className="absolute top-4 left-4"
+						className="absolute top-4 left-4 z-10"
 					/>
-					<div className="absolute top-4 right-4">
+					<div className="absolute top-4 right-4 z-10">
 						<AddServiceMenu {...menuCallbacks} />
 					</div>
 					<div className="flex min-h-full items-center justify-center px-10 py-6">
