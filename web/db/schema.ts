@@ -824,7 +824,7 @@ export const githubRepos = pgTable(
 			.references(() => githubInstallations.installationId, {
 				onDelete: "cascade",
 			}),
-		repoId: integer("repo_id").notNull().unique(),
+		repoId: integer("repo_id").notNull(),
 		repoFullName: text("repo_full_name").notNull(),
 		defaultBranch: text("default_branch").notNull().default("main"),
 		serviceId: text("service_id")
@@ -838,6 +838,7 @@ export const githubRepos = pgTable(
 	},
 	(table) => [
 		index("github_repos_installation_id_idx").on(table.installationId),
+		index("github_repos_repo_id_idx").on(table.repoId),
 	],
 );
 

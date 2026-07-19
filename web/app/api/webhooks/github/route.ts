@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -51,6 +51,13 @@ type PushPayload = {
 	sender: { id: number; login: string };
 };
 
+type PushResult = {
+	serviceId: string;
+	status: "queued" | "skipped" | "failed";
+	reason?: string;
+	buildId?: string;
+};
+
 async function handleInstallationEvent(payload: InstallationPayload) {
 	const { action, installation } = payload;
 
@@ -99,13 +106,13 @@ async function handlePushEvent(payload: PushPayload) {
 
 	const branch = ref.replace("refs/heads/", "");
 
-	const githubRepo = await db
-		.select()
+	const linkedServices = await db
+		.select({ githubRepo: githubRepos, service: services })
 		.from(githubRepos)
-		.where(eq(githubRepos.repoId, repository.id))
-		.then((r) => r[0]);
+		.innerJoin(services, eq(githubRepos.serviceId, services.id))
+		.where(eq(githubRepos.repoId, repository.id));
 
-	if (!githubRepo) {
+	if (linkedServices.length === 0) {
 		return NextResponse.json({
 			ok: true,
 			skipped: true,
@@ -113,107 +120,134 @@ async function handlePushEvent(payload: PushPayload) {
 		});
 	}
 
-	if (!githubRepo.serviceId) {
-		return NextResponse.json({
-			ok: true,
-			skipped: true,
-			reason: "no service linked",
-		});
+	const results: PushResult[] = [];
+
+	for (const { githubRepo, service } of linkedServices) {
+		if (service.deletedAt) {
+			results.push({
+				serviceId: service.id,
+				status: "skipped",
+				reason: "service deleted",
+			});
+			continue;
+		}
+
+		if (service.sourceType !== "github") {
+			results.push({
+				serviceId: service.id,
+				status: "skipped",
+				reason: "service not connected to GitHub",
+			});
+			continue;
+		}
+
+		if (!githubRepo.autoDeploy) {
+			results.push({
+				serviceId: service.id,
+				status: "skipped",
+				reason: "auto-deploy disabled",
+			});
+			continue;
+		}
+
+		const deployBranch = githubRepo.deployBranch || githubRepo.defaultBranch;
+		if (branch !== deployBranch) {
+			results.push({
+				serviceId: service.id,
+				status: "skipped",
+				reason: `branch mismatch: ${branch} != ${deployBranch}`,
+			});
+			continue;
+		}
+
+		try {
+			const existingBuild = await db
+				.select()
+				.from(builds)
+				.where(
+					and(
+						eq(builds.serviceId, service.id),
+						eq(builds.commitSha, head_commit.id),
+					),
+				)
+				.then((r) => r[0]);
+
+			if (existingBuild) {
+				results.push({
+					serviceId: service.id,
+					status: "skipped",
+					reason: "build already exists for this commit",
+					buildId: existingBuild.id,
+				});
+				continue;
+			}
+
+			let githubDeploymentId: number | undefined;
+			try {
+				githubDeploymentId = await createGitHubDeployment(
+					githubRepo.installationId,
+					repository.full_name,
+					head_commit.id,
+					`${service.name}-${service.id}`,
+					`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`,
+				);
+
+				await updateGitHubDeploymentStatus(
+					githubRepo.installationId,
+					repository.full_name,
+					githubDeploymentId,
+					"pending",
+					{ description: "Build queued" },
+				);
+			} catch (error) {
+				console.error(
+					`[webhook:push] failed to create GitHub deployment for service ${service.id}:`,
+					error,
+				);
+			}
+
+			await inngest.send(
+				inngestEvents.buildTrigger.create(
+					{
+						serviceId: service.id,
+						trigger: "push",
+						githubRepoId: githubRepo.id,
+						commitSha: head_commit.id,
+						commitMessage: head_commit.message.substring(0, 500),
+						branch,
+						author: head_commit.author.username || head_commit.author.name,
+						githubDeploymentId,
+						actor: {
+							type: "github",
+							githubUserId: payload.sender.id,
+							login: payload.sender.login,
+						},
+					},
+					{ id: `github-push:${githubRepo.id}:${head_commit.id}` },
+				),
+			);
+
+			results.push({ serviceId: service.id, status: "queued" });
+		} catch (error) {
+			console.error(
+				`[webhook:push] failed to queue build for service ${service.id}:`,
+				error,
+			);
+			results.push({
+				serviceId: service.id,
+				status: "failed",
+				reason: "failed to queue build",
+			});
+		}
 	}
 
-	if (!githubRepo.autoDeploy) {
-		return NextResponse.json({
-			ok: true,
-			skipped: true,
-			reason: "auto-deploy disabled",
-		});
-	}
-
-	const deployBranch = githubRepo.deployBranch || githubRepo.defaultBranch;
-	if (branch !== deployBranch) {
-		return NextResponse.json({
-			ok: true,
-			skipped: true,
-			reason: `branch mismatch: ${branch} != ${deployBranch}`,
-		});
-	}
-
-	const service = await db
-		.select()
-		.from(services)
-		.where(
-			and(eq(services.id, githubRepo.serviceId), isNull(services.deletedAt)),
-		)
-		.then((r) => r[0]);
-
-	if (!service) {
-		return NextResponse.json({
-			ok: true,
-			skipped: true,
-			reason: "service not found",
-		});
-	}
-
-	const existingBuild = await db
-		.select()
-		.from(builds)
-		.where(
-			and(
-				eq(builds.serviceId, githubRepo.serviceId),
-				eq(builds.commitSha, head_commit.id),
-			),
-		)
-		.then((r) => r[0]);
-
-	if (existingBuild) {
-		return NextResponse.json({
-			ok: true,
-			skipped: true,
-			reason: "build already exists for this commit",
-			buildId: existingBuild.id,
-		});
-	}
-
-	let githubDeploymentId: number | undefined;
-	try {
-		githubDeploymentId = await createGitHubDeployment(
-			githubRepo.installationId,
-			repository.full_name,
-			head_commit.id,
-			service.name,
-			`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`,
-		);
-
-		await updateGitHubDeploymentStatus(
-			githubRepo.installationId,
-			repository.full_name,
-			githubDeploymentId,
-			"pending",
-			{ description: "Build queued" },
-		);
-	} catch (error) {
-		console.error("[webhook:push] failed to create GitHub deployment:", error);
-	}
-
-	await inngest.send(
-		inngestEvents.buildTrigger.create({
-			serviceId: githubRepo.serviceId,
-			trigger: "push",
-			githubRepoId: githubRepo.id,
-			commitSha: head_commit.id,
-			commitMessage: head_commit.message.substring(0, 500),
-			branch,
-			author: head_commit.author.username || head_commit.author.name,
-			githubDeploymentId,
-			actor: {
-				type: "github",
-				githubUserId: payload.sender.id,
-				login: payload.sender.login,
-			},
-		}),
+	const hasFailures = results.some((result) => result.status === "failed");
+	// Keep dispatch failures visible for manual redelivery. Deterministic event IDs
+	// prevent already queued service links from starting duplicate builds.
+	return NextResponse.json(
+		{ ok: !hasFailures, results },
+		{ status: hasFailures ? 500 : 200 },
 	);
-
-	return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: NextRequest) {
