@@ -2,6 +2,7 @@ FROM node:24-slim AS deps
 WORKDIR /app
 RUN corepack enable pnpm && corepack prepare pnpm@11 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 FROM node:24-slim AS builder
@@ -17,7 +18,12 @@ RUN npx next build
 
 FROM node:24-slim AS drizzle
 WORKDIR /drizzle
-RUN npm install drizzle-kit drizzle-orm
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends patch \
+	&& rm -rf /var/lib/apt/lists/*
+RUN npm install drizzle-kit@0.31.10 drizzle-orm@0.45.2
+COPY patches/drizzle-kit@0.31.10.patch /tmp/drizzle-kit.patch
+RUN patch --directory=node_modules/drizzle-kit --strip=1 < /tmp/drizzle-kit.patch
 
 FROM node:24-slim AS runner
 WORKDIR /app

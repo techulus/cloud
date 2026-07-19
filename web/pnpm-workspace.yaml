@@ -11,3 +11,8 @@ allowBuilds:
   protobufjs: false
   sharp: false
   unrs-resolver: false
+
+# Backport https://github.com/drizzle-team/drizzle-orm/pull/5038 until a
+# stable Drizzle Kit release preserves composite constraint column order.
+patchedDependencies:
+  drizzle-kit@0.31.10: patches/drizzle-kit@0.31.10.patch

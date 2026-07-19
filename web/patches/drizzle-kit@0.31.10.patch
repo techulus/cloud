@@ -1,0 +1,78 @@
+diff --git a/api.js b/api.js
+index f4ecb91959f62fc938416a0585458c0a710af161..538e15d24636ffff2dee2b641629a8d5ed0422f9 100644
+--- a/api.js
++++ b/api.js
+@@ -23174,10 +23174,16 @@ WHERE
+             const checkConstraints = {};
+             const tableResponse = await getColumnsInfoQuery({ schema: tableSchema, table: tableName, db });
+             const tableConstraints = await db.query(
+-              `SELECT c.column_name, c.data_type, constraint_type, constraint_name, constraint_schema
++              `SELECT kcu.column_name, c.data_type, tc.constraint_type, tc.constraint_name, tc.constraint_schema
+       FROM information_schema.table_constraints tc
+-      JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
+-      JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+-        AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+-      WHERE tc.table_name = '${tableName}' and constraint_schema = '${tableSchema}';`
++      JOIN information_schema.key_column_usage kcu
++        ON tc.constraint_name = kcu.constraint_name
++        AND tc.constraint_schema = kcu.constraint_schema
++        AND tc.table_name = kcu.table_name
++      JOIN information_schema.columns AS c
++        ON c.table_schema = tc.constraint_schema
++        AND c.table_name = tc.table_name
++        AND c.column_name = kcu.column_name
++      WHERE tc.table_name = '${tableName}' and tc.constraint_schema = '${tableSchema}'
++      ORDER BY tc.constraint_name, kcu.ordinal_position;`
+             );
+diff --git a/api.mjs b/api.mjs
+index a940272dfb05accf57a472c46c52652ec9ad0080..c6b4beb146da1777804b34768063c225224efd1e 100644
+--- a/api.mjs
++++ b/api.mjs
+@@ -23190,10 +23190,16 @@ WHERE
+             const checkConstraints = {};
+             const tableResponse = await getColumnsInfoQuery({ schema: tableSchema, table: tableName, db });
+             const tableConstraints = await db.query(
+-              `SELECT c.column_name, c.data_type, constraint_type, constraint_name, constraint_schema
++              `SELECT kcu.column_name, c.data_type, tc.constraint_type, tc.constraint_name, tc.constraint_schema
+       FROM information_schema.table_constraints tc
+-      JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
+-      JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+-        AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+-      WHERE tc.table_name = '${tableName}' and constraint_schema = '${tableSchema}';`
++      JOIN information_schema.key_column_usage kcu
++        ON tc.constraint_name = kcu.constraint_name
++        AND tc.constraint_schema = kcu.constraint_schema
++        AND tc.table_name = kcu.table_name
++      JOIN information_schema.columns AS c
++        ON c.table_schema = tc.constraint_schema
++        AND c.table_name = tc.table_name
++        AND c.column_name = kcu.column_name
++      WHERE tc.table_name = '${tableName}' and tc.constraint_schema = '${tableSchema}'
++      ORDER BY tc.constraint_name, kcu.ordinal_position;`
+             );
+diff --git a/bin.cjs b/bin.cjs
+index 07274ea6f53fd54a129b3d338892feda6e995cff..d26825fc18ebe1859260828b6a4efa6e4f95e78c 100755
+--- a/bin.cjs
++++ b/bin.cjs
+@@ -17732,10 +17732,16 @@ WHERE
+             const checkConstraints = {};
+             const tableResponse = await getColumnsInfoQuery({ schema: tableSchema, table: tableName, db });
+             const tableConstraints = await db.query(
+-              `SELECT c.column_name, c.data_type, constraint_type, constraint_name, constraint_schema
++              `SELECT kcu.column_name, c.data_type, tc.constraint_type, tc.constraint_name, tc.constraint_schema
+       FROM information_schema.table_constraints tc
+-      JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
+-      JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+-        AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+-      WHERE tc.table_name = '${tableName}' and constraint_schema = '${tableSchema}';`
++      JOIN information_schema.key_column_usage kcu
++        ON tc.constraint_name = kcu.constraint_name
++        AND tc.constraint_schema = kcu.constraint_schema
++        AND tc.table_name = kcu.table_name
++      JOIN information_schema.columns AS c
++        ON c.table_schema = tc.constraint_schema
++        AND c.table_name = tc.table_name
++        AND c.column_name = kcu.column_name
++      WHERE tc.table_name = '${tableName}' and tc.constraint_schema = '${tableSchema}'
++      ORDER BY tc.constraint_name, kcu.ordinal_position;`
+             );
