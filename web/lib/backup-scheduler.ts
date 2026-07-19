@@ -1,8 +1,8 @@
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
-import { deleteBackup } from "@/actions/backups";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { services, serviceVolumes, volumeBackups } from "@/db/schema";
+import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { triggerBackup } from "@/lib/backups/trigger-backup";
 import {
 	differenceInElapsedDays,
@@ -149,6 +149,6 @@ export async function cleanupOldBackups() {
 	);
 
 	for (const backup of oldBackups) {
-		await deleteBackup(backup.id, { revalidate: false });
+		await deleteBackupInternal(backup.id);
 	}
 }
