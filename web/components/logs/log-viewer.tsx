@@ -555,29 +555,31 @@ function ServiceLogRow({
 	const level = detectLevel(entry.message);
 
 	return (
-		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
-			<span
-				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatPreciseDateTime(entry.timestamp)}
-			>
-				{formatTime(entry.timestamp)}
-			</span>
-			{level && (
+		<div className="flex flex-col sm:flex-row hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-1 sm:py-0.5 group">
+			<div className="flex items-baseline sm:contents">
 				<span
-					className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
+					className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+					title={formatPreciseDateTime(entry.timestamp)}
 				>
-					{level}
+					{formatTime(entry.timestamp)}
 				</span>
-			)}
-			<span
-				className={`shrink-0 w-[50px] text-center px-1 rounded text-[10px] mr-2 ${
-					entry.stream === "stderr"
-						? "text-red-600 dark:text-red-400 bg-red-500/10"
-						: "text-slate-600 dark:text-slate-400 bg-slate-500/10"
-				}`}
-			>
-				{entry.stream}
-			</span>
+				{level && (
+					<span
+						className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${LEVEL_COLORS[level]}`}
+					>
+						{level}
+					</span>
+				)}
+				<span
+					className={`shrink-0 w-[50px] text-center px-1 rounded text-[10px] mr-2 ${
+						entry.stream === "stderr"
+							? "text-red-600 dark:text-red-400 bg-red-500/10"
+							: "text-slate-600 dark:text-slate-400 bg-slate-500/10"
+					}`}
+				>
+					{entry.stream}
+				</span>
+			</div>
 			<span
 				className={`break-all whitespace-pre-wrap ${
 					entry.stream === "stderr"
@@ -601,7 +603,7 @@ function RequestRow({
 	const category = getStatusCategory(entry.status);
 
 	return (
-		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5 group">
+		<div className="flex flex-wrap sm:flex-nowrap hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-1 sm:py-0.5 group">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatPreciseDateTime(entry.timestamp)}
@@ -616,10 +618,10 @@ function RequestRow({
 			<span className="shrink-0 w-[50px] text-slate-500 dark:text-slate-400 font-medium">
 				{entry.method}
 			</span>
-			<span className="flex-1 break-all whitespace-pre-wrap text-slate-800 dark:text-slate-200">
+			<span className="order-last basis-full sm:order-none sm:basis-auto sm:flex-1 break-all whitespace-pre-wrap text-slate-800 dark:text-slate-200">
 				{highlightMatches(entry.path, search)}
 			</span>
-			<span className="shrink-0 w-[60px] text-right ml-2 text-slate-400 dark:text-slate-500 tabular-nums">
+			<span className="shrink-0 w-[60px] text-right ml-auto sm:ml-2 text-slate-400 dark:text-slate-500 tabular-nums">
 				{Math.round(Number(entry.duration) || 0)}ms
 			</span>
 			<span className="shrink-0 ml-2 text-slate-400 dark:text-slate-500 tabular-nums hidden group-hover:inline">
@@ -637,7 +639,7 @@ function BuildLogRow({
 	search: string;
 }) {
 	return (
-		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
+		<div className="flex flex-col sm:flex-row hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-1 sm:py-0.5">
 			<span
 				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
 				title={formatPreciseDateTime(entry.timestamp)}
@@ -659,18 +661,20 @@ function ServerLogRow({
 	search: string;
 }) {
 	return (
-		<div className="flex hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-0.5">
-			<span
-				className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
-				title={formatPreciseDateTime(entry.timestamp)}
-			>
-				{formatTime(entry.timestamp)}
-			</span>
-			<span
-				className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${SERVER_LOG_LEVEL_COLORS[entry.level] || SERVER_LOG_LEVEL_COLORS.info}`}
-			>
-				{entry.level}
-			</span>
+		<div className="flex flex-col sm:flex-row hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-1 sm:py-0.5">
+			<div className="flex items-baseline sm:contents">
+				<span
+					className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+					title={formatPreciseDateTime(entry.timestamp)}
+				>
+					{formatTime(entry.timestamp)}
+				</span>
+				<span
+					className={`shrink-0 w-[50px] text-center px-1.5 rounded text-[10px] font-medium uppercase mr-2 ${SERVER_LOG_LEVEL_COLORS[entry.level] || SERVER_LOG_LEVEL_COLORS.info}`}
+				>
+					{entry.level}
+				</span>
+			</div>
 			<span className="text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
 				{highlightMatches(entry.message, search)}
 			</span>

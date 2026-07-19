@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { cron } from "inngest";
-import { deleteBackup } from "@/actions/backups";
+import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -560,7 +560,7 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 					.where(eq(volumeBackups.serviceId, service.id));
 
 				for (const backup of backups) {
-					await deleteBackup(backup.id, { revalidate: false });
+					await deleteBackupInternal(backup.id);
 				}
 
 				await db.delete(secrets).where(eq(secrets.serviceId, service.id));
