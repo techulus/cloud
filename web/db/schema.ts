@@ -603,12 +603,9 @@ export const serviceRevisions = pgTable(
 			.notNull(),
 	},
 	(table) => [
-		// The database constraint is physically (id, service_id), but drizzle-kit
-		// 0.31.10 reports it as (service_id, id) during push diffing. Keep this order
-		// to avoid a drop/recreate that fails because foreign keys depend on it.
 		unique("service_revisions_id_service_id_unique").on(
-			table.serviceId,
 			table.id,
+			table.serviceId,
 		),
 		index("service_revisions_service_created_id_idx").on(
 			table.serviceId,
