@@ -16,14 +16,16 @@ permissions:
 
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - goos: linux
             goarch: amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
           - goos: linux
             goarch: arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
 
     steps:
       - name: Checkout
@@ -52,20 +54,25 @@ jobs:
           retention-days: 1
 
   cli:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - goos: darwin
             goarch: amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
           - goos: darwin
             goarch: arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
           - goos: linux
             goarch: amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
           - goos: linux
             goarch: arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
           - goos: windows
             goarch: amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
 
     steps:
       - name: Checkout
@@ -108,8 +115,8 @@ jobs:
           retention-days: 1
 
   release:
-    needs: [agent, cli, web, registry, updater]
-    runs-on: ubuntu-latest
+    needs: [agent, cli, containers]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Download agent artifacts
         uses: actions/download-artifact@v8
@@ -245,14 +252,49 @@ jobs:
             git pull --rebase origin main
           done
 
-  web:
-    runs-on: ubuntu-latest
+  container:
+    name: Build ${{ matrix.image }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - image: web
+            context: web
+            arch: amd64
+            platform: linux/amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - image: web
+            context: web
+            arch: arm64
+            platform: linux/arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
+          - image: registry
+            context: registry
+            arch: amd64
+            platform: linux/amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - image: registry
+            context: registry
+            arch: arm64
+            platform: linux/arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
+          - image: updater
+            context: deployment/updater
+            arch: amd64
+            platform: linux/amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - image: updater
+            context: deployment/updater
+            arch: arm64
+            platform: linux/arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -262,27 +304,45 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        id: build
+        uses: useblacksmith/build-push-action@v2
         with:
-          context: web
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/web:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}/web:tip
-          build-args: |
-            APP_VERSION=${{ github.ref_name }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          context: ${{ matrix.context }}
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.image }}
+          platforms: ${{ matrix.platform }}
+          build-args: ${{ matrix.image == 'web' && format('APP_VERSION={0}', github.ref_name) || '' }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
-  registry:
-    runs-on: ubuntu-latest
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  containers:
+    name: Publish ${{ matrix.image }} manifest
+    needs: container
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    strategy:
+      matrix:
+        image: [web, registry, updater]
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.image }}-*
+          merge-multiple: true
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -291,42 +351,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: registry
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/registry:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}/registry:tip
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=registry
-          cache-to: type=gha,mode=max,scope=registry
-
-  updater:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: deployment/updater
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/updater:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}/updater:tip
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=updater
-          cache-to: type=gha,mode=max,scope=updater
+      - name: Create and push multi-platform manifest
+        working-directory: /tmp/digests
+        run: |
+          image="ghcr.io/${{ github.repository }}/${{ matrix.image }}"
+          docker buildx imagetools create \
+            --tag "$image:${{ github.ref_name }}" \
+            --tag "$image:tip" \
+            $(printf "$image@sha256:%s " *)
