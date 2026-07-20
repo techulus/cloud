@@ -48,7 +48,14 @@ type Builder struct {
 const (
 	staleBuildDirAge     = 1 * time.Hour
 	staleTempArtifactAge = 24 * time.Hour
+	dockerfilePathKey    = "TECHULUS_DOCKERFILE_PATH"
 )
+
+type dockerfileConfig struct {
+	directory string
+	filename  string
+	found     bool
+}
 
 var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
 
@@ -226,23 +233,9 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		b.sendLog(config, fmt.Sprintf("Using root directory: %s", config.RootDir))
 	}
 
-	dockerfileRelPath := "Dockerfile"
-	hasDockerfile := false
-	forcedDockerfile := false
-	if customPath := config.Secrets["TECHULUS_DOCKERFILE_PATH"]; customPath != "" {
-		if !filepath.IsLocal(customPath) {
-			return fmt.Errorf("TECHULUS_DOCKERFILE_PATH must be a relative path within the build context, got %q", customPath)
-		}
-		resolved := filepath.Join(contextDir, customPath)
-		if info, err := os.Stat(resolved); err != nil || info.IsDir() {
-			b.sendLog(config, fmt.Sprintf("TECHULUS_DOCKERFILE_PATH is set but %s was not found in the repository", customPath))
-			return fmt.Errorf("TECHULUS_DOCKERFILE_PATH %q not found in build context", customPath)
-		}
-		dockerfileRelPath = filepath.Clean(customPath)
-		hasDockerfile = true
-		forcedDockerfile = true
-	} else if _, err := os.Stat(filepath.Join(contextDir, "Dockerfile")); err == nil {
-		hasDockerfile = true
+	dockerfile, err := resolveDockerfile(contextDir, config.Secrets)
+	if err != nil {
+		return err
 	}
 
 	buildkitAddr := os.Getenv("BUILDKIT_HOST")
@@ -253,6 +246,9 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	var secretArgs []string
 	var secretEnv []string
 	for key, value := range config.Secrets {
+		if key == dockerfilePathKey {
+			continue
+		}
 		secretArgs = append(secretArgs, "--secret", fmt.Sprintf("id=%s,env=%s", key, key))
 		secretEnv = append(secretEnv, fmt.Sprintf("%s=%s", key, value))
 	}
@@ -266,10 +262,10 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	archImageUri := config.ImageURI + "-" + arch
 	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", archImageUri)
 
-	if hasDockerfile {
-		log.Printf("[build:%s] building with Dockerfile %s via buildctl for %s", truncateStr(config.BuildID, 8), dockerfileRelPath, platform)
-		if forcedDockerfile {
-			b.sendLog(config, fmt.Sprintf("Using Dockerfile %s (from TECHULUS_DOCKERFILE_PATH)", dockerfileRelPath))
+	if dockerfile.found {
+		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
+		if configuredPath := strings.TrimSpace(config.Secrets[dockerfilePathKey]); configuredPath != "" {
+			b.sendLog(config, fmt.Sprintf("Using Dockerfile: %s", configuredPath))
 		} else {
 			b.sendLog(config, "Using existing Dockerfile")
 		}
@@ -280,8 +276,8 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"build",
 			"--frontend", "dockerfile.v0",
 			"--local", "context=.",
-			"--local", fmt.Sprintf("dockerfile=%s", filepath.Dir(dockerfileRelPath)),
-			"--opt", fmt.Sprintf("filename=%s", filepath.Base(dockerfileRelPath)),
+			"--local", fmt.Sprintf("dockerfile=%s", dockerfile.directory),
+			"--opt", fmt.Sprintf("filename=%s", dockerfile.filename),
 			"--opt", fmt.Sprintf("platform=%s", platform),
 			"--output", archOutputFlag,
 		}
@@ -348,6 +344,54 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 	b.sendLog(config, "Build completed")
 	return nil
+}
+
+func resolveDockerfile(contextDir string, secrets map[string]string) (dockerfileConfig, error) {
+	configuredPath, configured := secrets[dockerfilePathKey]
+	configuredPath = strings.TrimSpace(configuredPath)
+	if configured && configuredPath == "" {
+		return dockerfileConfig{}, fmt.Errorf("%s cannot be empty", dockerfilePathKey)
+	}
+
+	if !configured {
+		if _, err := os.Stat(filepath.Join(contextDir, "Dockerfile")); err == nil {
+			return dockerfileConfig{directory: ".", filename: "Dockerfile", found: true}, nil
+		} else if !os.IsNotExist(err) {
+			return dockerfileConfig{}, fmt.Errorf("failed to inspect Dockerfile: %w", err)
+		}
+		return dockerfileConfig{}, nil
+	}
+
+	cleanedPath := filepath.Clean(configuredPath)
+	if filepath.IsAbs(cleanedPath) || cleanedPath == ".." || strings.HasPrefix(cleanedPath, ".."+string(filepath.Separator)) {
+		return dockerfileConfig{}, fmt.Errorf("%s must be relative to the service root directory", dockerfilePathKey)
+	}
+
+	info, err := os.Stat(filepath.Join(contextDir, cleanedPath))
+	if err != nil {
+		return dockerfileConfig{}, fmt.Errorf("dockerfile %s does not exist: %w", configuredPath, err)
+	}
+	if info.IsDir() {
+		return dockerfileConfig{}, fmt.Errorf("dockerfile path %s is a directory", configuredPath)
+	}
+	resolvedContextDir, err := filepath.EvalSymlinks(contextDir)
+	if err != nil {
+		return dockerfileConfig{}, fmt.Errorf("failed to resolve service root directory: %w", err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(contextDir, cleanedPath))
+	if err != nil {
+		return dockerfileConfig{}, fmt.Errorf("failed to resolve Dockerfile %s: %w", configuredPath, err)
+	}
+	relativePath, err := filepath.Rel(resolvedContextDir, resolvedPath)
+	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return dockerfileConfig{}, fmt.Errorf("%s must resolve inside the service root directory", dockerfilePathKey)
+	}
+
+	return dockerfileConfig{
+		directory: filepath.Dir(cleanedPath),
+		filename:  filepath.Base(cleanedPath),
+		found:     true,
+	}, nil
 }
 
 func (b *Builder) runCommand(cmd *exec.Cmd, config *Config) (string, error) {

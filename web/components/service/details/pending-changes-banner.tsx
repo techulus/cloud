@@ -9,7 +9,10 @@ import { deployService } from "@/actions/projects";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { ServiceWithDetails as Service } from "@/db/types";
-import type { ConfigChange } from "@/lib/service-config";
+import {
+	type ConfigChange,
+	hasBuildAffectingChanges,
+} from "@/lib/service-config";
 
 interface PendingChangesBannerProps {
 	service: Service;
@@ -37,8 +40,9 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 		0,
 	);
 	const hasNoDeployments = service.deployments.length === 0;
-	const isGithubWithNoDeployments =
-		service.sourceType === "github" && hasNoDeployments;
+	const shouldBuild =
+		service.sourceType === "github" &&
+		(hasNoDeployments || hasBuildAffectingChanges(changes));
 
 	const hasChanges = changes.length > 0;
 	const showBanner =
@@ -48,7 +52,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 	const handleDeploy = async () => {
 		setIsDeploying(true);
 		try {
-			if (isGithubWithNoDeployments) {
+			if (shouldBuild) {
 				await triggerBuild(service.id);
 				router.push(
 					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
@@ -92,7 +96,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 							) : (
 								<Rocket className="size-4" data-icon="inline-start" />
 							)}
-							{isGithubWithNoDeployments ? "Build" : "Deploy"}
+							{shouldBuild ? "Build" : "Deploy"}
 						</Button>
 					</div>
 					{hasChanges ? (
