@@ -29,7 +29,7 @@ export default async function ServiceLayout({
 					{ label: "Dashboard", href: "/dashboard" },
 					{ label: project.name, href: `/dashboard/projects/${slug}/${env}` },
 					{
-						label: service.name,
+						label: `${service.name} (${env})`,
 						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}`,
 					},
 				]}
