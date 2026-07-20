@@ -369,10 +369,10 @@ func resolveDockerfile(contextDir string, secrets map[string]string) (dockerfile
 
 	info, err := os.Stat(filepath.Join(contextDir, cleanedPath))
 	if err != nil {
-		return dockerfileConfig{}, fmt.Errorf("Dockerfile %s does not exist: %w", configuredPath, err)
+		return dockerfileConfig{}, fmt.Errorf("dockerfile %s does not exist: %w", configuredPath, err)
 	}
 	if info.IsDir() {
-		return dockerfileConfig{}, fmt.Errorf("Dockerfile path %s is a directory", configuredPath)
+		return dockerfileConfig{}, fmt.Errorf("dockerfile path %s is a directory", configuredPath)
 	}
 	resolvedContextDir, err := filepath.EvalSymlinks(contextDir)
 	if err != nil {
