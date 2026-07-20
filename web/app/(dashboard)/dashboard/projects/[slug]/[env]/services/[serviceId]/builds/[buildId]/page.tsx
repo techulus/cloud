@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { BuildDetails } from "@/components/builds/build-details";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
-import { builds, projects, services, githubRepos } from "@/db/schema";
-import { BuildDetails } from "@/components/builds/build-details";
+import { builds, githubRepos, projects, services } from "@/db/schema";
 
 async function getBuild(
 	projectSlug: string,
@@ -78,7 +78,7 @@ export default async function BuildPage({
 						href: `/dashboard/projects/${slug}/${env}`,
 					},
 					{
-						label: data.service.name,
+						label: `${data.service.name} (${env})`,
 						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}`,
 					},
 					{
