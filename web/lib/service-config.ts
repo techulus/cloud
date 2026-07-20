@@ -76,7 +76,16 @@ export type ConfigChange = {
 	field: string;
 	from: string;
 	to: string;
+	secretKey?: string;
 };
+
+export const TECHULUS_DOCKERFILE_PATH = "TECHULUS_DOCKERFILE_PATH";
+
+export function hasBuildAffectingChanges(changes: ConfigChange[]): boolean {
+	return changes.some(
+		(change) => change.secretKey === TECHULUS_DOCKERFILE_PATH,
+	);
+}
 
 export function buildCurrentConfig(
 	service: {
@@ -238,6 +247,7 @@ export function diffConfigs(
 				field: "Secret",
 				from: "(none)",
 				to: secret.key,
+				secretKey: secret.key,
 			});
 		}
 		for (const volume of current.volumes || []) {
@@ -482,12 +492,14 @@ export function diffConfigs(
 				field: "Secret",
 				from: "(none)",
 				to: key,
+				secretKey: key,
 			});
 		} else if (deployedSecret.updatedAt !== currentSecret.updatedAt) {
 			changes.push({
 				field: "Secret",
 				from: key,
 				to: `${key} (updated)`,
+				secretKey: key,
 			});
 		}
 	}
@@ -498,6 +510,7 @@ export function diffConfigs(
 				field: "Secret",
 				from: key,
 				to: "(removed)",
+				secretKey: key,
 			});
 		}
 	}

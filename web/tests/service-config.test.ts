@@ -3,8 +3,10 @@ import {
 	type DeployedConfig,
 	diffConfigs,
 	getCurrentServerlessConfig,
+	hasBuildAffectingChanges,
 	MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
 	revisionSpecToDeployedConfig,
+	TECHULUS_DOCKERFILE_PATH,
 } from "@/lib/service-config";
 
 function deployedConfig(
@@ -94,5 +96,38 @@ describe("service config", () => {
 			from: "Enabled",
 			to: "Disabled",
 		});
+	});
+
+	it("requires a build when the Dockerfile path is added, updated, or removed", () => {
+		const dockerfileSecret = {
+			key: TECHULUS_DOCKERFILE_PATH,
+			updatedAt: "2026-07-20T00:00:00.000Z",
+		};
+		const withoutSecret = deployedConfig({ secrets: [] });
+		const withSecret = deployedConfig({ secrets: [dockerfileSecret] });
+		const updatedSecret = deployedConfig({
+			secrets: [{ ...dockerfileSecret, updatedAt: "2026-07-20T01:00:00.000Z" }],
+		});
+
+		expect(
+			hasBuildAffectingChanges(diffConfigs(withoutSecret, withSecret)),
+		).toBe(true);
+		expect(
+			hasBuildAffectingChanges(diffConfigs(withSecret, updatedSecret)),
+		).toBe(true);
+		expect(
+			hasBuildAffectingChanges(diffConfigs(withSecret, withoutSecret)),
+		).toBe(true);
+	});
+
+	it("does not require a build for unrelated environment variables", () => {
+		const changes = diffConfigs(
+			deployedConfig({ secrets: [] }),
+			deployedConfig({
+				secrets: [{ key: "DATABASE_URL", updatedAt: "2026-07-20" }],
+			}),
+		);
+
+		expect(hasBuildAffectingChanges(changes)).toBe(false);
 	});
 });

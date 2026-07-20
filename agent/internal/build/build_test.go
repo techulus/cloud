@@ -119,6 +119,88 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 	}
 }
 
+func TestResolveDockerfile(t *testing.T) {
+	contextDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM scratch"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(contextDir, "docker"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contextDir, "docker", "Dockerfile.prod"), []byte("FROM scratch"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile.custom"), []byte("FROM scratch"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(contextDir, "dockerfiles"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "Dockerfile"), []byte("FROM scratch"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(contextDir, "outside")); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		secrets   map[string]string
+		directory string
+		filename  string
+		wantErr   bool
+	}{
+		{name: "default", secrets: map[string]string{}, directory: ".", filename: "Dockerfile"},
+		{
+			name:      "nested custom path",
+			secrets:   map[string]string{dockerfilePathKey: "docker/Dockerfile.prod"},
+			directory: "docker",
+			filename:  "Dockerfile.prod",
+		},
+		{
+			name:      "root custom filename",
+			secrets:   map[string]string{dockerfilePathKey: "Dockerfile.custom"},
+			directory: ".",
+			filename:  "Dockerfile.custom",
+		},
+		{name: "missing custom path", secrets: map[string]string{dockerfilePathKey: "missing.Dockerfile"}, wantErr: true},
+		{name: "empty custom path", secrets: map[string]string{dockerfilePathKey: "  "}, wantErr: true},
+		{name: "absolute custom path", secrets: map[string]string{dockerfilePathKey: "/tmp/Dockerfile"}, wantErr: true},
+		{name: "escaping custom path", secrets: map[string]string{dockerfilePathKey: "../Dockerfile"}, wantErr: true},
+		{name: "directory custom path", secrets: map[string]string{dockerfilePathKey: "dockerfiles"}, wantErr: true},
+		{name: "symlink escape", secrets: map[string]string{dockerfilePathKey: "outside/Dockerfile"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveDockerfile(contextDir, tt.secrets)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.found || got.directory != tt.directory || got.filename != tt.filename {
+				t.Fatalf("resolveDockerfile() = %+v, want directory=%q filename=%q", got, tt.directory, tt.filename)
+			}
+		})
+	}
+}
+
+func TestResolveDockerfileFallsBackToRailpack(t *testing.T) {
+	got, err := resolveDockerfile(t.TempDir(), map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.found {
+		t.Fatalf("resolveDockerfile() = %+v, want no Dockerfile", got)
+	}
+}
+
 func runGit(t *testing.T, args ...string) string {
 	t.Helper()
 	output, err := exec.Command("git", args...).CombinedOutput()
