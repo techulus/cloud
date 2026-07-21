@@ -58,6 +58,7 @@ type dockerfileConfig struct {
 }
 
 var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
+var windowsAbsoluteRootPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 
 func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	return &Builder{
@@ -224,12 +225,11 @@ func (b *Builder) resolveCommitSha(ctx context.Context, config *Config, buildDir
 }
 
 func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir string) error {
-	contextDir := buildDir
+	contextDir, err := resolveBuildContext(buildDir, config.RootDir)
+	if err != nil {
+		return err
+	}
 	if config.RootDir != "" {
-		contextDir = filepath.Join(buildDir, config.RootDir)
-		if _, err := os.Stat(contextDir); err != nil {
-			return fmt.Errorf("root directory %s does not exist: %w", config.RootDir, err)
-		}
 		b.sendLog(config, fmt.Sprintf("Using root directory: %s", config.RootDir))
 	}
 
@@ -344,6 +344,45 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 	b.sendLog(config, "Build completed")
 	return nil
+}
+
+func resolveBuildContext(buildDir, rootDir string) (string, error) {
+	if rootDir == "" {
+		return buildDir, nil
+	}
+
+	if windowsAbsoluteRootPattern.MatchString(rootDir) {
+		return "", fmt.Errorf("root directory %s must be relative to and inside the cloned repository", rootDir)
+	}
+	normalizedRoot := strings.ReplaceAll(rootDir, "\\", "/")
+	cleanedRoot := filepath.Clean(filepath.FromSlash(normalizedRoot))
+	if filepath.IsAbs(cleanedRoot) || cleanedRoot == ".." || strings.HasPrefix(cleanedRoot, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("root directory %s must be relative to and inside the cloned repository", rootDir)
+	}
+
+	contextDir := filepath.Join(buildDir, cleanedRoot)
+	info, err := os.Stat(contextDir)
+	if err != nil {
+		return "", fmt.Errorf("root directory %s does not exist: %w", rootDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("root directory %s is not a directory", rootDir)
+	}
+
+	resolvedBuildDir, err := filepath.EvalSymlinks(buildDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve cloned repository directory: %w", err)
+	}
+	resolvedContextDir, err := filepath.EvalSymlinks(contextDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve root directory %s: %w", rootDir, err)
+	}
+	relativePath, err := filepath.Rel(resolvedBuildDir, resolvedContextDir)
+	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("root directory %s must resolve inside the cloned repository", rootDir)
+	}
+
+	return contextDir, nil
 }
 
 func resolveDockerfile(contextDir string, secrets map[string]string) (dockerfileConfig, error) {

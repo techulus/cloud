@@ -7,11 +7,46 @@ import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { startMigrationInternal } from "@/lib/migrations";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
-import { createRolloutWithServiceRevision } from "@/lib/service-revisions";
+import {
+	createRolloutForServiceRevision,
+	createRolloutWithServiceRevision,
+} from "@/lib/service-revisions";
+import { triggerBuildInternal } from "@/lib/trigger-build";
+
+export async function deployServiceRevisionInternal(
+	serviceId: string,
+	serviceRevisionId: string,
+	artifactImageUri: string,
+) {
+	const result = await createRolloutForServiceRevision(
+		serviceId,
+		serviceRevisionId,
+		artifactImageUri,
+	);
+	if (!result.rolloutId) return result;
+
+	await inngest.send(
+		inngestEvents.rolloutCreated.create(
+			{
+				rolloutId: result.rolloutId,
+				serviceId,
+			},
+			{
+				id: `rollout-created-${result.rolloutId}`,
+			},
+		),
+	);
+
+	return result;
+}
 
 export async function deployServiceInternal(
 	serviceId: string,
 	actor: ServiceRevisionActor | null,
+	options: {
+		runtimeBaseRevisionId?: string;
+		githubTrigger?: "manual" | "scheduled";
+	} = {},
 ) {
 	const service = await getService(serviceId);
 	if (!service) {
@@ -51,10 +86,19 @@ export async function deployServiceInternal(
 			return { migrationStarted: true };
 		}
 	}
+	const runtimeBaseRevisionId =
+		service.sourceType === "github" ? options.runtimeBaseRevisionId : undefined;
+	if (service.sourceType === "github" && !runtimeBaseRevisionId) {
+		if (!options.githubTrigger || !actor) {
+			throw new Error("GitHub deployment requires a build trigger");
+		}
+		return triggerBuildInternal(serviceId, options.githubTrigger, actor);
+	}
 
 	const { rolloutId } = await createRolloutWithServiceRevision(
 		serviceId,
 		actor,
+		runtimeBaseRevisionId,
 	);
 
 	try {

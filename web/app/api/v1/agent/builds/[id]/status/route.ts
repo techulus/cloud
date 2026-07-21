@@ -1,19 +1,14 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import {
-	builds,
-	githubRepos,
-	projects,
-	serviceReplicas,
-	services,
-} from "@/db/schema";
+import { builds, serviceRevisions } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { deployServiceInternal } from "@/lib/deploy-service";
+import { revisionRepositoryFullName } from "@/lib/build-revision-source";
 import { sendBuildFailureAlert } from "@/lib/email";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
@@ -22,17 +17,55 @@ type StatusUpdate = {
 	resolvedCommitSha?: string;
 };
 
-type BuildCompletedEventData = {
+const validStatuses = new Set<StatusUpdate["status"]>([
+	"cloning",
+	"building",
+	"pushing",
+	"completed",
+	"failed",
+]);
+
+type BuildStatus = typeof builds.$inferSelect.status;
+const terminalBuildStatuses = new Set<BuildStatus>([
+	"completed",
+	"failed",
+	"cancelled",
+]);
+const transitionSources: Record<StatusUpdate["status"], BuildStatus[]> = {
+	cloning: ["pending", "claimed", "cloning"],
+	building: ["pending", "claimed", "cloning", "building"],
+	pushing: ["pending", "claimed", "cloning", "building", "pushing"],
+	completed: ["pending", "claimed", "cloning", "building", "pushing"],
+	failed: ["pending", "claimed", "cloning", "building", "pushing"],
+};
+
+function platformImageForTarget(finalImage: string, targetPlatform: string) {
+	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
+	if (
+		operatingSystem !== "linux" ||
+		!architecture ||
+		extra.length > 0 ||
+		!["amd64", "arm64"].includes(architecture)
+	) {
+		throw new Error(`Invalid build target platform: ${targetPlatform}`);
+	}
+	return `${finalImage}-${architecture}`;
+}
+
+async function sendBuildCompletedEvent(data: {
 	buildId: string;
 	serviceId: string;
-	buildGroupId: string | null;
+	serviceRevisionId: string;
+	buildGroupId: string;
 	status: "success" | "failed";
 	imageUri?: string;
 	error?: string;
-};
-
-async function sendBuildCompletedEvent(data: BuildCompletedEventData) {
-	await inngest.send(inngestEvents.buildCompleted.create(data));
+}) {
+	await inngest.send(
+		inngestEvents.buildCompleted.create(data, {
+			id: `build-completed-${data.buildId}`,
+		}),
+	);
 }
 
 export async function POST(
@@ -46,106 +79,198 @@ export async function POST(
 	}
 
 	const { id: buildId } = await params;
-	const { serverId } = auth;
-
 	let update: StatusUpdate;
 	try {
 		update = JSON.parse(body);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
+	if (!validStatuses.has(update.status)) {
+		return NextResponse.json(
+			{ error: "Invalid build status" },
+			{ status: 400 },
+		);
+	}
 
-	const [build] = await db
+	const build = await db
 		.select()
 		.from(builds)
-		.where(and(eq(builds.id, buildId), eq(builds.claimedBy, serverId)));
-
+		.where(and(eq(builds.id, buildId), eq(builds.claimedBy, auth.serverId)))
+		.then((rows) => rows[0]);
 	if (!build) {
 		return NextResponse.json(
 			{ error: "Build not found or not claimed by this agent" },
 			{ status: 404 },
 		);
 	}
-
 	if (build.status === "cancelled") {
 		return NextResponse.json({ ok: true, cancelled: true });
 	}
 
-	const updateData: Record<string, unknown> = { status: update.status };
+	const revision = await db
+		.select({ specification: serviceRevisions.specification })
+		.from(serviceRevisions)
+		.where(
+			and(
+				eq(serviceRevisions.id, build.serviceRevisionId),
+				eq(serviceRevisions.serviceId, build.serviceId),
+			),
+		)
+		.then((rows) => rows[0]);
+	if (!revision) {
+		return NextResponse.json(
+			{ error: "Build service revision not found" },
+			{ status: 404 },
+		);
+	}
 
+	let specification: ReturnType<typeof parseServiceRevisionSpec>;
+	try {
+		specification = parseServiceRevisionSpec(revision.specification);
+	} catch (error) {
+		console.error("[build:status] invalid service revision:", error);
+		return NextResponse.json(
+			{ error: "Invalid build service revision" },
+			{ status: 500 },
+		);
+	}
+	if (
+		specification.source.type !== "github" ||
+		specification.source.commitSha !== build.commitSha ||
+		specification.source.branch !== build.branch
+	) {
+		return NextResponse.json(
+			{ error: "Build metadata does not match its service revision" },
+			{ status: 409 },
+		);
+	}
+	if (
+		update.resolvedCommitSha &&
+		update.resolvedCommitSha.toLowerCase() !== specification.source.commitSha
+	) {
+		return NextResponse.json(
+			{ error: "Resolved commit does not match the service revision" },
+			{ status: 409 },
+		);
+	}
+
+	let platformImageUri: string | null = null;
+	if (update.status === "completed") {
+		try {
+			platformImageUri = platformImageForTarget(
+				specification.image,
+				build.targetPlatform,
+			);
+		} catch (error) {
+			return NextResponse.json(
+				{
+					error:
+						error instanceof Error ? error.message : "Invalid build target",
+				},
+				{ status: 500 },
+			);
+		}
+	}
+
+	const updateData: Record<string, unknown> = { status: update.status };
 	if (update.status === "cloning" && !build.startedAt) {
 		updateData.startedAt = new Date();
 	}
-
 	if (update.status === "completed" || update.status === "failed") {
 		updateData.completedAt = new Date();
 	}
+	if (update.error) updateData.error = update.error;
+	if (platformImageUri) updateData.imageUri = platformImageUri;
 
-	if (update.error) {
-		updateData.error = update.error;
+	const transitionedBuild = await db
+		.update(builds)
+		.set(updateData)
+		.where(
+			and(
+				eq(builds.id, buildId),
+				eq(builds.claimedBy, auth.serverId),
+				inArray(builds.status, transitionSources[update.status]),
+			),
+		)
+		.returning()
+		.then((rows) => rows[0]);
+	let replayingTerminalUpdate = false;
+	if (!transitionedBuild) {
+		const currentBuild = await db
+			.select()
+			.from(builds)
+			.where(and(eq(builds.id, buildId), eq(builds.claimedBy, auth.serverId)))
+			.then((rows) => rows[0]);
+		if (!currentBuild) {
+			return NextResponse.json(
+				{ error: "Build not found or not claimed by this agent" },
+				{ status: 404 },
+			);
+		}
+		if (currentBuild.status === "cancelled") {
+			return NextResponse.json({ ok: true, cancelled: true });
+		}
+		if (
+			!terminalBuildStatuses.has(currentBuild.status) ||
+			currentBuild.status !== update.status
+		) {
+			return NextResponse.json(
+				{
+					error: `Cannot change build status from ${currentBuild.status} to ${update.status}`,
+				},
+				{ status: 409 },
+			);
+		}
+		if (
+			update.status === "completed" &&
+			currentBuild.imageUri !== platformImageUri
+		) {
+			return NextResponse.json(
+				{
+					error: "Completed build artifact does not match its service revision",
+				},
+				{ status: 409 },
+			);
+		}
+		replayingTerminalUpdate = true;
 	}
 
-	const effectiveCommitSha =
-		build.commitSha === "HEAD" && update.resolvedCommitSha
-			? update.resolvedCommitSha
-			: build.commitSha;
-
-	if (build.commitSha === "HEAD" && update.resolvedCommitSha) {
-		updateData.commitSha = update.resolvedCommitSha;
-	}
-
-	await db.update(builds).set(updateData).where(eq(builds.id, buildId));
-
-	if (build.githubDeploymentId && build.githubRepoId) {
+	if (
+		!replayingTerminalUpdate &&
+		build.githubDeploymentId &&
+		specification.source.authentication.type === "github_app"
+	) {
 		try {
-			const githubRepo = await db
-				.select()
-				.from(githubRepos)
-				.where(eq(githubRepos.id, build.githubRepoId))
-				.then((r) => r[0]);
-
-			if (githubRepo) {
-				const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
-				const logUrl = `${baseUrl}/builds/${buildId}/logs`;
-
-				if (
-					update.status === "cloning" ||
-					update.status === "building" ||
-					update.status === "pushing"
-				) {
-					await updateGitHubDeploymentStatus(
-						githubRepo.installationId,
-						githubRepo.repoFullName,
-						build.githubDeploymentId,
-						"in_progress",
-						{
-							description: `Build ${update.status}...`,
-							logUrl,
-						},
-					);
-				} else if (update.status === "completed") {
-					await updateGitHubDeploymentStatus(
-						githubRepo.installationId,
-						githubRepo.repoFullName,
-						build.githubDeploymentId,
-						"success",
-						{
-							description: "Build completed successfully",
-							logUrl,
-						},
-					);
-				} else if (update.status === "failed") {
-					await updateGitHubDeploymentStatus(
-						githubRepo.installationId,
-						githubRepo.repoFullName,
-						build.githubDeploymentId,
-						"failure",
-						{
-							description: update.error || "Build failed",
-							logUrl,
-						},
-					);
-				}
+			const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
+			const logUrl = `${baseUrl}/builds/${buildId}/logs`;
+			const repository = revisionRepositoryFullName(
+				specification.source.repository,
+			);
+			const installationId = specification.source.authentication.installationId;
+			if (["cloning", "building", "pushing"].includes(update.status)) {
+				await updateGitHubDeploymentStatus(
+					installationId,
+					repository,
+					build.githubDeploymentId,
+					"in_progress",
+					{ description: `Build ${update.status}...`, logUrl },
+				);
+			} else if (update.status === "completed") {
+				await updateGitHubDeploymentStatus(
+					installationId,
+					repository,
+					build.githubDeploymentId,
+					"success",
+					{ description: "Build completed successfully", logUrl },
+				);
+			} else {
+				await updateGitHubDeploymentStatus(
+					installationId,
+					repository,
+					build.githubDeploymentId,
+					"failure",
+					{ description: update.error || "Build failed", logUrl },
+				);
 			}
 		} catch (error) {
 			console.error(
@@ -156,20 +281,22 @@ export async function POST(
 	}
 
 	if (update.status === "failed") {
-		sendBuildFailureAlert({
-			serviceId: build.serviceId,
-			buildId,
-			error: update.error,
-		}).catch((error) => {
-			console.error(
-				"[build:status] failed to send build failure alert:",
-				error,
-			);
-		});
-
+		if (!replayingTerminalUpdate) {
+			sendBuildFailureAlert({
+				serviceId: build.serviceId,
+				buildId,
+				error: update.error,
+			}).catch((error) => {
+				console.error(
+					"[build:status] failed to send build failure alert:",
+					error,
+				);
+			});
+		}
 		await sendBuildCompletedEvent({
 			buildId,
 			serviceId: build.serviceId,
+			serviceRevisionId: build.serviceRevisionId,
 			buildGroupId: build.buildGroupId,
 			status: "failed",
 			error: update.error,
@@ -177,209 +304,62 @@ export async function POST(
 	}
 
 	if (update.status === "completed") {
-		console.log(
-			`[build:status] build ${buildId.slice(0, 8)} completed, targetPlatform=${build.targetPlatform}, serviceId=${build.serviceId}, commitSha=${effectiveCommitSha.slice(0, 8)}`,
-		);
-
-		const service = await db
-			.select()
-			.from(services)
-			.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)))
-			.then((r) => r[0]);
-
-		if (!service) {
-			await db
-				.update(builds)
-				.set({ error: "Service not found" })
-				.where(eq(builds.id, buildId));
-			return NextResponse.json({ error: "Service not found" }, { status: 404 });
-		}
-
-		const project = await db
-			.select()
-			.from(projects)
-			.where(eq(projects.id, service.projectId))
-			.then((r) => r[0]);
-
-		if (!project) {
-			return NextResponse.json({ error: "Project not found" }, { status: 404 });
-		}
-
-		const registryHost = process.env.REGISTRY_HOST;
-		if (!registryHost) {
+		if (!platformImageUri) {
 			return NextResponse.json(
-				{ error: "REGISTRY_HOST environment variable is required" },
+				{ error: "Invalid build artifact" },
 				{ status: 500 },
 			);
 		}
-		const commitSha =
-			effectiveCommitSha === "HEAD" ? "latest" : effectiveCommitSha;
-		const baseImageUri = `${registryHost}/${project.id}/${service.id}:${commitSha}`;
 
-		if (build.targetPlatform) {
-			const arch = build.targetPlatform.split("/")[1];
-			const archImageUri = `${baseImageUri}-${arch}`;
-			await db
-				.update(builds)
-				.set({ imageUri: archImageUri })
-				.where(eq(builds.id, buildId));
-
-			if (!build.buildGroupId) {
-				console.log(`[build:status] no buildGroupId, treating as single build`);
-
-				const replicas = await db
-					.select()
-					.from(serviceReplicas)
-					.where(eq(serviceReplicas.serviceId, build.serviceId));
-
-				const shouldDeploy = replicas.some((replica) => replica.count > 0);
-
-				console.log(
-					`[build:complete] enqueueing create_manifest for single-target build ${baseImageUri} to server ${serverId.slice(0, 8)}`,
-				);
-				await enqueueWork(serverId, "create_manifest", {
-					images: [archImageUri],
-					finalImageUri: baseImageUri,
-					serviceId: shouldDeploy ? build.serviceId : undefined,
-					buildId,
-				});
-
-				await db
-					.update(services)
-					.set({ image: baseImageUri })
-					.where(
-						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
-					);
-
-				await sendBuildCompletedEvent({
-					buildId,
-					serviceId: build.serviceId,
-					buildGroupId: build.buildGroupId,
-					status: "success",
-					imageUri: archImageUri,
-				});
-
-				console.log(
-					`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
-				);
-				return NextResponse.json({ ok: true });
-			}
-
-			const groupBuilds = await db
-				.select()
-				.from(builds)
-				.where(eq(builds.buildGroupId, build.buildGroupId));
-
-			console.log(
-				`[build:status] groupBuilds found: ${groupBuilds.length}, statuses: ${groupBuilds.map((b) => `${b.id.slice(0, 8)}=${b.status}`).join(", ")}`,
+		const groupBuilds = await db
+			.select()
+			.from(builds)
+			.where(
+				and(
+					eq(builds.buildGroupId, build.buildGroupId),
+					eq(builds.serviceRevisionId, build.serviceRevisionId),
+				),
 			);
-
-			const allCompleted = groupBuilds.every(
-				(b) => b.id === buildId || b.status === "completed",
+		const allCompleted =
+			groupBuilds.length > 0 &&
+			groupBuilds.every((candidate) => {
+				if (candidate.status !== "completed") return false;
+				return (
+					candidate.imageUri ===
+					platformImageForTarget(specification.image, candidate.targetPlatform)
+				);
+			});
+		if (allCompleted) {
+			const images = groupBuilds.map((candidate) =>
+				platformImageForTarget(specification.image, candidate.targetPlatform),
 			);
-
-			console.log(`[build:status] allCompleted=${allCompleted}`);
-
-			if (allCompleted && groupBuilds.length > 0) {
-				console.log(
-					`[build:complete] all ${groupBuilds.length} platform builds completed for ${build.serviceId}@${commitSha.slice(0, 8)}`,
-				);
-
-				const images = groupBuilds.map((b) => {
-					const bArch = b.targetPlatform?.split("/")[1] || "amd64";
-					return `${baseImageUri}-${bArch}`;
-				});
-
-				const replicas = await db
-					.select()
-					.from(serviceReplicas)
-					.where(eq(serviceReplicas.serviceId, build.serviceId));
-
-				const shouldDeploy = replicas.some((replica) => replica.count > 0);
-
-				console.log(
-					`[build:complete] enqueueing create_manifest for ${baseImageUri} to server ${serverId.slice(0, 8)}`,
-				);
-				await enqueueWork(serverId, "create_manifest", {
+			await enqueueWork(
+				auth.serverId,
+				"create_manifest",
+				{
 					images,
-					finalImageUri: baseImageUri,
-					serviceId: shouldDeploy ? build.serviceId : undefined,
+					finalImageUri: specification.image,
+					serviceId: build.serviceId,
+					serviceRevisionId: build.serviceRevisionId,
 					buildGroupId: build.buildGroupId,
-				});
-
-				await db
-					.update(services)
-					.set({ image: baseImageUri })
-					.where(
-						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
-					);
-			}
-
-			await sendBuildCompletedEvent({
-				buildId,
-				serviceId: build.serviceId,
-				buildGroupId: build.buildGroupId,
-				status: "success",
-				imageUri: `${baseImageUri}-${build.targetPlatform?.split("/")[1] || "amd64"}`,
-			});
-		} else {
-			console.log(
-				`[build:status] no targetPlatform, using legacy single-build path`,
+				},
+				{ id: `manifest-work-${build.buildGroupId}` },
 			);
-
-			await db
-				.update(builds)
-				.set({ imageUri: baseImageUri })
-				.where(eq(builds.id, buildId));
-
-			await db
-				.update(services)
-				.set({ image: baseImageUri })
-				.where(
-					and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
-				);
-
-			const replicas = await db
-				.select()
-				.from(serviceReplicas)
-				.where(eq(serviceReplicas.serviceId, build.serviceId));
-
-			const shouldDeploy = replicas.some((replica) => replica.count > 0);
-
-			if (shouldDeploy) {
-				console.log(
-					`[build:complete] triggering deployment for service ${build.serviceId}`,
-				);
-
-				try {
-					await deployServiceInternal(build.serviceId, null);
-				} catch (error) {
-					console.error("[build:complete] deployment failed:", error);
-					await db
-						.update(builds)
-						.set({ error: `Deployment failed: ${error}` })
-						.where(eq(builds.id, buildId));
-				}
-			} else {
-				console.log(
-					`[build:complete] no replicas configured for service ${build.serviceId}, skipping deployment`,
-				);
-			}
-
-			await sendBuildCompletedEvent({
-				buildId,
-				serviceId: build.serviceId,
-				buildGroupId: build.buildGroupId,
-				status: "success",
-				imageUri: baseImageUri,
-			});
 		}
+
+		await sendBuildCompletedEvent({
+			buildId,
+			serviceId: build.serviceId,
+			serviceRevisionId: build.serviceRevisionId,
+			buildGroupId: build.buildGroupId,
+			status: "success",
+			imageUri: platformImageUri,
+		});
 	}
 
 	console.log(
-		`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}`,
+		`[build:status] build ${buildId.slice(0, 8)} status: ${update.status}, revision=${build.serviceRevisionId.slice(0, 8)}`,
 	);
-
 	return NextResponse.json({ ok: true });
 }
 
@@ -391,17 +371,14 @@ export async function GET(
 	if (!auth.success) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
-
 	const { id: buildId } = await params;
-
-	const [build] = await db
+	const build = await db
 		.select({ status: builds.status })
 		.from(builds)
-		.where(eq(builds.id, buildId));
-
+		.where(eq(builds.id, buildId))
+		.then((rows) => rows[0]);
 	if (!build) {
 		return NextResponse.json({ error: "Build not found" }, { status: 404 });
 	}
-
 	return NextResponse.json({ status: build.status });
 }

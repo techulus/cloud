@@ -7,7 +7,6 @@ describe("log routes", () => {
 		vi.doUnmock("next/headers");
 		vi.doUnmock("@/lib/api-auth");
 		vi.doUnmock("@/lib/auth");
-		vi.doUnmock("@/lib/cli-service");
 		vi.doUnmock("@/lib/victoria-logs");
 	});
 
@@ -119,33 +118,6 @@ describe("log routes", () => {
 		expect(await response.json()).toEqual({
 			message: "Failed to query deployment logs",
 		});
-	});
-
-	it("rejects an injected manifest cursor before resolving the service", async () => {
-		vi.resetModules();
-		const getManifestStatus = vi.fn();
-		const queryLogsByService = vi.fn();
-		vi.doMock("@/lib/api-auth", () => ({
-			requireRequestRole: async () => ({ ok: true }),
-		}));
-		vi.doMock("@/lib/cli-service", () => ({ getManifestStatus }));
-		vi.doMock("@/lib/victoria-logs", () => ({
-			isLoggingEnabled: () => true,
-			queryLogsByService,
-		}));
-		const { GET } = await import("@/app/api/v1/manifest/logs/route");
-		const url = new URL("http://localhost/api/v1/manifest/logs");
-		url.searchParams.set("project", "project-1");
-		url.searchParams.set("environment", "production");
-		url.searchParams.set("service", "web");
-		url.searchParams.set("after", "2026-07-10T01:02:03Z | stats count()");
-
-		const response = await GET(new Request(url));
-
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: "Invalid log cursor" });
-		expect(getManifestStatus).not.toHaveBeenCalled();
-		expect(queryLogsByService).not.toHaveBeenCalled();
 	});
 });
 

@@ -187,6 +187,54 @@ async function githubCommitRequest<T>(
 	return response.json() as Promise<T>;
 }
 
+async function publicGitHubCommitRequest<T>(
+	repoFullName: string,
+	suffix: string,
+): Promise<T> {
+	validateRepoFullName(repoFullName);
+	const response = await fetch(
+		`https://api.github.com/repos/${repoFullName}/commits${suffix}`,
+		{
+			headers: {
+				Accept: "application/vnd.github+json",
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		},
+	);
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new Error(
+			`Public GitHub commit request failed (${response.status}): ${detail || response.statusText}`,
+		);
+	}
+	return response.json() as Promise<T>;
+}
+
+export async function resolveGitHubCommit(
+	repoFullName: string,
+	branch: string,
+	installationId?: number,
+): Promise<GitHubCommit> {
+	const ref = branch.trim();
+	if (!ref) throw new Error("GitHub branch is not configured");
+	const suffix = `?sha=${encodeURIComponent(ref)}&per_page=1`;
+	const commits = installationId
+		? await githubCommitRequest<GitHubCommitResponse[]>(
+				installationId,
+				repoFullName,
+				suffix,
+			)
+		: await publicGitHubCommitRequest<GitHubCommitResponse[]>(
+				repoFullName,
+				suffix,
+			);
+	const commit = commits[0];
+	if (!commit || !isFullCommitSha(commit.sha)) {
+		throw new Error("GitHub branch did not resolve to an exact commit");
+	}
+	return mapGitHubCommit(commit);
+}
+
 export async function listGitHubCommits(
 	installationId: number,
 	repoFullName: string,

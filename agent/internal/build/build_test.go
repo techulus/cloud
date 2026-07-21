@@ -119,6 +119,63 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 	}
 }
 
+func TestResolveBuildContext(t *testing.T) {
+	buildDir := t.TempDir()
+	nestedDir := filepath.Join(buildDir, "services", "api")
+	if err := os.MkdirAll(nestedDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		rootDir string
+		want    string
+		wantErr bool
+	}{
+		{name: "repository root", rootDir: "", want: buildDir},
+		{name: "safe nested root", rootDir: filepath.Join("services", "api"), want: nestedDir},
+		{name: "windows separators", rootDir: `services\api`, want: nestedDir},
+		{name: "absolute path", rootDir: outsideDir, wantErr: true},
+		{name: "windows absolute path", rootDir: `C:\repo`, wantErr: true},
+		{name: "UNC path", rootDir: `\\server\share`, wantErr: true},
+		{name: "parent escape", rootDir: "..", wantErr: true},
+		{name: "nested parent escape", rootDir: filepath.Join("services", "..", ".."), wantErr: true},
+		{name: "windows parent escape", rootDir: `services\..\..`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveBuildContext(buildDir, tt.rootDir)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "root directory") {
+					t.Fatalf("resolveBuildContext() error = %v, want clear root directory error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveBuildContext() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveBuildContextRejectsSymlinkEscape(t *testing.T) {
+	buildDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.Symlink(outsideDir, filepath.Join(buildDir, "outside")); err != nil {
+		t.Skipf("symlinks are not supported: %v", err)
+	}
+
+	_, err := resolveBuildContext(buildDir, "outside")
+	if err == nil || !strings.Contains(err.Error(), "must resolve inside the cloned repository") {
+		t.Fatalf("resolveBuildContext() error = %v, want symlink containment error", err)
+	}
+}
+
 func TestResolveDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM scratch"), 0600); err != nil {

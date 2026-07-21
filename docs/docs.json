@@ -67,6 +67,12 @@
               "infrastructure/backups",
               "infrastructure/alerts"
             ]
+          },
+          {
+            "group": "API",
+            "pages": [
+              "api/public-api"
+            ]
           }
         ]
       }

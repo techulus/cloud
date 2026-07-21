@@ -12,8 +12,7 @@ import {
 	updateGitHubDeploymentStatus,
 	verifyWebhookSignature,
 } from "@/lib/github";
-import { inngest } from "@/lib/inngest/client";
-import { inngestEvents } from "@/lib/inngest/events";
+import { triggerResolvedBuildInternal } from "@/lib/trigger-build";
 
 type InstallationPayload = {
 	action: "created" | "deleted" | "suspend" | "unsuspend";
@@ -206,26 +205,21 @@ async function handlePushEvent(payload: PushPayload) {
 				);
 			}
 
-			await inngest.send(
-				inngestEvents.buildTrigger.create(
-					{
-						serviceId: service.id,
-						trigger: "push",
-						githubRepoId: githubRepo.id,
-						commitSha: head_commit.id,
-						commitMessage: head_commit.message.substring(0, 500),
-						branch,
-						author: head_commit.author.username || head_commit.author.name,
-						githubDeploymentId,
-						actor: {
-							type: "github",
-							githubUserId: payload.sender.id,
-							login: payload.sender.login,
-						},
-					},
-					{ id: `github-push:${githubRepo.id}:${head_commit.id}` },
-				),
-			);
+			await triggerResolvedBuildInternal(service.id, {
+				trigger: "push",
+				commitSha: head_commit.id,
+				commitMessage: head_commit.message,
+				author: head_commit.author.username || head_commit.author.name,
+				expectedRepository: `https://github.com/${repository.full_name}`,
+				expectedBranch: branch,
+				githubDeploymentId,
+				idempotencyKey: `github-push:${githubRepo.id}:${head_commit.id}`,
+				actor: {
+					type: "github",
+					githubUserId: payload.sender.id,
+					login: payload.sender.login,
+				},
+			});
 
 			results.push({ serviceId: service.id, status: "queued" });
 		} catch (error) {

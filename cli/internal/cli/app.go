@@ -3,12 +3,14 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -79,7 +81,6 @@ func NewApp(version string, in io.Reader, out io.Writer, errOut io.Writer) *App 
 		Out:        out,
 		Err:        errOut,
 		HTTPClient: &http.Client{Timeout: defaultAPITimeout},
-		Sleep:      time.Sleep,
 		Now:        time.Now,
 		IsInteractive: func() bool {
 			inFile, inOK := in.(*os.File)
@@ -110,7 +111,9 @@ func (a *App) Execute() error {
 	if a.Args != nil {
 		cmd.SetArgs(a.Args)
 	}
-	if err := cmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := cmd.ExecuteContext(ctx); err != nil {
 		if a.isMachineOutput() {
 			_ = a.writeError(err)
 			return handledError{err: err}
@@ -153,6 +156,14 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(a.deployCommand())
 	root.AddCommand(a.statusCommand())
 	root.AddCommand(a.logsCommand())
+	root.AddCommand(a.environmentsCommand())
+	root.AddCommand(a.servicesCommand())
+	root.AddCommand(a.resourceCommand("config", "Show full service configuration", "/configuration", nil))
+	root.AddCommand(a.paginatedCommand("rollouts", "List rollout history", "/rollouts"))
+	root.AddCommand(a.rolloutCommand())
+	root.AddCommand(a.paginatedCommand("builds", "List build history", "/builds"))
+	root.AddCommand(a.metricsCommand())
+	root.AddCommand(a.revisionsCommand())
 	root.AddCommand(a.versionCommand())
 	root.AddCommand(a.completionCommand(root))
 
@@ -235,7 +246,7 @@ func (a *App) authWhoamiCommand() *cobra.Command {
 				User auth.User `json:"user"`
 			}
 			client := a.client(config)
-			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/cli/auth/whoami", nil, nil, &response); err != nil {
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/me", nil, nil, &response); err != nil {
 				return err
 			}
 			result := authWhoamiOutput{
@@ -278,28 +289,32 @@ func (a *App) initCommand() *cobra.Command {
 				folderName = "my-service"
 			}
 			starter := fmt.Sprintf(`apiVersion: v1
-project: %s
-environment: production
+project:
+  slug: %s
+environment:
+  name: production
 service:
   name: %s
   source:
     type: image
     image: nginx:1.27
-  replicas:
-    count: 1
+  hostname: null
+  replicas: 1
+  healthCheck: null
+  startCommand: null
   ports:
-    - port: 80
+    - containerPort: 80
       public: false
 `, folderName, folderName)
 			if err := os.WriteFile(manifestPath, []byte(starter), 0o644); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
-				return a.writeData(initOutput{Manifest: manifestPath, Next: "tc apply"}, "Manifest created")
+				return a.writeData(initOutput{Manifest: manifestPath, Next: "tc link"}, "Manifest created")
 			}
 			output.Section(a.Out, "Manifest")
 			output.Field(a.Out, "Created", manifestPath)
-			output.Next(a.Out, "tc apply")
+			output.Next(a.Out, "tc link")
 			return nil
 		},
 	}
@@ -307,6 +322,7 @@ service:
 
 func (a *App) linkCommand() *cobra.Command {
 	var force bool
+	var projectID, environmentID, serviceID string
 	cmd := &cobra.Command{
 		Use:   "link",
 		Short: "Create techulus.yml from an existing service",
@@ -315,10 +331,19 @@ func (a *App) linkCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.isMachineOutput() {
-				return errors.New("tc link requires an interactive terminal and does not support --agent or --json")
+				return errors.New("tc link does not support --agent or --json")
 			}
-			if !a.IsInteractive() {
-				return errors.New("tc link requires an interactive terminal")
+			explicitIDs := 0
+			for _, id := range []string{projectID, environmentID, serviceID} {
+				if strings.TrimSpace(id) != "" {
+					explicitIDs++
+				}
+			}
+			if explicitIDs != 0 && explicitIDs != 3 {
+				return errors.New("provide --project, --environment, and --service together")
+			}
+			if explicitIDs == 0 && !a.IsInteractive() {
+				return errors.New("tc link requires an interactive terminal or all ID flags")
 			}
 			config, err := requireConfig()
 			if err != nil {
@@ -336,47 +361,128 @@ func (a *App) linkCommand() *cobra.Command {
 			}
 
 			client := a.client(config)
-			var targets linkTargetsResponse
-			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/manifest/link-targets", nil, nil, &targets); err != nil {
+			ps, err := fetchAllProjects(cmd.Context(), client)
+			if err != nil {
 				return err
 			}
-			if countSupportedServices(targets.Projects) == 0 {
-				return errors.New("no linkable services were found in your account")
-			}
-			projectChoices := filterProjectsWithServices(targets.Projects)
-			if len(projectChoices) == 0 {
-				return errors.New("no services were found in your account")
+			if len(ps.Projects) == 0 {
+				return errors.New("no projects found")
 			}
 			reader := bufio.NewReader(a.In)
-			project, err := selectFromList(reader, a.Out, "Select a project:", projectChoices, renderProjectChoice, nil)
+			var project projectItem
+			if projectID != "" {
+				for _, v := range ps.Projects {
+					if v.ID == projectID {
+						project = v
+					}
+				}
+				if project.ID == "" {
+					return errors.New("project ID not found")
+				}
+			} else {
+				project, err = selectFromList(reader, a.Out, "Select a project:", ps.Projects, func(v projectItem) string { return v.Name }, nil)
+				if err != nil {
+					return err
+				}
+			}
+			ep := "/api/v1/projects/" + url.PathEscape(project.ID) + "/environments"
+			es, err := fetchAllEnvironments(cmd.Context(), client, ep)
 			if err != nil {
 				return err
 			}
-			environmentChoices := filterEnvironmentsWithServices(project.Environments)
-			environment, err := selectFromList(reader, a.Out, "Select an environment:", environmentChoices, renderEnvironmentChoice, nil)
+			var environment environmentItem
+			if environmentID != "" {
+				for _, v := range es.Environments {
+					if v.ID == environmentID {
+						environment = v
+					}
+				}
+				if environment.ID == "" {
+					return errors.New("environment ID not found")
+				}
+			} else {
+				environment, err = selectFromList(reader, a.Out, "Select an environment:", es.Environments, func(v environmentItem) string { return v.Name }, nil)
+				if err != nil {
+					return err
+				}
+			}
+			sp := ep + "/" + url.PathEscape(environment.ID) + "/services"
+			ss, err := fetchAllServices(cmd.Context(), client, sp)
 			if err != nil {
 				return err
 			}
-			service, err := selectFromList(reader, a.Out, "Select a service:", environment.Services, renderServiceChoice, disabledServiceReason)
-			if err != nil {
+			var service serviceItem
+			if serviceID != "" {
+				for _, v := range ss.Services {
+					if v.ID == serviceID {
+						service = v
+					}
+				}
+				if service.ID == "" {
+					return errors.New("service ID not found")
+				}
+			} else {
+				service, err = selectFromList(reader, a.Out, "Select a service:", ss.Services, func(v serviceItem) string { return v.Name }, nil)
+				if err != nil {
+					return err
+				}
+			}
+			var cfg struct {
+				Current struct {
+					Hostname *string `json:"hostname"`
+					Ports    []struct {
+						ContainerPort int     `json:"containerPort"`
+						IsPublic      bool    `json:"public"`
+						Domain        *string `json:"domain"`
+					} `json:"ports"`
+					Replicas     int                   `json:"replicas"`
+					HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
+					StartCommand *string               `json:"startCommand"`
+					Resources    *manifest.Resources   `json:"resources"`
+				} `json:"current"`
+				Management *struct {
+					Patchable bool `json:"patchable"`
+					Blockers  []struct {
+						Code    string `json:"code"`
+						Message string `json:"message"`
+					} `json:"blockers"`
+				} `json:"management"`
+			}
+			base := sp + "/" + url.PathEscape(service.ID)
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, base+"/configuration", nil, nil, &cfg); err != nil {
 				return err
 			}
-
-			var result linkManifestResponse
-			if err := client.RequestJSON(cmd.Context(), http.MethodPost, "/api/v1/manifest/link", nil, map[string]string{"serviceId": service.ID}, &result); err != nil {
-				return err
+			if cfg.Management == nil {
+				return errors.New("configuration response did not include service management compatibility")
 			}
-			if err := manifest.Save(manifestPath, result.Manifest); err != nil {
+			if !cfg.Management.Patchable {
+				if len(cfg.Management.Blockers) > 0 && cfg.Management.Blockers[0].Message != "" {
+					return errors.New(cfg.Management.Blockers[0].Message)
+				}
+				return errors.New("this service cannot be managed with techulus.yml")
+			}
+			if cfg.Current.Resources != nil && cfg.Current.Resources.CPUCores == nil && cfg.Current.Resources.MemoryMB == nil {
+				cfg.Current.Resources = nil
+			}
+			ports := make([]manifest.Port, len(cfg.Current.Ports))
+			for i, p := range cfg.Current.Ports {
+				ports[i] = manifest.Port{ContainerPort: p.ContainerPort, Public: p.IsPublic, Domain: p.Domain}
+			}
+			m := manifest.Manifest{APIVersion: "v1", Project: manifest.Project{ID: project.ID, Slug: project.Slug}, Environment: manifest.Environment{ID: environment.ID, Name: environment.Name}, Service: manifest.Service{ID: service.ID, Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
+			if err := manifest.Save(manifestPath, m); err != nil {
 				return err
 			}
 			output.Section(a.Out, "Linked")
-			output.Field(a.Out, "Service", fmt.Sprintf("%s/%s/%s", result.Service.Project, result.Service.Environment, result.Service.Name))
+			output.Field(a.Out, "Service", fmt.Sprintf("%s/%s/%s", project.Slug, environment.Name, service.Name))
 			output.Field(a.Out, "Manifest", manifestPath)
 			output.Next(a.Out, "tc status  or  tc apply")
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Replace an existing techulus.yml")
+	cmd.Flags().StringVar(&projectID, "project", "", "Project ID")
+	cmd.Flags().StringVar(&environmentID, "environment", "", "Environment ID")
+	cmd.Flags().StringVar(&serviceID, "service", "", "Service ID")
 	return cmd
 }
 
@@ -398,7 +504,14 @@ func (a *App) applyCommand() *cobra.Command {
 			}
 			var result applyResponse
 			client := a.client(config)
-			if err := client.RequestJSON(cmd.Context(), http.MethodPost, "/api/v1/manifest/apply", nil, loaded.Manifest, &result); err != nil {
+			if !loaded.Manifest.Linked() {
+				return errors.New("service is not linked: run `tc link`")
+			}
+			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "replicas": loaded.Manifest.Service.Replicas, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
+			if loaded.Manifest.Service.Resources != nil {
+				body["resources"] = loaded.Manifest.Service.Resources
+			}
+			if err := client.RequestJSON(cmd.Context(), http.MethodPatch, serviceBase(loaded.Manifest)+"/configuration", nil, body, &result); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
@@ -428,17 +541,34 @@ func (a *App) deployCommand() *cobra.Command {
 			}
 			var result deployResponse
 			client := a.client(config)
-			if err := client.RequestJSON(cmd.Context(), http.MethodPost, "/api/v1/manifest/deploy", nil, loaded.Manifest, &result); err != nil {
+			if !loaded.Manifest.Linked() {
+				return errors.New("service is not linked: run `tc link`")
+			}
+			var persisted struct {
+				Current struct {
+					Source manifest.Source `json:"source"`
+				} `json:"current"`
+			}
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, serviceBase(loaded.Manifest)+"/configuration", nil, nil, &persisted); err != nil {
+				return err
+			}
+			if !sourcesEqual(loaded.Manifest.Service.Source, persisted.Current.Source) {
+				return errors.New("service source differs from techulus.yml: run `tc apply` before deploying")
+			}
+			if err := client.RequestJSON(cmd.Context(), http.MethodPost, serviceBase(loaded.Manifest)+"/deploy", nil, nil, &result); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
 				return a.writeData(result, "Deploy")
 			}
 			output.Section(a.Out, "Deploy")
-			output.Field(a.Out, "Service", output.ShortID(result.ServiceID))
+			output.Field(a.Out, "Operation", result.Operation)
 			output.Field(a.Out, "Status", output.Status(result.Status))
 			if result.RolloutID != nil && *result.RolloutID != "" {
 				output.Field(a.Out, "Rollout", output.ShortID(*result.RolloutID))
+			}
+			if result.Operation == "build" {
+				output.Field(a.Out, "Next", "build queued; a rollout starts after it succeeds")
 			}
 			output.Next(a.Out, "tc status")
 			return nil
@@ -465,16 +595,11 @@ func (a *App) statusCommand() *cobra.Command {
 			}
 			var status statusResponse
 			client := a.client(config)
-			query := manifestIdentityQuery(value)
-			if err := client.RequestJSON(cmd.Context(), http.MethodGet, "/api/v1/manifest/status", query, nil, &status); err != nil {
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, serviceBase(value)+"/status", nil, nil, &status); err != nil {
 				return err
 			}
-			result := statusOutput{
-				Target: serviceTargetFromManifest(value),
-				Status: status,
-			}
 			if a.isMachineOutput() {
-				return a.writeData(result, "Status")
+				return a.writeData(status, "Status")
 			}
 			printStatus(a.Out, value, status)
 			return nil
@@ -487,6 +612,7 @@ func (a *App) statusCommand() *cobra.Command {
 func (a *App) logsCommand() *cobra.Command {
 	var tail int
 	var follow bool
+	var query, logRange string
 	var target serviceTargetFlags
 	cmd := &cobra.Command{
 		Use:   "logs",
@@ -497,10 +623,6 @@ func (a *App) logsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if tail < 1 || tail > 1000 {
 				return errors.New("log line count must be between 1 and 1000")
-			}
-			tailChanged := cmd.Flags().Changed("tail")
-			if tailChanged && !cmd.Flags().Changed("follow") {
-				follow = false
 			}
 			if a.isMachineOutput() {
 				if cmd.Flags().Changed("follow") && follow {
@@ -516,13 +638,224 @@ func (a *App) logsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.runLogs(cmd.Context(), config, value, tail, follow)
+			if logRange != "" && !contains([]string{"1h", "6h", "24h", "7d"}, logRange) {
+				return errors.New("invalid log range")
+			}
+			return a.runLogs(cmd.Context(), config, value, tail, follow, query, logRange)
 		},
 	}
 	cmd.Flags().IntVarP(&tail, "tail", "n", defaultLogTail, "Number of log lines to fetch")
 	cmd.Flags().BoolVar(&follow, "follow", true, "Continue polling for new log lines")
+	cmd.Flags().StringVarP(&query, "query", "q", "", "Search log messages")
+	cmd.Flags().StringVar(&logRange, "range", "", "Time range (1h, 6h, 24h, 7d)")
 	addServiceTargetFlags(cmd, &target)
 	return cmd
+}
+
+func (a *App) environmentsCommand() *cobra.Command {
+	var id string
+	c := &cobra.Command{Use: "environments", Short: "List project environments", RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, e := requireConfig()
+		if e != nil {
+			return e
+		}
+		if id == "" {
+			if l, x := a.ensureManifest(); x == nil {
+				id = l.Manifest.Project.ID
+			}
+		}
+		if id == "" {
+			return errors.New("missing --project (or link this directory)")
+		}
+		out, e := fetchAllEnvironments(cmd.Context(), a.client(cfg), "/api/v1/projects/"+url.PathEscape(id)+"/environments")
+		if e != nil {
+			return e
+		}
+		if a.isMachineOutput() {
+			return a.writeData(out, "Environments")
+		}
+		output.Section(a.Out, "Environments")
+		for _, v := range out.Environments {
+			fmt.Fprintf(a.Out, "  %s  %s\n", v.ID, v.Name)
+		}
+		return nil
+	}}
+	c.Flags().StringVar(&id, "project", "", "Project ID")
+	return c
+}
+func (a *App) servicesCommand() *cobra.Command {
+	var p, eid string
+	c := &cobra.Command{Use: "services", Short: "List environment services", RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, e := requireConfig()
+		if e != nil {
+			return e
+		}
+		if p == "" || eid == "" {
+			if l, x := a.ensureManifest(); x == nil {
+				if p == "" {
+					p = l.Manifest.Project.ID
+				}
+				if eid == "" {
+					eid = l.Manifest.Environment.ID
+				}
+			}
+		}
+		if p == "" || eid == "" {
+			return errors.New("missing --project and --environment (or link this directory)")
+		}
+		path := "/api/v1/projects/" + url.PathEscape(p) + "/environments/" + url.PathEscape(eid) + "/services"
+		out, e := fetchAllServices(cmd.Context(), a.client(cfg), path)
+		if e != nil {
+			return e
+		}
+		if a.isMachineOutput() {
+			return a.writeData(out, "Services")
+		}
+		output.Section(a.Out, "Services")
+		for _, v := range out.Services {
+			fmt.Fprintf(a.Out, "  %s  %s  %s\n", v.ID, v.Name, v.Source.Type)
+		}
+		return nil
+	}}
+	c.Flags().StringVar(&p, "project", "", "Project ID")
+	c.Flags().StringVar(&eid, "environment", "", "Environment ID")
+	return c
+}
+func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command) url.Values) *cobra.Command {
+	var target serviceTargetFlags
+	c := &cobra.Command{Use: name, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, e := requireConfig()
+		if e != nil {
+			return e
+		}
+		m, e := a.resolveServiceTarget(target)
+		if e != nil {
+			return e
+		}
+		query := url.Values{}
+		if q != nil {
+			query = q(cmd)
+		}
+		var out map[string]any
+		if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, serviceBase(m)+suffix, query, nil, &out); e != nil {
+			return e
+		}
+		label := strings.ToUpper(name[:1]) + name[1:]
+		if a.isMachineOutput() {
+			return a.writeData(out, label)
+		}
+		output.Section(a.Out, label)
+		printMapSummary(a.Out, out)
+		if len(out) > 0 {
+			raw, _ := json.MarshalIndent(out, "  ", "  ")
+			fmt.Fprintln(a.Out, string(raw))
+		}
+		return nil
+	}}
+	addServiceTargetFlags(c, &target)
+	return c
+}
+func (a *App) paginatedCommand(name, short, suffix string) *cobra.Command {
+	var limit int
+	var cursor string
+	c := a.resourceCommand(name, short, suffix, func(*cobra.Command) url.Values {
+		q := url.Values{"limit": {strconv.Itoa(limit)}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		return q
+	})
+	c.Flags().IntVar(&limit, "limit", 25, "Items (1-100)")
+	c.Flags().StringVar(&cursor, "cursor", "", "Pagination cursor")
+	c.PreRunE = func(*cobra.Command, []string) error {
+		if limit < 1 || limit > 100 {
+			return errors.New("limit must be between 1 and 100")
+		}
+		return nil
+	}
+	return c
+}
+func (a *App) rolloutCommand() *cobra.Command {
+	var target serviceTargetFlags
+	c := &cobra.Command{Use: "rollout <rolloutId>", Short: "Show rollout detail", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		return a.getRolloutResource(cmd, target, args[0], false, "", 100)
+	}}
+	c.PersistentFlags().StringVar(&target.Project, "project", "", "Project ID")
+	c.PersistentFlags().StringVar(&target.Environment, "environment", "", "Environment ID")
+	c.PersistentFlags().StringVar(&target.Service, "service", "", "Service ID")
+	var q string
+	var limit int
+	logs := &cobra.Command{Use: "logs <rolloutId>", Short: "Show rollout logs", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if limit < 1 || limit > 1000 {
+			return errors.New("limit must be between 1 and 1000")
+		}
+		return a.getRolloutResource(cmd, target, args[0], true, q, limit)
+	}}
+	logs.Flags().StringVarP(&q, "query", "q", "", "Search logs")
+	logs.Flags().IntVar(&limit, "limit", 100, "Log lines")
+	c.AddCommand(logs)
+	return c
+}
+func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id string, logs bool, q string, limit int) error {
+	cfg, e := requireConfig()
+	if e != nil {
+		return e
+	}
+	m, e := a.resolveServiceTarget(t)
+	if e != nil {
+		return e
+	}
+	suffix := "/rollouts/" + url.PathEscape(id)
+	query := url.Values{}
+	if logs {
+		suffix += "/logs"
+		query.Set("limit", strconv.Itoa(limit))
+		if q != "" {
+			query.Set("q", q)
+		}
+	}
+	var out map[string]any
+	if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, serviceBase(m)+suffix, query, nil, &out); e != nil {
+		return e
+	}
+	if a.isMachineOutput() {
+		return a.writeData(out, "Rollout")
+	}
+	raw, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Fprintln(a.Out, string(raw))
+	return nil
+}
+func (a *App) metricsCommand() *cobra.Command {
+	var r string
+	c := a.resourceCommand("metrics", "Show service metrics", "/metrics", func(*cobra.Command) url.Values { return url.Values{"range": {r}} })
+	c.Flags().StringVar(&r, "range", "1h", "Range: 1h, 6h, 24h, 7d, 30d")
+	c.PreRunE = func(*cobra.Command, []string) error {
+		if !contains([]string{"1h", "6h", "24h", "7d", "30d"}, r) {
+			return errors.New("invalid metrics range")
+		}
+		return nil
+	}
+	return c
+}
+func (a *App) revisionsCommand() *cobra.Command {
+	var cursor string
+	c := a.resourceCommand("revisions", "List service revisions", "/revisions", func(*cobra.Command) url.Values {
+		q := url.Values{}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		return q
+	})
+	c.Flags().StringVar(&cursor, "cursor", "", "Pagination cursor")
+	return c
+}
+func contains(v []string, s string) bool {
+	for _, x := range v {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) versionCommand() *cobra.Command {
@@ -736,9 +1069,9 @@ type serviceTargetFlags struct {
 }
 
 func addServiceTargetFlags(cmd *cobra.Command, target *serviceTargetFlags) {
-	cmd.Flags().StringVar(&target.Project, "project", "", "Project name or slug")
-	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment name")
-	cmd.Flags().StringVar(&target.Service, "service", "", "Service name")
+	cmd.Flags().StringVar(&target.Project, "project", "", "Project ID")
+	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment ID")
+	cmd.Flags().StringVar(&target.Service, "service", "", "Service ID")
 }
 
 func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest, error) {
@@ -756,6 +1089,9 @@ func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest
 		if err != nil {
 			return manifest.Manifest{}, err
 		}
+		if !loaded.Manifest.Linked() {
+			return manifest.Manifest{}, errors.New("service is not linked: run `tc link`")
+		}
 		return loaded.Manifest, nil
 	}
 	if explicitCount != 3 {
@@ -763,20 +1099,115 @@ func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest
 	}
 	return manifest.Manifest{
 		APIVersion:  "v1",
-		Project:     project,
-		Environment: environment,
+		Project:     manifest.Project{ID: project, Slug: project},
+		Environment: manifest.Environment{ID: environment, Name: environment},
 		Service: manifest.Service{
-			Name: service,
+			ID: service, Name: service,
 		},
 	}, nil
 }
 
-func serviceTargetFromManifest(value manifest.Manifest) serviceTargetOutput {
-	return serviceTargetOutput{
-		Project:     value.Project,
-		Environment: value.Environment,
-		Service:     value.Service.Name,
+func serviceBase(value manifest.Manifest) string {
+	return "/api/v1/projects/" + url.PathEscape(value.Project.ID) + "/environments/" + url.PathEscape(value.Environment.ID) + "/services/" + url.PathEscape(value.Service.ID)
+}
+
+func sourcePatch(source manifest.Source) map[string]any {
+	if source.Type == "image" {
+		return map[string]any{"type": "image", "image": source.Image}
 	}
+	return map[string]any{
+		"type":       "github",
+		"repository": source.Repository,
+		"branch":     source.Branch,
+		"rootDir":    source.RootDir,
+	}
+}
+
+func pageQuery(cursor string) url.Values {
+	query := url.Values{"limit": {"100"}}
+	if cursor != "" {
+		query.Set("cursor", cursor)
+	}
+	return query
+}
+
+func fetchAllProjects(ctx context.Context, client *api.Client) (projectsResponse, error) {
+	var result projectsResponse
+	cursor := ""
+	seen := map[string]struct{}{}
+	for {
+		var page projectsResponse
+		if err := client.RequestJSON(ctx, http.MethodGet, "/api/v1/projects", pageQuery(cursor), nil, &page); err != nil {
+			return projectsResponse{}, err
+		}
+		result.Projects = append(result.Projects, page.Projects...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		if _, exists := seen[page.NextCursor]; exists {
+			return projectsResponse{}, errors.New("projects API returned a repeated pagination cursor")
+		}
+		seen[page.NextCursor] = struct{}{}
+		cursor = page.NextCursor
+	}
+}
+
+func fetchAllEnvironments(ctx context.Context, client *api.Client, path string) (environmentsResponse, error) {
+	var result environmentsResponse
+	cursor := ""
+	seen := map[string]struct{}{}
+	for {
+		var page environmentsResponse
+		if err := client.RequestJSON(ctx, http.MethodGet, path, pageQuery(cursor), nil, &page); err != nil {
+			return environmentsResponse{}, err
+		}
+		result.Environments = append(result.Environments, page.Environments...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		if _, exists := seen[page.NextCursor]; exists {
+			return environmentsResponse{}, errors.New("environments API returned a repeated pagination cursor")
+		}
+		seen[page.NextCursor] = struct{}{}
+		cursor = page.NextCursor
+	}
+}
+
+func fetchAllServices(ctx context.Context, client *api.Client, path string) (servicesResponse, error) {
+	var result servicesResponse
+	cursor := ""
+	seen := map[string]struct{}{}
+	for {
+		var page servicesResponse
+		if err := client.RequestJSON(ctx, http.MethodGet, path, pageQuery(cursor), nil, &page); err != nil {
+			return servicesResponse{}, err
+		}
+		result.Services = append(result.Services, page.Services...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		if _, exists := seen[page.NextCursor]; exists {
+			return servicesResponse{}, errors.New("services API returned a repeated pagination cursor")
+		}
+		seen[page.NextCursor] = struct{}{}
+		cursor = page.NextCursor
+	}
+}
+
+func sourcesEqual(expected, actual manifest.Source) bool {
+	if expected.Type != actual.Type {
+		return false
+	}
+	if expected.Type == "image" {
+		return expected.Image == actual.Image
+	}
+	if !strings.EqualFold(expected.Repository, actual.Repository) || expected.Branch != actual.Branch {
+		return false
+	}
+	if expected.RootDir == nil || actual.RootDir == nil {
+		return expected.RootDir == nil && actual.RootDir == nil
+	}
+	return *expected.RootDir == *actual.RootDir
 }
 
 func requireConfig() (*auth.Config, error) {
@@ -819,7 +1250,9 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
 			return errors.New("device authorization expired")
 		}
-		a.Sleep(interval)
+		if err := a.sleep(ctx, interval); err != nil {
+			return err
+		}
 		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
 			return errors.New("device authorization expired")
 		}
@@ -865,12 +1298,11 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	machineName, _ := os.Hostname()
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	var exchange exchangeResponse
-	if err := api.JSON(ctx, a.HTTPClient, http.MethodPost, host+"/api/v1/cli/auth/exchange", map[string]string{
+	if err := api.JSON(ctx, a.HTTPClient, http.MethodPost, host+"/api/v1/api-keys", map[string]string{
 		"authorization": "Bearer " + accessToken,
-	}, map[string]string{
-		"machineName": machineName,
-		"platform":    platform,
-		"cliVersion":  a.Version,
+	}, map[string]any{
+		"name":     cliAPIKeyName(machineName),
+		"metadata": map[string]string{"machineName": machineName, "platform": platform, "cliVersion": a.Version},
 	}, &exchange); err != nil {
 		return err
 	}
@@ -879,13 +1311,10 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 		APIKey:  exchange.APIKey,
 		KeyID:   exchange.KeyID,
 		KeyName: exchange.Name,
-		User:    &exchange.User,
 	}); err != nil {
 		return err
 	}
 	output.Section(a.Out, "Signed in")
-	output.Field(a.Out, "User", exchange.User.Email)
-	output.Field(a.Out, "Name", exchange.User.Name)
 	output.Field(a.Out, "Host", host)
 	key := "created"
 	if exchange.KeyID != "" {
@@ -895,21 +1324,26 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	return nil
 }
 
-func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.Manifest, tail int, follow bool) error {
+func cliAPIKeyName(machineName string) string {
+	name := strings.TrimSpace("CLI " + machineName)
+	runes := []rune(name)
+	if len(runes) > 32 {
+		name = string(runes[:32])
+	}
+	return name
+}
+
+func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.Manifest, tail int, follow bool, search, logRange string) error {
 	client := a.client(config)
-	result, err := fetchLogs(ctx, client, value, tail, "")
+	result, err := fetchLogs(ctx, client, value, tail, "", search, logRange)
 	if err != nil {
 		return err
 	}
 	if a.isMachineOutput() {
-		return a.writeData(logsOutput{
-			Target:         serviceTargetFromManifest(value),
-			LoggingEnabled: result.LoggingEnabled,
-			Logs:           result.Logs,
-		}, "Logs")
+		return a.writeData(result, "Logs")
 	}
-	fmt.Fprintf(a.Out, "%s/%s/%s\n", value.Project, value.Environment, value.Service.Name)
-	if !result.LoggingEnabled {
+	fmt.Fprintf(a.Out, "%s/%s/%s\n", value.Project.Slug, value.Environment.Name, value.Service.Name)
+	if result.Provider == "disabled" {
 		output.Section(a.Out, "Logs")
 		output.Field(a.Out, "Status", "disabled")
 		return nil
@@ -931,82 +1365,109 @@ func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.M
 		output.Field(a.Out, "Waiting", "new log lines")
 	}
 
-	after := getLogCursor(result.Logs)
-	if after == "" {
-		after = a.Now().UTC().Format(time.RFC3339Nano)
+	cursor := result.NextCursor
+	if cursor == "" {
+		return fmt.Errorf("logs API did not return nextCursor")
 	}
 	for {
-		a.Sleep(logPollInterval)
-		next, err := fetchLogs(ctx, client, value, defaultLogTail, after)
+		next, err := fetchLogs(ctx, client, value, defaultLogTail, cursor, search, logRange)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			return err
 		}
-		if len(next.Logs) == 0 {
+		if len(next.Logs) > 0 {
+			printLogs(a.Out, next.Logs)
+		}
+		if next.NextCursor == "" {
+			return fmt.Errorf("logs API did not return nextCursor")
+		}
+		cursor = next.NextCursor
+		if next.HasMore {
 			continue
 		}
-		printLogs(a.Out, next.Logs)
-		if cursor := getLogCursor(next.Logs); cursor != "" {
-			after = cursor
+		d := time.Duration(next.PollAfterMS) * time.Millisecond
+		if d <= 0 {
+			d = logPollInterval
+		}
+		if err := a.sleep(ctx, d); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
 		}
 	}
 }
 
-func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest, tail int, after string) (logsResponse, error) {
-	query := manifestIdentityQuery(value)
-	query.Set("tail", strconv.Itoa(tail))
-	if after != "" {
-		query.Set("after", after)
+func (a *App) sleep(ctx context.Context, duration time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	var result logsResponse
-	err := client.RequestJSON(ctx, http.MethodGet, "/api/v1/manifest/logs", query, nil, &result)
-	return result, err
+	if a.Sleep != nil {
+		a.Sleep(duration)
+		return ctx.Err()
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
-func manifestIdentityQuery(value manifest.Manifest) url.Values {
-	return url.Values{
-		"project":     {value.Project},
-		"environment": {value.Environment},
-		"service":     {value.Service.Name},
+func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest, tail int, cursor, search, logRange string) (logsResponse, error) {
+	query := url.Values{}
+	query.Set("tail", strconv.Itoa(tail))
+	if search != "" {
+		query.Set("q", search)
 	}
+	if logRange != "" {
+		query.Set("range", logRange)
+	}
+	if cursor != "" {
+		query.Set("cursor", cursor)
+		query.Set("wait", "20")
+	}
+	var result logsResponse
+	err := client.RequestJSON(ctx, http.MethodGet, serviceBase(value)+"/logs", query, nil, &result)
+	return result, err
 }
 
 func printApplyResult(w io.Writer, result applyResponse) {
 	output.Section(w, "Apply")
 	output.Field(w, "Action", result.Action)
-	output.Field(w, "Service", output.ShortID(result.ServiceID))
 	if len(result.Changes) == 0 {
 		output.Field(w, "Changes", "none")
 		return
 	}
 	output.Section(w, fmt.Sprintf("Changes (%d)", len(result.Changes)))
 	for _, change := range result.Changes {
-		fmt.Fprintf(w, "  * %s\n", change.Field)
-		output.Field(w, "From", change.From)
-		output.Field(w, "To", change.To)
+		fmt.Fprintf(w, "  * %s\n", change)
 	}
 }
 
 func printStatus(w io.Writer, value manifest.Manifest, status statusResponse) {
-	fmt.Fprintf(w, "%s/%s/%s\n", value.Project, value.Environment, value.Service.Name)
+	fmt.Fprintf(w, "%s/%s/%s\n", value.Project.Slug, value.Environment.Name, value.Service.Name)
 	output.Section(w, "Service")
 	output.Field(w, "ID", output.ShortID(status.Service.ID))
-	output.Field(w, "Image", status.Service.Image)
-	if status.Service.Hostname == nil || *status.Service.Hostname == "" {
-		output.Field(w, "Hostname", "none")
+	if status.Service.Source.Type == "image" {
+		output.Field(w, "Source", status.Service.Source.Image)
 	} else {
-		output.Field(w, "Hostname", *status.Service.Hostname)
+		output.Field(w, "Source", status.Service.Source.Repository+" @ "+status.Service.Source.Branch)
 	}
-	output.Field(w, "Replicas", status.Service.Replicas)
+	output.Section(w, "Build")
+	if status.LatestBuild == nil {
+		output.Field(w, "Latest", "none")
+	} else {
+		printMapSummary(w, status.LatestBuild)
+	}
 
 	output.Section(w, "Rollout")
 	if status.LatestRollout != nil {
-		output.Field(w, "ID", output.ShortID(status.LatestRollout.ID))
-		output.Field(w, "Status", output.Status(status.LatestRollout.Status))
-		if status.LatestRollout.CurrentStage != nil && *status.LatestRollout.CurrentStage != "" {
-			output.Field(w, "Stage", output.Status(*status.LatestRollout.CurrentStage))
-		} else {
-			output.Field(w, "Stage", "none")
-		}
+		printMapSummary(w, status.LatestRollout)
 	} else {
 		output.Field(w, "Latest", "none")
 	}
@@ -1017,9 +1478,15 @@ func printStatus(w io.Writer, value manifest.Manifest, status statusResponse) {
 		return
 	}
 	for _, deployment := range status.Deployments {
-		fmt.Fprintf(w, "  * %s\n", output.ShortID(deployment.ID))
-		output.Field(w, "Status", output.Status(deployment.Status))
-		output.Field(w, "Server", output.ShortID(deployment.ServerID))
+		printMapSummary(w, deployment)
+	}
+}
+
+func printMapSummary(w io.Writer, m map[string]any) {
+	for _, k := range []string{"id", "status", "phase", "currentStage", "serverName", "createdAt"} {
+		if v, ok := m[k]; ok && v != nil {
+			output.Field(w, k, v)
+		}
 	}
 }
 
@@ -1032,28 +1499,6 @@ func printLogs(w io.Writer, logs []serviceLog) {
 		message := strings.TrimRight(log.Message, "\n")
 		fmt.Fprintf(w, "%s %-9s %s\n", output.Timestamp(log.Timestamp), "["+stream+"]", message)
 	}
-}
-
-func getLogCursor(logs []serviceLog) string {
-	var latest string
-	var latestTime time.Time
-	for _, log := range logs {
-		parsed, err := time.Parse(time.RFC3339Nano, log.Timestamp)
-		if err != nil {
-			continue
-		}
-		if latest == "" || parsed.After(latestTime) {
-			latest = log.Timestamp
-			latestTime = parsed
-		}
-	}
-	if latest != "" {
-		return latest
-	}
-	if len(logs) > 0 {
-		return logs[len(logs)-1].Timestamp
-	}
-	return ""
 }
 
 func selectFromList[T any](

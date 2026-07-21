@@ -20,7 +20,11 @@ import {
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { getTimestamp } from "@/lib/date";
-import { revisionSpecToDeployedConfig } from "@/lib/service-config";
+import { resolvePersistedSourceFromRows } from "@/lib/public-api";
+import {
+	revisionSpecToDeployedConfig,
+	type SourceConfig,
+} from "@/lib/service-config";
 
 export async function GET(
 	request: Request,
@@ -118,12 +122,25 @@ export async function GET(
 					: Promise.resolve(null),
 				service.sourceType === "github"
 					? db
-							.select({ id: githubRepos.id })
+							.select()
 							.from(githubRepos)
 							.where(eq(githubRepos.serviceId, service.id))
 							.then((r) => r[0] || null)
 					: Promise.resolve(null),
 			]);
+			const persistedSource = resolvePersistedSourceFromRows(
+				service,
+				githubRepo ?? undefined,
+			);
+			const currentSource: SourceConfig =
+				persistedSource.type === "github"
+					? {
+							type: "github",
+							repository: persistedSource.repository,
+							branch: persistedSource.branch,
+							rootDir: persistedSource.rootDir ?? null,
+						}
+					: persistedSource;
 
 			const activeDeployment = serviceDeployments.find(
 				(deployment) =>
@@ -248,6 +265,7 @@ export async function GET(
 				latestBuild,
 				hasGithubAppRepo: githubRepo !== null,
 				activeConfig,
+				currentSource,
 				deletionBackupFallback,
 			};
 		}),

@@ -2,6 +2,8 @@ package logs
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,18 +12,30 @@ import (
 )
 
 const (
-	maxBatchSize   = 1000
-	flushInterval  = 5 * time.Second
-	maxQueueSize   = 10000
-	defaultSince   = "1m"
+	maxBatchSize  = 1000
+	flushInterval = 5 * time.Second
+	maxQueueSize  = 10000
+	defaultSince  = "1m"
 )
 
 type LogEntry struct {
+	EventID      string
 	DeploymentID string
 	ServiceID    string
 	Stream       string
 	Message      string
 	Timestamp    string
+}
+
+func newLogEventID(now time.Time) (string, error) {
+	random := make([]byte, 26)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate random log event ID: %w", err)
+	}
+	for i := range random {
+		random[i] = 'a' + random[i]%26
+	}
+	return fmt.Sprintf("e%019d%s", now.UnixNano(), random), nil
 }
 
 type LogBatch struct {
@@ -143,7 +157,13 @@ func (c *Collector) collectFromContainer(ctr ContainerInfo) {
 
 	var lastTimestamp time.Time
 	for entry := range entryCh {
+		eventID, err := newLogEventID(time.Now())
+		if err != nil {
+			log.Printf("[logs] failed to identify log from container %s: %v", ctr.ContainerID, err)
+			continue
+		}
 		logEntry := LogEntry{
+			EventID:      eventID,
 			DeploymentID: ctr.DeploymentID,
 			ServiceID:    ctr.ServiceID,
 			Stream:       entry.Stream,

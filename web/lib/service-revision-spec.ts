@@ -1,4 +1,4 @@
-export const SERVICE_REVISION_SCHEMA_VERSION = 1 as const;
+export const SERVICE_REVISION_SCHEMA_VERSION = 2 as const;
 
 export function getDefaultServiceHostname(name: string): string {
 	return name
@@ -40,9 +40,27 @@ export type ServiceRevisionVolume = {
 	containerPath: string;
 };
 
+export type ServiceRevisionSource =
+	| {
+			type: "image";
+			image: string;
+	  }
+	| {
+			type: "github";
+			repository: string;
+			repositoryId: number | null;
+			branch: string;
+			commitSha: string;
+			rootDir: string | null;
+			authentication:
+				| { type: "anonymous" }
+				| { type: "github_app"; installationId: number };
+	  };
+
 export type ServiceRevisionSpec = {
 	schemaVersion: typeof SERVICE_REVISION_SCHEMA_VERSION;
 	image: string;
+	source: ServiceRevisionSource;
 	hostname: string;
 	stateful: boolean;
 	serverless: {
@@ -97,13 +115,22 @@ export type ServiceRevisionDraft = {
 	volumes: Array<{ name: string; containerPath: string }>;
 };
 
-function validateServiceRevisionSpec(specification: ServiceRevisionSpec) {
+export type ServiceRevisionSpecOverrides = {
+	image?: string;
+	source?: ServiceRevisionSource;
+	allowNoPlacements?: boolean;
+};
+
+function validateServiceRevisionSpec(
+	specification: ServiceRevisionSpec,
+	allowNoPlacements: boolean,
+) {
 	const totalReplicas = specification.placements.reduce(
 		(sum, placement) => sum + placement.count,
 		0,
 	);
 
-	if (totalReplicas < 1) {
+	if (totalReplicas < 1 && !allowNoPlacements) {
 		throw new Error("At least one replica is required");
 	}
 	if (totalReplicas > 10) {
@@ -115,6 +142,17 @@ function validateServiceRevisionSpec(specification: ServiceRevisionSpec) {
 	if (specification.stateful && specification.placements.length !== 1) {
 		throw new Error("Stateful services must be deployed to exactly one server");
 	}
+	if (
+		specification.serverless.enabled &&
+		!specification.ports.some(
+			(port) =>
+				port.isPublic && port.protocol === "http" && port.domain !== null,
+		)
+	) {
+		throw new Error(
+			"Serverless services require a public HTTP port with a domain",
+		);
+	}
 }
 
 function compareStrings(a: string, b: string) {
@@ -123,12 +161,15 @@ function compareStrings(a: string, b: string) {
 
 export function buildServiceRevisionSpec(
 	draft: ServiceRevisionDraft,
+	overrides: ServiceRevisionSpecOverrides = {},
 ): ServiceRevisionSpec {
 	const { service } = draft;
+	const image = overrides.image?.trim() || service.image.trim();
 
 	const specification: ServiceRevisionSpec = {
 		schemaVersion: SERVICE_REVISION_SCHEMA_VERSION,
-		image: service.image.trim(),
+		image,
+		source: overrides.source ?? { type: "image", image },
 		hostname:
 			service.hostname?.trim() || getDefaultServiceHostname(service.name),
 		stateful: service.stateful ?? false,
@@ -198,6 +239,9 @@ export function buildServiceRevisionSpec(
 					compareStrings(a.containerPath, b.containerPath),
 			),
 	};
-	validateServiceRevisionSpec(specification);
+	validateServiceRevisionSpec(
+		specification,
+		overrides.allowNoPlacements ?? false,
+	);
 	return specification;
 }

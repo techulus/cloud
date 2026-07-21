@@ -50,6 +50,7 @@ func (v *VictoriaLogsSender) setAuthHeader(req *http.Request) {
 type victoriaLogEntry struct {
 	Msg          string `json:"_msg"`
 	Time         string `json:"_time"`
+	EventID      string `json:"event_id"`
 	DeploymentID string `json:"deployment_id"`
 	ServiceID    string `json:"service_id"`
 	ServerID     string `json:"server_id"`
@@ -66,6 +67,7 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 		entry := victoriaLogEntry{
 			Msg:          l.Message,
 			Time:         l.Timestamp,
+			EventID:      l.EventID,
 			DeploymentID: l.DeploymentID,
 			ServiceID:    l.ServiceID,
 			ServerID:     v.serverID,

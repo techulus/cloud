@@ -1,20 +1,32 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	lte,
+	or,
+} from "drizzle-orm";
 import { cron } from "inngest";
-import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
 	deploymentPorts,
 	deployments,
+	rollouts,
 	secrets,
+	serviceRevisions,
 	services,
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { addUtcDays, toDate } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -310,6 +322,55 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				if (!service || !service.deletedAt) {
 					throw new Error("Deleted service not found");
 				}
+				const runtimeBaseRevision =
+					service.sourceType === "github"
+						? await db
+								.select({
+									id: rollouts.serviceRevisionId,
+									specification: serviceRevisions.specification,
+								})
+								.from(rollouts)
+								.innerJoin(
+									serviceRevisions,
+									and(
+										eq(serviceRevisions.id, rollouts.serviceRevisionId),
+										eq(serviceRevisions.serviceId, rollouts.serviceId),
+									),
+								)
+								.where(
+									and(
+										eq(rollouts.serviceId, serviceId),
+										eq(rollouts.status, "completed"),
+									),
+								)
+								.orderBy(
+									desc(rollouts.completedAt),
+									desc(rollouts.createdAt),
+									desc(rollouts.id),
+								)
+								.limit(1)
+								.then((rows) => rows[0])
+						: undefined;
+				if (service.sourceType === "github" && !runtimeBaseRevision) {
+					throw new Error(
+						"Cannot restore GitHub service without a completed runtime revision",
+					);
+				}
+				if (runtimeBaseRevision) {
+					let baseSpecification: ReturnType<typeof parseServiceRevisionSpec>;
+					try {
+						baseSpecification = parseServiceRevisionSpec(
+							runtimeBaseRevision.specification,
+						);
+					} catch {
+						throw new Error("GitHub runtime base revision is invalid");
+					}
+					if (baseSpecification.source.type !== "github") {
+						throw new Error(
+							"GitHub runtime base revision is not a GitHub build",
+						);
+					}
+				}
 
 				const resolvedTargetServerId = targetServerId ?? service.lockedServerId;
 				if (!resolvedTargetServerId) {
@@ -339,6 +400,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 					storageConfig,
 					service,
 					targetServerId: resolvedTargetServerId,
+					runtimeBaseRevisionId: runtimeBaseRevision?.id,
 					backups,
 				};
 			});
@@ -421,7 +483,9 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						.where(eq(services.id, serviceId));
 
 					try {
-						const result = await deployServiceInternal(serviceId, actor);
+						const result = await deployServiceInternal(serviceId, actor, {
+							runtimeBaseRevisionId: setup.runtimeBaseRevisionId,
+						});
 						if (!("rolloutId" in result) || !result.rolloutId) {
 							throw new Error("Restore could not start a deployment");
 						}

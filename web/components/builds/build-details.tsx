@@ -28,7 +28,7 @@ import {
 	ItemTitle,
 } from "@/components/ui/item";
 import { StatusBadge } from "@/components/ui/status-badge";
-import type { Build, BuildStatus, GithubRepo, Service } from "@/db/types";
+import type { Build, BuildStatus, Service } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
 
@@ -103,7 +103,7 @@ export function BuildDetails({
 	envName: string;
 	service: Pick<Service, "id" | "name">;
 	build: BuildWithDates;
-	githubRepo: Pick<GithubRepo, "id" | "repoFullName"> | null;
+	githubRepo: { repoFullName: string } | null;
 }) {
 	const router = useRouter();
 	const [isCancelling, setIsCancelling] = useState(false);
