@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const encryptionKey = (await resolveEncryptionKey()).toString("hex");
+		const encryptionKeyBuffer = await resolveEncryptionKey();
+		const encryptionKey = encryptionKeyBuffer.toString("hex");
 
 		const { subnetId, wireguardIp } = await assignSubnet();
 
