@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       matrix:
         include:
@@ -50,7 +50,7 @@ jobs:
 
   release:
     needs: agent
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
