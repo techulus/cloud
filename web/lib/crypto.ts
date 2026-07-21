@@ -11,10 +11,6 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-export async function getEncryptionKeyHex(): Promise<string> {
-	return (await resolveEncryptionKey()).toString("hex");
-}
-
 export async function encryptSecret(plaintext: string): Promise<string> {
 	const key = await resolveEncryptionKey();
 	const iv = randomBytes(IV_LENGTH);

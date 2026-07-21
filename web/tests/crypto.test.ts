@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import {
-	decryptSecret,
-	encryptSecret,
-	getEncryptionKeyHex,
-} from "@/lib/crypto";
-import { resetEncryptionKeyCacheForTests } from "@/lib/kms";
+	resetEncryptionKeyCacheForTests,
+	resolveEncryptionKey,
+} from "@/lib/kms";
 
 const KEY = "ab".repeat(32);
 
@@ -26,7 +25,7 @@ describe("secret encryption", () => {
 
 		expect(framed.length).toBe(12 + 16 + Buffer.byteLength("top secret"));
 		expect(await decryptSecret(encrypted)).toBe("top secret");
-		expect(await getEncryptionKeyHex()).toBe(KEY);
+		expect((await resolveEncryptionKey()).toString("hex")).toBe(KEY);
 	});
 
 	it("fails authentication when the key changes", async () => {

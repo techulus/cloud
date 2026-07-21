@@ -2,9 +2,8 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { getEncryptionKeyHex } from "@/lib/crypto";
 import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
-import { EncryptionKeyUnavailableError } from "@/lib/kms";
+import { EncryptionKeyUnavailableError, resolveEncryptionKey } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
 import { assignSubnet } from "@/lib/wireguard";
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const encryptionKey = await getEncryptionKeyHex();
+		const encryptionKey = (await resolveEncryptionKey()).toString("hex");
 
 		const { subnetId, wireguardIp } = await assignSubnet();
 
