@@ -156,6 +156,7 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(a.deployCommand())
 	root.AddCommand(a.statusCommand())
 	root.AddCommand(a.logsCommand())
+	root.AddCommand(a.projectsCommand())
 	root.AddCommand(a.environmentsCommand())
 	root.AddCommand(a.servicesCommand())
 	root.AddCommand(a.resourceCommand("config", "Show full service configuration", "/configuration", nil))
@@ -650,6 +651,32 @@ func (a *App) logsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&logRange, "range", "", "Time range (1h, 6h, 24h, 7d)")
 	addServiceTargetFlags(cmd, &target)
 	return cmd
+}
+
+func (a *App) projectsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "projects",
+		Short: "List projects",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := requireConfig()
+			if err != nil {
+				return err
+			}
+			out, err := fetchAllProjects(cmd.Context(), a.client(cfg))
+			if err != nil {
+				return err
+			}
+			if a.isMachineOutput() {
+				return a.writeData(out, "Projects")
+			}
+			output.Section(a.Out, "Projects")
+			for _, v := range out.Projects {
+				fmt.Fprintf(a.Out, "  %s  %s  %s\n", v.ID, v.Name, v.Slug)
+			}
+			return nil
+		},
+	}
 }
 
 func (a *App) environmentsCommand() *cobra.Command {

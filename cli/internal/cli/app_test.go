@@ -243,6 +243,78 @@ func TestCollectionRequestsFollowPagination(t *testing.T) {
 	}
 }
 
+func TestProjectsCommandListsProjects(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/projects" || r.URL.Query().Get("limit") != "100" {
+			t.Errorf("request = %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		if r.URL.Query().Get("cursor") == "" {
+			w.Write([]byte(`{"projects":[{"id":"p1","name":"App One","slug":"app-one"}],"nextCursor":"next"}`))
+			return
+		}
+		w.Write([]byte(`{"projects":[{"id":"p2","name":"App Two","slug":"app-two"}]}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	if err := execute(app, "projects"); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"Projects", "p1", "App One", "app-one", "p2", "App Two", "app-two"} {
+		if !strings.Contains(out.String(), value) {
+			t.Fatalf("output missing %q: %s", value, out.String())
+		}
+	}
+}
+
+func TestProjectsCommandMachineOutput(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"projects":[{"id":"p1","name":"App","slug":"app"}]}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	for _, mode := range []string{"--agent", "--json"} {
+		t.Run(mode, func(t *testing.T) {
+			app, out := testApp(t, t.TempDir(), s.Client())
+			if err := execute(app, mode, "projects"); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "--agent" {
+				var value projectsResponse
+				if err := json.Unmarshal(out.Bytes(), &value); err != nil || len(value.Projects) != 1 {
+					t.Fatalf("agent output = %s, error = %v", out.String(), err)
+				}
+				return
+			}
+			var value struct {
+				OK      bool             `json:"ok"`
+				Data    projectsResponse `json:"data"`
+				Summary string           `json:"summary"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &value); err != nil || !value.OK || len(value.Data.Projects) != 1 || value.Summary != "Projects" {
+				t.Fatalf("json output = %s, error = %v", out.String(), err)
+			}
+		})
+	}
+}
+
+func TestProjectsCommandHelpAndArguments(t *testing.T) {
+	app, out := testApp(t, t.TempDir(), nil)
+	if err := execute(app, "--help"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "projects") {
+		t.Fatalf("root help missing projects: %s", out.String())
+	}
+	if err := execute(app, "projects", "unexpected"); err == nil {
+		t.Fatal("projects accepted an unexpected positional argument")
+	}
+}
+
 func TestMissingIDsFailLocally(t *testing.T) {
 	configHome(t)
 	writeConfig(t, "http://unused")
