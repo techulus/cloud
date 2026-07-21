@@ -150,7 +150,7 @@ jobs:
   homebrew:
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     concurrency:
       group: homebrew-tap
       cancel-in-progress: false

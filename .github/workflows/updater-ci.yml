@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: deployment/updater
@@ -51,7 +51,7 @@ jobs:
         run: ./.bin/staticcheck ./...
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       matrix:
         include:
@@ -83,7 +83,7 @@ jobs:
           go build -o dist/control-plane-updater-${{ matrix.goos }}-${{ matrix.goarch }} .
 
   image:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       matrix:
         platform:
