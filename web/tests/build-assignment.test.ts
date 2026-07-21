@@ -1,30 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 const mocks = vi.hoisted(() => {
-	// Results are consumed in the same order as db.select() calls in each test.
 	const queryResults: unknown[][] = [];
-	const queries: Array<{
-		from: ReturnType<typeof vi.fn>;
-		innerJoin: ReturnType<typeof vi.fn>;
-		where: ReturnType<typeof vi.fn>;
-	}> = [];
-
+	const queries: Array<{ where: ReturnType<typeof vi.fn> }> = [];
 	function createQuery(result: unknown[]) {
 		const query = {
 			from: vi.fn(() => query),
-			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
+			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
-			) =>
-				Promise.resolve(result).then(resolve, reject),
+			) => Promise.resolve(result).then(resolve, reject),
 		};
-
 		queries.push(query);
 		return query;
 	}
-
 	return {
 		queryResults,
 		queries,
@@ -39,11 +31,51 @@ vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/db/queries", () => ({ getSetting: mocks.getSetting }));
 
 import {
-	getTargetPlatformsForService,
-	selectBuildServerForPlatform,
+	getTargetPlatformsForRevision,
+	selectBuildServerForRevision,
 } from "@/lib/build-assignment";
 
-describe("build assignment", () => {
+function specification(
+	overrides: Partial<ServiceRevisionSpec> = {},
+): ServiceRevisionSpec {
+	return {
+		schemaVersion: 2,
+		image: "registry/app:revision-1",
+		source: { type: "image", image: "registry/app:revision-1" },
+		hostname: "app",
+		stateful: false,
+		serverless: {
+			enabled: false,
+			sleepAfterSeconds: 300,
+			wakeTimeoutSeconds: 300,
+		},
+		healthCheck: null,
+		startCommand: null,
+		resourceLimits: { cpuCores: null, memoryMb: null },
+		placements: [{ serverId: "server-target", count: 1 }],
+		ports: [],
+		secrets: [],
+		volumes: [],
+		...overrides,
+	};
+}
+
+function sqlTokens(value: unknown): unknown[] {
+	if (!value || typeof value !== "object") return [value];
+	const record = value as {
+		name?: string;
+		queryChunks?: unknown[];
+		value?: unknown;
+	};
+	if (Array.isArray(record.queryChunks)) {
+		return record.queryChunks.flatMap(sqlTokens);
+	}
+	if (Array.isArray(record.value)) return record.value.flatMap(sqlTokens);
+	if ("value" in record) return [record.value];
+	return record.name ? [record.name] : [];
+}
+
+describe("revision-backed build assignment", () => {
 	beforeEach(() => {
 		mocks.queryResults.length = 0;
 		mocks.queries.length = 0;
@@ -51,183 +83,111 @@ describe("build assignment", () => {
 		mocks.getSetting.mockReset();
 	});
 
-	function sqlTokens(value: unknown): unknown[] {
-		if (!value || typeof value !== "object") {
-			return [value];
-		}
-
-		const record = value as {
-			name?: string;
-			queryChunks?: unknown[];
-			value?: unknown;
-		};
-
-		if (Array.isArray(record.queryChunks)) {
-			return record.queryChunks.flatMap(sqlTokens);
-		}
-
-		if (Array.isArray(record.value)) {
-			return record.value.flatMap(sqlTokens);
-		}
-
-		if ("value" in record) {
-			return [record.value];
-		}
-
-		if (record.name) {
-			return [record.name];
-		}
-
-		return [];
-	}
-
-	function expectActiveReplicaPredicate(queryIndex: number) {
-		const condition = mocks.queries[queryIndex]?.where.mock.calls[0]?.[0];
-		const tokens = sqlTokens(condition);
-
-		expect(tokens).toEqual(expect.arrayContaining(["service_id", "count", 0]));
-		expect(tokens).toContain(" > ");
-	}
-
-	it("assigns stateful builds to the active replica server", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[
-				{
-					id: "server_target",
-					status: "online",
-					meta: { arch: "arm64" },
-				},
-			],
-		);
+	it("assigns a stateful build to its snapshotted placement server", async () => {
+		mocks.queryResults.push([
+			{ id: "server-target", status: "online", meta: { arch: "arm64" } },
+		]);
 
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
-		).resolves.toBe("server_target");
-		expectActiveReplicaPredicate(1);
+			selectBuildServerForRevision(
+				specification({ stateful: true }),
+				"linux/arm64",
+			),
+		).resolves.toBe("server-target");
 	});
 
-	it("rejects stateful builds without exactly one active replica server", async () => {
-		mocks.queryResults.push([{ id: "service_1", stateful: true }], []);
-
+	it("rejects an invalid stateful placement without reading mutable service rows", async () => {
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
+			selectBuildServerForRevision(
+				specification({ stateful: true, placements: [] }),
+				"linux/arm64",
+			),
 		).rejects.toThrow(
-			"Stateful services must have exactly one active replica server",
+			"Stateful service revisions must have exactly one active replica server",
 		);
+		expect(mocks.db.select).not.toHaveBeenCalled();
 	});
 
-	it("rejects stateful builds with multiple active replica rows", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[
-				{ id: "server_1", status: "online", meta: { arch: "arm64" } },
-				{ id: "server_2", status: "online", meta: { arch: "arm64" } },
-			],
-		);
-
+	it("rejects an offline stateful revision target", async () => {
+		mocks.queryResults.push([
+			{ id: "server-target", status: "offline", meta: { arch: "arm64" } },
+		]);
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
-		).rejects.toThrow(
-			"Stateful services must have exactly one active replica server",
-		);
-	});
-
-	it("rejects stateful builds when the active replica server is offline", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[{ id: "server_target", status: "offline", meta: { arch: "arm64" } }],
-		);
-
-		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
+			selectBuildServerForRevision(
+				specification({ stateful: true }),
+				"linux/arm64",
+			),
 		).rejects.toThrow("Stateful service target server is offline");
 	});
 
-	it("rejects stateful builds when the active replica arch does not match the requested platform", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[
-				{
-					id: "server_target",
-					status: "online",
-					meta: { arch: "arm64" },
-				},
-			],
-		);
-
+	it("rejects a stateful platform that differs from the revision target", async () => {
+		mocks.queryResults.push([
+			{ id: "server-target", status: "online", meta: { arch: "arm64" } },
+		]);
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/amd64"),
+			selectBuildServerForRevision(
+				specification({ stateful: true }),
+				"linux/amd64",
+			),
 		).rejects.toThrow(
 			"Stateful service target server architecture arm64 does not match platform linux/amd64",
 		);
-		expectActiveReplicaPredicate(1);
 	});
 
-	it("builds a stateful target platform from the active replica server architecture", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[{ id: "server_target", status: "online", meta: { arch: "arm64" } }],
-		);
-
-		await expect(getTargetPlatformsForService("service_1")).resolves.toEqual([
-			"linux/arm64",
+	it("derives a stateful target platform from the revision placement", async () => {
+		mocks.queryResults.push([
+			{ id: "server-target", status: "online", meta: { arch: "arm64" } },
 		]);
-		expectActiveReplicaPredicate(1);
+		await expect(
+			getTargetPlatformsForRevision(specification({ stateful: true })),
+		).resolves.toEqual(["linux/arm64"]);
 	});
 
-	it("rejects stateful target platform resolution when the active replica arch is unknown", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: true }],
-			[{ id: "server_target", status: "online", meta: null }],
-		);
-
-		await expect(getTargetPlatformsForService("service_1")).rejects.toThrow(
-			"Stateful service target server architecture is unknown",
-		);
-	});
-
-	it("keeps stateless builds assigned by matching architecture", async () => {
+	it("assigns stateless builds to an online server with the requested architecture", async () => {
 		mocks.getSetting.mockResolvedValue(null);
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: false }],
-			[
-				{ id: "server_amd", meta: { arch: "amd64" } },
-				{ id: "server_arm", meta: { arch: "arm64" } },
-			],
-		);
-
+		mocks.queryResults.push([
+			{ id: "server-amd", meta: { arch: "amd64" } },
+			{ id: "server-arm", meta: { arch: "arm64" } },
+		]);
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
-		).resolves.toBe("server_arm");
+			selectBuildServerForRevision(specification(), "linux/arm64"),
+		).resolves.toBe("server-arm");
 	});
 
-	it("limits stateless build assignment to allowed build servers", async () => {
-		mocks.getSetting.mockResolvedValue(["server_arm"]);
-		mocks.queryResults.push(
-			[{ id: "service_1", stateful: false }],
-			[{ id: "server_arm", meta: { arch: "arm64" } }],
-		);
-
+	it("limits stateless build assignment to configured build servers", async () => {
+		mocks.getSetting.mockResolvedValue(["server-arm"]);
+		mocks.queryResults.push([{ id: "server-arm", meta: { arch: "arm64" } }]);
 		await expect(
-			selectBuildServerForPlatform("service_1", "linux/arm64"),
-		).resolves.toBe("server_arm");
+			selectBuildServerForRevision(specification(), "linux/arm64"),
+		).resolves.toBe("server-arm");
 
-		const condition = mocks.queries[1]?.where.mock.calls[0]?.[0];
+		const condition = mocks.queries[0]?.where.mock.calls[0]?.[0];
 		expect(sqlTokens(condition)).toEqual(
 			expect.arrayContaining(["status", "online", "id", " in "]),
 		);
 	});
 
-	it("builds target platforms from active replica server architectures", async () => {
-		mocks.queryResults.push(
-			[{ id: "service_1" }],
-			[{ meta: { arch: "arm64" } }, { meta: { arch: "arm64" } }],
-		);
-
-		await expect(getTargetPlatformsForService("service_1")).resolves.toEqual([
-			"linux/arm64",
+	it("derives stateless target platforms from snapshotted placements", async () => {
+		mocks.queryResults.push([
+			{ id: "server-a", meta: { arch: "arm64" } },
+			{ id: "server-b", meta: { arch: "arm64" } },
 		]);
-		expectActiveReplicaPredicate(1);
+		await expect(
+			getTargetPlatformsForRevision(
+				specification({
+					placements: [
+						{ serverId: "server-a", count: 1 },
+						{ serverId: "server-b", count: 1 },
+					],
+				}),
+			),
+		).resolves.toEqual(["linux/arm64"]);
+	});
+
+	it("uses both default platforms for an unplaced build revision", async () => {
+		await expect(
+			getTargetPlatformsForRevision(specification({ placements: [] })),
+		).resolves.toEqual(["linux/amd64", "linux/arm64"]);
+		expect(mocks.db.select).not.toHaveBeenCalled();
 	});
 });

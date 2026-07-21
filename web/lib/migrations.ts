@@ -1,10 +1,16 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
-import { deployments, services, serviceVolumes } from "@/db/schema";
+import {
+	deployments,
+	serviceRevisions,
+	services,
+	serviceVolumes,
+} from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 export async function startMigrationInternal(
 	serviceId: string,
@@ -50,11 +56,13 @@ export async function startMigrationInternal(
 			id: deployments.id,
 			serverId: deployments.serverId,
 			containerId: deployments.containerId,
+			serviceRevisionId: deployments.serviceRevisionId,
 		})
 		.from(deployments)
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
+				eq(deployments.trafficState, "active"),
 				inArray(deployments.observedPhase, ["healthy", "running"]),
 			),
 		)
@@ -70,6 +78,29 @@ export async function startMigrationInternal(
 
 	if (deployment.serverId === targetServerId) {
 		throw new Error("Service is already running on the target server");
+	}
+	if (service.sourceType === "github") {
+		const baseRevision = await db
+			.select({ specification: serviceRevisions.specification })
+			.from(serviceRevisions)
+			.where(
+				and(
+					eq(serviceRevisions.id, deployment.serviceRevisionId),
+					eq(serviceRevisions.serviceId, serviceId),
+				),
+			)
+			.then((rows) => rows[0]);
+		if (!baseRevision)
+			throw new Error("Runtime base service revision not found");
+		let specification: ReturnType<typeof parseServiceRevisionSpec>;
+		try {
+			specification = parseServiceRevisionSpec(baseRevision.specification);
+		} catch {
+			throw new Error("GitHub runtime base revision is invalid");
+		}
+		if (specification.source.type !== "github") {
+			throw new Error("GitHub runtime base revision is not a GitHub build");
+		}
 	}
 
 	await db
@@ -88,6 +119,7 @@ export async function startMigrationInternal(
 			targetServerId,
 			sourceServerId: deployment.serverId,
 			sourceDeploymentId: deployment.id,
+			sourceServiceRevisionId: deployment.serviceRevisionId,
 			sourceContainerId: deployment.containerId,
 			volumes: volumes.map((v) => ({ id: v.id, name: v.name })),
 			actor,

@@ -7,6 +7,7 @@ export type MigrationEvents = {
 			targetServerId: string;
 			sourceServerId: string;
 			sourceDeploymentId: string;
+			sourceServiceRevisionId: string;
 			sourceContainerId: string;
 			volumes: { id: string; name: string }[];
 			actor?: ServiceRevisionActor | null;

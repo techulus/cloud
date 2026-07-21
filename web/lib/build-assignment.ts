@@ -1,7 +1,8 @@
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
-import { servers, serviceReplicas, services } from "@/db/schema";
+import { servers } from "@/db/schema";
+import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 type BuildTargetServer = {
@@ -11,143 +12,110 @@ type BuildTargetServer = {
 };
 
 async function getStatefulBuildTargetServer(
-	serviceId: string,
+	specification: ServiceRevisionSpec,
 ): Promise<BuildTargetServer> {
-	const targetServers = await db
-		.select({ id: servers.id, status: servers.status, meta: servers.meta })
-		.from(serviceReplicas)
-		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-		.where(
-			and(
-				eq(serviceReplicas.serviceId, serviceId),
-				gt(serviceReplicas.count, 0),
-			),
-		);
-
-	if (targetServers.length !== 1) {
+	const placements = specification.placements.filter(
+		(placement) => placement.count > 0,
+	);
+	if (placements.length !== 1 || placements[0].count !== 1) {
 		throw new Error(
-			"Stateful services must have exactly one active replica server",
+			"Stateful service revisions must have exactly one active replica server",
 		);
 	}
 
-	const [targetServer] = targetServers;
-
+	const targetServer = await db
+		.select({ id: servers.id, status: servers.status, meta: servers.meta })
+		.from(servers)
+		.where(eq(servers.id, placements[0].serverId))
+		.then((rows) => rows[0]);
+	if (!targetServer) {
+		throw new Error("Stateful service revision target server was not found");
+	}
 	if (targetServer.status !== "online") {
 		throw new Error("Stateful service target server is offline");
 	}
-
 	if (!targetServer.meta?.arch) {
 		throw new Error("Stateful service target server architecture is unknown");
 	}
-
 	return {
 		...targetServer,
 		meta: { arch: targetServer.meta.arch },
 	};
 }
 
-export async function selectBuildServerForPlatform(
-	serviceId: string,
+export async function selectBuildServerForRevision(
+	specification: ServiceRevisionSpec,
 	platform: string,
 ): Promise<string> {
-	const service = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.then((r) => r[0]);
-
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
 	const arch = platform.split("/")[1];
+	if (!arch) throw new Error(`Invalid build platform ${platform}`);
 
-	if (service.stateful) {
-		const targetServer = await getStatefulBuildTargetServer(serviceId);
+	if (specification.stateful) {
+		const targetServer = await getStatefulBuildTargetServer(specification);
 		if (targetServer.meta.arch !== arch) {
 			throw new Error(
 				`Stateful service target server architecture ${targetServer.meta.arch} does not match platform ${platform}`,
 			);
 		}
-
 		return targetServer.id;
 	}
 
 	const allowedBuildServerIds = await getSetting<string[]>(
 		SETTING_KEYS.SERVERS_ALLOWED_FOR_BUILDS,
 	);
-
-	let onlineServers: { id: string; meta: { arch?: string } | null }[];
-
-	if (allowedBuildServerIds && allowedBuildServerIds.length > 0) {
-		onlineServers = await db
-			.select({ id: servers.id, meta: servers.meta })
-			.from(servers)
-			.where(
-				and(
-					eq(servers.status, "online"),
-					inArray(servers.id, allowedBuildServerIds),
-				),
-			);
-	} else {
-		onlineServers = await db
-			.select({ id: servers.id, meta: servers.meta })
-			.from(servers)
-			.where(eq(servers.status, "online"));
-	}
-
-	const matchingServers = onlineServers.filter((s) => s.meta?.arch === arch);
-
+	const onlineServers = allowedBuildServerIds?.length
+		? await db
+				.select({ id: servers.id, meta: servers.meta })
+				.from(servers)
+				.where(
+					and(
+						eq(servers.status, "online"),
+						inArray(servers.id, allowedBuildServerIds),
+					),
+				)
+		: await db
+				.select({ id: servers.id, meta: servers.meta })
+				.from(servers)
+				.where(eq(servers.status, "online"));
+	const matchingServers = onlineServers.filter(
+		(server) => server.meta?.arch === arch,
+	);
 	if (matchingServers.length === 0) {
 		throw new Error(`No online servers available for platform ${platform}`);
 	}
-
 	return matchingServers[Math.floor(Math.random() * matchingServers.length)].id;
 }
 
-export async function getTargetPlatformsForService(
-	serviceId: string,
+export async function getTargetPlatformsForRevision(
+	specification: ServiceRevisionSpec,
 ): Promise<string[]> {
-	const service = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.then((r) => r[0]);
-
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	if (service.stateful) {
-		const targetServer = await getStatefulBuildTargetServer(serviceId);
+	if (specification.stateful) {
+		const targetServer = await getStatefulBuildTargetServer(specification);
 		return [`linux/${targetServer.meta.arch}`];
 	}
 
-	let targetPlatforms: string[] = [];
+	const serverIds = specification.placements
+		.filter((placement) => placement.count > 0)
+		.map((placement) => placement.serverId);
+	if (serverIds.length === 0) return ["linux/amd64", "linux/arm64"];
 
-	const replicas = await db
-		.select({ meta: servers.meta })
-		.from(serviceReplicas)
-		.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-		.where(
-			and(
-				eq(serviceReplicas.serviceId, service.id),
-				gt(serviceReplicas.count, 0),
-			),
-		);
-
-	targetPlatforms = [
+	const placementServers = await db
+		.select({ id: servers.id, meta: servers.meta })
+		.from(servers)
+		.where(inArray(servers.id, serverIds));
+	if (placementServers.length !== new Set(serverIds).size) {
+		throw new Error("A service revision placement server was not found");
+	}
+	const targetPlatforms = [
 		...new Set(
-			replicas
-				.map((r) => r.meta?.arch)
+			placementServers
+				.map((server) => server.meta?.arch)
 				.filter((arch): arch is string => !!arch)
 				.map((arch) => `linux/${arch}`),
 		),
 	];
-
 	if (targetPlatforms.length === 0) {
-		targetPlatforms.push("linux/amd64", "linux/arm64");
+		throw new Error("Service revision placement architectures are unknown");
 	}
-
 	return targetPlatforms;
 }

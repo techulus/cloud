@@ -1,4 +1,4 @@
-import type { DeployedConfig } from "@/lib/service-config";
+import type { DeployedConfig, SourceConfig } from "@/lib/service-config";
 import type {
 	builds,
 	deploymentPorts,
@@ -56,6 +56,7 @@ export type HealthStats = {
 
 export type ServiceWithDetails = Service & {
 	activeConfig?: DeployedConfig | null;
+	currentSource: SourceConfig;
 	ports: ServicePort[];
 	configuredReplicas: Array<
 		ServiceReplica & { serverName: string; serverIsProxy: boolean }

@@ -32,7 +32,9 @@ export const auth = betterAuth({
 			validateClient: async (clientId) => clientId === TECHULUS_CLI_CLIENT_ID,
 		}),
 		apiKey({
-			enableSessionForAPIKeys: true,
+			// Public API routes verify keys explicitly. Do not turn a key into a
+			// browser session, which would also authorize legacy dashboard APIs.
+			enableSessionForAPIKeys: false,
 			apiKeyHeaders: "x-api-key",
 			defaultPrefix: "tcl_",
 			enableMetadata: true,

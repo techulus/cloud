@@ -261,6 +261,7 @@ export async function queryServiceMetrics(options: {
 	serviceId: string;
 	range: MetricRange;
 	now?: Date;
+	throwOnError?: boolean;
 }): Promise<ServiceMetrics> {
 	const endpoint = getQueryEndpoint();
 	const now = options.now ?? new Date();
@@ -276,6 +277,8 @@ export async function queryServiceMetrics(options: {
 		window.start,
 		window.stepSeconds * SECOND_IN_MILLISECONDS,
 	);
+	const recover = <T>(promise: Promise<T>, fallback: T): Promise<T> =>
+		options.throwOnError ? promise : promise.catch(() => fallback);
 
 	const [
 		requestResults,
@@ -291,76 +294,112 @@ export async function queryServiceMetrics(options: {
 		totalIngressBytes,
 		totalEgressBytes,
 	] = await Promise.all([
-		queryRangePromQL(endpoint, {
-			query: `sum by (code) (increase(traefik_service_requests_total{${traefikFilter}}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: responseTimeQuery(0.5, traefikFilter, rangeWindow),
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: responseTimeQuery(0.9, traefikFilter, rangeWindow),
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: responseTimeQuery(0.95, traefikFilter, rangeWindow),
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: responseTimeQuery(0.99, traefikFilter, rangeWindow),
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: `sum(rate(traefik_service_requests_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: `sum(rate(traefik_service_responses_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: `sum(avg_over_time(techulus_service_cpu_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: `sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryRangePromQL(endpoint, {
-			query: `sum(avg_over_time(techulus_service_memory_used_bytes{service_id="${serviceId}"}[${rangeWindow}]))`,
-			start: queryStart,
-			end: window.end,
-			stepSeconds: window.stepSeconds,
-		}).catch(() => []),
-		queryInstantPromQL(
-			endpoint,
-			`sum(increase(traefik_service_requests_bytes_total{${traefikFilter}}[${totalWindow}]))`,
-			window.end,
-		).catch(() => null),
-		queryInstantPromQL(
-			endpoint,
-			`sum(increase(traefik_service_responses_bytes_total{${traefikFilter}}[${totalWindow}]))`,
-			window.end,
-		).catch(() => null),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum by (code) (increase(traefik_service_requests_total{${traefikFilter}}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: responseTimeQuery(0.5, traefikFilter, rangeWindow),
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: responseTimeQuery(0.9, traefikFilter, rangeWindow),
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: responseTimeQuery(0.95, traefikFilter, rangeWindow),
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: responseTimeQuery(0.99, traefikFilter, rangeWindow),
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum(rate(traefik_service_requests_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum(rate(traefik_service_responses_bytes_total{${traefikFilter}}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum(avg_over_time(techulus_service_cpu_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${serviceId}"}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryRangePromQL(endpoint, {
+				query: `sum(avg_over_time(techulus_service_memory_used_bytes{service_id="${serviceId}"}[${rangeWindow}]))`,
+				start: queryStart,
+				end: window.end,
+				stepSeconds: window.stepSeconds,
+			}),
+			[],
+		),
+		recover(
+			queryInstantPromQL(
+				endpoint,
+				`sum(increase(traefik_service_requests_bytes_total{${traefikFilter}}[${totalWindow}]))`,
+				window.end,
+			),
+			null,
+		),
+		recover(
+			queryInstantPromQL(
+				endpoint,
+				`sum(increase(traefik_service_responses_bytes_total{${traefikFilter}}[${totalWindow}]))`,
+				window.end,
+			),
+			null,
+		),
 	]);
 
 	const buckets = createServiceMetricBuckets(window);

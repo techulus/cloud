@@ -1,0 +1,46 @@
+binary := "dist/tc"
+version := env_var_or_default("VERSION", "dev")
+
+# List available tasks.
+default:
+    @just --list
+
+# Build the CLI binary at dist/tc. Override the version with VERSION=<value>.
+build:
+    mkdir -p dist
+    go build -trimpath -ldflags "-X main.version={{version}}" -o {{binary}} ./cmd/tc
+
+# Run the CLI without building a binary first, forwarding any arguments.
+run *args:
+    go run -trimpath -ldflags "-X main.version={{version}}" ./cmd/tc {{args}}
+
+# Run all tests.
+test:
+    go test ./...
+
+# Run Go's static analyzer.
+vet:
+    go vet ./...
+
+# Format all Go packages.
+fmt:
+    go fmt ./...
+
+# Fail when any Go source file is not gofmt-formatted.
+fmt-check:
+    @unformatted="$(gofmt -l $(find . -type f -name '*.go'))"; \
+        if [ -n "$unformatted" ]; then \
+            printf 'These files need gofmt:\n%s\n' "$unformatted"; \
+            exit 1; \
+        fi
+
+# Run the non-mutating local checks.
+check: fmt-check test vet
+
+# Install tc into GOBIN.
+install:
+    go install -trimpath -ldflags "-X main.version={{version}}" ./cmd/tc
+
+# Remove generated binaries.
+clean:
+    rm -rf dist
