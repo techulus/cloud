@@ -88,7 +88,7 @@ start, so scaling `WEB_REPLICAS` does not run migrations from every replica.
 
 ## Database Migrations
 
-Schema is synced automatically by the one-shot `migrate` service via `drizzle-kit push --force`. This keeps deployment non-interactive, including schema changes Drizzle classifies as data-loss operations such as dropping columns. If schema sync fails, `web` startup is blocked; inspect the failure with `docker compose -f compose.production.yml logs migrate`.
+Schema is synced automatically by the one-shot `migrate` service via `drizzle-kit push`. Non-destructive changes are applied automatically. Changes Drizzle classifies as data-loss operations fail closed and require manual intervention. If schema sync fails, `web` startup is blocked; inspect the failure with `docker compose -f compose.production.yml logs migrate`.
 
 **Future plan:** Once the schema stabilizes, switch to `drizzle-kit generate` + `drizzle-orm migrate()` with pre-generated SQL migration files. This will eliminate the esbuild/drizzle-kit dependency from the production image.
 
