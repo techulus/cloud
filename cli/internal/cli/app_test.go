@@ -306,6 +306,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 		path, query string
 	}{
 		{[]string{"status"}, "/status", ""},
+		{[]string{"config"}, "/configuration", ""},
 		{[]string{"rollouts", "--limit", "7", "--cursor", "next"}, "/rollouts", "cursor=next&limit=7"},
 		{[]string{"rollout", "r1"}, "/rollouts/r1", ""},
 		{[]string{"rollout", "logs", "r1", "-q", "oops", "--limit", "9"}, "/rollouts/r1/logs", "limit=9&q=oops"},
@@ -340,6 +341,179 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 				t.Fatalf("got %s?%s", gotPath, gotQuery)
 			}
 		})
+	}
+}
+
+func TestBuildsHumanOutputIsFormatted(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response string
+		want     []string
+	}{
+		{
+			name:     "image source",
+			response: `{"builds":[],"nextCursor":null,"reason":"IMAGE_SOURCE","supported":false}`,
+			want:     []string{"Builds", "Status", "not supported", "image-source services use pre-built images"},
+		},
+		{
+			name:     "github source",
+			response: `{"supported":true,"builds":[{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","status":"in_progress","branch":"main","commitSha":"abcdef1234567890abcdef1234567890abcdef12","createdAt":"2026-01-01T00:00:00.820Z"}],"nextCursor":"next-page"}`,
+			want:     []string{"Builds (1)", "ID", "0400075c...6b28", "Status", "in progress", "Branch", "main", "Commit", "abcdef12...ef12", "Created", "2026-01-01T00:00:00.82Z", "next-page"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configHome(t)
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.response))
+			}))
+			defer s.Close()
+			writeConfig(t, s.URL)
+
+			app, out := testApp(t, t.TempDir(), s.Client())
+			err := execute(app, "builds", "--project", "p", "--environment", "e", "--service", "s")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out.String(), "{") {
+				t.Fatalf("human output contains raw JSON:\n%s", out.String())
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("output missing %q:\n%s", want, out.String())
+				}
+			}
+		})
+	}
+}
+
+func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"current":{"source":{"type":"github","repository":"https://github.com/acme/app","branch":"main","rootDir":"cmd/api"},"hostname":"api.example.com","stateful":true,"replicas":2,"placements":[{"serverId":"server-1","serverName":"ubuntu-2","count":2}],"healthCheck":{"cmd":"curl localhost:3000","interval":10,"timeout":5,"retries":3,"startPeriod":30},"startCommand":"npm start","resources":{"cpuCores":2,"memoryMb":512},"ports":[{"containerPort":3000,"public":true,"domain":"api.example.com","protocol":"http","externalPort":null}],"volumes":[{"name":"data","containerPath":"/data"}],"serverless":{"enabled":false,"sleepAfterSeconds":300,"wakeTimeoutSeconds":30},"schedules":{"deployment":null,"backup":{"enabled":false,"schedule":null}}},"active":null,"activeRevisionId":"0400075c-69aa-46c2-bccc-fc172b8c6b28","activeDeploymentId":"2c917d90-4bc1-4274-b3bf-34fed009fc12","hasPendingChanges":true,"changes":[{"field":"replicas","from":"active revision","to":"current configuration"}],"management":{"patchable":true,"blockers":[]}}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	err := execute(app, "config", "--project", "p", "--environment", "e", "--service", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "{") {
+		t.Fatalf("human output contains raw JSON:\n%s", out.String())
+	}
+	for _, want := range []string{"Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deployment", "0400075c...6b28", "replicas: active revision -> current configuration", "Management", "Patchable", "yes"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestMetricsHumanOutputIsFormatted(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"provider":"enabled","metrics":{"range":"1h","windowStart":"2026-07-21T09:00:00Z","windowEnd":"2026-07-21T10:00:00Z","totalRequests":1000000,"totalIngressBytes":460,"totalEgressBytes":2048,"buckets":[{"timestamp":"2026-07-21T10:00:00Z","totalRequests":1000000,"cpuUsagePercent":42.5,"memoryUsagePercent":50,"memoryUsedBytes":1048576,"p50ResponseTimeMs":12,"p95ResponseTimeMs":45,"ingressBytesPerSecond":512,"egressBytesPerSecond":1024}]}}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	err := execute(app, "metrics", "--project", "p", "--environment", "e", "--service", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "{") {
+		t.Fatalf("human output contains raw JSON:\n%s", out.String())
+	}
+	for _, want := range []string{"Metrics", "1h", "Requests", "1000000", "2.0 KiB", "Latest sample", "42.5%", "50% (1.0 MiB)", "12 ms", "45 ms", "512 B/s", "1024 B/s"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "1e+06") {
+		t.Fatalf("request count uses scientific notation:\n%s", out.String())
+	}
+}
+
+func TestMetricsHumanOutputShowsDisabledProvider(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"provider":"disabled","metrics":null}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	err := execute(app, "metrics", "--project", "p", "--environment", "e", "--service", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Status") || !strings.Contains(out.String(), "disabled") || strings.Contains(out.String(), "{") {
+		t.Fatalf("output = %s", out.String())
+	}
+}
+
+func TestRevisionsHumanOutputIsFormatted(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"nextCursor":"next-page","revisions":[{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","createdAt":"2026-07-21T11:04:58.816Z","actor":{"name":"Arjun Komath","type":"user"},"comparison":{"kind":"changes","changes":[{"field":"Image","from":"app:v1","to":"app:v2"}]},"rollout":{"id":"2c917d90-4bc1-4274-b3bf-34fed009fc12","status":"in_progress"}},{"id":"3f9293e9-d4d8-4b72-8ae4-94b3737ab056","createdAt":"2026-07-21T02:16:12.820Z","actor":{"type":"github","login":"octocat"},"comparison":{"kind":"initial"},"rollout":null}]}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	err := execute(app, "revisions", "--project", "p", "--environment", "e", "--service", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "{") {
+		t.Fatalf("human output contains raw JSON:\n%s", out.String())
+	}
+	for _, want := range []string{"Revisions (2)", "0400075c...6b28", "Arjun Komath", "in progress", "Image: app:v1 -> app:v2", "3f9293e9...b056", "@octocat", "initial revision", "next-page"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestRolloutHumanOutputIsFormatted(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/p/environments/e/services/s/rollouts":
+			w.Write([]byte(`{"rollouts":[{"id":"2c917d90-4bc1-4274-b3bf-34fed009fc12","status":"in_progress","currentStage":"health_check","createdAt":"2026-07-21T11:04:59.46Z","completedAt":null,"deployments":[{"serverName":"ubuntu-2","phase":"running","healthStatus":"healthy"}]}],"nextCursor":"next-page"}`))
+		case "/api/v1/projects/p/environments/e/services/s/rollouts/r1":
+			w.Write([]byte(`{"rollout":{"id":"2c917d90-4bc1-4274-b3bf-34fed009fc12","status":"completed","currentStage":"completed","createdAt":"2026-07-21T11:04:59.46Z","completedAt":"2026-07-21T11:05:30Z","deployments":[]}}`))
+		case "/api/v1/projects/p/environments/e/services/s/rollouts/r1/logs":
+			w.Write([]byte(`{"provider":"enabled","logs":[{"message":"Rollout started","stage":"preparing","timestamp":"2026-07-21T11:04:59.46Z"},{"message":"Starting container","stage":"health_check","timestamp":"2026-07-21T11:05:00.529Z"}]}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"rollouts"}, []string{"Rollouts (1)", "2c917d90...fc12", "in progress", "health check", "ubuntu-2: running, healthy", "next-page"}},
+		{[]string{"rollout", "r1"}, []string{"Rollout", "2c917d90...fc12", "completed", "2026-07-21T11:05:30Z"}},
+		{[]string{"rollout", "logs", "r1"}, []string{"Rollout logs (2)", "[preparing]", "Rollout started", "[health check]", "Starting container"}},
+	} {
+		app, out := testApp(t, t.TempDir(), s.Client())
+		args := append(tc.args, "--project", "p", "--environment", "e", "--service", "s")
+		if err := execute(app, args...); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "{") {
+			t.Fatalf("human output contains raw JSON:\n%s", out.String())
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("output missing %q:\n%s", want, out.String())
+			}
+		}
 	}
 }
 

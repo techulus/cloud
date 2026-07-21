@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -158,10 +157,10 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(a.logsCommand())
 	root.AddCommand(a.environmentsCommand())
 	root.AddCommand(a.servicesCommand())
-	root.AddCommand(a.resourceCommand("config", "Show full service configuration", "/configuration", nil))
-	root.AddCommand(a.paginatedCommand("rollouts", "List rollout history", "/rollouts"))
+	root.AddCommand(a.resourceCommand("config", "Show full service configuration", "/configuration", nil, printConfiguration))
+	root.AddCommand(a.paginatedCommand("rollouts", "List rollout history", "/rollouts", printRollouts))
 	root.AddCommand(a.rolloutCommand())
-	root.AddCommand(a.paginatedCommand("builds", "List build history", "/builds"))
+	root.AddCommand(a.paginatedCommand("builds", "List build history", "/builds", printBuilds))
 	root.AddCommand(a.metricsCommand())
 	root.AddCommand(a.revisionsCommand())
 	root.AddCommand(a.versionCommand())
@@ -721,7 +720,7 @@ func (a *App) servicesCommand() *cobra.Command {
 	c.Flags().StringVar(&eid, "environment", "", "Environment ID")
 	return c
 }
-func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command) url.Values) *cobra.Command {
+func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command) url.Values, print func(io.Writer, map[string]any)) *cobra.Command {
 	var target serviceTargetFlags
 	c := &cobra.Command{Use: name, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, e := requireConfig()
@@ -744,18 +743,16 @@ func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command)
 		if a.isMachineOutput() {
 			return a.writeData(out, label)
 		}
-		output.Section(a.Out, label)
-		printMapSummary(a.Out, out)
-		if len(out) > 0 {
-			raw, _ := json.MarshalIndent(out, "  ", "  ")
-			fmt.Fprintln(a.Out, string(raw))
+		if print == nil {
+			return fmt.Errorf("%s command does not define human output formatting", name)
 		}
+		print(a.Out, out)
 		return nil
 	}}
 	addServiceTargetFlags(c, &target)
 	return c
 }
-func (a *App) paginatedCommand(name, short, suffix string) *cobra.Command {
+func (a *App) paginatedCommand(name, short, suffix string, print func(io.Writer, map[string]any)) *cobra.Command {
 	var limit int
 	var cursor string
 	c := a.resourceCommand(name, short, suffix, func(*cobra.Command) url.Values {
@@ -764,7 +761,7 @@ func (a *App) paginatedCommand(name, short, suffix string) *cobra.Command {
 			q.Set("cursor", cursor)
 		}
 		return q
-	})
+	}, print)
 	c.Flags().IntVar(&limit, "limit", 25, "Items (1-100)")
 	c.Flags().StringVar(&cursor, "cursor", "", "Pagination cursor")
 	c.PreRunE = func(*cobra.Command, []string) error {
@@ -821,13 +818,16 @@ func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id st
 	if a.isMachineOutput() {
 		return a.writeData(out, "Rollout")
 	}
-	raw, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Fprintln(a.Out, string(raw))
+	if logs {
+		printRolloutLogs(a.Out, out)
+	} else {
+		printRolloutDetail(a.Out, out)
+	}
 	return nil
 }
 func (a *App) metricsCommand() *cobra.Command {
 	var r string
-	c := a.resourceCommand("metrics", "Show service metrics", "/metrics", func(*cobra.Command) url.Values { return url.Values{"range": {r}} })
+	c := a.resourceCommand("metrics", "Show service metrics", "/metrics", func(*cobra.Command) url.Values { return url.Values{"range": {r}} }, printMetrics)
 	c.Flags().StringVar(&r, "range", "1h", "Range: 1h, 6h, 24h, 7d, 30d")
 	c.PreRunE = func(*cobra.Command, []string) error {
 		if !contains([]string{"1h", "6h", "24h", "7d", "30d"}, r) {
@@ -845,7 +845,7 @@ func (a *App) revisionsCommand() *cobra.Command {
 			q.Set("cursor", cursor)
 		}
 		return q
-	})
+	}, printRevisions)
 	c.Flags().StringVar(&cursor, "cursor", "", "Pagination cursor")
 	return c
 }
@@ -1487,6 +1487,560 @@ func printMapSummary(w io.Writer, m map[string]any) {
 		if v, ok := m[k]; ok && v != nil {
 			output.Field(w, k, v)
 		}
+	}
+}
+
+func printBuilds(w io.Writer, result map[string]any) {
+	if supported, ok := result["supported"].(bool); ok && !supported {
+		output.Section(w, "Builds")
+		output.Field(w, "Status", "not supported")
+		output.Field(w, "Reason", "image-source services use pre-built images")
+		return
+	}
+
+	builds, _ := result["builds"].([]any)
+	output.Section(w, fmt.Sprintf("Builds (%d)", len(builds)))
+	if len(builds) == 0 {
+		output.Field(w, "Items", "none")
+	} else {
+		for i, value := range builds {
+			build, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			for _, field := range []struct {
+				key, label string
+			}{
+				{"id", "ID"},
+				{"status", "Status"},
+				{"branch", "Branch"},
+				{"commitSha", "Commit"},
+				{"commitMessage", "Message"},
+				{"author", "Author"},
+				{"targetPlatform", "Platform"},
+				{"startedAt", "Started"},
+				{"completedAt", "Completed"},
+				{"createdAt", "Created"},
+			} {
+				value, ok := build[field.key].(string)
+				if !ok || value == "" {
+					continue
+				}
+				switch field.key {
+				case "id", "commitSha":
+					value = output.ShortID(value)
+				case "status":
+					value = output.Status(value)
+				case "startedAt", "completedAt", "createdAt":
+					value = output.Timestamp(value)
+				}
+				output.Field(w, field.label, value)
+			}
+		}
+	}
+	if cursor, ok := result["nextCursor"].(string); ok && cursor != "" {
+		output.Field(w, "Next", cursor)
+	}
+}
+
+func printConfiguration(w io.Writer, result map[string]any) {
+	output.Section(w, "Configuration")
+	current, ok := result["current"].(map[string]any)
+	if !ok {
+		output.Field(w, "Status", "unavailable")
+		return
+	}
+
+	if source, ok := current["source"].(map[string]any); ok {
+		output.Field(w, "Source", formatSource(source))
+	}
+	printOptionalField(w, "Hostname", current["hostname"])
+	printOptionalField(w, "Stateful", current["stateful"])
+	printOptionalField(w, "Replicas", current["replicas"])
+	printOptionalField(w, "Start", current["startCommand"])
+	if resources, ok := current["resources"].(map[string]any); ok {
+		if cpu, ok := metricNumber(resources["cpuCores"]); ok {
+			output.Field(w, "CPU limit", formatMetric(cpu, " cores"))
+		} else {
+			output.Field(w, "CPU limit", "no limit")
+		}
+		if memory, ok := metricNumber(resources["memoryMb"]); ok {
+			output.Field(w, "Memory", formatMetric(memory, " MB"))
+		} else {
+			output.Field(w, "Memory", "no limit")
+		}
+	}
+
+	printPlacements(w, current["placements"])
+	printPorts(w, current["ports"])
+	printVolumes(w, current["volumes"])
+	printHealthCheck(w, current["healthCheck"])
+	printServerless(w, current["serverless"])
+	printSchedules(w, current["schedules"])
+
+	output.Section(w, "Deployment")
+	printOptionalField(w, "Revision", shortIDValue(result["activeRevisionId"]))
+	printOptionalField(w, "Deployment", shortIDValue(result["activeDeploymentId"]))
+	printOptionalField(w, "Pending", result["hasPendingChanges"])
+	changes, _ := result["changes"].([]any)
+	if len(changes) > 0 {
+		output.Field(w, "Changes", len(changes))
+		for _, value := range changes {
+			change, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(w, "    * %v: %v -> %v\n", change["field"], change["from"], change["to"])
+		}
+	} else {
+		output.Field(w, "Changes", "none")
+	}
+
+	if management, ok := result["management"].(map[string]any); ok {
+		output.Section(w, "Management")
+		printOptionalField(w, "Patchable", management["patchable"])
+		blockers, _ := management["blockers"].([]any)
+		for _, value := range blockers {
+			blocker, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(w, "    * %v\n", blocker["message"])
+		}
+	}
+}
+
+func formatSource(source map[string]any) string {
+	switch source["type"] {
+	case "image":
+		if image, ok := source["image"].(string); ok {
+			return image
+		}
+	case "github":
+		repository, _ := source["repository"].(string)
+		branch, _ := source["branch"].(string)
+		value := repository
+		if branch != "" {
+			value += " @ " + branch
+		}
+		if root, ok := source["rootDir"].(string); ok && root != "" {
+			value += " (" + root + ")"
+		}
+		return value
+	}
+	return "unknown"
+}
+
+func printOptionalField(w io.Writer, label string, value any) {
+	switch value := value.(type) {
+	case nil:
+		output.Field(w, label, "none")
+	case bool:
+		if value {
+			output.Field(w, label, "yes")
+		} else {
+			output.Field(w, label, "no")
+		}
+	case string:
+		if value == "" {
+			output.Field(w, label, "none")
+		} else {
+			output.Field(w, label, value)
+		}
+	default:
+		output.Field(w, label, value)
+	}
+}
+
+func shortIDValue(value any) any {
+	if id, ok := value.(string); ok && id != "" {
+		return output.ShortID(id)
+	}
+	return nil
+}
+
+func printPlacements(w io.Writer, value any) {
+	placements, _ := value.([]any)
+	output.Field(w, "Placements", len(placements))
+	for _, value := range placements {
+		placement, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		server := placement["serverName"]
+		if server == nil {
+			server = shortIDValue(placement["serverId"])
+		}
+		fmt.Fprintf(w, "    * %v: %v replica(s)\n", server, placement["count"])
+	}
+}
+
+func printPorts(w io.Writer, value any) {
+	ports, _ := value.([]any)
+	output.Field(w, "Ports", len(ports))
+	for _, value := range ports {
+		port, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		protocol, _ := port["protocol"].(string)
+		line := fmt.Sprintf("%v/%s", port["containerPort"], protocol)
+		if public, _ := port["public"].(bool); public {
+			line += " public"
+			if domain, ok := port["domain"].(string); ok && domain != "" {
+				line += " (" + domain + ")"
+			} else if external := port["externalPort"]; external != nil {
+				line += fmt.Sprintf(" (external %v)", external)
+			}
+		}
+		fmt.Fprintf(w, "    * %s\n", line)
+	}
+}
+
+func printVolumes(w io.Writer, value any) {
+	volumes, _ := value.([]any)
+	output.Field(w, "Volumes", len(volumes))
+	for _, value := range volumes {
+		volume, ok := value.(map[string]any)
+		if ok {
+			fmt.Fprintf(w, "    * %v: %v\n", volume["name"], volume["containerPath"])
+		}
+	}
+}
+
+func printHealthCheck(w io.Writer, value any) {
+	health, ok := value.(map[string]any)
+	if !ok {
+		output.Field(w, "Health", "none")
+		return
+	}
+	output.Field(w, "Health", health["cmd"])
+	fmt.Fprintf(w, "    interval %vs, timeout %vs, retries %v, start period %vs\n", health["interval"], health["timeout"], health["retries"], health["startPeriod"])
+}
+
+func printServerless(w io.Writer, value any) {
+	serverless, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	enabled, _ := serverless["enabled"].(bool)
+	if !enabled {
+		output.Field(w, "Serverless", "disabled")
+		return
+	}
+	output.Field(w, "Serverless", "enabled")
+	fmt.Fprintf(w, "    sleep after %vs, wake timeout %vs\n", serverless["sleepAfterSeconds"], serverless["wakeTimeoutSeconds"])
+}
+
+func printSchedules(w io.Writer, value any) {
+	schedules, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	printOptionalField(w, "Deploy cron", schedules["deployment"])
+	if backup, ok := schedules["backup"].(map[string]any); ok {
+		enabled, _ := backup["enabled"].(bool)
+		if enabled {
+			printOptionalField(w, "Backup cron", backup["schedule"])
+		} else {
+			output.Field(w, "Backups", "disabled")
+		}
+	}
+}
+
+func printMetrics(w io.Writer, result map[string]any) {
+	output.Section(w, "Metrics")
+	if result["provider"] == "disabled" {
+		output.Field(w, "Status", "disabled")
+		return
+	}
+
+	metrics, ok := result["metrics"].(map[string]any)
+	if !ok {
+		output.Field(w, "Status", "unavailable")
+		return
+	}
+	for _, field := range []struct {
+		key, label string
+	}{
+		{"range", "Range"},
+		{"windowStart", "From"},
+		{"windowEnd", "To"},
+		{"totalRequests", "Requests"},
+	} {
+		if value, ok := metrics[field.key]; ok && value != nil {
+			if field.key == "totalRequests" {
+				if count, ok := metricNumber(value); ok {
+					value = formatMetric(count, "")
+				}
+			}
+			output.Field(w, field.label, value)
+		}
+	}
+	if value, ok := metricNumber(metrics["totalIngressBytes"]); ok {
+		output.Field(w, "Ingress", formatBytes(value))
+	}
+	if value, ok := metricNumber(metrics["totalEgressBytes"]); ok {
+		output.Field(w, "Egress", formatBytes(value))
+	}
+
+	buckets, _ := metrics["buckets"].([]any)
+	if len(buckets) == 0 {
+		output.Field(w, "Samples", "none")
+		return
+	}
+	latest, ok := buckets[len(buckets)-1].(map[string]any)
+	if !ok {
+		return
+	}
+	output.Section(w, "Latest sample")
+	if value, ok := latest["timestamp"]; ok {
+		output.Field(w, "Time", value)
+	}
+	if value, ok := latest["totalRequests"]; ok {
+		if count, ok := metricNumber(value); ok {
+			value = formatMetric(count, "")
+		}
+		output.Field(w, "Requests", value)
+	}
+	if value, ok := metricNumber(latest["cpuUsagePercent"]); ok {
+		output.Field(w, "CPU", formatMetric(value, "%"))
+	}
+	if value, ok := metricNumber(latest["memoryUsagePercent"]); ok {
+		memory := formatMetric(value, "%")
+		if bytes, ok := metricNumber(latest["memoryUsedBytes"]); ok {
+			memory += " (" + formatBytes(bytes) + ")"
+		}
+		output.Field(w, "Memory", memory)
+	}
+	for _, field := range []struct {
+		key, label, suffix string
+	}{
+		{"p50ResponseTimeMs", "P50 latency", " ms"},
+		{"p90ResponseTimeMs", "P90 latency", " ms"},
+		{"p95ResponseTimeMs", "P95 latency", " ms"},
+		{"p99ResponseTimeMs", "P99 latency", " ms"},
+		{"ingressBytesPerSecond", "Ingress/s", " B/s"},
+		{"egressBytesPerSecond", "Egress/s", " B/s"},
+	} {
+		if value, ok := metricNumber(latest[field.key]); ok {
+			output.Field(w, field.label, formatMetric(value, field.suffix))
+		}
+	}
+}
+
+func metricNumber(value any) (float64, bool) {
+	number, ok := value.(float64)
+	return number, ok
+}
+
+func formatMetric(value float64, suffix string) string {
+	return strconv.FormatFloat(value, 'f', -1, 64) + suffix
+}
+
+func formatBytes(value float64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	unit := 0
+	for value >= 1024 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	return strconv.FormatFloat(value, 'f', 1, 64) + " " + units[unit]
+}
+
+func printRevisions(w io.Writer, result map[string]any) {
+	revisions, _ := result["revisions"].([]any)
+	output.Section(w, fmt.Sprintf("Revisions (%d)", len(revisions)))
+	if len(revisions) == 0 {
+		output.Field(w, "Items", "none")
+	}
+	for i, value := range revisions {
+		revision, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		if id, ok := revision["id"].(string); ok {
+			output.Field(w, "ID", output.ShortID(id))
+		}
+		if createdAt, ok := revision["createdAt"].(string); ok {
+			output.Field(w, "Created", output.Timestamp(createdAt))
+		}
+		if actor, ok := revision["actor"].(map[string]any); ok {
+			output.Field(w, "Actor", revisionActor(actor))
+		}
+		if rollout, ok := revision["rollout"].(map[string]any); ok {
+			id, _ := rollout["id"].(string)
+			status, _ := rollout["status"].(string)
+			value := output.ShortID(id)
+			if status != "" {
+				value += " (" + output.Status(status) + ")"
+			}
+			output.Field(w, "Rollout", value)
+		}
+		printRevisionChanges(w, revision["comparison"])
+	}
+	if cursor, ok := result["nextCursor"].(string); ok && cursor != "" {
+		output.Field(w, "Next", cursor)
+	}
+}
+
+func printRollouts(w io.Writer, result map[string]any) {
+	rollouts, _ := result["rollouts"].([]any)
+	output.Section(w, fmt.Sprintf("Rollouts (%d)", len(rollouts)))
+	if len(rollouts) == 0 {
+		output.Field(w, "Items", "none")
+	}
+	for i, value := range rollouts {
+		rollout, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		printRolloutFields(w, rollout)
+	}
+	if cursor, ok := result["nextCursor"].(string); ok && cursor != "" {
+		output.Field(w, "Next", cursor)
+	}
+}
+
+func printRolloutDetail(w io.Writer, result map[string]any) {
+	output.Section(w, "Rollout")
+	rollout, ok := result["rollout"].(map[string]any)
+	if !ok {
+		output.Field(w, "Status", "unavailable")
+		return
+	}
+	printRolloutFields(w, rollout)
+}
+
+func printRolloutFields(w io.Writer, rollout map[string]any) {
+	for _, field := range []struct {
+		key, label string
+	}{
+		{"id", "ID"},
+		{"status", "Status"},
+		{"currentStage", "Stage"},
+		{"createdAt", "Created"},
+		{"completedAt", "Completed"},
+	} {
+		value, ok := rollout[field.key].(string)
+		if !ok || value == "" {
+			continue
+		}
+		switch field.key {
+		case "id":
+			value = output.ShortID(value)
+		case "status", "currentStage":
+			value = output.Status(value)
+		case "createdAt", "completedAt":
+			value = output.Timestamp(value)
+		}
+		output.Field(w, field.label, value)
+	}
+
+	deployments, _ := rollout["deployments"].([]any)
+	output.Field(w, "Deployments", len(deployments))
+	for _, value := range deployments {
+		deployment, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		server, _ := deployment["serverName"].(string)
+		phase, _ := deployment["phase"].(string)
+		health, _ := deployment["healthStatus"].(string)
+		state := output.Status(phase)
+		if health != "" {
+			if state != "" {
+				state += ", "
+			}
+			state += output.Status(health)
+		}
+		fmt.Fprintf(w, "    * %s", server)
+		if state != "" {
+			fmt.Fprintf(w, ": %s", state)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func printRolloutLogs(w io.Writer, result map[string]any) {
+	if result["provider"] == "disabled" {
+		output.Section(w, "Rollout logs")
+		output.Field(w, "Status", "disabled")
+		return
+	}
+	logs, _ := result["logs"].([]any)
+	output.Section(w, fmt.Sprintf("Rollout logs (%d)", len(logs)))
+	if len(logs) == 0 {
+		output.Field(w, "Lines", "none")
+		return
+	}
+	for _, value := range logs {
+		log, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		timestamp, _ := log["timestamp"].(string)
+		stage, _ := log["stage"].(string)
+		message, _ := log["message"].(string)
+		if stage == "" {
+			stage = "rollout"
+		}
+		fmt.Fprintf(w, "%s %-16s %s\n", output.Timestamp(timestamp), "["+output.Status(stage)+"]", strings.TrimRight(message, "\n"))
+	}
+}
+
+func revisionActor(actor map[string]any) string {
+	switch actor["type"] {
+	case "user":
+		if name, ok := actor["name"].(string); ok {
+			return name
+		}
+	case "github":
+		if login, ok := actor["login"].(string); ok {
+			return "@" + login
+		}
+	case "system":
+		return "system"
+	}
+	return "unknown"
+}
+
+func printRevisionChanges(w io.Writer, value any) {
+	comparison, ok := value.(map[string]any)
+	if !ok {
+		output.Field(w, "Changes", "unavailable")
+		return
+	}
+	switch comparison["kind"] {
+	case "initial":
+		output.Field(w, "Changes", "initial revision")
+	case "unavailable":
+		output.Field(w, "Changes", "unavailable")
+	case "changes":
+		changes, _ := comparison["changes"].([]any)
+		if len(changes) == 0 {
+			output.Field(w, "Changes", "none")
+			return
+		}
+		output.Field(w, "Changes", len(changes))
+		for _, value := range changes {
+			change, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(w, "    * %v: %v -> %v\n", change["field"], change["from"], change["to"])
+		}
+	default:
+		output.Field(w, "Changes", "unavailable")
 	}
 }
 
