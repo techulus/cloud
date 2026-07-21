@@ -1,9 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { BuildDetails } from "@/components/builds/build-details";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
-import { builds, projects, services, githubRepos } from "@/db/schema";
-import { BuildDetails } from "@/components/builds/build-details";
+import { builds, projects, serviceRevisions, services } from "@/db/schema";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 async function getBuild(
 	projectSlug: string,
@@ -34,13 +35,28 @@ async function getBuild(
 
 	if (!build) return null;
 
-	let githubRepo = null;
-	if (build.githubRepoId) {
-		githubRepo = await db
-			.select()
-			.from(githubRepos)
-			.where(eq(githubRepos.id, build.githubRepoId))
-			.then((r) => r[0]);
+	const revision = await db
+		.select({ specification: serviceRevisions.specification })
+		.from(serviceRevisions)
+		.where(
+			and(
+				eq(serviceRevisions.id, build.serviceRevisionId),
+				eq(serviceRevisions.serviceId, build.serviceId),
+			),
+		)
+		.then((rows) => rows[0]);
+	let githubRepo: { repoFullName: string } | null = null;
+	try {
+		const source = revision
+			? parseServiceRevisionSpec(revision.specification).source
+			: null;
+		if (source?.type === "github") {
+			githubRepo = {
+				repoFullName: new URL(source.repository).pathname.replace(/^\//, ""),
+			};
+		}
+	} catch {
+		// Keep historical builds visible when their revision cannot be parsed.
 	}
 
 	return {
@@ -78,7 +94,7 @@ export default async function BuildPage({
 						href: `/dashboard/projects/${slug}/${env}`,
 					},
 					{
-						label: data.service.name,
+						label: `${data.service.name} (${env})`,
 						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}`,
 					},
 					{

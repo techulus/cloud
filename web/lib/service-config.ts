@@ -22,10 +22,17 @@ export type HealthCheckConfig = {
 	startPeriod: number;
 };
 
-export type SourceConfig = {
-	type: "image";
-	image: string;
-};
+export type SourceConfig =
+	| {
+			type: "image";
+			image: string;
+	  }
+	| {
+			type: "github";
+			repository: string | null;
+			branch: string;
+			rootDir: string | null;
+	  };
 
 export type SecretConfig = {
 	key: string;
@@ -76,7 +83,19 @@ export type ConfigChange = {
 	field: string;
 	from: string;
 	to: string;
+	secretKey?: string;
+	requiresBuild?: boolean;
 };
+
+export const TECHULUS_DOCKERFILE_PATH = "TECHULUS_DOCKERFILE_PATH";
+
+export function hasBuildAffectingChanges(changes: ConfigChange[]): boolean {
+	return changes.some(
+		(change) =>
+			change.secretKey === TECHULUS_DOCKERFILE_PATH ||
+			change.requiresBuild === true,
+	);
+}
 
 export function buildCurrentConfig(
 	service: {
@@ -104,17 +123,15 @@ export function buildCurrentConfig(
 		protocol?: "http" | "tcp" | "udp" | null;
 		tlsPassthrough?: boolean | null;
 	}[],
-	secrets?: { key: string; updatedAt: Date | string }[],
-	volumes?: { name: string; containerPath: string }[],
+	secrets: { key: string; updatedAt: Date | string }[] | undefined,
+	volumes: { name: string; containerPath: string }[] | undefined,
+	source: SourceConfig,
 ): DeployedConfig {
 	const hasResourceLimits =
 		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
 
 	return {
-		source: {
-			type: "image",
-			image: service.image,
-		},
+		source,
 		hostname: service.hostname ?? undefined,
 		stateful: service.stateful ?? false,
 		placement: {
@@ -168,11 +185,18 @@ export function diffConfigs(
 	const changes: ConfigChange[] = [];
 
 	if (!deployed) {
-		if (current.source.image) {
+		if (current.source.type === "image" && current.source.image) {
 			changes.push({
 				field: "Image",
 				from: "(not deployed)",
 				to: current.source.image,
+			});
+		} else if (current.source.type === "github") {
+			changes.push({
+				field: "GitHub repository",
+				from: "(not deployed)",
+				to: current.source.repository ?? "(not configured)",
+				requiresBuild: true,
 			});
 		}
 		for (const replica of current.replicas) {
@@ -238,6 +262,7 @@ export function diffConfigs(
 				field: "Secret",
 				from: "(none)",
 				to: secret.key,
+				secretKey: secret.key,
 			});
 		}
 		for (const volume of current.volumes || []) {
@@ -290,11 +315,53 @@ export function diffConfigs(
 		}
 	}
 
-	if (deployed.source.image !== current.source.image) {
+	if (
+		deployed.source.type === "image" &&
+		current.source.type === "image" &&
+		deployed.source.image !== current.source.image
+	) {
 		changes.push({
 			field: "Image",
 			from: deployed.source.image,
 			to: current.source.image,
+		});
+	} else if (
+		deployed.source.type === "github" &&
+		current.source.type === "github"
+	) {
+		if (
+			(deployed.source.repository ?? "").toLowerCase() !==
+			(current.source.repository ?? "").toLowerCase()
+		) {
+			changes.push({
+				field: "GitHub repository",
+				from: deployed.source.repository ?? "(not configured)",
+				to: current.source.repository ?? "(not configured)",
+				requiresBuild: true,
+			});
+		}
+		if (deployed.source.branch !== current.source.branch) {
+			changes.push({
+				field: "GitHub branch",
+				from: deployed.source.branch,
+				to: current.source.branch,
+				requiresBuild: true,
+			});
+		}
+		if (deployed.source.rootDir !== current.source.rootDir) {
+			changes.push({
+				field: "GitHub root directory",
+				from: deployed.source.rootDir ?? "(repository root)",
+				to: current.source.rootDir ?? "(repository root)",
+				requiresBuild: true,
+			});
+		}
+	} else if (deployed.source.type !== current.source.type) {
+		changes.push({
+			field: "Source",
+			from: deployed.source.type === "github" ? "GitHub" : "Image",
+			to: current.source.type === "github" ? "GitHub" : "Image",
+			requiresBuild: current.source.type === "github",
 		});
 	}
 
@@ -482,12 +549,14 @@ export function diffConfigs(
 				field: "Secret",
 				from: "(none)",
 				to: key,
+				secretKey: key,
 			});
 		} else if (deployedSecret.updatedAt !== currentSecret.updatedAt) {
 			changes.push({
 				field: "Secret",
 				from: key,
 				to: `${key} (updated)`,
+				secretKey: key,
 			});
 		}
 	}
@@ -498,6 +567,7 @@ export function diffConfigs(
 				field: "Secret",
 				from: key,
 				to: "(removed)",
+				secretKey: key,
 			});
 		}
 	}
@@ -576,7 +646,15 @@ export function revisionSpecToDeployedConfig(
 	serverNames: Record<string, string>,
 ): DeployedConfig {
 	return {
-		source: { type: "image", image: specification.image },
+		source:
+			specification.source.type === "github"
+				? {
+						type: "github",
+						repository: specification.source.repository,
+						branch: specification.source.branch,
+						rootDir: specification.source.rootDir,
+					}
+				: { type: "image", image: specification.source.image },
 		hostname: specification.hostname,
 		stateful: specification.stateful,
 		placement: {

@@ -92,6 +92,7 @@ export function ServiceLayoutClient({
 			ports,
 			service.secrets,
 			service.volumes,
+			service.currentSource,
 		);
 		return diffConfigs(deployed, current);
 	}, [service]);

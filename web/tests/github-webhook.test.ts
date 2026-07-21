@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
 		updateGitHubDeploymentStatus: vi.fn(),
 		send: vi.fn(),
 		createBuildTrigger: vi.fn(),
+		triggerResolvedBuildInternal: vi.fn(),
 	};
 });
 
@@ -45,6 +46,9 @@ vi.mock("@/lib/inngest/events", () => ({
 		buildTrigger: { create: mocks.createBuildTrigger },
 	},
 }));
+vi.mock("@/lib/trigger-build", () => ({
+	triggerResolvedBuildInternal: mocks.triggerResolvedBuildInternal,
+}));
 
 import { POST } from "@/app/api/webhooks/github/route";
 
@@ -57,6 +61,7 @@ function linkedService({
 	autoDeploy = true,
 	sourceType = "github",
 	deletedAt = null,
+	rootDir = "",
 }: {
 	serviceId: string;
 	name?: string;
@@ -64,6 +69,7 @@ function linkedService({
 	autoDeploy?: boolean;
 	sourceType?: "github" | "image";
 	deletedAt?: Date | null;
+	rootDir?: string;
 }) {
 	return {
 		githubRepo: {
@@ -82,6 +88,7 @@ function linkedService({
 			name,
 			sourceType,
 			deletedAt,
+			githubRootDir: rootDir,
 		},
 	};
 }
@@ -129,12 +136,18 @@ describe("GitHub push webhook", () => {
 			data,
 			...options,
 		}));
+		mocks.triggerResolvedBuildInternal.mockReset();
+		mocks.triggerResolvedBuildInternal.mockResolvedValue({ status: "queued" });
 	});
 
 	it("queues every active service linked to the pushed repository and branch", async () => {
 		mocks.queryResults.push(
 			[
-				linkedService({ serviceId: "service-a", name: "web" }),
+				linkedService({
+					serviceId: "service-a",
+					name: "web",
+					rootDir: "apps/web",
+				}),
 				linkedService({ serviceId: "service-b", name: "web" }),
 			],
 			[],
@@ -154,24 +167,24 @@ describe("GitHub push webhook", () => {
 				{ serviceId: "service-b", status: "queued" },
 			],
 		});
-		expect(mocks.send).toHaveBeenCalledTimes(2);
-		expect(mocks.createBuildTrigger).toHaveBeenNthCalledWith(
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledTimes(2);
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenNthCalledWith(
 			1,
+			"service-a",
 			expect.objectContaining({
-				serviceId: "service-a",
-				githubRepoId: "link-service-a",
 				githubDeploymentId: 1001,
+				expectedRepository: "https://github.com/techulus/cloud",
+				expectedBranch: "main",
+				idempotencyKey: `github-push:link-service-a:${COMMIT_SHA}`,
 			}),
-			{ id: `github-push:link-service-a:${COMMIT_SHA}` },
 		);
-		expect(mocks.createBuildTrigger).toHaveBeenNthCalledWith(
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenNthCalledWith(
 			2,
+			"service-b",
 			expect.objectContaining({
-				serviceId: "service-b",
-				githubRepoId: "link-service-b",
 				githubDeploymentId: 1002,
+				idempotencyKey: `github-push:link-service-b:${COMMIT_SHA}`,
 			}),
-			{ id: `github-push:link-service-b:${COMMIT_SHA}` },
 		);
 		expect(mocks.createGitHubDeployment).toHaveBeenNthCalledWith(
 			1,
@@ -212,7 +225,7 @@ describe("GitHub push webhook", () => {
 				reason: "branch mismatch: main != staging",
 			},
 		]);
-		expect(mocks.send).toHaveBeenCalledTimes(1);
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not let an ineligible or previously built service suppress another link", async () => {
@@ -259,9 +272,9 @@ describe("GitHub push webhook", () => {
 			},
 			{ serviceId: "service-eligible", status: "queued" },
 		]);
-		expect(mocks.send).toHaveBeenCalledTimes(1);
-		expect(mocks.createBuildTrigger).toHaveBeenCalledWith(
-			expect.objectContaining({ serviceId: "service-eligible" }),
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledTimes(1);
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledWith(
+			"service-eligible",
 			expect.any(Object),
 		);
 	});
@@ -281,7 +294,7 @@ describe("GitHub push webhook", () => {
 			.mockRejectedValueOnce(new Error("GitHub unavailable"))
 			.mockResolvedValueOnce(1002)
 			.mockResolvedValueOnce(1003);
-		mocks.send
+		mocks.triggerResolvedBuildInternal
 			.mockResolvedValueOnce(undefined)
 			.mockRejectedValueOnce(new Error("Inngest unavailable"))
 			.mockResolvedValueOnce(undefined);
@@ -302,18 +315,17 @@ describe("GitHub push webhook", () => {
 				{ serviceId: "service-later", status: "queued" },
 			],
 		});
-		expect(mocks.send).toHaveBeenCalledTimes(3);
-		expect(mocks.createBuildTrigger).toHaveBeenNthCalledWith(
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledTimes(3);
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenNthCalledWith(
 			1,
+			"service-deployment-error",
 			expect.objectContaining({
-				serviceId: "service-deployment-error",
 				githubDeploymentId: undefined,
 			}),
-			expect.any(Object),
 		);
-		expect(mocks.createBuildTrigger).toHaveBeenNthCalledWith(
+		expect(mocks.triggerResolvedBuildInternal).toHaveBeenNthCalledWith(
 			3,
-			expect.objectContaining({ serviceId: "service-later" }),
+			"service-later",
 			expect.any(Object),
 		);
 	});

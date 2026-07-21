@@ -148,6 +148,140 @@ describe("VictoriaLogs queries", () => {
 		);
 	});
 
+	it("returns an initial public tail in chronological tuple order", async () => {
+		const { queryPublicServiceLogs } = await loadVictoriaLogs();
+		const urls: URL[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				urls.push(new URL(String(input)));
+				return jsonLinesResponse([
+					storedLogWithId("2026-07-10T00:00:00Z", "extra", eventId("a")),
+					storedLogWithId("2026-07-10T00:00:01Z", "first", eventId("b")),
+					storedLogWithId("2026-07-10T00:00:02Z", "second", eventId("c")),
+				]);
+			}),
+		);
+
+		const result = await queryPublicServiceLogs({
+			serviceId: "service-1",
+			limit: 2,
+			logType: "container",
+		});
+
+		expect(result.logs.map((log) => log._msg)).toEqual(["first", "second"]);
+		expect(result.hasMore).toBe(false);
+		const url = urls[0];
+		expect(url?.searchParams.has("limit")).toBe(false);
+		expect(url?.searchParams.get("timeout")).toBe("4s");
+		expect(url?.searchParams.get("query")).toContain(
+			"| first 3 by (_time desc, event_id desc) | sort by (_time, event_id)",
+		);
+		expect(url?.searchParams.get("query")).toContain("_time:24h");
+	});
+
+	it("pages equal-timestamp public logs by event ID without skips", async () => {
+		const { queryPublicServiceLogs } = await loadVictoriaLogs();
+		const queries: string[] = [];
+		const logs = [
+			storedLogWithId("2026-07-10T00:00:00Z", "a", eventId("a")),
+			storedLogWithId("2026-07-10T00:00:00Z", "b", eventId("b")),
+			storedLogWithId("2026-07-10T00:00:00Z", "c", eventId("c")),
+		];
+		const fetchMock = vi
+			.fn()
+			.mockImplementationOnce(async (input: string | URL | Request) => {
+				queries.push(new URL(String(input)).searchParams.get("query") || "");
+				return jsonLinesResponse(logs);
+			})
+			.mockImplementationOnce(async (input: string | URL | Request) => {
+				queries.push(new URL(String(input)).searchParams.get("query") || "");
+				return jsonLinesResponse([logs[2]]);
+			});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const first = await queryPublicServiceLogs({
+			serviceId: "service-1",
+			limit: 2,
+			logType: "container",
+			cursor: { time: "2026-07-09T23:59:59Z", eventId: "" },
+		});
+		const second = await queryPublicServiceLogs({
+			serviceId: "service-1",
+			limit: 2,
+			logType: "container",
+			cursor: {
+				time: first.logs[1]._time,
+				eventId: first.logs[1].event_id ?? "",
+			},
+		});
+
+		expect(first.logs.map((log) => log._msg)).toEqual(["a", "b"]);
+		expect(first.hasMore).toBe(true);
+		expect(second.logs.map((log) => log._msg)).toEqual(["c"]);
+		expect(second.hasMore).toBe(false);
+		expect(queries[0]).toContain("| first 3 by (_time, event_id)");
+		expect(queries[0]).toContain("_time:>=2026-07-09T23:59:59Z");
+		expect(queries[1]).toContain(
+			`_time:>=2026-07-10T00:00:00Z _time:<=2026-07-10T00:00:00Z event_id:>"${eventId("b")}"`,
+		);
+	});
+
+	it("fails loudly rather than skipping unidentified logs while following", async () => {
+		const { queryPublicServiceLogs, ServiceLogCursorUnavailableError } =
+			await loadVictoriaLogs();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				jsonLinesResponse([
+					storedLog("2026-07-10T00:00:00Z", "legacy agent log"),
+				]),
+			),
+		);
+
+		await expect(
+			queryPublicServiceLogs({
+				serviceId: "service-1",
+				limit: 2,
+				logType: "container",
+				cursor: {
+					time: "2026-07-09T23:59:59Z",
+					eventId: eventId("a"),
+				},
+			}),
+		).rejects.toBeInstanceOf(ServiceLogCursorUnavailableError);
+	});
+
+	it("propagates caller cancellation to the VictoriaLogs request", async () => {
+		const { queryPublicServiceLogs } = await loadVictoriaLogs();
+		const controller = new AbortController();
+		let providerSignal: AbortSignal | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+				providerSignal = init?.signal ?? undefined;
+				return new Promise<Response>((_resolve, reject) => {
+					providerSignal?.addEventListener(
+						"abort",
+						() => reject(new DOMException("Aborted", "AbortError")),
+						{ once: true },
+					);
+				});
+			}),
+		);
+
+		const result = queryPublicServiceLogs({
+			serviceId: "service-1",
+			limit: 2,
+			logType: "container",
+			signal: controller.signal,
+		});
+		controller.abort();
+
+		await expect(result).rejects.toMatchObject({ name: "AbortError" });
+		expect(providerSignal?.aborted).toBe(true);
+	});
+
 	it("queries deployment logs after the supplied cursor", async () => {
 		const { queryLogsByDeployment } = await loadVictoriaLogs();
 		let query = "";
@@ -235,6 +369,14 @@ function storedLog(time: string, message: string) {
 		service_id: "service-1",
 		log_type: "container",
 	};
+}
+
+function eventId(suffix: string) {
+	return `e${"1".padStart(19, "0")}${suffix.repeat(26)}`;
+}
+
+function storedLogWithId(time: string, message: string, id: string) {
+	return { ...storedLog(time, message), event_id: id };
 }
 
 function jsonLinesResponse(logs: unknown[]) {

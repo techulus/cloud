@@ -8,8 +8,26 @@ import type {
 } from "@/lib/service-revision-spec";
 
 const serviceRevisionSpecSchema = z.strictObject({
-	schemaVersion: z.literal(1),
+	schemaVersion: z.literal(2),
 	image: z.string(),
+	source: z.discriminatedUnion("type", [
+		z.strictObject({ type: z.literal("image"), image: z.string() }),
+		z.strictObject({
+			type: z.literal("github"),
+			repository: z.string().url(),
+			repositoryId: z.number().int().positive().nullable(),
+			branch: z.string().min(1),
+			commitSha: z.string().regex(/^[0-9a-f]{40}$/),
+			rootDir: z.string().min(1).nullable(),
+			authentication: z.discriminatedUnion("type", [
+				z.strictObject({ type: z.literal("anonymous") }),
+				z.strictObject({
+					type: z.literal("github_app"),
+					installationId: z.number().int().positive(),
+				}),
+			]),
+		}),
+	]),
 	hostname: z.string(),
 	stateful: z.boolean(),
 	serverless: z.strictObject({
@@ -120,7 +138,7 @@ function portDescription(port: ServiceRevisionPort): string {
 	].join(", ");
 }
 
-/** Compare two immutable v1 specifications without requiring browser APIs. */
+/** Compare two immutable v2 specifications without requiring browser APIs. */
 export function diffServiceRevisionSpecs(
 	previous: ServiceRevisionSpec,
 	current: ServiceRevisionSpec,
@@ -132,6 +150,21 @@ export function diffServiceRevisionSpecs(
 	};
 
 	add("Image", previous.image, current.image);
+	add("Source type", previous.source.type, current.source.type);
+	if (previous.source.type === "github" && current.source.type === "github") {
+		add(
+			"GitHub repository",
+			previous.source.repository,
+			current.source.repository,
+		);
+		add("GitHub branch", previous.source.branch, current.source.branch);
+		add("GitHub commit", previous.source.commitSha, current.source.commitSha);
+		add(
+			"GitHub root directory",
+			previous.source.rootDir ?? "(repository root)",
+			current.source.rootDir ?? "(repository root)",
+		);
+	}
 	add("Hostname", previous.hostname, current.hostname);
 	add(
 		"Service type",

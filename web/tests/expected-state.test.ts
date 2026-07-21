@@ -27,8 +27,9 @@ describe("expected-state pure builders", () => {
 			serviceId,
 			revisionId: `rev_${serviceId}`,
 			specification: {
-				schemaVersion: 1,
+				schemaVersion: 2,
 				image: "nginx",
+				source: { type: "image", image: "nginx" },
 				hostname: serviceId,
 				stateful: false,
 				serverless: {

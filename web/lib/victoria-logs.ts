@@ -1,4 +1,5 @@
 import {
+	DEFAULT_LOG_TIME_RANGE,
 	escapeLogRegex,
 	type LogTimeRange,
 	normalizeLogCursor,
@@ -45,6 +46,7 @@ type LogSearchField = "_msg" | "path" | "method" | "status" | "client_ip";
 export type StoredLog = {
 	_msg: string;
 	_time: string;
+	event_id?: string;
 	deployment_id?: string;
 	service_id: string;
 	server_id?: string;
@@ -58,6 +60,23 @@ export type StoredLog = {
 	size?: number;
 	client_ip?: string;
 };
+
+const publicServiceLogEventIdPattern = /^e[0-9]{19}[a-z]{26}$/;
+
+export function isPublicServiceLogEventId(value: unknown): value is string {
+	return (
+		typeof value === "string" && publicServiceLogEventIdPattern.test(value)
+	);
+}
+
+export class ServiceLogCursorUnavailableError extends Error {
+	constructor() {
+		super(
+			"Log following requires current agents; upgrade agents before continuing",
+		);
+		this.name = "ServiceLogCursorUnavailableError";
+	}
+}
 
 export function isLoggingEnabled(): boolean {
 	return !!(VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL);
@@ -95,19 +114,23 @@ type QueryLogsByServiceOptions = {
 	serverId?: string;
 	search?: string;
 	range?: LogTimeRange;
+	signal?: AbortSignal;
 };
 
-export async function queryLogsByService(
-	options: QueryLogsByServiceOptions,
-): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	const { serviceId, limit, after, before, logType, serverId, search, range } =
-		options;
+export type PublicServiceLogCursor = {
+	time: string;
+	eventId: string;
+};
 
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
+type PublicServiceLogsOptions = Omit<
+	QueryLogsByServiceOptions,
+	"after" | "before"
+> & {
+	cursor?: PublicServiceLogCursor;
+};
 
+function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
+	const { serviceId, logType, serverId, search, range } = options;
 	let query = formatLogSqlExactFilter("service_id", serviceId);
 	if (logType === "http") {
 		query += ` log_type:http`;
@@ -122,14 +145,6 @@ export async function queryLogsByService(
 	if (range) {
 		query += ` _time:${range}`;
 	}
-	const afterCursor = normalizeLogCursor(after);
-	if (afterCursor) {
-		query += ` _time:>${afterCursor}`;
-	}
-	const beforeCursor = normalizeLogCursor(before);
-	if (beforeCursor) {
-		query += ` _time:<${beforeCursor}`;
-	}
 	const searchFilter = formatLogSqlSearchFilter(
 		search,
 		logType === "http"
@@ -139,13 +154,131 @@ export async function queryLogsByService(
 	if (searchFilter) {
 		query += ` ${searchFilter}`;
 	}
+	return query;
+}
+
+function providerSignal(signal?: AbortSignal): AbortSignal {
+	const timeout = AbortSignal.timeout(5_000);
+	return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+async function fetchLogQuery(
+	endpoint: EndpointConfig,
+	query: string,
+	signal?: AbortSignal,
+): Promise<StoredLog[]> {
+	const url = new URL(`${endpoint.url}/select/logsql/query`);
+	url.searchParams.set("query", query);
+	url.searchParams.set("timeout", "4s");
+	const response = await fetch(url.toString(), {
+		...buildFetchOptions(endpoint),
+		signal: providerSignal(signal),
+	});
+
+	if (!response.ok) {
+		throw new Error(
+			`Failed to query logs: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const text = await response.text();
+	return text
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as StoredLog);
+}
+
+function deduplicateIdentifiedLogs(logs: StoredLog[]): StoredLog[] {
+	const seen = new Set<string>();
+	return logs.filter((log) => {
+		if (!log.event_id) return true;
+		if (seen.has(log.event_id)) return false;
+		seen.add(log.event_id);
+		return true;
+	});
+}
+
+export async function queryPublicServiceLogs(
+	options: PublicServiceLogsOptions,
+): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
+	const pageSize = options.limit + 1;
+	let query = buildServiceLogFilter({
+		...options,
+		range: options.range ?? DEFAULT_LOG_TIME_RANGE,
+	});
+	if (options.cursor) {
+		const cursorTime = normalizeLogCursor(options.cursor.time);
+		if (!cursorTime) throw new Error("Invalid public service log cursor time");
+		if (
+			options.cursor.eventId !== "" &&
+			!isPublicServiceLogEventId(options.cursor.eventId)
+		) {
+			throw new Error("Invalid public service log cursor event ID");
+		}
+		if (options.cursor.eventId) {
+			const eventId = JSON.stringify(options.cursor.eventId);
+			query += ` (_time:>${cursorTime} OR (_time:>=${cursorTime} _time:<=${cursorTime} event_id:>${eventId}))`;
+		} else {
+			query += ` _time:>=${cursorTime}`;
+		}
+		query += ` | first ${pageSize} by (_time, event_id)`;
+	} else {
+		query += ` | first ${pageSize} by (_time desc, event_id desc) | sort by (_time, event_id)`;
+	}
+
+	const rawLogs = await fetchLogQuery(endpoint, query, options.signal);
+	if (
+		options.cursor &&
+		rawLogs.some((log) => !isPublicServiceLogEventId(log.event_id))
+	) {
+		throw new ServiceLogCursorUnavailableError();
+	}
+	const logs = deduplicateIdentifiedLogs(rawLogs);
+	const hasMore =
+		options.cursor !== undefined &&
+		(rawLogs.length > options.limit || logs.length > options.limit);
+	if (logs.length > options.limit) {
+		if (options.cursor) logs.pop();
+		else logs.shift();
+	}
+	return { logs, hasMore };
+}
+
+export async function queryLogsByService(
+	options: QueryLogsByServiceOptions,
+): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
+	const { limit, after, before } = options;
+
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
+	let query = buildServiceLogFilter(options);
+	const afterCursor = normalizeLogCursor(after);
+	if (afterCursor) {
+		query += ` _time:>${afterCursor}`;
+	}
+	const beforeCursor = normalizeLogCursor(before);
+	if (beforeCursor) {
+		query += ` _time:<${beforeCursor}`;
+	}
 	query += " | sort by (_time desc)";
 
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
 	url.searchParams.set("limit", String(limit + 1));
 
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
+	const response = await fetch(url.toString(), {
+		...buildFetchOptions(endpoint),
+		signal: providerSignal(options.signal),
+	});
 
 	if (!response.ok) {
 		throw new Error(

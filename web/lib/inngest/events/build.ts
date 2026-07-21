@@ -4,8 +4,9 @@ export type BuildEvents = {
 	"build/trigger": {
 		data: {
 			serviceId: string;
+			serviceRevisionId: string;
+			buildRequestId: string;
 			trigger: "manual" | "scheduled" | "push";
-			githubRepoId?: string;
 			commitSha: string;
 			commitMessage: string;
 			branch: string;
@@ -18,21 +19,23 @@ export type BuildEvents = {
 		data: {
 			buildId: string;
 			serviceId: string;
-			buildGroupId: string | null;
+			serviceRevisionId: string;
+			buildGroupId: string;
 			actor?: ServiceRevisionActor | null;
 		};
 	};
 	"build/cancelled": {
 		data: {
 			buildId: string;
-			buildGroupId: string | null;
+			buildGroupId: string;
 		};
 	};
 	"build/completed": {
 		data: {
 			buildId: string;
 			serviceId: string;
-			buildGroupId: string | null;
+			serviceRevisionId: string;
+			buildGroupId: string;
 			status: "success" | "failed";
 			imageUri?: string;
 			error?: string;
@@ -41,6 +44,7 @@ export type BuildEvents = {
 	"manifest/completed": {
 		data: {
 			serviceId: string;
+			serviceRevisionId: string;
 			buildGroupId: string;
 			imageUri: string;
 		};
@@ -48,6 +52,7 @@ export type BuildEvents = {
 	"manifest/failed": {
 		data: {
 			serviceId: string;
+			serviceRevisionId: string;
 			buildGroupId: string;
 			error: string;
 		};

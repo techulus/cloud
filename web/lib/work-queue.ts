@@ -43,13 +43,17 @@ export async function enqueueWork(
 	serverId: string,
 	type: WorkQueue["type"],
 	payload: Record<string, unknown>,
+	options: { id?: string } = {},
 ) {
-	await db.insert(workQueue).values({
-		id: randomUUID(),
-		serverId,
-		type,
-		payload: JSON.stringify(payload),
-	});
+	await db
+		.insert(workQueue)
+		.values({
+			id: options.id ?? randomUUID(),
+			serverId,
+			type,
+			payload: JSON.stringify(payload),
+		})
+		.onConflictDoNothing({ target: workQueue.id });
 }
 
 export async function completeWorkItemResults(
@@ -247,27 +251,49 @@ async function runWorkItemCompletionSideEffects(
 	try {
 		const payload = JSON.parse(item.payload) as {
 			serviceId?: string;
+			serviceRevisionId?: string;
 			finalImageUri?: string;
 			buildGroupId?: string;
 		};
 
 		if (result.status === "completed") {
-			if (payload.serviceId && payload.finalImageUri) {
+			if (
+				payload.serviceId &&
+				payload.serviceRevisionId &&
+				payload.buildGroupId &&
+				payload.finalImageUri
+			) {
 				await inngest.send(
-					inngestEvents.manifestCompleted.create({
-						serviceId: payload.serviceId,
-						buildGroupId: payload.buildGroupId || "",
-						imageUri: payload.finalImageUri,
-					}),
+					inngestEvents.manifestCompleted.create(
+						{
+							serviceId: payload.serviceId,
+							serviceRevisionId: payload.serviceRevisionId,
+							buildGroupId: payload.buildGroupId,
+							imageUri: payload.finalImageUri,
+						},
+						{
+							id: `manifest-completed-${payload.buildGroupId}`,
+						},
+					),
 				);
 			}
-		} else if (payload.serviceId) {
+		} else if (
+			payload.serviceId &&
+			payload.serviceRevisionId &&
+			payload.buildGroupId
+		) {
 			await inngest.send(
-				inngestEvents.manifestFailed.create({
-					serviceId: payload.serviceId,
-					buildGroupId: payload.buildGroupId || "",
-					error: result.error || "Manifest creation failed",
-				}),
+				inngestEvents.manifestFailed.create(
+					{
+						serviceId: payload.serviceId,
+						serviceRevisionId: payload.serviceRevisionId,
+						buildGroupId: payload.buildGroupId,
+						error: result.error || "Manifest creation failed",
+					},
+					{
+						id: `manifest-failed-${payload.buildGroupId}`,
+					},
+				),
 			);
 		}
 	} catch (error) {

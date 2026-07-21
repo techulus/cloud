@@ -68,7 +68,15 @@ mutable tags such as `latest` or `tip`.
 | `POSTGRES_DB` | PostgreSQL database name |
 | `DATABASE_URL` | Full connection string (e.g., `postgres://user:pass@postgres:5432/db`) |
 | `BETTER_AUTH_SECRET` | Secret key for authentication |
-| `ENCRYPTION_KEY` | 32 bytes as 64-character hex string |
+| `ENCRYPTION_KEY` | 32 bytes as 64-character hex string. Required unless AWS KMS BYOK is configured. |
+| `ENCRYPTION_KMS_KEY_ARN` | Optional full ARN of a symmetric AWS KMS key. Enables BYOK. |
+| `AWS_REGION` | Required with `ENCRYPTION_KMS_KEY_ARN`. |
+
+For KMS BYOK, run the dedicated control plane in AWS with an instance profile or task role. The role needs `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey`. Do not put static AWS credentials in `.env`.
+
+The KMS key can be in another AWS account. For direct cross-account access, grant the control-plane role access in both the customer's KMS key policy and the role's identity policy. Scope cryptographic operations to the exact key and the `techulus:purpose=service-secret-dek` encryption context. The application uses its existing role credentials and does not call STS `AssumeRole`. Compute agents need no KMS permissions. See the installation documentation for policy examples.
+
+On a fresh KMS installation, omit `ENCRYPTION_KEY`. To migrate existing data, configure KMS while retaining `ENCRYPTION_KEY` for one restart. Verify an existing secret, then remove the raw key and restart every web replica. If a wrapped key already exists, a remaining `ENCRYPTION_KEY` must match it or encryption operations fail closed. The wrapped data encryption key is stored in PostgreSQL, so database recovery also requires access to the same KMS key.
 
 ### Victoria Logs
 

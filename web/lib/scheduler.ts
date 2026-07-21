@@ -1,6 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
-import { triggerBuild } from "@/actions/builds";
 import { db } from "@/db";
 import {
 	deployments,
@@ -213,11 +212,13 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 				`[scheduler] triggering scheduled deployment for ${service.name} (sourceType=${service.sourceType})`,
 			);
 
-			if (service.sourceType === "github") {
-				await triggerBuild(service.id, "scheduled");
-			} else {
-				await deployServiceInternal(service.id, { type: "system" });
-			}
+			await deployServiceInternal(
+				service.id,
+				{ type: "system" },
+				{
+					githubTrigger: "scheduled",
+				},
+			);
 
 			console.log(
 				`[scheduler] ${service.name}: deployment triggered successfully`,

@@ -104,4 +104,75 @@ describe("service revision specification", () => {
 			"At least one replica is required",
 		);
 	});
+
+	it("snapshots GitHub source provenance and the reserved runtime image", () => {
+		const spec = buildServiceRevisionSpec(draft(), {
+			image: "registry.test/project/service:revision-1",
+			source: {
+				type: "github",
+				repository: "https://github.com/techulus/cloud",
+				repositoryId: 123,
+				branch: "main",
+				commitSha: "0123456789abcdef0123456789abcdef01234567",
+				rootDir: "web",
+				authentication: { type: "github_app", installationId: 456 },
+			},
+		});
+
+		expect(spec).toMatchObject({
+			schemaVersion: 2,
+			image: "registry.test/project/service:revision-1",
+			source: {
+				type: "github",
+				repository: "https://github.com/techulus/cloud",
+				branch: "main",
+				commitSha: "0123456789abcdef0123456789abcdef01234567",
+				rootDir: "web",
+				authentication: { type: "github_app", installationId: 456 },
+			},
+		});
+	});
+
+	it("allows an unrolled build revision to snapshot zero placements", () => {
+		expect(() =>
+			buildServiceRevisionSpec(draft({ placements: [] }), {
+				allowNoPlacements: true,
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects serverless revisions without a public HTTP port and domain", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: false,
+					domain: null,
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
+		input.service.serverlessEnabled = true;
+
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"Serverless services require a public HTTP port with a domain",
+		);
+	});
+
+	it("accepts serverless revisions with at least one public HTTP port and domain", () => {
+		const input = draft();
+		input.service.serverlessEnabled = true;
+		input.ports[0] = {
+			port: 443,
+			isPublic: true,
+			domain: "api.example.com",
+			protocol: "http",
+			externalPort: null,
+			tlsPassthrough: false,
+		};
+
+		expect(() => buildServiceRevisionSpec(input)).not.toThrow();
+	});
 });

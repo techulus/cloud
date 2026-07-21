@@ -64,7 +64,7 @@ export default async function RolloutPage({
 						href: `/dashboard/projects/${slug}/${env}`,
 					},
 					{
-						label: data.service.name,
+						label: `${data.service.name} (${env})`,
 						href: `/dashboard/projects/${slug}/${env}/services/${serviceId}`,
 					},
 					{

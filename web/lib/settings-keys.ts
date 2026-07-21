@@ -9,7 +9,18 @@ export const SETTING_KEYS = {
 	CONTROL_PLANE_UPDATE_STATE: "control_plane_update_state",
 	CONTROL_PLANE_LAST_UPDATE_CHECK_AT: "control_plane_last_update_check_at",
 	CONTROL_PLANE_UPGRADE_STATE: "control_plane_upgrade_state",
+	KMS_ENCRYPTION_CONFIG: "kms_encryption_config",
 } as const;
+
+export const kmsEncryptionConfigSchema = z.object({
+	version: z.literal(1),
+	keyArn: z.string().min(1),
+	wrappedDekBase64: z.string().min(1),
+	wrappedAt: z.string().datetime(),
+	origin: z.enum(["generated", "migrated"]),
+});
+
+export type KmsEncryptionConfig = z.infer<typeof kmsEncryptionConfigSchema>;
 
 export const DEFAULT_BUILD_TIMEOUT_MINUTES = 30;
 export const DEFAULT_BACKUP_RETENTION_DAYS = 7;

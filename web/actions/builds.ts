@@ -1,12 +1,17 @@
 "use server";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, githubRepos, services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
 import { isFullCommitSha, listGitHubCommits } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import {
+	requeueBuildRevisionInternal,
+	triggerBuildInternal,
+	triggerResolvedBuildInternal,
+} from "@/lib/trigger-build";
 
 export async function cancelBuild(buildId: string) {
 	await requireDeveloperRole();
@@ -27,16 +32,43 @@ export async function cancelBuild(buildId: string) {
 		throw new Error(`Cannot cancel build in ${build.status} status`);
 	}
 
-	await db
+	const cancelled = await db
 		.update(builds)
 		.set({ status: "cancelled", completedAt: new Date() })
-		.where(eq(builds.id, buildId));
+		.where(
+			and(
+				eq(builds.id, buildId),
+				inArray(builds.status, [
+					"pending",
+					"claimed",
+					"cloning",
+					"building",
+					"pushing",
+				]),
+			),
+		)
+		.returning({ id: builds.id })
+		.then((rows) => rows[0]);
+	if (!cancelled) {
+		const current = await db
+			.select({ status: builds.status })
+			.from(builds)
+			.where(eq(builds.id, buildId))
+			.then((rows) => rows[0]);
+		if (!current) throw new Error("Build not found");
+		throw new Error(`Cannot cancel build in ${current.status} status`);
+	}
 
 	await inngest.send(
-		inngestEvents.buildCancelled.create({
-			buildId,
-			buildGroupId: build.buildGroupId,
-		}),
+		inngestEvents.buildCancelled.create(
+			{
+				buildId,
+				buildGroupId: build.buildGroupId,
+			},
+			{
+				id: `build-cancelled-${buildId}`,
+			},
+		),
 	);
 
 	return { success: true };
@@ -64,18 +96,17 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
-	await inngest.send(
-		inngestEvents.buildTrigger.create({
-			serviceId: build.serviceId,
-			trigger: "manual",
-			githubRepoId: build.githubRepoId ?? undefined,
-			commitSha: build.commitSha,
-			commitMessage: build.commitMessage ?? "Retry build",
-			branch: build.branch,
-			author: build.author ?? undefined,
-			actor: { type: "user", userId: session.user.id, name: session.user.name },
-		}),
-	);
+	await requeueBuildRevisionInternal({
+		serviceId: build.serviceId,
+		serviceRevisionId: build.serviceRevisionId,
+		commitMessage: build.commitMessage ?? "Retry build",
+		author: build.author ?? undefined,
+		actor: {
+			type: "user",
+			userId: session.user.id,
+			name: session.user.name,
+		},
+	});
 
 	return { success: true };
 }
@@ -92,65 +123,13 @@ export async function triggerBuild(
 				name: session.user.name,
 			}
 		: ({ type: "system" } as const);
-	const [service] = await db
-		.select()
-		.from(services)
-		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
-
-	if (!service) {
-		throw new Error("Service not found");
-	}
-
-	if (service.sourceType !== "github") {
-		throw new Error("Service is not connected to GitHub");
-	}
-
-	const triggerMessage =
-		trigger === "scheduled"
-			? "Scheduled build trigger"
-			: "Manual build trigger";
-
-	const [githubRepo] = await db
-		.select()
-		.from(githubRepos)
-		.where(eq(githubRepos.serviceId, serviceId));
-
-	if (githubRepo) {
-		await inngest.send(
-			inngestEvents.buildTrigger.create({
-				serviceId,
-				trigger,
-				githubRepoId: githubRepo.id,
-				commitSha: "HEAD",
-				commitMessage: triggerMessage,
-				branch: githubRepo.deployBranch || githubRepo.defaultBranch || "main",
-				actor,
-			}),
-		);
-
-		return { success: true };
-	}
-
-	if (!service.githubRepoUrl) {
-		throw new Error("No GitHub repository linked to this service");
-	}
-
-	await inngest.send(
-		inngestEvents.buildTrigger.create({
-			serviceId,
-			trigger,
-			commitSha: "HEAD",
-			commitMessage: triggerMessage,
-			branch: service.githubBranch || "main",
-			actor,
-		}),
-	);
-
+	await triggerBuildInternal(serviceId, trigger, actor);
 	return { success: true };
 }
 
 export async function triggerManualBuild(serviceId: string, commitSha: string) {
-	await requireDeveloperRole();
+	const session = await requireDeveloperRole();
+	if (!session) throw new Error("Unauthorized");
 	if (!isFullCommitSha(commitSha)) {
 		throw new Error("Commit SHA must be a full 40-character hexadecimal SHA");
 	}
@@ -182,17 +161,19 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 		);
 	}
 
-	await inngest.send(
-		inngestEvents.buildTrigger.create({
-			serviceId,
-			trigger: "manual",
-			githubRepoId: result.githubRepo.id,
-			commitSha: commit.sha.toLowerCase(),
-			commitMessage: commit.message.substring(0, 500),
-			branch,
-			author: commit.author ?? undefined,
-		}),
-	);
+	await triggerResolvedBuildInternal(serviceId, {
+		trigger: "manual",
+		commitSha: commit.sha,
+		commitMessage: commit.message,
+		author: commit.author ?? undefined,
+		expectedRepository: `https://github.com/${result.githubRepo.repoFullName}`,
+		expectedBranch: branch,
+		actor: {
+			type: "user",
+			userId: session.user.id,
+			name: session.user.name,
+		},
+	});
 
 	return { success: true };
 }

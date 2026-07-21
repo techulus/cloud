@@ -697,7 +697,7 @@ export const rollouts = pgTable(
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
-		serviceRevisionId: text("service_revision_id"),
+		serviceRevisionId: text("service_revision_id").notNull(),
 		status: text("status", {
 			enum: ["queued", "in_progress", "completed", "failed", "rolled_back"],
 		})
@@ -718,7 +718,9 @@ export const rollouts = pgTable(
 			table.serviceId,
 			table.createdAt,
 		),
-		index("rollouts_service_revision_id_idx").on(table.serviceRevisionId),
+		uniqueIndex("rollouts_service_revision_id_unique_idx").on(
+			table.serviceRevisionId,
+		),
 		foreignKey({
 			name: "rollouts_service_revision_service_fk",
 			columns: [table.serviceRevisionId, table.serviceId],
@@ -843,12 +845,10 @@ export const builds = pgTable(
 	"builds",
 	{
 		id: text("id").primaryKey(),
-		githubRepoId: text("github_repo_id").references(() => githubRepos.id, {
-			onDelete: "cascade",
-		}),
 		serviceId: text("service_id")
 			.notNull()
 			.references(() => services.id, { onDelete: "cascade" }),
+		serviceRevisionId: text("service_revision_id").notNull(),
 		commitSha: text("commit_sha").notNull(),
 		commitMessage: text("commit_message"),
 		branch: text("branch").notNull(),
@@ -870,8 +870,8 @@ export const builds = pgTable(
 		imageUri: text("image_uri"),
 		error: text("error"),
 		githubDeploymentId: bigint("github_deployment_id", { mode: "number" }),
-		targetPlatform: text("target_platform"),
-		buildGroupId: text("build_group_id"),
+		targetPlatform: text("target_platform").notNull(),
+		buildGroupId: text("build_group_id").notNull(),
 		claimedBy: text("claimed_by").references(() => servers.id, {
 			onDelete: "set null",
 		}),
@@ -884,9 +884,14 @@ export const builds = pgTable(
 	},
 	(table) => [
 		index("builds_service_created_at_idx").on(table.serviceId, table.createdAt),
-		index("builds_github_repo_id_idx").on(table.githubRepoId),
+		index("builds_service_revision_id_idx").on(table.serviceRevisionId),
 		index("builds_build_group_id_idx").on(table.buildGroupId),
 		index("builds_claimed_by_idx").on(table.claimedBy),
+		foreignKey({
+			name: "builds_service_revision_service_fk",
+			columns: [table.serviceRevisionId, table.serviceId],
+			foreignColumns: [serviceRevisions.id, serviceRevisions.serviceId],
+		}).onDelete("cascade"),
 	],
 );
 

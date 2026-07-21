@@ -1,0 +1,293 @@
+---
+title: "Public API reference"
+description: "Automate service configuration, deployments, and observability."
+---
+
+The public API is available under `/api/v1`. The `tc` CLI uses this API directly.
+
+## Authentication
+
+Send your CLI API key in the `X-API-Key` header on every resource request:
+
+```bash
+curl https://cloud.example.com/api/v1/me \
+  --header "X-API-Key: $TECHULUS_API_KEY"
+```
+
+Browser cookies and bearer tokens cannot access resource endpoints. A bearer token or browser session can only create an API key with `POST /api/v1/api-keys`. An API key cannot create another API key.
+
+`tc auth login` completes the device flow, creates an API key, and stores it locally. `tc auth logout` only removes the local credentials.
+
+### Create an API key
+
+```http
+POST /api/v1/api-keys
+Authorization: Bearer <device-access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "CLI workstation",
+  "metadata": {
+    "machineName": "workstation",
+    "platform": "darwin/arm64"
+  }
+}
+```
+
+`name` is required and can contain up to 32 characters. The response contains the secret once:
+
+```json
+{
+  "apiKey": "tcl_...",
+  "keyId": "...",
+  "name": "CLI workstation"
+}
+```
+
+## Authorization and containment
+
+Roles are global for the current Techulus Cloud installation. There are no project-level permissions.
+
+- `reader`, `developer`, and `admin` can read resources.
+- `developer` and `admin` can change configuration and deploy services.
+
+Service URLs always include the project and environment:
+
+```text
+/api/v1/projects/{projectId}/environments/{environmentId}/services/{serviceId}
+```
+
+The API returns `404 NOT_FOUND` when an ID exists but does not belong to the parent IDs in the URL.
+
+## Errors
+
+Every API error uses the same shape:
+
+```json
+{
+  "message": "Resource not found",
+  "code": "NOT_FOUND"
+}
+```
+
+Use `code` for automation. Do not match the human-readable `message`.
+
+## Identity and collections
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/me` | Return the API-key user, role, and key-backed session |
+| `GET` | `/api/v1/projects` | List projects |
+| `GET` | `/api/v1/projects/{projectId}/environments` | List environments in a project |
+| `GET` | `/api/v1/projects/{projectId}/environments/{environmentId}/services` | List services in an environment |
+| `GET` | `/api/v1/projects/{projectId}/environments/{environmentId}/services/{serviceId}` | Return one contained service |
+
+Collection responses use an opaque keyset cursor:
+
+```json
+{
+  "services": [
+    {
+      "id": "...",
+      "name": "web",
+      "hostname": "web",
+      "source": { "type": "image", "image": "nginx:1.27" },
+      "createdAt": "2026-07-20T00:00:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+Pass `nextCursor` as `?cursor=...`. `limit` defaults to 100 and accepts values from 1 through 100.
+
+## Service resources
+
+The paths in this table are relative to the nested service URL.
+
+| Method | Path suffix | Description |
+| --- | --- | --- |
+| `GET`, `PATCH` | `/configuration` | Read safe current/active configuration or atomically apply the managed subset |
+| `GET` | `/status` | Read source, latest build and rollout, and persisted deployments |
+| `POST` | `/deploy` | Queue an image rollout or GitHub build |
+| `GET` | `/logs` | Search logs and optionally long poll |
+| `GET` | `/rollouts` | List rollouts with cursor pagination |
+| `GET` | `/rollouts/{rolloutId}` | Read a contained rollout and its deployments |
+| `GET` | `/rollouts/{rolloutId}/logs` | Search bounded rollout logs |
+| `GET` | `/builds` | List GitHub builds with cursor pagination |
+| `GET` | `/metrics` | Read metrics with explicit provider state |
+| `GET` | `/revisions` | Read a redacted configuration changelog |
+
+Rollout and build collections accept `limit` from 1 through 100 and an opaque `cursor`. Their default limit is 25. Revisions accept their returned opaque `cursor` and return up to 25 items.
+
+## Configuration
+
+`GET /configuration` returns these distinct states:
+
+- `current` is the mutable configuration stored for the service.
+- `active` is the immutable specification used by the active deployment.
+- `activeRevisionId` and `activeDeploymentId` identify that active state.
+- `hasPendingChanges` and `changes` compare current and active state.
+- `management.patchable` and `management.blockers` explain whether the API can safely manage the service.
+
+A GitHub service keeps mutable repository settings in `current.source`. Its `active.source` comes from the immutable service revision used by the active deployment. The public projection includes the snapshotted repository, branch, and root directory. It omits repository IDs and authentication details.
+
+Configuration and revision responses never include secret names, values, or ciphertext.
+
+### Patch configuration
+
+`PATCH /configuration` is atomic. Every field is optional. Omitted fields remain unchanged. An included `ports` array replaces the entire managed port set.
+
+```json
+{
+  "source": {
+    "type": "github",
+    "repository": "https://github.com/techulus/cloud",
+    "branch": "main",
+    "rootDir": "web"
+  },
+  "hostname": "cloud",
+  "ports": [
+    {
+      "containerPort": 3000,
+      "public": true,
+      "domain": "cloud.example.com"
+    }
+  ],
+  "replicas": 1,
+  "healthCheck": {
+    "cmd": "curl --fail http://localhost:3000/health",
+    "interval": 10,
+    "timeout": 5,
+    "retries": 3,
+    "startPeriod": 30
+  },
+  "startCommand": null,
+  "resources": {
+    "cpuCores": 1,
+    "memoryMb": 512
+  }
+}
+```
+
+The API supports these source variants:
+
+```json
+{ "type": "image", "image": "nginx:1.27" }
+```
+
+```json
+{
+  "type": "github",
+  "repository": "https://github.com/owner/repository",
+  "branch": "main",
+  "rootDir": "services/api"
+}
+```
+
+GitHub repository URLs are canonical HTTPS `github.com` URLs. `rootDir` must stay inside the repository. Use `rootDir: null` to clear an existing build root. Source conversion and GitHub repository switching are not supported.
+
+The API only manages stateless services with HTTP ports. Existing volumes, stateful mode, TCP or UDP ports, TLS passthrough, unsupported placement, or invalid resource limits return a conflict with an actionable code. `replicas` must match the existing server placement.
+
+## Deployments and builds
+
+`POST /deploy` uses the persisted service source. It does not apply configuration first.
+
+- An image service queues a rollout.
+- A GitHub service queues a build. A rollout starts after a successful build.
+
+Deploy responses are always HTTP 202:
+
+```json
+{
+  "operation": "rollout",
+  "status": "queued",
+  "rolloutId": "...",
+  "buildId": null
+}
+```
+
+Image migration can return `status: "migration_started"` and `rolloutId: null`. GitHub returns:
+
+```json
+{
+  "operation": "build",
+  "status": "build_queued",
+  "rolloutId": null,
+  "buildId": null
+}
+```
+
+Build records are created asynchronously, so `buildId` is initially `null`. `/status` reports `latestBuild` and `latestRollout` independently.
+
+Each GitHub deployment resolves an exact 40-character commit before it queues build work. The control plane creates an immutable service revision that snapshots the service configuration, source provenance, and reserved artifact identity. Every platform build references that revision and reads its repository, branch, commit, root directory, authentication mode, secrets, and final image URI from the revision.
+
+After all platform images succeed, the control plane creates the final manifest and rolls out that same revision. Configuration changes made while a build is running do not alter its inputs. Retrying a failed or cancelled build creates a new revision with a new artifact identity. It never overwrites an artifact reserved by an earlier revision.
+
+## Logs
+
+Service logs accept these query parameters:
+
+| Parameter | Description |
+| --- | --- |
+| `q` | Literal, case-insensitive message search; maximum 200 characters |
+| `range` | `1h`, `6h`, `24h`, or `7d`; defaults to `24h` |
+| `limit` or `tail` | 1 through 1,000 records; defaults to 100 |
+| `cursor` | Continue after the last emitted record by using the opaque `nextCursor` value |
+| `wait` | Long-poll for 0 through 20 seconds when `cursor` is present |
+
+Round-trip `nextCursor` without decoding or modifying it. When `hasMore` is `true`, request the next page immediately. Otherwise, respect `pollAfterMs` before the next request. Keep the service, `q`, and `range` unchanged while reusing a cursor.
+
+```json
+{
+  "provider": "enabled",
+  "logs": [
+    {
+      "deploymentId": "...",
+      "stream": "stdout",
+      "message": "server started",
+      "timestamp": "2026-07-20T00:00:00.123456789Z"
+    }
+  ],
+  "nextCursor": "eyJ2IjoxLCJ0IjoiLi4uIiwiZSI6Ii4uLiJ9",
+  "hasMore": false,
+  "pollAfterMs": 250
+}
+```
+
+When logging is not configured, the response uses `provider: "disabled"` with an empty list. An upstream failure returns `502 LOG_PROVIDER_ERROR`. Log following returns `409 LOG_CURSOR_UNAVAILABLE` if an agent must be upgraded before it can provide deterministic cursors.
+
+Rollout logs accept `q` and `limit`. Their response includes bounded stage messages for the contained rollout.
+
+## Metrics
+
+Metrics accept `range=1h|6h|24h|7d|30d`.
+
+- A configured provider returns `{ "provider": "enabled", "metrics": ... }`. `metrics` can contain successful empty series.
+- A disabled provider returns `{ "provider": "disabled", "metrics": null }`.
+- An upstream failure returns `502 METRICS_PROVIDER_ERROR`.
+
+The endpoint exposes fixed service metrics. It does not accept raw PromQL.
+
+## CLI commands
+
+The CLI uses the same endpoints documented above:
+
+| Command | Purpose |
+| --- | --- |
+| `tc config` | Show current and active service configuration |
+| `tc projects` | List projects |
+| `tc environments` | List project environments |
+| `tc services` | List environment services |
+| `tc status` | Show build, rollout, and deployment status |
+| `tc logs -q <text>` | Search or follow service logs |
+| `tc rollouts` | List rollout history |
+| `tc rollout <id>` | Show rollout detail |
+| `tc rollout logs <id>` | Fetch rollout logs |
+| `tc builds` | List builds when the source supports them |
+| `tc metrics` | Query service metrics |
+| `tc revisions` | List the redacted revision changelog |
+
+`tc link` stores the selected project, environment, and service IDs in `techulus.yml`. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.

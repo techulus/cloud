@@ -35,6 +35,7 @@ import {
 	markDeploymentRemoved,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
+import { validateDockerImageInternal } from "@/lib/docker-image";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
@@ -56,180 +57,11 @@ import { getZodErrorMessage, slugify } from "@/lib/utils";
 import { enqueueWork } from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
 
-function isValidImageReferencePart(reference: string): boolean {
-	const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
-	const digestPattern = /^[A-Za-z0-9_+.-]+:[0-9a-fA-F]{32,256}$/;
-
-	return (
-		reference === "latest" ||
-		tagPattern.test(reference) ||
-		digestPattern.test(reference)
-	);
-}
-
-function isValidImageNamePart(part: string): boolean {
-	const segmentPattern = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
-	return part.split("/").every((segment) => segmentPattern.test(segment));
-}
-
-function parseImageReference(image: string): {
-	registry: string;
-	namespace: string;
-	repository: string;
-	tag: string | null;
-	digest: string | null;
-} {
-	let registry = "docker.io";
-	let namespace = "library";
-	let repository: string;
-	let tag: string | null = "latest";
-	let digest: string | null = null;
-	let imagePath = image;
-
-	const digestIndex = imagePath.indexOf("@");
-	if (digestIndex !== -1) {
-		digest = imagePath.substring(digestIndex + 1);
-		imagePath = imagePath.substring(0, digestIndex);
-		tag = null;
-	} else {
-		const tagIndex = imagePath.lastIndexOf(":");
-		if (tagIndex !== -1 && !imagePath.substring(tagIndex).includes("/")) {
-			tag = imagePath.substring(tagIndex + 1);
-			imagePath = imagePath.substring(0, tagIndex);
-		}
-	}
-
-	const parts = imagePath.split("/");
-
-	if (parts.length === 1) {
-		repository = parts[0];
-	} else if (parts.length === 2) {
-		if (parts[0].includes(".") || parts[0].includes(":")) {
-			registry = parts[0];
-			repository = parts[1];
-		} else {
-			namespace = parts[0];
-			repository = parts[1];
-		}
-	} else {
-		registry = parts[0];
-		namespace = parts.slice(1, -1).join("/");
-		repository = parts[parts.length - 1];
-	}
-
-	return { registry, namespace, repository, tag, digest };
-}
-
 export async function validateDockerImage(
 	image: string,
 ): Promise<{ valid: boolean; error?: string }> {
 	await requireDeveloperRole();
-	try {
-		const { registry, namespace, repository, tag, digest } =
-			parseImageReference(image);
-		const reference = digest || tag || "latest";
-
-		if (!isValidImageReferencePart(reference)) {
-			return {
-				valid: false,
-				error: "Invalid image tag or digest",
-			};
-		}
-
-		if (!isValidImageNamePart(namespace) || !isValidImageNamePart(repository)) {
-			return {
-				valid: false,
-				error: "Invalid image name",
-			};
-		}
-
-		if (registry === "docker.io") {
-			const repoPath =
-				namespace === "library" ? repository : `${namespace}/${repository}`;
-
-			if (digest) {
-				const tokenUrl = `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${namespace === "library" ? "library/" : ""}${repoPath}:pull`;
-				const tokenResponse = await fetch(tokenUrl);
-				if (!tokenResponse.ok) {
-					return {
-						valid: false,
-						error: "Failed to authenticate with Docker Hub",
-					};
-				}
-				const tokenData = await tokenResponse.json();
-				const token = tokenData.token;
-
-				const manifestUrl = `https://registry-1.docker.io/v2/${namespace === "library" ? "library/" : ""}${repoPath}/manifests/${digest}`;
-				const manifestResponse = await fetch(manifestUrl, {
-					headers: {
-						Authorization: `Bearer ${token}`,
-						Accept:
-							"application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
-					},
-				});
-
-				if (manifestResponse.status === 404) {
-					return {
-						valid: false,
-						error: "Image digest not found on Docker Hub",
-					};
-				}
-				if (!manifestResponse.ok) {
-					return { valid: false, error: "Failed to validate image" };
-				}
-				return { valid: true };
-			}
-
-			const url = `https://hub.docker.com/v2/repositories/${namespace === "library" ? "library/" : ""}${repoPath}/tags/${reference}`;
-			const response = await fetch(url, { method: "GET" });
-
-			if (response.status === 404) {
-				return { valid: false, error: "Image or tag not found on Docker Hub" };
-			}
-			if (!response.ok) {
-				return { valid: false, error: "Failed to validate image" };
-			}
-			return { valid: true };
-		}
-
-		if (registry === "ghcr.io") {
-			const tokenUrl = `https://ghcr.io/token?scope=repository:${namespace}/${repository}:pull`;
-			const tokenResponse = await fetch(tokenUrl);
-			if (!tokenResponse.ok) {
-				return {
-					valid: false,
-					error: "Image not found on GitHub Container Registry",
-				};
-			}
-			const tokenData = await tokenResponse.json();
-			const token = tokenData.token;
-
-			const manifestUrl = `https://ghcr.io/v2/${namespace}/${repository}/manifests/${reference}`;
-			const manifestResponse = await fetch(manifestUrl, {
-				headers: {
-					Authorization: `Bearer ${token}`,
-					Accept:
-						"application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
-				},
-			});
-
-			if (manifestResponse.status === 404) {
-				return {
-					valid: false,
-					error: `Image ${digest ? "digest" : "tag"} not found on GitHub Container Registry`,
-				};
-			}
-			if (!manifestResponse.ok) {
-				return { valid: false, error: "Failed to validate image" };
-			}
-			return { valid: true };
-		}
-
-		return { valid: true };
-	} catch (error) {
-		console.error("Image validation error:", error);
-		return { valid: false, error: "Failed to validate image" };
-	}
+	return validateDockerImageInternal(image);
 }
 
 export async function createProject(name: string) {
@@ -924,11 +756,12 @@ export async function updateServiceGithubRepo(
 export async function deployService(serviceId: string) {
 	const session = await requireDeveloperRole();
 	if (!session) throw new Error("Unauthorized");
-	return deployServiceInternal(serviceId, {
+	const actor = {
 		type: "user",
 		userId: session.user.id,
 		name: session.user.name,
-	});
+	} as const;
+	return deployServiceInternal(serviceId, actor, { githubTrigger: "manual" });
 }
 
 export async function deleteDeployments(serviceId: string) {

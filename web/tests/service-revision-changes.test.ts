@@ -4,8 +4,9 @@ import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function spec(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 1,
+		schemaVersion: 2,
 		image: "app:v1",
+		source: { type: "image", image: "app:v1" },
 		hostname: "app",
 		stateful: false,
 		serverless: {
