@@ -21,11 +21,13 @@ describe("secret encryption", () => {
 
 	it("preserves the AES-256-GCM framing and round trips", async () => {
 		const encrypted = await encryptSecret("top secret");
+		const decrypted = await decryptSecret(encrypted);
 		const framed = Buffer.from(encrypted, "base64");
+		const encryptionKey = await resolveEncryptionKey();
 
 		expect(framed.length).toBe(12 + 16 + Buffer.byteLength("top secret"));
-		expect(await decryptSecret(encrypted)).toBe("top secret");
-		expect((await resolveEncryptionKey()).toString("hex")).toBe(KEY);
+		expect(decrypted).toBe("top secret");
+		expect(encryptionKey.toString("hex")).toBe(KEY);
 	});
 
 	it("fails authentication when the key changes", async () => {

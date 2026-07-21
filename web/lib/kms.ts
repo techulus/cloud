@@ -107,7 +107,8 @@ async function createCandidate(
 			origin: "migrated",
 		};
 	}
-	if (await hasExistingEncryptionState()) {
+	const hasExistingState = await hasExistingEncryptionState();
+	if (hasExistingState) {
 		throw new EncryptionKeyUnavailableError(
 			"ENCRYPTION_KEY is required to migrate existing secrets or registered agents to AWS KMS",
 		);
