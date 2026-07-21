@@ -317,7 +317,36 @@ configure_interactive() {
     done
 
     BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
-    ENCRYPTION_KEY="$(openssl rand -hex 32)"
+
+    echo ""
+    log_info "Secret encryption configuration"
+    echo -e "  ${BOLD}1)${NC} Local encryption key"
+    echo -e "  ${BOLD}2)${NC} Customer-managed AWS KMS key (AWS-hosted control plane)"
+    echo ""
+
+    local encryption_choice
+    while true; do
+        read -rp "$(echo -e "${CYAN}Choose encryption option [1]: ${NC}")" encryption_choice
+        encryption_choice="${encryption_choice:-1}"
+        case "$encryption_choice" in
+            1)
+                ENCRYPTION_SETTINGS="ENCRYPTION_KEY=$(openssl rand -hex 32)"
+                break
+                ;;
+            2)
+                prompt_value ENCRYPTION_KMS_KEY_ARN "Enter the full AWS KMS key ARN"
+                prompt_value AWS_REGION "Enter the AWS region containing the KMS key"
+                ENCRYPTION_SETTINGS="ENCRYPTION_KMS_KEY_ARN=${ENCRYPTION_KMS_KEY_ARN}
+AWS_REGION=${AWS_REGION}"
+                log_info "The web service must have an AWS role granting access to this KMS key."
+                break
+                ;;
+            *)
+                log_warn "Please enter 1 or 2"
+                ;;
+        esac
+    done
+
     VL_USERNAME="admin"
     VL_PASSWORD="$(openssl rand -hex 16)"
     VM_USERNAME="admin"
@@ -367,7 +396,7 @@ ACME_EMAIL=${ACME_EMAIL}
 DATABASE_URL=${DATABASE_URL}
 
 BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-ENCRYPTION_KEY=${ENCRYPTION_KEY}
+${ENCRYPTION_SETTINGS}
 
 VL_USERNAME=${VL_USERNAME}
 VL_PASSWORD=${VL_PASSWORD}

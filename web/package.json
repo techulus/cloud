@@ -15,6 +15,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1070.0",
     "@aws-sdk/client-s3": "^3.968.0",
     "@base-ui/react": "^1.0.0",
     "@better-auth/api-key": "1.6.23",
