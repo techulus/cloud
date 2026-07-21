@@ -93,7 +93,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["npx", "drizzle-kit", "push", "--force"]
+    command: ["npx", "drizzle-kit", "push"]
     restart: on-failure
 
   web:
