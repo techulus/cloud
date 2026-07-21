@@ -2,7 +2,9 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { getEncryptionKeyHex } from "@/lib/crypto";
 import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
+import { EncryptionKeyUnavailableError } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
 import { assignSubnet } from "@/lib/wireguard";
@@ -56,9 +58,11 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
+		const encryptionKey = await getEncryptionKeyHex();
+
 		const { subnetId, wireguardIp } = await assignSubnet();
 
-		await db
+		const claimedServers = await db
 			.update(servers)
 			.set({
 				wireguardPublicKey,
@@ -72,13 +76,28 @@ export async function POST(request: NextRequest) {
 				status: "online",
 				lastHeartbeat: now,
 			})
-			.where(eq(servers.id, server.id));
+			.where(
+				and(
+					eq(servers.id, server.id),
+					eq(servers.agentToken, token),
+					isNull(servers.tokenUsedAt),
+					gt(servers.tokenCreatedAt, expiryThreshold),
+				),
+			)
+			.returning({ id: servers.id });
+
+		if (claimedServers.length === 0) {
+			return NextResponse.json(
+				{ error: "Invalid, expired, or already used token" },
+				{ status: 401 },
+			);
+		}
 
 		return NextResponse.json({
 			serverId: server.id,
 			subnetId,
 			wireguardIp,
-			encryptionKey: process.env.ENCRYPTION_KEY,
+			encryptionKey,
 			loggingEndpoint: process.env.VICTORIA_LOGS_URL ?? null,
 			metricsEndpoint: process.env.VICTORIA_METRICS_URL ?? null,
 			registryUrl: process.env.REGISTRY_URL ?? null,
@@ -88,6 +107,12 @@ export async function POST(request: NextRequest) {
 		});
 	} catch (error) {
 		console.error("Agent registration error:", error);
+		if (error instanceof EncryptionKeyUnavailableError) {
+			return NextResponse.json(
+				{ error: "Secret encryption service unavailable" },
+				{ status: 503 },
+			);
+		}
 		return NextResponse.json(
 			{ error: "Internal server error" },
 			{ status: 500 },

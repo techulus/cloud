@@ -121,7 +121,45 @@ use the common commands below when investigating a self-hosted service.
 | `ACME_EMAIL` | Email for Let's Encrypt certificates |
 | `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`) |
 | `BETTER_AUTH_SECRET` | Secret key for authentication |
-| `ENCRYPTION_KEY` | 32 bytes as a 64-character hex string |
+| `ENCRYPTION_KEY` | 32 bytes as a 64-character hex string. Required unless you configure AWS KMS BYOK. |
+
+### AWS KMS BYOK
+
+AWS KMS BYOK is available for AWS-hosted dedicated control planes. Prefer deploying the control plane in your AWS account. Attach an EC2 instance profile or ECS task role to the web service. Do not store static AWS credentials in `.env`.
+
+Set these variables instead of `ENCRYPTION_KEY` for a new installation:
+
+```env
+ENCRYPTION_KMS_KEY_ARN=arn:aws:kms:us-east-1:123456789012:key/your-key-id
+AWS_REGION=us-east-1
+```
+
+The role needs `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey` for the configured key. Restrict the key policy to the role, the exact key, and this encryption context:
+
+```json
+{
+  "StringEquals": {
+    "kms:EncryptionContext:techulus:purpose": "service-secret-dek"
+  }
+}
+```
+
+The first secret operation generates a 32-byte data encryption key. The control plane stores only its KMS-wrapped form in PostgreSQL. Each web process unwraps and caches the key when first needed. The secret ciphertext format and agent behavior remain unchanged.
+
+To migrate an existing installation:
+
+1. Back up PostgreSQL and `.env`.
+2. Add `ENCRYPTION_KMS_KEY_ARN` and `AWS_REGION`. Keep the existing `ENCRYPTION_KEY` temporarily.
+3. Restart the web service and verify that you can reveal an existing secret and register an agent.
+4. Remove `ENCRYPTION_KEY` and restart all web replicas.
+
+When a wrapped key already exists, any remaining `ENCRYPTION_KEY` must contain the same key bytes. The control plane fails closed if they differ. Do not add a newly generated `ENCRYPTION_KEY` to an existing KMS installation.
+
+Do not change `ENCRYPTION_KMS_KEY_ARN` after initialization. Automatic rotation of the same KMS key is transparent. Moving to another KMS key requires a reviewed rewrap procedure.
+
+If KMS is unavailable, cold-started web processes return a service-unavailable response for secret operations and agent registration. Other control-plane features remain available. Warm processes and existing agents can continue using keys already held in memory or local agent configuration.
+
+Back up both PostgreSQL and continued access to the KMS key. Deleting the KMS key can make a database restore unrecoverable. Disabling the key blocks future unwraps, but it does not erase keys already cached by running processes or registered agents.
 
 ### Control plane deployment
 

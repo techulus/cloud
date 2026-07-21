@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { secrets } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { decryptSecret } from "@/lib/crypto";
+import { EncryptionKeyUnavailableError } from "@/lib/kms";
 
 export async function POST(
 	request: Request,
@@ -28,7 +29,7 @@ export async function POST(
 	}
 
 	try {
-		const decryptedValue = decryptSecret(secret[0].encryptedValue);
+		const decryptedValue = await decryptSecret(secret[0].encryptedValue);
 
 		return new Response(JSON.stringify({ value: decryptedValue }), {
 			status: 200,
@@ -40,7 +41,14 @@ export async function POST(
 				Vary: "Authorization",
 			},
 		});
-	} catch {
+	} catch (error) {
+		if (error instanceof EncryptionKeyUnavailableError) {
+			console.error("Secret encryption key unavailable:", error);
+			return Response.json(
+				{ error: "Secret encryption service unavailable" },
+				{ status: 503 },
+			);
+		}
 		return Response.json(
 			{ error: "Failed to decrypt secret" },
 			{ status: 500 },

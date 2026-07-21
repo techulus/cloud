@@ -47,14 +47,14 @@ export async function createSecretsBatch(
 			if (existingSecret) {
 				toUpdate.push({
 					id: existingSecret.id,
-					encryptedValue: encryptSecret(item.value),
+					encryptedValue: await encryptSecret(item.value),
 				});
 			} else {
 				toInsert.push({
 					id: randomUUID(),
 					serviceId,
 					key: item.key,
-					encryptedValue: encryptSecret(item.value),
+					encryptedValue: await encryptSecret(item.value),
 				});
 			}
 		}
