@@ -189,7 +189,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 
 				<div className="space-y-4 border-t pt-4">
 					<div>
-						<h3 className="text-sm font-medium">HTTP ports</h3>
+						<h3 className="text-sm font-medium">HTTP endpoints</h3>
 						<p className="text-sm text-muted-foreground">
 							Expose HTTP services with an automatic or custom domain.
 						</p>
@@ -289,7 +289,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 
 				<div className="space-y-4 border-t pt-4">
 					<div>
-						<h3 className="text-sm font-medium">TCP/UDP ports</h3>
+						<h3 className="text-sm font-medium">TCP/UDP endpoints</h3>
 					</div>
 					<TCPUDPPorts
 						service={service}
