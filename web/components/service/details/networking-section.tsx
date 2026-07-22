@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, HelpCircle, Lock, Plus, X } from "lucide-react";
+import { Check, Copy, Globe, HelpCircle, Lock, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { memo, useState } from "react";
 import { toast } from "sonner";
@@ -68,6 +68,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 		autoSubdomainDomain ? "auto" : "custom",
 	);
 	const [hostnameOverride, setHostnameOverride] = useState<string | null>(null);
+	const [privateEndpointCopied, setPrivateEndpointCopied] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 
 	const hostname = hostnameOverride || initialHostname;
@@ -89,6 +90,12 @@ export const NetworkingSection = memo(function NetworkingSection({
 		setHostnameOverride(result.hostname);
 		onUpdate();
 		router.refresh();
+	};
+
+	const copyPrivateEndpoint = async () => {
+		await navigator.clipboard.writeText(`${hostname}.internal`);
+		setPrivateEndpointCopied(true);
+		setTimeout(() => setPrivateEndpointCopied(false), 2000);
 	};
 
 	const selectedDomain = domainMode === "auto" ? autoDomain : domain;
@@ -188,6 +195,19 @@ export const NetworkingSection = memo(function NetworkingSection({
 							textClassName="text-sm font-mono"
 						/>
 						<span className="text-muted-foreground">.internal</span>
+						<Button
+							variant="ghost"
+							size="sm"
+							aria-label="Copy private endpoint"
+							className="h-6 px-2"
+							onClick={copyPrivateEndpoint}
+						>
+							{privateEndpointCopied ? (
+								<Check className="h-3 w-3" />
+							) : (
+								<Copy className="h-3 w-3" />
+							)}
+						</Button>
 					</div>
 				</div>
 
