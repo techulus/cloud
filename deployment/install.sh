@@ -267,7 +267,7 @@ configure_interactive() {
     log_header "Configuration"
 
     prompt_value ROOT_DOMAIN "Enter your root domain (e.g. cloud.example.com)"
-    read -rp "$(echo -e "${CYAN}Optional edge hostname for TCP/UDP and Edge DNS (leave blank to skip): ${NC}")" EDGE_DOMAIN
+    read -rp "$(echo -e "${CYAN}Optional canonical hostname for edge traffic (leave blank to skip): ${NC}")" EDGE_DOMAIN
 
     local public_ip
     public_ip=$(detect_public_ip)

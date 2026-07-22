@@ -3,23 +3,13 @@
 import { revalidatePath } from "next/cache";
 import isEmail from "validator/es/lib/isEmail";
 import { ZodError } from "zod";
-import { getSetting, setSetting } from "@/db/queries";
+import { setSetting } from "@/db/queries";
 import { requireAdminRole, requireAuth } from "@/lib/auth";
-import { validateBunnyConnection } from "@/lib/bunny-dns";
 import {
 	checkAndPersistControlPlaneUpdate,
 	refreshControlPlaneAboutState,
 	startControlPlaneUpgrade,
 } from "@/lib/control-plane-updates";
-import { decryptSecret, encryptSecret } from "@/lib/crypto";
-import {
-	type EdgeDnsConfig,
-	type EdgeDnsConfigInput,
-	type EdgeDnsSyncState,
-	edgeDnsConfigInputSchema,
-	getEffectiveEdgeDomain,
-} from "@/lib/edge-dns";
-import { enqueueEdgeDnsReconciliation } from "@/lib/edge-dns-service";
 import { buildTimeoutSchema } from "@/lib/schemas";
 import {
 	type EmailAlertsConfig,
@@ -70,106 +60,11 @@ export async function updateAcmeEmail(email: string) {
 	return { success: true };
 }
 
-async function resolveEdgeAccessKey(inputKey: string) {
-	if (inputKey) return inputKey;
-	const existing = await getSetting<EdgeDnsConfig>(
-		SETTING_KEYS.EDGE_DNS_CONFIG,
-	);
-	if (!existing?.encryptedAccessKey)
-		throw new Error("Bunny API key is required");
-	return decryptSecret(existing.encryptedAccessKey);
-}
-
-export async function testEdgeDnsConnection(input: EdgeDnsConfigInput) {
+export async function updateProxyDomain(domain: string) {
 	await requireAdminSession();
-	const validated = edgeDnsConfigInputSchema.parse(input);
-	const fallback = await getSetting<string>(SETTING_KEYS.PROXY_DOMAIN);
-	const hostname = getEffectiveEdgeDomain(fallback).hostname;
-	if (!hostname)
-		throw new Error("Configure EDGE_DOMAIN before enabling Edge DNS");
-	const validation = await validateBunnyConnection(
-		validated.zoneId,
-		await resolveEdgeAccessKey(validated.accessKey),
-		hostname,
-	);
-	return {
-		zoneDomain: validation.zoneDomain,
-		recordName: validation.name,
-		existingARecordCount: validation.exactARecords.length,
-	};
-}
-
-export async function saveEdgeDnsConfig(input: EdgeDnsConfigInput) {
-	await requireAdminSession();
-	const validated = edgeDnsConfigInputSchema.parse(input);
-	const existing = await getSetting<EdgeDnsConfig>(
-		SETTING_KEYS.EDGE_DNS_CONFIG,
-	);
-	if (!validated.enabled) {
-		if (existing) {
-			await setSetting(SETTING_KEYS.EDGE_DNS_CONFIG, {
-				...existing,
-				enabled: false,
-			} satisfies EdgeDnsConfig);
-		}
-		revalidatePath("/dashboard/settings");
-		return { success: true };
-	}
-	const key = await resolveEdgeAccessKey(validated.accessKey);
-	const fallback = await getSetting<string>(SETTING_KEYS.PROXY_DOMAIN);
-	const hostname = getEffectiveEdgeDomain(fallback).hostname;
-	if (!hostname)
-		throw new Error("Configure EDGE_DOMAIN before enabling Edge DNS");
-	const scopeChanged =
-		existing?.zoneId !== validated.zoneId ||
-		existing?.claimedHostname !== hostname;
-	if (scopeChanged && !validated.confirmScope) {
-		throw new Error(
-			"Confirm the managed DNS scope before enabling synchronization",
-		);
-	}
-	const validation = await validateBunnyConnection(
-		validated.zoneId,
-		key,
-		hostname,
-	);
-	await setSetting(SETTING_KEYS.EDGE_DNS_CONFIG, {
-		enabled: true,
-		zoneId: validated.zoneId,
-		provider: "bunny",
-		encryptedAccessKey: await encryptSecret(key),
-		claimedHostname: hostname,
-	} satisfies EdgeDnsConfig);
-	if (scopeChanged) {
-		const previous = await getSetting<EdgeDnsSyncState>(
-			SETTING_KEYS.EDGE_DNS_SYNC_STATE,
-		);
-		await setSetting(SETTING_KEYS.EDGE_DNS_SYNC_STATE, {
-			status: "idle",
-			desiredTargets: [],
-			currentTargets: validation.exactARecords.flatMap(
-				(record) => record.Value ?? [],
-			),
-			providerRecordIds: validation.exactARecords.map((record) =>
-				String(record.Id),
-			),
-			message: validation.exactARecords.length
-				? `Adopted ${validation.exactARecords.length} existing A record(s)${existing ? "; the previous managed scope was left unchanged" : ""}`
-				: `Claimed an empty DNS record set${existing ? "; the previous managed scope was left unchanged" : ""}`,
-			lastAttemptAt: previous?.lastAttemptAt,
-			lastSuccessAt: previous?.lastSuccessAt,
-		} satisfies EdgeDnsSyncState);
-	}
-	await enqueueEdgeDnsReconciliation("config-saved").catch((error) => {
-		console.error("Failed to enqueue Edge DNS reconciliation:", error);
-	});
+	const trimmed = domain.trim();
+	await setSetting(SETTING_KEYS.PROXY_DOMAIN, trimmed || null);
 	revalidatePath("/dashboard/settings");
-	return { success: true };
-}
-
-export async function syncEdgeDnsNow() {
-	await requireAdminSession();
-	await enqueueEdgeDnsReconciliation("manual");
 	return { success: true };
 }
 

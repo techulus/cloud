@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => query),
 			set: vi.fn(() => query),
 			where: vi.fn(() => query),
-			limit: vi.fn(() => query),
 			returning: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
@@ -155,17 +154,14 @@ describe("agent status serverless attachment", () => {
 
 describe("agent status deployment cleanup", () => {
 	it("deletes a removed containerless deployment missing from the report", async () => {
-		mocks.selectResults.push(
-			[],
-			[
-				{
-					id: "deployment_removed",
-					containerId: null,
-					runtimeDesiredState: "removed",
-					observedPhase: "sleeping",
-				},
-			],
-		);
+		mocks.selectResults.push([
+			{
+				id: "deployment_removed",
+				containerId: null,
+				runtimeDesiredState: "removed",
+				observedPhase: "sleeping",
+			},
+		]);
 
 		await applyStatusReport("server_1", { containers: [] });
 
@@ -184,7 +180,7 @@ describe("agent status deployment cleanup", () => {
 			observedPhase: "sleeping",
 			rolloutId: "rollout_1",
 		};
-		mocks.selectResults.push([], [deployment], [deployment]);
+		mocks.selectResults.push([deployment], [deployment]);
 
 		await applyStatusReport("server_1", {
 			containers: [

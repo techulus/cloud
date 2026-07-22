@@ -3,7 +3,6 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
-import { enqueueEdgeDnsReconciliation } from "@/lib/edge-dns-service";
 import { EncryptionKeyUnavailableError, resolveEncryptionKey } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
@@ -92,11 +91,6 @@ export async function POST(request: NextRequest) {
 				{ error: "Invalid, expired, or already used token" },
 				{ status: 401 },
 			);
-		}
-		if (isProxy === true) {
-			await enqueueEdgeDnsReconciliation("proxy-registered").catch((error) => {
-				console.error("Failed to enqueue Edge DNS reconciliation:", error);
-			});
 		}
 
 		return NextResponse.json({

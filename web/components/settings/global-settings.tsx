@@ -25,9 +25,9 @@ import {
 import { LocalDate } from "@/components/core/local-date";
 import { ApiKeySettings } from "@/components/settings/api-key-settings";
 import {
-	type EdgeDnsOverview,
-	EdgeDnsSettings,
-} from "@/components/settings/edge-dns-settings";
+	type EdgeDomainOverview,
+	EdgeDomainSettings,
+} from "@/components/settings/edge-domain-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { MemberSettings } from "@/components/settings/member-settings";
 import { TwoFactorSettings } from "@/components/settings/two-factor-settings";
@@ -86,7 +86,7 @@ type Props = {
 		buildServerIds: string[];
 		buildTimeoutMinutes: number;
 		acmeEmail: string | null;
-		edgeDns: EdgeDnsOverview;
+		edgeDomain: EdgeDomainOverview;
 		emailAlertsConfig: EmailAlertsConfig | null;
 		controlPlaneUpdateState: ControlPlaneUpdateState | null;
 		controlPlaneUpgradeState: ControlPlaneUpgradeState | null;
@@ -435,7 +435,10 @@ export function GlobalSettings({
 					</div>
 				</div>
 
-				<EdgeDnsSettings initial={initialSettings.edgeDns} />
+				<EdgeDomainSettings
+					initial={initialSettings.edgeDomain}
+					servers={servers}
+				/>
 			</TabsContent>
 
 			<TabsContent value="email" className="space-y-6 pt-4">

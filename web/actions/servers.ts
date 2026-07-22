@@ -8,7 +8,6 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { enqueueAgentUpgrade } from "@/lib/agent-upgrades";
 import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
-import { enqueueEdgeDnsReconciliation } from "@/lib/edge-dns-service";
 import { nameSchema } from "@/lib/schemas";
 import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage } from "@/lib/utils";
@@ -56,15 +55,7 @@ export async function deleteServer(
 ) {
 	const session = await requireDeveloperRole();
 	await verifyDeleteConfirmation(session, confirmation, "server");
-	const deleted = await db
-		.delete(servers)
-		.where(eq(servers.id, id))
-		.returning({ isProxy: servers.isProxy });
-	if (deleted[0]?.isProxy) {
-		await enqueueEdgeDnsReconciliation("proxy-deleted").catch((error) => {
-			console.error("Failed to enqueue Edge DNS reconciliation:", error);
-		});
-	}
+	await db.delete(servers).where(eq(servers.id, id));
 }
 
 export async function updateServerName(id: string, name: string) {
