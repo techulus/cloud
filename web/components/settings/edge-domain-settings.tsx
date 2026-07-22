@@ -1,5 +1,13 @@
+"use client";
+
 import { Network } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
+import { updateEdgeDomain } from "@/actions/settings";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import type { Server } from "@/db/types";
@@ -15,12 +23,32 @@ export function EdgeDomainSettings({
 	initial: EdgeDomainOverview;
 	servers: Server[];
 }) {
+	const router = useRouter();
+	const [domain, setDomain] = useState(initial.hostname ?? "");
+	const [isSaving, setIsSaving] = useState(false);
 	const proxies = servers.filter((server) => server.isProxy);
 	const ipv4Targets = [
 		...new Set(
 			proxies.flatMap((server) => (server.publicIp ? [server.publicIp] : [])),
 		),
 	].sort();
+	const hasChanges = domain !== (initial.hostname ?? "");
+
+	const handleSave = async () => {
+		setIsSaving(true);
+		try {
+			const result = await updateEdgeDomain(domain);
+			setDomain(result.hostname);
+			toast.success("Edge domain updated");
+			router.refresh();
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to update edge domain",
+			);
+		} finally {
+			setIsSaving(false);
+		}
+	};
 
 	return (
 		<div className="rounded-lg border">
@@ -34,16 +62,25 @@ export function EdgeDomainSettings({
 			</Item>
 
 			<div className="p-4 space-y-5">
-				<div>
-					<Label>Canonical hostname</Label>
-					<div className="font-mono text-sm mt-1">
-						{initial.hostname ?? "Not configured"}
-					</div>
+				<div className="space-y-2">
+					<Label htmlFor="edge-domain">Canonical hostname</Label>
+					<Input
+						id="edge-domain"
+						value={domain}
+						onChange={(event) => setDomain(event.target.value)}
+						placeholder="edge.example.com"
+					/>
 					<p className="text-xs text-muted-foreground mt-1">
-						{initial.hostname
-							? "Configured with EDGE_DOMAIN for HTTP/HTTPS and direct TCP/UDP connections."
-							: "Set EDGE_DOMAIN on the control plane to configure HTTP/HTTPS and direct TCP/UDP endpoints."}
+						Used for HTTP/HTTPS custom domains and direct TCP/UDP connection
+						strings.
 					</p>
+					{hasChanges && (
+						<div className="pt-2">
+							<Button onClick={handleSave} disabled={isSaving} size="sm">
+								{isSaving ? "Saving..." : "Save"}
+							</Button>
+						</div>
+					)}
 				</div>
 
 				<div>
@@ -72,7 +109,7 @@ export function EdgeDomainSettings({
 							<p className="px-3 py-2 text-sm text-muted-foreground">
 								{initial.hostname
 									? "No proxy IPv4 addresses are available."
-									: "Configure EDGE_DOMAIN to see the required records."}
+									: "Configure an edge domain to see the required records."}
 							</p>
 						)}
 					</div>
@@ -83,12 +120,12 @@ export function EdgeDomainSettings({
 					<ul className="mt-2 space-y-2 text-sm text-muted-foreground">
 						<li>
 							For subdomains, create a <code>CNAME</code> pointing to{" "}
-							<code>{initial.hostname ?? "your EDGE_DOMAIN"}</code>.
+							<code>{initial.hostname ?? "your edge domain"}</code>.
 						</li>
 						<li>
 							For apex domains, create an <code>ALIAS</code> or{" "}
 							<code>ANAME</code> pointing to{" "}
-							<code>{initial.hostname ?? "your EDGE_DOMAIN"}</code>.
+							<code>{initial.hostname ?? "your edge domain"}</code>.
 						</li>
 					</ul>
 				</div>

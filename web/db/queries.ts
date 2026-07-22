@@ -14,7 +14,6 @@ import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
 } from "@/lib/control-plane-updates";
-import { getEdgeDomain } from "@/lib/edge-domain";
 import type {
 	EmailAlertsConfig,
 	SmtpConfig,
@@ -288,6 +287,7 @@ export async function getGlobalSettings() {
 		buildServers,
 		buildTimeout,
 		acmeEmail,
+		edgeDomain,
 		emailAlertsConfig,
 		controlPlaneUpdateState,
 		controlPlaneUpgradeState,
@@ -295,6 +295,7 @@ export async function getGlobalSettings() {
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<number>("build_timeout_minutes"),
 		getSetting<string>("acme_email"),
+		getSetting<string>("edge_domain"),
 		getSetting<EmailAlertsConfig>("email_alerts_config"),
 		getSetting<ControlPlaneUpdateState>("control_plane_update_state"),
 		getSetting<ControlPlaneUpgradeState>("control_plane_upgrade_state"),
@@ -304,7 +305,7 @@ export async function getGlobalSettings() {
 		buildTimeoutMinutes: buildTimeout ?? 30,
 		acmeEmail: acmeEmail ?? null,
 		edgeDomain: {
-			hostname: getEdgeDomain(),
+			hostname: edgeDomain ?? null,
 		},
 		emailAlertsConfig: emailAlertsConfig ?? null,
 		controlPlaneUpdateState: controlPlaneUpdateState ?? null,

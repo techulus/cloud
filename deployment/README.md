@@ -75,17 +75,15 @@ INNGEST_EVENT_KEY=<your-event-key>
 
 ### Edge Domain
 
-Set `EDGE_DOMAIN` to the canonical hostname used for all public edge traffic,
-including HTTP/HTTPS custom domains and direct TCP/UDP connection strings:
-
-```env
-EDGE_DOMAIN=edge.example.com
-```
+After signing in as an admin, configure **Edge Domain** under
+**Settings → Infrastructure**. This is the canonical hostname used for all
+public edge traffic, including HTTP/HTTPS custom domains and direct TCP/UDP
+connection strings.
 
 Configure this hostname in your DNS provider to resolve to every proxy server's
 public IPv4 address. You can use direct `A` records or your own DNS routing,
 load-balancing, or GeoDNS policy. Custom HTTP/HTTPS subdomains can use a `CNAME`
-to `EDGE_DOMAIN`; apex domains can use `ALIAS` or `ANAME` where supported.
+to the edge domain; apex domains can use `ALIAS` or `ANAME` where supported.
 
 Techulus Cloud only displays the required DNS configuration. It does not create
 or update DNS records.

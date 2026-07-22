@@ -60,6 +60,14 @@ export async function updateAcmeEmail(email: string) {
 	return { success: true };
 }
 
+export async function updateEdgeDomain(domain: string) {
+	await requireAdminSession();
+	const hostname = domain.trim().replace(/\.$/, "");
+	await setSetting(SETTING_KEYS.EDGE_DOMAIN, hostname || null);
+	revalidatePath("/dashboard/settings");
+	return { success: true, hostname };
+}
+
 export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
 	await requireAdminSession();
 	try {

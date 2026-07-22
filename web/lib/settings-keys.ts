@@ -4,6 +4,7 @@ export const SETTING_KEYS = {
 	SERVERS_ALLOWED_FOR_BUILDS: "servers_allowed_for_builds",
 	BUILD_TIMEOUT_MINUTES: "build_timeout_minutes",
 	ACME_EMAIL: "acme_email",
+	EDGE_DOMAIN: "edge_domain",
 	EMAIL_ALERTS_CONFIG: "email_alerts_config",
 	CONTROL_PLANE_UPDATE_STATE: "control_plane_update_state",
 	CONTROL_PLANE_LAST_UPDATE_CHECK_AT: "control_plane_last_update_check_at",

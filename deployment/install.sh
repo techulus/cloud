@@ -267,7 +267,6 @@ configure_interactive() {
     log_header "Configuration"
 
     prompt_value ROOT_DOMAIN "Enter your root domain (e.g. cloud.example.com)"
-    read -rp "$(echo -e "${CYAN}Optional hostname for HTTP/HTTPS and TCP/UDP edge traffic (leave blank to skip): ${NC}")" EDGE_DOMAIN
 
     local public_ip
     public_ip=$(detect_public_ip)
@@ -392,7 +391,6 @@ write_env_file() {
 
     cat > "${DEPLOY_DIR}/.env" <<EOF
 ROOT_DOMAIN=${ROOT_DOMAIN}
-EDGE_DOMAIN=${EDGE_DOMAIN:-}
 ACME_EMAIL=${ACME_EMAIL}
 
 DATABASE_URL=${DATABASE_URL}

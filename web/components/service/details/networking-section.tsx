@@ -49,7 +49,8 @@ function DnsInstructionsModal({ edgeDomain }: { edgeDomain: string | null }) {
 						</div>
 					) : (
 						<p className="text-sm text-muted-foreground">
-							Set EDGE_DOMAIN on the control plane to view DNS instructions.
+							Configure the Edge Domain in Infrastructure settings to view DNS
+							instructions.
 						</p>
 					)}
 				</div>

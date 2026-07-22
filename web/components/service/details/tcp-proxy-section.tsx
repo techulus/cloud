@@ -167,8 +167,8 @@ export const TCPUDPPorts = memo(function TCPUDPPorts({
 
 			{!edgeDomain && (
 				<p className="text-xs text-amber-600">
-					EDGE_DOMAIN is not configured on the control plane. Set it to show
-					connection strings.
+					The Edge Domain is not configured. Set it in Infrastructure settings
+					to show connection strings.
 				</p>
 			)}
 

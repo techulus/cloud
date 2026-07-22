@@ -78,7 +78,6 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
       - APP_URL=https://${ROOT_DOMAIN}
-      - EDGE_DOMAIN=${EDGE_DOMAIN:-}
       - VICTORIA_LOGS_URL=https://${VL_USERNAME}:${VL_PASSWORD}@logs.${ROOT_DOMAIN}
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
@@ -107,7 +106,6 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - BETTER_AUTH_URL=https://${ROOT_DOMAIN}
       - APP_URL=https://${ROOT_DOMAIN}
-      - EDGE_DOMAIN=${EDGE_DOMAIN:-}
       - VICTORIA_LOGS_URL=https://${VL_USERNAME}:${VL_PASSWORD}@logs.${ROOT_DOMAIN}
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
