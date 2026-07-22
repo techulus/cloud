@@ -63,7 +63,7 @@ export function AgentUpdateNudge({
 
 	return (
 		<>
-			<div className="mx-auto max-w-5xl rounded-b-lg border border-amber-500/40 border-t-0 bg-amber-500/5">
+			<div className="mx-auto mt-2 max-w-5xl rounded-lg border border-amber-500/40 bg-amber-500/5 lg:mt-0 lg:rounded-t-none lg:border-t-0">
 				<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
 					<div className="flex items-center gap-2">
 						<span className="size-2 rounded-full bg-amber-500" />
