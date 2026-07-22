@@ -168,16 +168,23 @@ export const NetworkingSection = memo(function NetworkingSection({
 			summaryMuted={service.ports.length === 0}
 		>
 			<div className="space-y-6">
-				<div className="flex items-center gap-1 text-sm">
-					<Lock className="h-4 w-4 text-muted-foreground" />
-					<span className="text-muted-foreground">Private endpoint:</span>
-					<EditableText
-						value={hostname}
-						onChange={handleHostnameChange}
-						label="hostname"
-						textClassName="text-sm font-mono"
-					/>
-					<span className="text-muted-foreground">.internal</span>
+				<div className="space-y-4">
+					<div>
+						<h3 className="text-sm font-medium">Private endpoint</h3>
+						<p className="text-sm text-muted-foreground">
+							Reach this service privately from other services in the cluster.
+						</p>
+					</div>
+					<div className="flex items-center gap-1 text-sm">
+						<Lock className="h-4 w-4 text-muted-foreground" />
+						<EditableText
+							value={hostname}
+							onChange={handleHostnameChange}
+							label="hostname"
+							textClassName="text-sm font-mono"
+						/>
+						<span className="text-muted-foreground">.internal</span>
+					</div>
 				</div>
 
 				<div className="space-y-4 border-t pt-4">
