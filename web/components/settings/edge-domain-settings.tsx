@@ -6,7 +6,6 @@ import type { Server } from "@/db/types";
 
 export type EdgeDomainOverview = {
 	hostname: string | null;
-	hostnameSource: "env" | "fallback" | "unconfigured";
 };
 
 export function EdgeDomainSettings({
@@ -41,11 +40,9 @@ export function EdgeDomainSettings({
 						{initial.hostname ?? "Not configured"}
 					</div>
 					<p className="text-xs text-muted-foreground mt-1">
-						{initial.hostnameSource === "env"
+						{initial.hostname
 							? "Configured with EDGE_DOMAIN."
-							: initial.hostnameSource === "fallback"
-								? "Using the legacy Proxy Domain setting. Configure EDGE_DOMAIN to replace it."
-								: "Set EDGE_DOMAIN on the control plane to configure the canonical hostname."}
+							: "Set EDGE_DOMAIN on the control plane to configure the canonical hostname."}
 					</p>
 				</div>
 
