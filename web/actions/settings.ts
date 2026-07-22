@@ -60,14 +60,6 @@ export async function updateAcmeEmail(email: string) {
 	return { success: true };
 }
 
-export async function updateProxyDomain(domain: string) {
-	await requireAdminSession();
-	const trimmed = domain.trim();
-	await setSetting(SETTING_KEYS.PROXY_DOMAIN, trimmed || null);
-	revalidatePath("/dashboard/settings");
-	return { success: true };
-}
-
 export async function updateEmailAlertsConfig(config: EmailAlertsConfig) {
 	await requireAdminSession();
 	try {

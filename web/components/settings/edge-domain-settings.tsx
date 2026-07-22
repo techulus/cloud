@@ -41,8 +41,8 @@ export function EdgeDomainSettings({
 					</div>
 					<p className="text-xs text-muted-foreground mt-1">
 						{initial.hostname
-							? "Configured with EDGE_DOMAIN."
-							: "Set EDGE_DOMAIN on the control plane to configure the canonical hostname."}
+							? "Configured with EDGE_DOMAIN for HTTP/HTTPS and direct TCP/UDP connections."
+							: "Set EDGE_DOMAIN on the control plane to configure HTTP/HTTPS and direct TCP/UDP endpoints."}
 					</p>
 				</div>
 

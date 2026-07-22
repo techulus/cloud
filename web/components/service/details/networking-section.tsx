@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { slugify } from "@/lib/utils";
 
-function DnsInstructionsModal() {
+function DnsInstructionsModal({ edgeDomain }: { edgeDomain: string | null }) {
 	return (
 		<Dialog>
 			<DialogTrigger
@@ -36,12 +36,22 @@ function DnsInstructionsModal() {
 					<DialogTitle>DNS Configuration</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-4">
-					<p className="text-sm text-muted-foreground">
-						Point your domain A record to your proxy servers.
-					</p>
-					<div className="text-xs text-muted-foreground">
-						<p>Type: A | TTL: 300</p>
-					</div>
+					{edgeDomain ? (
+						<div className="space-y-2 text-sm text-muted-foreground">
+							<p>
+								For subdomains, create a CNAME record pointing to{" "}
+								<code>{edgeDomain}</code>.
+							</p>
+							<p>
+								For apex domains, use an ALIAS or ANAME record pointing to{" "}
+								<code>{edgeDomain}</code>.
+							</p>
+						</div>
+					) : (
+						<p className="text-sm text-muted-foreground">
+							Set EDGE_DOMAIN on the control plane to view DNS instructions.
+						</p>
+					)}
 				</div>
 			</DialogContent>
 		</Dialog>
@@ -50,12 +60,12 @@ function DnsInstructionsModal() {
 
 export const NetworkingSection = memo(function NetworkingSection({
 	service,
-	proxyDomain,
+	edgeDomain,
 	autoSubdomainDomain,
 	onUpdate,
 }: {
 	service: Service;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	autoSubdomainDomain: string | null;
 	onUpdate: () => void;
 }) {
@@ -307,7 +317,9 @@ export const NetworkingSection = memo(function NetworkingSection({
 								className="flex-1 min-w-32"
 							/>
 						)}
-						{domainMode === "custom" && <DnsInstructionsModal />}
+						{domainMode === "custom" && (
+							<DnsInstructionsModal edgeDomain={edgeDomain} />
+						)}
 						<Button
 							size="sm"
 							variant="outline"
@@ -326,7 +338,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 					</div>
 					<TCPUDPPorts
 						service={service}
-						proxyDomain={proxyDomain}
+						edgeDomain={edgeDomain}
 						onUpdate={onUpdate}
 					/>
 				</div>

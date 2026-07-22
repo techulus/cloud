@@ -288,7 +288,6 @@ export async function getGlobalSettings() {
 		buildServers,
 		buildTimeout,
 		acmeEmail,
-		proxyDomain,
 		emailAlertsConfig,
 		controlPlaneUpdateState,
 		controlPlaneUpgradeState,
@@ -296,7 +295,6 @@ export async function getGlobalSettings() {
 		getSetting<string[]>("servers_allowed_for_builds"),
 		getSetting<number>("build_timeout_minutes"),
 		getSetting<string>("acme_email"),
-		getSetting<string>("proxy_domain"),
 		getSetting<EmailAlertsConfig>("email_alerts_config"),
 		getSetting<ControlPlaneUpdateState>("control_plane_update_state"),
 		getSetting<ControlPlaneUpgradeState>("control_plane_upgrade_state"),
@@ -305,7 +303,6 @@ export async function getGlobalSettings() {
 		buildServerIds: buildServers ?? [],
 		buildTimeoutMinutes: buildTimeout ?? 30,
 		acmeEmail: acmeEmail ?? null,
-		proxyDomain: proxyDomain ?? null,
 		edgeDomain: {
 			hostname: getEdgeDomain(),
 		},

@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import isFQDN from "validator/es/lib/isFQDN";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { ServiceLayoutClient } from "@/components/service/service-layout-client";
-import { getProjectBySlug, getService, getSetting } from "@/db/queries";
-import { SETTING_KEYS } from "@/lib/settings-keys";
+import { getProjectBySlug, getService } from "@/db/queries";
+import { getEdgeDomain } from "@/lib/edge-domain";
 
 export default async function ServiceLayout({
 	params,
@@ -13,10 +13,9 @@ export default async function ServiceLayout({
 	children: React.ReactNode;
 }) {
 	const { slug, env, serviceId } = await params;
-	const [project, service, proxyDomain] = await Promise.all([
+	const [project, service] = await Promise.all([
 		getProjectBySlug(slug),
 		getService(serviceId),
-		getSetting<string>(SETTING_KEYS.PROXY_DOMAIN),
 	]);
 	const configuredAutoSubdomainDomain =
 		process.env.AUTO_SUBDOMAIN_DOMAIN?.trim().toLowerCase();
@@ -48,7 +47,7 @@ export default async function ServiceLayout({
 				projectId={project.id}
 				serviceId={serviceId}
 				envName={env}
-				proxyDomain={proxyDomain}
+				edgeDomain={getEdgeDomain()}
 				autoSubdomainDomain={autoSubdomainDomain}
 			>
 				{children}
