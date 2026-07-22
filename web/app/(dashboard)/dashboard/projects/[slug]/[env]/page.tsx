@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { ServiceCanvas } from "@/components/service/service-canvas";
 import {
-	getProjectBySlug,
 	getEnvironmentByName,
 	getGlobalSettings,
+	getProjectBySlug,
 } from "@/db/queries";
 
 export default async function ProjectEnvironmentPage({
@@ -45,7 +45,7 @@ export default async function ProjectEnvironmentPage({
 					projectSlug={slug}
 					envId={environment.id}
 					envName={environment.name}
-					proxyDomain={globalSettings.proxyDomain}
+					edgeDomain={globalSettings.edgeDomain.hostname}
 				/>
 			</div>
 		</>

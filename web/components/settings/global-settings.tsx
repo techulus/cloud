@@ -6,7 +6,6 @@ import {
 	ExternalLink,
 	Hammer,
 	Info,
-	Network,
 	RefreshCw,
 	Server,
 	Shield,
@@ -21,11 +20,14 @@ import {
 	updateAcmeEmail,
 	updateBuildServers,
 	updateBuildTimeout,
-	updateProxyDomain,
 	upgradeControlPlane,
 } from "@/actions/settings";
 import { LocalDate } from "@/components/core/local-date";
 import { ApiKeySettings } from "@/components/settings/api-key-settings";
+import {
+	type EdgeDomainOverview,
+	EdgeDomainSettings,
+} from "@/components/settings/edge-domain-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { MemberSettings } from "@/components/settings/member-settings";
 import { TwoFactorSettings } from "@/components/settings/two-factor-settings";
@@ -84,7 +86,8 @@ type Props = {
 		buildServerIds: string[];
 		buildTimeoutMinutes: number;
 		acmeEmail: string | null;
-		proxyDomain: string | null;
+		edgeDomain: EdgeDomainOverview;
+		autoSubdomainDomain: string | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
 		controlPlaneUpdateState: ControlPlaneUpdateState | null;
 		controlPlaneUpgradeState: ControlPlaneUpgradeState | null;
@@ -116,11 +119,7 @@ export function GlobalSettings({
 	const [isSavingTimeout, setIsSavingTimeout] = useState(false);
 
 	const [acmeEmail, setAcmeEmail] = useState(initialSettings.acmeEmail ?? "");
-	const [proxyDomain, setProxyDomain] = useState(
-		initialSettings.proxyDomain ?? "",
-	);
 	const [isSavingAcmeEmail, setIsSavingAcmeEmail] = useState(false);
-	const [isSavingProxyDomain, setIsSavingProxyDomain] = useState(false);
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [controlPlaneUpgradeDialogOpen, setControlPlaneUpgradeDialogOpen] =
@@ -209,23 +208,6 @@ export function GlobalSettings({
 		}
 	};
 
-	const handleSaveProxyDomain = async () => {
-		setIsSavingProxyDomain(true);
-		try {
-			await updateProxyDomain(proxyDomain);
-			toast.success("Proxy domain updated");
-			router.refresh();
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Failed to update proxy domain",
-			);
-		} finally {
-			setIsSavingProxyDomain(false);
-		}
-	};
-
 	const handleCheckUpdates = async () => {
 		setIsCheckingUpdates(true);
 		try {
@@ -270,8 +252,6 @@ export function GlobalSettings({
 		buildTimeoutMinutes !== String(initialSettings.buildTimeoutMinutes);
 
 	const acmeEmailChanged = acmeEmail !== (initialSettings.acmeEmail ?? "");
-	const proxyDomainChanged =
-		proxyDomain !== (initialSettings.proxyDomain ?? "");
 	const updateState = initialSettings.controlPlaneUpdateState;
 	const upgradeState = initialSettings.controlPlaneUpgradeState;
 	const displayVersion = updateState?.currentVersion ?? appVersion ?? "dev";
@@ -456,42 +436,11 @@ export function GlobalSettings({
 					</div>
 				</div>
 
-				<div className="rounded-lg border">
-					<Item className="border-0 border-b rounded-none">
-						<ItemMedia variant="icon">
-							<Network className="size-5 text-muted-foreground" />
-						</ItemMedia>
-						<ItemContent>
-							<ItemTitle>Proxy Domain</ItemTitle>
-						</ItemContent>
-					</Item>
-					<div className="p-4 space-y-4">
-						<p className="text-sm text-muted-foreground">
-							Domain used for TCP/UDP proxy connections. This should point to
-							your proxy server.
-						</p>
-						<div className="space-y-2">
-							<Label htmlFor="proxy-domain">Domain</Label>
-							<Input
-								id="proxy-domain"
-								value={proxyDomain}
-								onChange={(e) => setProxyDomain(e.target.value)}
-								placeholder="proxy.example.com"
-							/>
-						</div>
-						{proxyDomainChanged && (
-							<div className="pt-3 border-t">
-								<Button
-									onClick={handleSaveProxyDomain}
-									disabled={isSavingProxyDomain}
-									size="sm"
-								>
-									{isSavingProxyDomain ? "Saving..." : "Save"}
-								</Button>
-							</div>
-						)}
-					</div>
-				</div>
+				<EdgeDomainSettings
+					initial={initialSettings.edgeDomain}
+					initialAutoSubdomainDomain={initialSettings.autoSubdomainDomain}
+					servers={servers}
+				/>
 			</TabsContent>
 
 			<TabsContent value="email" className="space-y-6 pt-4">

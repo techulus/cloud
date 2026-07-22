@@ -8,11 +8,13 @@ export function ConfigSection({
 	title,
 	summary,
 	summaryMuted = false,
+	keepMounted = false,
 	children,
 }: {
 	title: string;
 	summary?: ReactNode;
 	summaryMuted?: boolean;
+	keepMounted?: boolean;
 	children: ReactNode;
 }) {
 	const [open, setOpen] = useState(false);
@@ -21,6 +23,7 @@ export function ConfigSection({
 		<section>
 			<button
 				type="button"
+				aria-expanded={open}
 				onClick={() => setOpen(!open)}
 				className="flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
 			>
@@ -44,7 +47,11 @@ export function ConfigSection({
 					/>
 				</span>
 			</button>
-			{open ? <div className="border-t px-3 py-3">{children}</div> : null}
+			{open || keepMounted ? (
+				<div className={cn("border-t px-3 py-3", !open && "hidden")}>
+					{children}
+				</div>
+			) : null}
 		</section>
 	);
 }

@@ -22,6 +22,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import type { RolloutStatus } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
 
 type RolloutListItem = {
 	id: string;
@@ -74,7 +75,15 @@ const STATUS_TITLES: Record<Exclude<RolloutStatus, "in_progress">, string> = {
 	rolled_back: "Deployment rolled back",
 };
 
-function RolloutStatusBadge({ status }: { status: RolloutStatus }) {
+function RolloutStatusBadge({
+	status,
+	className,
+	size,
+}: {
+	status: RolloutStatus;
+	className?: string;
+	size?: "default" | "sm";
+}) {
 	const config = STATUS_CONFIG[status];
 	const isAnimated = status === "in_progress";
 
@@ -83,7 +92,8 @@ function RolloutStatusBadge({ status }: { status: RolloutStatus }) {
 			icon={config.icon}
 			label={config.label}
 			isAnimated={isAnimated}
-			className={config.color}
+			className={cn(config.color, className)}
+			size={size}
 		/>
 	);
 }
@@ -189,7 +199,10 @@ export function RolloutHistory({
 							href={`/dashboard/projects/${projectSlug}/${envName}/services/${serviceId}/rollouts/${rollout.id}`}
 						>
 							<Item variant="outline">
-								<RolloutStatusBadge status={rollout.status} />
+								<RolloutStatusBadge
+									status={rollout.status}
+									className="max-sm:hidden"
+								/>
 								<ItemContent>
 									<ItemTitle>
 										<span className="truncate">
@@ -199,9 +212,14 @@ export function RolloutHistory({
 										</span>
 									</ItemTitle>
 									<ItemDescription>
+										<RolloutStatusBadge
+											status={rollout.status}
+											size="sm"
+											className="mr-3 sm:hidden"
+										/>
 										<span>{formatRelativeTime(rollout.createdAt)}</span>
 										<span className="ml-3">
-											Duration:{" "}
+											<span className="max-sm:hidden">Duration: </span>
 											{formatElapsedDurationBetween(
 												rollout.createdAt,
 												rollout.completedAt,

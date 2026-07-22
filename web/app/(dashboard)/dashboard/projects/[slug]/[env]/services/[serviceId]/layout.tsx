@@ -12,11 +12,14 @@ export default async function ServiceLayout({
 	children: React.ReactNode;
 }) {
 	const { slug, env, serviceId } = await params;
-	const [project, service, proxyDomain] = await Promise.all([
-		getProjectBySlug(slug),
-		getService(serviceId),
-		getSetting<string>(SETTING_KEYS.PROXY_DOMAIN),
-	]);
+	const [project, service, edgeDomain, autoSubdomainDomain] = await Promise.all(
+		[
+			getProjectBySlug(slug),
+			getService(serviceId),
+			getSetting<string>(SETTING_KEYS.EDGE_DOMAIN),
+			getSetting<string>(SETTING_KEYS.AUTO_SUBDOMAIN_DOMAIN),
+		],
+	);
 
 	if (!project || !service) {
 		notFound();
@@ -39,7 +42,8 @@ export default async function ServiceLayout({
 				projectId={project.id}
 				serviceId={serviceId}
 				envName={env}
-				proxyDomain={proxyDomain}
+				edgeDomain={edgeDomain}
+				autoSubdomainDomain={autoSubdomainDomain}
 			>
 				{children}
 			</ServiceLayoutClient>

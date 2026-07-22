@@ -13,6 +13,17 @@ Custom domains are bound to a specific service port. When you add a domain:
 
 Traffic flows: `Internet → Proxy Node → Traefik (TLS) → WireGuard → Container`.
 
+## Automatic Subdomains
+
+Configure **Automatic Subdomain Domain** under **Settings → Infrastructure** to
+offer automatic domains in service networking settings. For example, with the
+setting configured as `apps.example.com`, a service whose private hostname is
+`project-api-production` can use `project-api-production.apps.example.com`.
+
+Create a wildcard DNS record for `*.apps.example.com` that points to all proxy
+servers. The setting contains only the base domain, without `*.` or a protocol.
+Custom domains remain available alongside automatic domains.
+
 ## TLS Certificates
 
 Certificates are provisioned using the ACME HTTP-01 challenge. The control plane handles the challenge validation — Traefik routes `/.well-known/acme-challenge/*` requests back to the control plane.

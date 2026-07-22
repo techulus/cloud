@@ -10,7 +10,7 @@ import { EditableText } from "@/components/core/editable-text";
 import { LocalDate } from "@/components/core/local-date";
 import { ConfigSection } from "@/components/service/details/config-section";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
-import { PortsSection } from "@/components/service/details/ports-section";
+import { NetworkingSection } from "@/components/service/details/networking-section";
 import { ReplicasSection } from "@/components/service/details/replicas-section";
 import { ResourceLimitsSection } from "@/components/service/details/resource-limits-section";
 import { ScheduleSection } from "@/components/service/details/schedule-section";
@@ -18,7 +18,6 @@ import { SecretsSection } from "@/components/service/details/secrets-section";
 import { ServerlessSection } from "@/components/service/details/serverless-section";
 import { SourceSection } from "@/components/service/details/source-section";
 import { StartCommandSection } from "@/components/service/details/start-command-section";
-import { TCPProxySection } from "@/components/service/details/tcp-proxy-section";
 import { VolumesSection } from "@/components/service/details/volumes-section";
 import { useService } from "@/components/service/service-layout-client";
 import type { DeleteConfirmation } from "@/lib/two-factor";
@@ -28,7 +27,14 @@ const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
 export default function ConfigurationPage() {
 	const router = useRouter();
 	const { mutate: globalMutate } = useSWRConfig();
-	const { service, projectSlug, envName, proxyDomain, onUpdate } = useService();
+	const {
+		service,
+		projectSlug,
+		envName,
+		edgeDomain,
+		autoSubdomainDomain,
+		onUpdate,
+	} = useService();
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
 			ACTIVE_DELETE_BACKUP_STATUSES.includes(
@@ -98,11 +104,10 @@ export default function ConfigurationPage() {
 
 				<SecretsSection service={service} onUpdate={handleConfigSave} />
 
-				<PortsSection service={service} onUpdate={handleConfigSave} />
-
-				<TCPProxySection
+				<NetworkingSection
 					service={service}
-					proxyDomain={proxyDomain}
+					edgeDomain={edgeDomain}
+					autoSubdomainDomain={autoSubdomainDomain}
 					onUpdate={handleConfigSave}
 				/>
 
