@@ -1,4 +1,4 @@
-export const SERVICE_REVISION_SCHEMA_VERSION = 2 as const;
+export const SERVICE_REVISION_SCHEMA_VERSION = 3 as const;
 
 export function getDefaultServiceHostname(name: string): string {
 	return name
@@ -19,6 +19,10 @@ export type ServiceRevisionPlacement = {
 	serverId: string;
 	count: number;
 };
+
+export type ServiceRevisionPlacementIntent =
+	| { mode: "manual" }
+	| { mode: "automatic"; replicas: number };
 
 export type ServiceRevisionPort = {
 	containerPort: number;
@@ -74,6 +78,7 @@ export type ServiceRevisionSpec = {
 		cpuCores: number | null;
 		memoryMb: number | null;
 	};
+	placement: ServiceRevisionPlacementIntent;
 	placements: ServiceRevisionPlacement[];
 	ports: ServiceRevisionPort[];
 	secrets: ServiceRevisionSecret[];
@@ -97,6 +102,8 @@ export type ServiceRevisionDraft = {
 		startCommand: string | null;
 		resourceCpuLimit: number | null;
 		resourceMemoryLimitMb: number | null;
+		placementMode?: "manual" | "automatic" | null;
+		replicas?: number;
 	};
 	placements: Array<{ serverId: string; count: number }>;
 	ports: Array<{
@@ -125,16 +132,34 @@ function validateServiceRevisionSpec(
 	specification: ServiceRevisionSpec,
 	allowNoPlacements: boolean,
 ) {
-	const totalReplicas = specification.placements.reduce(
-		(sum, placement) => sum + placement.count,
-		0,
-	);
+	const totalReplicas =
+		specification.placement.mode === "automatic"
+			? specification.placement.replicas
+			: specification.placements.reduce(
+					(sum, placement) => sum + placement.count,
+					0,
+				);
 
 	if (totalReplicas < 1 && !allowNoPlacements) {
 		throw new Error("At least one replica is required");
 	}
 	if (totalReplicas > 10) {
 		throw new Error("Maximum 10 replicas allowed");
+	}
+	if (
+		specification.placement.mode === "automatic" &&
+		specification.placements.length
+	) {
+		throw new Error("Automatic placement snapshots cannot contain placements");
+	}
+	if (
+		specification.placement.mode === "automatic" &&
+		specification.volumes.length > 0
+	) {
+		throw new Error("Services with volumes cannot use automatic placement");
+	}
+	if (specification.stateful && specification.placement.mode === "automatic") {
+		throw new Error("Stateful services cannot use automatic placement");
 	}
 	if (specification.stateful && totalReplicas !== 1) {
 		throw new Error("Stateful services can only have exactly 1 replica");
@@ -195,7 +220,11 @@ export function buildServiceRevisionSpec(
 			cpuCores: service.resourceCpuLimit,
 			memoryMb: service.resourceMemoryLimitMb,
 		},
-		placements: draft.placements
+		placement:
+			service.placementMode === "automatic"
+				? { mode: "automatic", replicas: service.replicas ?? 1 }
+				: { mode: "manual" },
+		placements: (service.placementMode === "automatic" ? [] : draft.placements)
 			.filter((placement) => placement.count > 0)
 			.map((placement) => ({
 				serverId: placement.serverId,

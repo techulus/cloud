@@ -50,6 +50,7 @@ export type ResourceLimitsConfig = {
 };
 
 export type PlacementConfig = {
+	mode?: "manual" | "automatic";
 	replicas: number;
 };
 
@@ -110,6 +111,7 @@ export function buildCurrentConfig(
 		resourceCpuLimit: number | null;
 		resourceMemoryLimitMb: number | null;
 		replicas: number;
+		placementMode?: "manual" | "automatic" | null;
 		stateful?: boolean | null;
 		serverlessEnabled?: boolean | null;
 		serverlessSleepAfterSeconds?: number | null;
@@ -129,13 +131,19 @@ export function buildCurrentConfig(
 ): DeployedConfig {
 	const hasResourceLimits =
 		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
+	const placementMode = service.placementMode ?? "manual";
+	const replicaCount =
+		placementMode === "automatic"
+			? service.replicas
+			: replicas.reduce((sum, replica) => sum + replica.count, 0);
 
 	return {
 		source,
 		hostname: service.hostname ?? undefined,
 		stateful: service.stateful ?? false,
 		placement: {
-			replicas: replicas.reduce((sum, r) => sum + r.count, 0),
+			mode: placementMode,
+			replicas: replicaCount,
 		},
 		replicas: replicas.map((r) => ({
 			serverId: r.serverId,
@@ -373,37 +381,62 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedReplicasMap = new Map(
-		(deployed.replicas || []).map((r) => [r.serverId, r]),
-	);
-	const currentReplicasMap = new Map(
-		(current.replicas || []).map((r) => [r.serverId, r]),
-	);
-
-	for (const [serverId, currentReplica] of currentReplicasMap) {
-		const deployedReplica = deployedReplicasMap.get(serverId);
-		if (!deployedReplica) {
+	const deployedPlacementMode = deployed.placement?.mode ?? "manual";
+	const currentPlacementMode = current.placement?.mode ?? "manual";
+	if (deployedPlacementMode !== currentPlacementMode) {
+		changes.push({
+			field: "Placement mode",
+			from: deployedPlacementMode === "automatic" ? "Automatic" : "Manual",
+			to: currentPlacementMode === "automatic" ? "Automatic" : "Manual",
+		});
+	}
+	if (
+		deployedPlacementMode === "automatic" &&
+		currentPlacementMode === "automatic"
+	) {
+		if (deployed.placement?.replicas !== current.placement?.replicas) {
 			changes.push({
-				field: `${currentReplica.serverName} replicas`,
-				from: "0",
-				to: String(currentReplica.count),
-			});
-		} else if (deployedReplica.count !== currentReplica.count) {
-			changes.push({
-				field: `${currentReplica.serverName} replicas`,
-				from: String(deployedReplica.count),
-				to: String(currentReplica.count),
+				field: "Desired replicas",
+				from: String(deployed.placement?.replicas ?? 0),
+				to: String(current.placement?.replicas ?? 0),
 			});
 		}
-	}
+	} else if (
+		deployedPlacementMode === "manual" &&
+		currentPlacementMode === "manual"
+	) {
+		const deployedReplicasMap = new Map(
+			(deployed.replicas || []).map((replica) => [replica.serverId, replica]),
+		);
+		const currentReplicasMap = new Map(
+			(current.replicas || []).map((replica) => [replica.serverId, replica]),
+		);
 
-	for (const [serverId, deployedReplica] of deployedReplicasMap) {
-		if (!currentReplicasMap.has(serverId)) {
-			changes.push({
-				field: `${deployedReplica.serverName} replicas`,
-				from: String(deployedReplica.count),
-				to: "0 (removed)",
-			});
+		for (const [serverId, currentReplica] of currentReplicasMap) {
+			const deployedReplica = deployedReplicasMap.get(serverId);
+			if (!deployedReplica) {
+				changes.push({
+					field: `${currentReplica.serverName} replicas`,
+					from: "0",
+					to: String(currentReplica.count),
+				});
+			} else if (deployedReplica.count !== currentReplica.count) {
+				changes.push({
+					field: `${currentReplica.serverName} replicas`,
+					from: String(deployedReplica.count),
+					to: String(currentReplica.count),
+				});
+			}
+		}
+
+		for (const [serverId, deployedReplica] of deployedReplicasMap) {
+			if (!currentReplicasMap.has(serverId)) {
+				changes.push({
+					field: `${deployedReplica.serverName} replicas`,
+					from: String(deployedReplica.count),
+					to: "0 (removed)",
+				});
+			}
 		}
 	}
 
@@ -645,6 +678,13 @@ export function revisionSpecToDeployedConfig(
 	specification: ServiceRevisionSpec,
 	serverNames: Record<string, string>,
 ): DeployedConfig {
+	const replicaCount =
+		specification.placement.mode === "automatic"
+			? specification.placement.replicas
+			: specification.placements.reduce(
+					(sum, placement) => sum + placement.count,
+					0,
+				);
 	return {
 		source:
 			specification.source.type === "github"
@@ -658,10 +698,8 @@ export function revisionSpecToDeployedConfig(
 		hostname: specification.hostname,
 		stateful: specification.stateful,
 		placement: {
-			replicas: specification.placements.reduce(
-				(sum, placement) => sum + placement.count,
-				0,
-			),
+			mode: specification.placement.mode,
+			replicas: replicaCount,
 		},
 		replicas: specification.placements.map((placement) => ({
 			serverId: placement.serverId,

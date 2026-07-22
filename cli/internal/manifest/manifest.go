@@ -36,9 +36,18 @@ type Service struct {
 	Hostname     *string      `json:"hostname" yaml:"hostname"`
 	Ports        []Port       `json:"ports" yaml:"ports"`
 	Replicas     int          `json:"replicas" yaml:"replicas"`
+	Placement    *Placement   `json:"placement,omitempty" yaml:"placement,omitempty"`
 	HealthCheck  *HealthCheck `json:"healthCheck" yaml:"healthCheck"`
 	StartCommand *string      `json:"startCommand" yaml:"startCommand"`
 	Resources    *Resources   `json:"resources,omitempty" yaml:"resources,omitempty"`
+}
+type Placement struct {
+	Mode    string            `json:"mode" yaml:"mode"`
+	Servers []PlacementServer `json:"servers,omitempty" yaml:"servers,omitempty"`
+}
+type PlacementServer struct {
+	ServerID string `json:"serverId" yaml:"serverId"`
+	Count    int    `json:"count" yaml:"count"`
 }
 type Source struct {
 	Type       string  `json:"type" yaml:"type"`
@@ -140,6 +149,12 @@ func ApplyDefaults(m *Manifest) {
 	if m.Service.Replicas == 0 {
 		m.Service.Replicas = 1
 	}
+	if p := m.Service.Placement; p != nil {
+		p.Mode = strings.ToLower(strings.TrimSpace(p.Mode))
+		for i := range p.Servers {
+			p.Servers[i].ServerID = strings.TrimSpace(p.Servers[i].ServerID)
+		}
+	}
 	if h := m.Service.HealthCheck; h != nil {
 		h.Cmd = strings.TrimSpace(h.Cmd)
 		if h.Interval == 0 {
@@ -212,6 +227,39 @@ func Validate(m Manifest) error {
 	}
 	if m.Service.Replicas < 1 || m.Service.Replicas > 10 {
 		return errors.New("service.replicas must be between 1 and 10")
+	}
+	if p := m.Service.Placement; p != nil {
+		switch p.Mode {
+		case "automatic":
+			if p.Servers != nil {
+				return errors.New("service.placement.servers cannot be set for automatic placement")
+			}
+		case "manual":
+			total := 0
+			seen := make(map[string]struct{}, len(p.Servers))
+			for i, server := range p.Servers {
+				serverID := strings.TrimSpace(server.ServerID)
+				if serverID == "" {
+					return fmt.Errorf("service.placement.servers[%d].serverId cannot be blank", i)
+				}
+				if _, exists := seen[serverID]; exists {
+					return fmt.Errorf("service.placement.servers[%d].serverId must be unique", i)
+				}
+				seen[serverID] = struct{}{}
+				if server.Count < 1 {
+					return fmt.Errorf("service.placement.servers[%d].count must be positive", i)
+				}
+				total += server.Count
+			}
+			if total < 1 || total > 10 {
+				return errors.New("service.placement manual total must be between 1 and 10")
+			}
+			if total != m.Service.Replicas {
+				return errors.New("service.placement manual total must equal service.replicas")
+			}
+		default:
+			return errors.New("service.placement.mode must be automatic or manual")
+		}
 	}
 	seenPorts := make(map[int]struct{}, len(m.Service.Ports))
 	for i, p := range m.Service.Ports {

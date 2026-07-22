@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -219,7 +219,6 @@ function getManagementBlockers(input: {
 	source: PublicSource;
 	ports: Array<typeof servicePorts.$inferSelect>;
 	volumeCount: number;
-	replicaCount: number;
 }): ManagementBlocker[] {
 	const blockers: ManagementBlocker[] = [];
 	if (input.service.stateful || input.volumeCount > 0) {
@@ -252,12 +251,6 @@ function getManagementBlockers(input: {
 				"Public HTTP ports without domains must be managed in the web UI",
 		});
 	}
-	if (input.replicaCount < 1 || input.replicaCount > 10) {
-		blockers.push({
-			code: "INVALID_PLACEMENT",
-			message: "Manual placement must contain between 1 and 10 replicas",
-		});
-	}
 	if (
 		(input.service.resourceCpuLimit === null) !==
 		(input.service.resourceMemoryLimitMb === null)
@@ -286,6 +279,14 @@ function getManagementBlockers(input: {
 
 function sanitizeSpec(specification: unknown) {
 	const spec = parseServiceRevisionSpec(specification);
+	const replicas =
+		spec.placement.mode === "automatic"
+			? spec.placement.replicas
+			: spec.placements.reduce((sum, placement) => sum + placement.count, 0);
+	const placement =
+		spec.placement.mode === "automatic"
+			? { mode: "automatic" as const, replicas }
+			: { mode: "manual" as const, placements: spec.placements, replicas };
 	return {
 		source:
 			spec.source.type === "github"
@@ -293,17 +294,13 @@ function sanitizeSpec(specification: unknown) {
 						type: "github" as const,
 						repository: spec.source.repository,
 						branch: spec.source.branch,
-						...(spec.source.rootDir
-							? { rootDir: spec.source.rootDir }
-							: {}),
+						...(spec.source.rootDir ? { rootDir: spec.source.rootDir } : {}),
 					}
 				: { type: "image" as const, image: spec.source.image },
 		hostname: spec.hostname,
 		stateful: spec.stateful,
-		replicas: spec.placements.reduce(
-			(sum, placement) => sum + placement.count,
-			0,
-		),
+		placement,
+		replicas,
 		placements: spec.placements,
 		healthCheck: spec.healthCheck,
 		startCommand: spec.startCommand,
@@ -382,16 +379,25 @@ export async function safeConfiguration(service: NestedService) {
 			a.name.localeCompare(b.name, "en") ||
 			a.containerPath.localeCompare(b.containerPath, "en"),
 	);
-	const replicaCount = sortedPlacements.reduce(
-		(sum, placement) => sum + placement.count,
-		0,
-	);
+	const replicaCount =
+		service.placementMode === "automatic"
+			? service.replicas
+			: sortedPlacements.reduce((sum, placement) => sum + placement.count, 0);
+	const placement =
+		service.placementMode === "automatic"
+			? { mode: "automatic" as const, replicas: replicaCount }
+			: {
+					mode: "manual" as const,
+					placements: sortedPlacements,
+					replicas: replicaCount,
+				};
 	const current = {
 		source,
 		hostname: service.hostname,
 		stateful: service.stateful,
 		replicas: replicaCount,
 		placements: sortedPlacements,
+		placement,
 		healthCheck: service.healthCheckCmd
 			? {
 					cmd: service.healthCheckCmd,
@@ -454,11 +460,15 @@ export async function safeConfiguration(service: NestedService) {
 		hostname:
 			current.hostname?.trim() || getDefaultServiceHostname(service.name),
 		stateful: current.stateful,
-		replicas: current.replicas,
-		placements: current.placements.map(({ serverId, count }) => ({
-			serverId,
-			count,
-		})),
+		placement:
+			current.placement.mode === "automatic"
+				? current.placement
+				: {
+						...current.placement,
+						placements: current.placement.placements.map(
+							({ serverId, count }) => ({ serverId, count }),
+						),
+					},
 		healthCheck: current.healthCheck,
 		startCommand: current.startCommand?.trim() || null,
 		resources: current.resources,
@@ -486,7 +496,6 @@ export async function safeConfiguration(service: NestedService) {
 		source,
 		ports,
 		volumeCount: volumes.length,
-		replicaCount,
 	});
 
 	return {
@@ -546,11 +555,47 @@ const hostnameSchema = z
 		/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
 		"hostname must contain only lowercase letters, numbers, and hyphens",
 	);
+export const placementSchema = z.discriminatedUnion("mode", [
+	z.strictObject({
+		mode: z.literal("automatic"),
+		replicas: z.number().int().min(1).max(10),
+	}),
+	z
+		.strictObject({
+			mode: z.literal("manual"),
+			placements: z
+				.array(
+					z.strictObject({
+						serverId: z.string().min(1),
+						count: z.number().int().min(1).max(10),
+					}),
+				)
+				.min(1),
+		})
+		.superRefine((value, context) => {
+			if (
+				new Set(value.placements.map((item) => item.serverId)).size !==
+				value.placements.length
+			)
+				context.addIssue({
+					code: "custom",
+					message: "Server IDs must be unique",
+					path: ["placements"],
+				});
+			if (value.placements.reduce((sum, item) => sum + item.count, 0) > 10)
+				context.addIssue({
+					code: "custom",
+					message: "Total replicas must be between 1 and 10",
+					path: ["placements"],
+				});
+		}),
+]);
 export const configurationPatchSchema = z.strictObject({
 	source: publicSourceSchema.optional(),
 	hostname: hostnameSchema.nullable().optional(),
 	ports: z.array(portSchema).max(100).optional(),
 	replicas: z.number().int().min(1).max(10).optional(),
+	placement: placementSchema.optional(),
 	healthCheck: healthCheckSchema.nullable().optional(),
 	startCommand: z.string().trim().min(1).max(4096).nullable().optional(),
 	resources: z
@@ -610,6 +655,9 @@ export async function patchConfiguration(
 	}
 
 	return db.transaction(async (tx) => {
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${service.id}))`,
+		);
 		const persisted = await tx
 			.select()
 			.from(services)
@@ -638,17 +686,26 @@ export async function patchConfiguration(
 				.limit(1)
 				.then((rows) => rows[0]),
 		]);
-		const replicaCount = placements.reduce(
-			(sum, placement) => sum + placement.count,
-			0,
-		);
+		const replicaCount =
+			persisted.placementMode === "automatic"
+				? persisted.replicas
+				: placements.reduce((sum, placement) => sum + placement.count, 0);
 		const source = resolvePersistedSourceFromRows(persisted, repo);
+		if (
+			input.placement?.mode === "automatic" &&
+			(persisted.stateful || volumes.length > 0)
+		) {
+			domainError(
+				"Automatic placement is not supported for stateful services or services with volumes",
+				"AUTOMATIC_PLACEMENT_UNSUPPORTED",
+				400,
+			);
+		}
 		const blockers = getManagementBlockers({
 			service: persisted,
 			source,
 			ports,
 			volumeCount: volumes.length,
-			replicaCount,
 		});
 		if (blockers[0]) {
 			domainError(blockers[0].message, blockers[0].code);
@@ -677,11 +734,70 @@ export async function patchConfiguration(
 				);
 			}
 		}
-		if (input.replicas !== undefined && input.replicas !== replicaCount) {
+		if (
+			input.replicas !== undefined &&
+			input.placement &&
+			input.replicas !==
+				(input.placement.mode === "automatic"
+					? input.placement.replicas
+					: input.placement.placements.reduce(
+							(sum, item) => sum + item.count,
+							0,
+						))
+		) {
+			domainError(
+				"replicas and placement describe different desired replica counts",
+				"REPLICA_PLACEMENT_MISMATCH",
+				400,
+			);
+		}
+		if (
+			input.replicas !== undefined &&
+			!input.placement &&
+			persisted.placementMode === "manual" &&
+			input.replicas !== replicaCount
+		) {
 			domainError(
 				`replicas must match the current manual placement of ${replicaCount}`,
 				"REPLICA_PLACEMENT_MISMATCH",
 			);
+		}
+		if (input.placement?.mode === "manual") {
+			const ids = input.placement.placements.map((item) => item.serverId);
+			const selected = await tx
+				.select({
+					id: servers.id,
+					isProxy: servers.isProxy,
+					status: servers.status,
+					wireguardIp: servers.wireguardIp,
+				})
+				.from(servers)
+				.where(inArray(servers.id, ids));
+			if (selected.length !== ids.length)
+				domainError(
+					"One or more selected servers do not exist",
+					"INVALID_PLACEMENT",
+					400,
+				);
+			if (
+				selected.some(
+					(server) => server.status !== "online" || !server.wireguardIp,
+				)
+			)
+				domainError(
+					"Manual placement requires online, configured servers",
+					"INVALID_PLACEMENT",
+					400,
+				);
+			if (
+				persisted.serverlessEnabled &&
+				selected.some((server) => !server.isProxy)
+			)
+				domainError(
+					"Serverless services can only be deployed to proxy nodes",
+					"SERVERLESS_PROXY_REQUIRED",
+					400,
+				);
 		}
 
 		if (input.hostname) {
@@ -807,6 +923,49 @@ export async function patchConfiguration(
 			changed("source.image", persisted.image, input.source.image)
 		) {
 			set.image = input.source.image;
+		}
+		if (input.placement) {
+			const desiredReplicas =
+				input.placement.mode === "automatic"
+					? input.placement.replicas
+					: input.placement.placements.reduce(
+							(sum, item) => sum + item.count,
+							0,
+						);
+			if (
+				changed(
+					"placement",
+					persisted.placementMode === "automatic"
+						? { mode: "automatic", replicas: persisted.replicas }
+						: {
+								mode: "manual",
+								placements: placements
+									.map(({ serverId, count }) => ({ serverId, count }))
+									.toSorted((a, b) => a.serverId.localeCompare(b.serverId)),
+							},
+					input.placement,
+				)
+			) {
+				set.placementMode = input.placement.mode;
+				set.replicas = desiredReplicas;
+				await tx
+					.delete(serviceReplicas)
+					.where(eq(serviceReplicas.serviceId, service.id));
+				if (input.placement.mode === "manual")
+					await tx.insert(serviceReplicas).values(
+						input.placement.placements.map((item) => ({
+							id: randomUUID(),
+							serviceId: service.id,
+							...item,
+						})),
+					);
+			}
+		} else if (
+			input.replicas !== undefined &&
+			persisted.placementMode === "automatic" &&
+			changed("placement.replicas", persisted.replicas, input.replicas)
+		) {
+			set.replicas = input.replicas;
 		}
 		if (input.source?.type === "github") {
 			const effectiveBranch =

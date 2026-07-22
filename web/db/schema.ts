@@ -330,6 +330,7 @@ export const servers = pgTable("servers", {
 		.notNull()
 		.default("pending"),
 	lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
+	onlineSince: timestamp("online_since", { withTimezone: true }),
 	resourcesCpu: integer("resources_cpu"),
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),
@@ -404,6 +405,12 @@ export const services = pgTable(
 		githubBranch: text("github_branch").default("main"),
 		githubRootDir: text("github_root_dir"),
 		replicas: integer("replicas").notNull().default(1),
+		placementMode: text("placement_mode", { enum: ["manual", "automatic"] })
+			.notNull()
+			.default("manual"),
+		lastAutomaticPlacementAt: timestamp("last_automatic_placement_at", {
+			withTimezone: true,
+		}),
 		stateful: boolean("stateful").notNull().default(false),
 		lockedServerId: text("locked_server_id").references(() => servers.id, {
 			onDelete: "set null",

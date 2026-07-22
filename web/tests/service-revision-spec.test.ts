@@ -120,7 +120,7 @@ describe("service revision specification", () => {
 		});
 
 		expect(spec).toMatchObject({
-			schemaVersion: 2,
+			schemaVersion: 3,
 			image: "registry.test/project/service:revision-1",
 			source: {
 				type: "github",
@@ -139,6 +139,36 @@ describe("service revision specification", () => {
 				allowNoPlacements: true,
 			}),
 		).not.toThrow();
+	});
+
+	it("snapshots automatic placement intent without resolved placements", () => {
+		const input = draft({ volumes: [] });
+		input.service.placementMode = "automatic";
+		input.service.replicas = 4;
+
+		expect(buildServiceRevisionSpec(input)).toMatchObject({
+			placement: { mode: "automatic", replicas: 4 },
+			placements: [],
+		});
+	});
+
+	it("rejects automatic placement for stateful and volume-backed services", () => {
+		const stateful = draft({ volumes: [] });
+		stateful.service.stateful = true;
+		stateful.service.placementMode = "automatic";
+		stateful.service.replicas = 1;
+
+		expect(() => buildServiceRevisionSpec(stateful)).toThrow(
+			"Stateful services cannot use automatic placement",
+		);
+
+		const volumeBacked = draft();
+		volumeBacked.service.placementMode = "automatic";
+		volumeBacked.service.replicas = 1;
+
+		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
+			"Services with volumes cannot use automatic placement",
+		);
 	});
 
 	it("rejects serverless revisions without a public HTTP port and domain", () => {

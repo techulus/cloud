@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -15,8 +15,27 @@ import { enqueueWork } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
+export const AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS = 10 * 60 * 1000;
 
 export type Placement = { serverId: string; replicas: number };
+
+export function distributeReplicas(
+	serverIds: string[],
+	replicas: number,
+): Placement[] {
+	const ids = [...new Set(serverIds)].sort((a, b) => a.localeCompare(b));
+	if (ids.length === 0) throw new Error("No eligible servers for deployment");
+	if (!Number.isInteger(replicas) || replicas < 1 || replicas > 10)
+		throw new Error("Replica count must be between 1 and 10");
+	const counts = new Map(ids.map((id) => [id, 0]));
+	for (let index = 0; index < replicas; index++) {
+		const id = ids[index % ids.length];
+		counts.set(id, (counts.get(id) ?? 0) + 1);
+	}
+	return ids
+		.map((serverId) => ({ serverId, replicas: counts.get(serverId) ?? 0 }))
+		.filter((placement) => placement.replicas > 0);
+}
 
 export type DeploymentContext = {
 	revisionId: string;
@@ -107,6 +126,57 @@ export function calculateRevisionPlacements(
 	}
 
 	return { placements, totalReplicas };
+}
+
+export async function resolveRevisionPlacements(
+	specification: ServiceRevisionSpec,
+): Promise<{ placements: Placement[]; totalReplicas: number }> {
+	if (specification.placement.mode === "manual") {
+		const result = calculateRevisionPlacements(specification);
+		if (specification.serverless.enabled) {
+			const selected = await db
+				.select({ id: servers.id, isProxy: servers.isProxy })
+				.from(servers)
+				.where(
+					inArray(
+						servers.id,
+						result.placements.map((p) => p.serverId),
+					),
+				);
+			if (
+				selected.length !== result.placements.length ||
+				selected.some((server) => !server.isProxy)
+			)
+				throw new Error(
+					"Serverless services can only be placed on proxy servers",
+				);
+		}
+		return result;
+	}
+	const eligible = await db
+		.select({ id: servers.id })
+		.from(servers)
+		.where(
+			and(
+				eq(servers.status, "online"),
+				isNotNull(servers.wireguardIp),
+				isNotNull(servers.onlineSince),
+				lt(
+					servers.onlineSince,
+					new Date(Date.now() - AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS),
+				),
+				...(specification.serverless.enabled
+					? [eq(servers.isProxy, true)]
+					: []),
+			),
+		);
+	return {
+		placements: distributeReplicas(
+			eligible.map((server) => server.id),
+			specification.placement.replicas,
+		),
+		totalReplicas: specification.placement.replicas,
+	};
 }
 
 export async function validateServers(
@@ -295,7 +365,7 @@ export async function completeRollout(
 	serviceId: string,
 	context: Omit<DeploymentContext, "serverMap" | "revisionId">,
 ): Promise<{ completed: boolean; stoppedCount: number }> {
-	const { placements, specification, totalReplicas, isRollingUpdate } = context;
+	const { placements, specification, isRollingUpdate } = context;
 	const lockedServerId = specification.stateful
 		? placements[0]?.serverId
 		: undefined;
@@ -330,7 +400,9 @@ export async function completeRollout(
 		await tx
 			.update(services)
 			.set({
-				replicas: totalReplicas,
+				...(specification.placement.mode === "automatic"
+					? { lastAutomaticPlacementAt: new Date() }
+					: {}),
 				...(lockedServerId ? { lockedServerId } : {}),
 			})
 			.where(eq(services.id, serviceId));

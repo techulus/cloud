@@ -16,10 +16,10 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
-import {
-	SERVICE_REVISION_SCHEMA_VERSION,
-	type ServiceRevisionSecret,
-	type ServiceRevisionSpec,
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import type {
+	ServiceRevisionSecret,
+	ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
 import { getWireGuardPeers } from "@/lib/wireguard";
 
@@ -241,9 +241,7 @@ async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 
 	const runtimeServices = new Map<string, RuntimeServiceRevision>();
 	for (const row of rows) {
-		if (row.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION) {
-			throw new Error(`Service ${row.serviceId} uses an unsupported revision`);
-		}
+		const specification = parseServiceRevisionSpec(row.specification);
 		const existing = runtimeServices.get(row.serviceId);
 		if (existing && existing.revisionId !== row.revisionId) {
 			throw new Error(`Service ${row.serviceId} has multiple active revisions`);
@@ -252,7 +250,7 @@ async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 			id: row.serviceId,
 			name: row.serviceName,
 			revisionId: row.revisionId,
-			specification: row.specification,
+			specification,
 		});
 	}
 	return [...runtimeServices.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -352,14 +350,7 @@ export function buildExpectedContainersFromRows({
 			if (!revision) {
 				throw new Error(`Deployment ${dep.id} has no service revision`);
 			}
-			if (
-				revision.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION
-			) {
-				throw new Error(
-					`Deployment ${dep.id} uses an unsupported service revision`,
-				);
-			}
-			const specification = revision.specification;
+			const specification = parseServiceRevisionSpec(revision.specification);
 			const ports = (portsByDeploymentId.get(dep.id) ?? [])
 				.slice()
 				.sort(

@@ -4,7 +4,8 @@ import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function spec(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 2,
+		schemaVersion: 3,
+		placement: { mode: "manual" },
 		image: "app:v1",
 		source: { type: "image", image: "app:v1" },
 		hostname: "app",
@@ -136,6 +137,23 @@ describe("diffServiceRevisionSpecs", () => {
 			from: "1 replicas",
 			to: "2 replicas",
 		});
+	});
+
+	it("reports automatic placement intent without transient server assignments", () => {
+		const previous = spec();
+		previous.placement = { mode: "automatic", replicas: 2 };
+		previous.placements = [];
+		const current = structuredClone(previous);
+		current.placement = { mode: "automatic", replicas: 4 };
+
+		expect(diffServiceRevisionSpecs(previous, current)).toEqual([
+			{ field: "Desired replicas", from: "2", to: "4" },
+		]);
+
+		const manual = spec();
+		expect(diffServiceRevisionSpecs(manual, previous)).toEqual([
+			{ field: "Placement mode", from: "Manual", to: "Automatic" },
+		]);
 	});
 
 	it("never exposes secret ciphertext while detecting additions, updates, and removals", () => {

@@ -20,6 +20,65 @@ func TestDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatalf("got=%#v err=%v", got, e)
 	}
 }
+
+func TestPlacementRoundTripAndValidation(t *testing.T) {
+	m := base()
+	m.Service.Replicas = 3
+	m.Service.Placement = &Placement{Mode: " manual ", Servers: []PlacementServer{{ServerID: " server-a ", Count: 2}, {ServerID: "server-b", Count: 1}}}
+	b, err := Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Service.Placement == nil || got.Service.Placement.Mode != "manual" || got.Service.Placement.Servers[0].ServerID != "server-a" {
+		t.Fatalf("placement=%#v", got.Service.Placement)
+	}
+
+	tests := []struct {
+		name      string
+		placement *Placement
+		replicas  int
+	}{
+		{"invalid mode", &Placement{Mode: "random"}, 1},
+		{"automatic servers", &Placement{Mode: "automatic", Servers: []PlacementServer{}}, 1},
+		{"blank server", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: " ", Count: 1}}}, 1},
+		{"duplicate server", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 1}, {ServerID: "a", Count: 1}}}, 2},
+		{"nonpositive count", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 0}}}, 1},
+		{"total exceeds limit", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 11}}}, 10},
+		{"total differs from replicas", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 1}}}, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := base()
+			m.Service.Replicas = tc.replicas
+			m.Service.Placement = tc.placement
+			ApplyDefaults(&m)
+			if err := Validate(m); err == nil {
+				t.Fatal("invalid placement accepted")
+			}
+		})
+	}
+}
+
+func TestPlacementOmittedIsBackwardCompatible(t *testing.T) {
+	m, err := Parse([]byte(`apiVersion: v1
+project: {slug: app}
+environment: {name: prod}
+service:
+  name: web
+  source: {type: image, image: nginx}
+  replicas: 2
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Service.Placement != nil || m.Service.Replicas != 2 {
+		t.Fatalf("service=%#v", m.Service)
+	}
+}
 func TestGitHubCanonical(t *testing.T) {
 	m := base()
 	root := `packages\web`

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
@@ -25,17 +25,31 @@ export async function deployServiceRevisionInternal(
 	);
 	if (!result.rolloutId) return result;
 
-	await inngest.send(
-		inngestEvents.rolloutCreated.create(
-			{
-				rolloutId: result.rolloutId,
-				serviceId,
-			},
-			{
-				id: `rollout-created-${result.rolloutId}`,
-			},
-		),
-	);
+	try {
+		await inngest.send(
+			inngestEvents.rolloutCreated.create(
+				{
+					rolloutId: result.rolloutId,
+					serviceId,
+				},
+				{
+					id: `rollout-created-${result.rolloutId}`,
+				},
+			),
+		);
+	} catch (error) {
+		await db
+			.update(rollouts)
+			.set({
+				status: "failed",
+				currentStage: "enqueue_failed",
+				completedAt: new Date(),
+			})
+			.where(
+				and(eq(rollouts.id, result.rolloutId), eq(rollouts.status, "queued")),
+			);
+		throw error;
+	}
 
 	return result;
 }
@@ -116,7 +130,7 @@ export async function deployServiceInternal(
 				currentStage: "enqueue_failed",
 				completedAt: new Date(),
 			})
-			.where(eq(rollouts.id, rolloutId));
+			.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")));
 		throw error;
 	}
 

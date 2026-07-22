@@ -10,6 +10,8 @@ import {
 	checkAndRunScheduledDeployments,
 	cleanupStaleItems,
 	failTimedOutAgentUpgrades,
+	rebalanceAutomaticServices,
+	recoverInvalidAutomaticPlacements,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
 
@@ -23,6 +25,12 @@ export const staleServerCheck = inngest.createFunction(
 		await step.run("check-stale-servers", async () => {
 			console.log("[cron] running stale server check");
 			await checkAndRecoverStaleServers();
+		});
+		await step.run("recover-invalid-automatic-placements", async () => {
+			await recoverInvalidAutomaticPlacements();
+		});
+		await step.run("rebalance-automatic-services", async () => {
+			await rebalanceAutomaticServices();
 		});
 	},
 );

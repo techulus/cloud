@@ -5,6 +5,7 @@ import {
 	deployments,
 	rollouts,
 	servers,
+	serviceRevisions,
 	services,
 	workQueue,
 } from "@/db/schema";
@@ -20,12 +21,250 @@ import {
 	sendManualRecoveryRequiredAlert,
 	sendServerOfflineAlert,
 } from "@/lib/email";
+import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
+import {
+	AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS,
+	distributeReplicas,
+	resolveRevisionPlacements,
+} from "@/lib/inngest/functions/rollout-helpers";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { cloneActiveRevisionAndQueueSystemRollout } from "@/lib/service-revisions";
 import {
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
 
 const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
+export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
+export const MAX_REBALANCES_PER_RUN = 5;
+
+async function enqueueSystemRollout(
+	serviceId: string,
+	result: { rolloutId: string; created: boolean },
+): Promise<void> {
+	if (!result.created) return;
+	try {
+		await inngest.send(
+			inngestEvents.rolloutCreated.create(
+				{ rolloutId: result.rolloutId, serviceId },
+				{ id: `rollout-created-${result.rolloutId}` },
+			),
+		);
+	} catch (error) {
+		await db
+			.update(rollouts)
+			.set({
+				status: "failed",
+				currentStage: "enqueue_failed",
+				completedAt: new Date(),
+			})
+			.where(
+				and(eq(rollouts.id, result.rolloutId), eq(rollouts.status, "queued")),
+			);
+		throw error;
+	}
+}
+
+export async function rebalanceAutomaticServices(): Promise<void> {
+	const now = new Date();
+	const candidates = await db
+		.select()
+		.from(services)
+		.where(and(isNull(services.deletedAt)))
+		.orderBy(services.id);
+	let queuedCount = 0;
+	for (const service of candidates) {
+		if (queuedCount >= MAX_REBALANCES_PER_RUN) break;
+		if (
+			service.lastAutomaticPlacementAt &&
+			now.getTime() - service.lastAutomaticPlacementAt.getTime() <
+				AUTOMATIC_PLACEMENT_COOLDOWN_MS
+		)
+			continue;
+		const [pending, activeDeployments] = await Promise.all([
+			db
+				.select({ id: rollouts.id })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, service.id),
+						inArray(rollouts.status, ["queued", "in_progress"]),
+					),
+				)
+				.limit(1)
+				.then((r) => r[0]),
+			db
+				.select({
+					revisionId: deployments.serviceRevisionId,
+					specification: serviceRevisions.specification,
+				})
+				.from(deployments)
+				.innerJoin(
+					serviceRevisions,
+					eq(deployments.serviceRevisionId, serviceRevisions.id),
+				)
+				.where(
+					and(
+						eq(deployments.serviceId, service.id),
+						inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+						eq(deployments.trafficState, "active"),
+					),
+				)
+				.then((rows) => rows),
+		]);
+		const activeRevisionIds = new Set(
+			activeDeployments.map((deployment) => deployment.revisionId),
+		);
+		if (pending || activeRevisionIds.size !== 1) continue;
+		const active = activeDeployments[0];
+		if (!active) continue;
+		const spec = parseServiceRevisionSpec(active.specification);
+		if (spec.stateful || spec.placement.mode !== "automatic") continue;
+		const eligible = await db
+			.select({ id: servers.id })
+			.from(servers)
+			.where(
+				and(
+					eq(servers.status, "online"),
+					isNotNull(servers.wireguardIp),
+					isNotNull(servers.onlineSince),
+					lt(
+						servers.onlineSince,
+						subtractMilliseconds(
+							now,
+							AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS,
+						),
+					),
+					...(spec.serverless.enabled ? [eq(servers.isProxy, true)] : []),
+				),
+			);
+		if (!eligible.length) continue;
+		const ideal = distributeReplicas(
+			eligible.map((s) => s.id),
+			spec.placement.replicas,
+		);
+		const desired = await db
+			.select({
+				serverId: deployments.serverId,
+				count: sql<number>`count(*)::int`,
+			})
+			.from(deployments)
+			.where(
+				and(
+					eq(deployments.serviceId, service.id),
+					inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+					eq(deployments.trafficState, "active"),
+				),
+			)
+			.groupBy(deployments.serverId);
+		const normalize = (
+			rows: Array<{ serverId: string; count?: number; replicas?: number }>,
+		) => rows.map((r) => [r.serverId, r.count ?? r.replicas]).sort();
+		if (JSON.stringify(normalize(ideal)) === JSON.stringify(normalize(desired)))
+			continue;
+		try {
+			const result = await cloneActiveRevisionAndQueueSystemRollout(
+				service.id,
+				active.revisionId,
+			);
+			if (!result.created) continue;
+			await enqueueSystemRollout(service.id, result);
+			queuedCount++;
+		} catch (error) {
+			console.error(`[scheduler] failed to rebalance ${service.name}`, error);
+		}
+	}
+}
+
+export async function recoverInvalidAutomaticPlacements(): Promise<void> {
+	const activeDeployments = await db
+		.select({
+			serviceId: deployments.serviceId,
+			serviceName: services.name,
+			revisionId: deployments.serviceRevisionId,
+			specification: serviceRevisions.specification,
+			serverStatus: servers.status,
+			serverWireguardIp: servers.wireguardIp,
+			serverIsProxy: servers.isProxy,
+			serverOnlineSince: servers.onlineSince,
+		})
+		.from(deployments)
+		.innerJoin(services, eq(services.id, deployments.serviceId))
+		.innerJoin(servers, eq(servers.id, deployments.serverId))
+		.innerJoin(
+			serviceRevisions,
+			eq(serviceRevisions.id, deployments.serviceRevisionId),
+		)
+		.where(
+			and(
+				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				eq(deployments.trafficState, "active"),
+				isNull(services.deletedAt),
+			),
+		);
+
+	const byService = new Map<string, typeof activeDeployments>();
+	for (const deployment of activeDeployments) {
+		const current = byService.get(deployment.serviceId) ?? [];
+		current.push(deployment);
+		byService.set(deployment.serviceId, current);
+	}
+
+	for (const [serviceId, serviceDeployments] of byService) {
+		const revisionIds = new Set(
+			serviceDeployments.map((deployment) => deployment.revisionId),
+		);
+		if (revisionIds.size !== 1) {
+			console.error(
+				`[scheduler] skipping automatic recovery for ${serviceId}: multiple active revisions`,
+			);
+			continue;
+		}
+		const active = serviceDeployments[0];
+		if (!active) continue;
+		const specification = parseServiceRevisionSpec(active.specification);
+		if (specification.stateful || specification.placement.mode !== "automatic")
+			continue;
+		const hasInvalidPlacement = serviceDeployments.some(
+			(deployment) =>
+				deployment.serverStatus !== "online" ||
+				!deployment.serverWireguardIp ||
+				!deployment.serverOnlineSince ||
+				deployment.serverOnlineSince.getTime() >=
+					Date.now() - AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS ||
+				(specification.serverless.enabled && !deployment.serverIsProxy),
+		);
+		if (!hasInvalidPlacement) continue;
+
+		const pending = await db
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				and(
+					eq(rollouts.serviceId, serviceId),
+					inArray(rollouts.status, ["queued", "in_progress"]),
+				),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (pending) continue;
+
+		try {
+			await resolveRevisionPlacements(specification);
+			const result = await cloneActiveRevisionAndQueueSystemRollout(
+				serviceId,
+				active.revisionId,
+			);
+			await enqueueSystemRollout(serviceId, result);
+		} catch (error) {
+			console.error(
+				`[scheduler] failed level-triggered recovery for ${active.serviceName}`,
+				error,
+			);
+		}
+	}
+}
 
 async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
@@ -40,15 +279,22 @@ async function triggerRecoveryForOfflineServers(
 			serverPublicIp: servers.publicIp,
 			serverWireguardIp: servers.wireguardIp,
 			serviceName: services.name,
+			serviceId: services.id,
+			serviceRevisionId: deployments.serviceRevisionId,
+			specification: serviceRevisions.specification,
 		})
 		.from(deployments)
 		.innerJoin(servers, eq(servers.id, deployments.serverId))
 		.innerJoin(services, eq(services.id, deployments.serviceId))
+		.innerJoin(
+			serviceRevisions,
+			eq(serviceRevisions.id, deployments.serviceRevisionId),
+		)
 		.where(
 			and(
 				inArray(deployments.serverId, offlineServerIds),
 				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
-				inArray(deployments.trafficState, ["candidate", "active"]),
+				eq(deployments.trafficState, "active"),
 				isNull(services.deletedAt),
 			),
 		);
@@ -58,6 +304,32 @@ async function triggerRecoveryForOfflineServers(
 			`[scheduler] ${offlineServerIds.length} server(s) went offline; no active replicas need manual recovery`,
 		);
 		return;
+	}
+	const automaticallyRecovered = new Set<string>();
+	const recoveryAttempted = new Set<string>();
+	for (const deployment of affectedDeployments) {
+		if (recoveryAttempted.has(deployment.serviceId)) continue;
+		recoveryAttempted.add(deployment.serviceId);
+		try {
+			const specification = parseServiceRevisionSpec(deployment.specification);
+			if (
+				specification.stateful ||
+				specification.placement.mode !== "automatic"
+			)
+				continue;
+			await resolveRevisionPlacements(specification);
+			const queued = await cloneActiveRevisionAndQueueSystemRollout(
+				deployment.serviceId,
+				deployment.serviceRevisionId,
+			);
+			await enqueueSystemRollout(deployment.serviceId, queued);
+			automaticallyRecovered.add(deployment.serviceId);
+		} catch (error) {
+			console.error(
+				`[scheduler] automatic recovery failed for ${deployment.serviceName}; falling back to manual alert`,
+				error,
+			);
+		}
 	}
 
 	const affectedByServer = new Map<
@@ -71,6 +343,7 @@ async function triggerRecoveryForOfflineServers(
 	>();
 
 	for (const deployment of affectedDeployments) {
+		if (automaticallyRecovered.has(deployment.serviceId)) continue;
 		const current = affectedByServer.get(deployment.serverId) ?? {
 			serverName: deployment.serverName,
 			serverIp:
@@ -118,7 +391,7 @@ export async function checkAndRecoverStaleServers(
 
 	const markedOffline = await db
 		.update(servers)
-		.set({ status: "offline" })
+		.set({ status: "offline", onlineSince: null })
 		.where(and(...conditions))
 		.returning({
 			id: servers.id,
@@ -146,9 +419,7 @@ export async function checkAndRecoverStaleServers(
 		});
 	}
 
-	triggerRecoveryForOfflineServers(offlineIds).catch((error) => {
-		console.error("[scheduler] recovery failed:", error);
-	});
+	await triggerRecoveryForOfflineServers(offlineIds);
 }
 
 export async function checkAndRunScheduledDeployments(): Promise<void> {

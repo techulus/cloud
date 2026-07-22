@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
 		return query;
 	}
 	const tx = {
+		execute: vi.fn(() => Promise.resolve()),
 		select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
 		insert: vi.fn(() => insertQuery()),
 	};
@@ -64,7 +65,8 @@ import {
 
 function sourceSpecification(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 2,
+		schemaVersion: 3,
+		placement: { mode: "manual" },
 		image: "registry.test/project-1/service-1:revision-original",
 		source: {
 			type: "github",
@@ -162,6 +164,7 @@ describe("GitHub build service revisions", () => {
 				actor: { type: "system" },
 			}),
 		).rejects.toThrow("Service revision idempotency conflict");
+		expect(mocks.tx.execute).toHaveBeenCalledTimes(1);
 		expect(mocks.tx.insert).not.toHaveBeenCalled();
 	});
 

@@ -9,13 +9,13 @@ import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import {
-	calculateRevisionPlacements,
 	checkForRollingUpdate,
 	cleanupExistingDeployments,
 	cleanupTerminalDeployments,
 	completeRollout,
 	createDeploymentRecords,
 	issueCertificatesForRevision,
+	resolveRevisionPlacements,
 	validateServers,
 } from "./rollout-helpers";
 import { handleRolloutFailure } from "./rollout-utils";
@@ -62,7 +62,11 @@ async function acquireRolloutTurn(
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
 
 		const rollout = await tx
-			.select({ status: rollouts.status, createdAt: rollouts.createdAt })
+			.select({
+				status: rollouts.status,
+				currentStage: rollouts.currentStage,
+				createdAt: rollouts.createdAt,
+			})
 			.from(rollouts)
 			.where(eq(rollouts.id, rolloutId))
 			.then((rows) => rows[0]);
@@ -71,7 +75,9 @@ async function acquireRolloutTurn(
 			throw new Error("Rollout not found");
 		}
 
-		if (rollout.status !== "queued") {
+		const recoverableEnqueueFailure =
+			rollout.status === "failed" && rollout.currentStage === "enqueue_failed";
+		if (rollout.status !== "queued" && !recoverableEnqueueFailure) {
 			return rollout.status === "in_progress" ? "acquired" : "terminal";
 		}
 
@@ -104,6 +110,7 @@ async function acquireRolloutTurn(
 			.set({
 				status: "in_progress",
 				currentStage: "preparing",
+				completedAt: null,
 			})
 			.where(eq(rollouts.id, rolloutId));
 
@@ -219,7 +226,7 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const placementResult = await step.run("load-placements", async () => {
 			try {
-				const result = calculateRevisionPlacements(specification);
+				const result = await resolveRevisionPlacements(specification);
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,

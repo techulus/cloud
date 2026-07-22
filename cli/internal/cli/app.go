@@ -435,7 +435,14 @@ func (a *App) linkCommand() *cobra.Command {
 						IsPublic      bool    `json:"public"`
 						Domain        *string `json:"domain"`
 					} `json:"ports"`
-					Replicas     int                   `json:"replicas"`
+					Replicas  int `json:"replicas"`
+					Placement *struct {
+						Mode string `json:"mode"`
+					} `json:"placement"`
+					Placements []struct {
+						ServerID string `json:"serverId"`
+						Count    int    `json:"count"`
+					} `json:"placements"`
 					HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
 					StartCommand *string               `json:"startCommand"`
 					Resources    *manifest.Resources   `json:"resources"`
@@ -468,7 +475,19 @@ func (a *App) linkCommand() *cobra.Command {
 			for i, p := range cfg.Current.Ports {
 				ports[i] = manifest.Port{ContainerPort: p.ContainerPort, Public: p.IsPublic, Domain: p.Domain}
 			}
-			m := manifest.Manifest{APIVersion: "v1", Project: manifest.Project{ID: project.ID, Slug: project.Slug}, Environment: manifest.Environment{ID: environment.ID, Name: environment.Name}, Service: manifest.Service{ID: service.ID, Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
+			var placement *manifest.Placement
+			if cfg.Current.Placement != nil {
+				if cfg.Current.Placement.Mode == "automatic" {
+					placement = &manifest.Placement{Mode: "automatic"}
+				} else if len(cfg.Current.Placements) > 0 {
+					placement = &manifest.Placement{Mode: "manual"}
+					placement.Servers = make([]manifest.PlacementServer, len(cfg.Current.Placements))
+					for i, p := range cfg.Current.Placements {
+						placement.Servers[i] = manifest.PlacementServer{ServerID: p.ServerID, Count: p.Count}
+					}
+				}
+			}
+			m := manifest.Manifest{APIVersion: "v1", Project: manifest.Project{ID: project.ID, Slug: project.Slug}, Environment: manifest.Environment{ID: environment.ID, Name: environment.Name}, Service: manifest.Service{ID: service.ID, Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, Placement: placement, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
 			if err := manifest.Save(manifestPath, m); err != nil {
 				return err
 			}
@@ -508,6 +527,14 @@ func (a *App) applyCommand() *cobra.Command {
 				return errors.New("service is not linked: run `tc link`")
 			}
 			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "replicas": loaded.Manifest.Service.Replicas, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
+			if placement := loaded.Manifest.Service.Placement; placement != nil {
+				delete(body, "replicas")
+				if placement.Mode == "automatic" {
+					body["placement"] = map[string]any{"mode": "automatic", "replicas": loaded.Manifest.Service.Replicas}
+				} else {
+					body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
+				}
+			}
 			if loaded.Manifest.Service.Resources != nil {
 				body["resources"] = loaded.Manifest.Service.Resources
 			}
