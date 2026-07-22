@@ -88,6 +88,15 @@ to the edge domain; apex domains can use `ALIAS` or `ANAME` where supported.
 Techulus Cloud only displays the required DNS configuration. It does not create
 or update DNS records.
 
+### Automatic Service Subdomains
+
+Configure **Automatic Subdomain Domain** under **Settings → Infrastructure** to
+offer generated domains in service Networking settings. Enter only the base
+domain, such as `apps.example.com`, without `*.` or a protocol.
+
+Create wildcard DNS records for `*.apps.example.com` that resolve to every proxy
+server public IPv4 address.
+
 ### Web Replicas
 
 Set `WEB_REPLICAS` in `.env` to run multiple control plane web containers:

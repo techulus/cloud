@@ -288,6 +288,7 @@ export async function getGlobalSettings() {
 		buildTimeout,
 		acmeEmail,
 		edgeDomain,
+		autoSubdomainDomain,
 		emailAlertsConfig,
 		controlPlaneUpdateState,
 		controlPlaneUpgradeState,
@@ -296,6 +297,7 @@ export async function getGlobalSettings() {
 		getSetting<number>("build_timeout_minutes"),
 		getSetting<string>("acme_email"),
 		getSetting<string>("edge_domain"),
+		getSetting<string>("auto_subdomain_domain"),
 		getSetting<EmailAlertsConfig>("email_alerts_config"),
 		getSetting<ControlPlaneUpdateState>("control_plane_update_state"),
 		getSetting<ControlPlaneUpgradeState>("control_plane_upgrade_state"),
@@ -307,6 +309,7 @@ export async function getGlobalSettings() {
 		edgeDomain: {
 			hostname: edgeDomain ?? null,
 		},
+		autoSubdomainDomain: autoSubdomainDomain ?? null,
 		emailAlertsConfig: emailAlertsConfig ?? null,
 		controlPlaneUpdateState: controlPlaneUpdateState ?? null,
 		controlPlaneUpgradeState: controlPlaneUpgradeState ?? null,

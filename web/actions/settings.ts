@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import isEmail from "validator/es/lib/isEmail";
+import isFQDN from "validator/es/lib/isFQDN";
 import { ZodError } from "zod";
 import { setSetting } from "@/db/queries";
 import { requireAdminRole, requireAuth } from "@/lib/auth";
@@ -64,6 +65,17 @@ export async function updateEdgeDomain(domain: string) {
 	await requireAdminSession();
 	const hostname = domain.trim().replace(/\.$/, "");
 	await setSetting(SETTING_KEYS.EDGE_DOMAIN, hostname || null);
+	revalidatePath("/dashboard/settings");
+	return { success: true, hostname };
+}
+
+export async function updateAutoSubdomainDomain(domain: string) {
+	await requireAdminSession();
+	const hostname = domain.trim().toLowerCase().replace(/\.$/, "");
+	if (hostname && (hostname.length > 253 || !isFQDN(hostname))) {
+		throw new Error("Invalid automatic subdomain domain");
+	}
+	await setSetting(SETTING_KEYS.AUTO_SUBDOMAIN_DOMAIN, hostname || null);
 	revalidatePath("/dashboard/settings");
 	return { success: true, hostname };
 }

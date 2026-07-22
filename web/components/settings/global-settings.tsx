@@ -87,6 +87,7 @@ type Props = {
 		buildTimeoutMinutes: number;
 		acmeEmail: string | null;
 		edgeDomain: EdgeDomainOverview;
+		autoSubdomainDomain: string | null;
 		emailAlertsConfig: EmailAlertsConfig | null;
 		controlPlaneUpdateState: ControlPlaneUpdateState | null;
 		controlPlaneUpgradeState: ControlPlaneUpgradeState | null;
@@ -437,6 +438,7 @@ export function GlobalSettings({
 
 				<EdgeDomainSettings
 					initial={initialSettings.edgeDomain}
+					initialAutoSubdomainDomain={initialSettings.autoSubdomainDomain}
 					servers={servers}
 				/>
 			</TabsContent>

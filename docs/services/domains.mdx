@@ -15,9 +15,9 @@ Traffic flows: `Internet → Proxy Node → Traefik (TLS) → WireGuard → Cont
 
 ## Automatic Subdomains
 
-Set `AUTO_SUBDOMAIN_DOMAIN` on the control plane to offer automatic domains in
-service networking settings. For example, with
-`AUTO_SUBDOMAIN_DOMAIN=apps.example.com`, a service whose private hostname is
+Configure **Automatic Subdomain Domain** under **Settings → Infrastructure** to
+offer automatic domains in service networking settings. For example, with the
+setting configured as `apps.example.com`, a service whose private hostname is
 `project-api-production` can use `project-api-production.apps.example.com`.
 
 Create a wildcard DNS record for `*.apps.example.com` that points to all proxy
