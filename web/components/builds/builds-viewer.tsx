@@ -52,6 +52,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import type { Build, BuildStatus } from "@/db/types";
 import { formatElapsedDurationBetween, formatRelativeTime } from "@/lib/date";
 import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
 
 type BuildListItem = Pick<
 	Build,
@@ -119,7 +120,15 @@ const STATUS_CONFIG: Record<
 	},
 };
 
-function BuildStatusBadge({ status }: { status: BuildStatus }) {
+function BuildStatusBadge({
+	status,
+	className,
+	size,
+}: {
+	status: BuildStatus;
+	className?: string;
+	size?: "default" | "sm";
+}) {
 	const config = STATUS_CONFIG[status];
 	const isAnimated = ["cloning", "building", "pushing"].includes(status);
 
@@ -128,7 +137,8 @@ function BuildStatusBadge({ status }: { status: BuildStatus }) {
 			icon={config.icon}
 			label={config.label}
 			isAnimated={isAnimated}
-			className={config.color}
+			className={cn(config.color, className)}
+			size={size}
 		/>
 	);
 }
@@ -376,7 +386,10 @@ export function BuildsViewer({
 								)
 							}
 						>
-							<BuildStatusBadge status={build.status} />
+							<BuildStatusBadge
+								status={build.status}
+								className="max-sm:hidden"
+							/>
 							<ItemContent>
 								<ItemTitle>
 									<GitCommit className="size-3.5 text-muted-foreground" />
@@ -388,19 +401,26 @@ export function BuildsViewer({
 									</span>
 								</ItemTitle>
 								<ItemDescription>
+									<BuildStatusBadge
+										status={build.status}
+										size="sm"
+										className="mr-3 sm:hidden"
+									/>
 									<span className="inline-flex items-center gap-1">
 										<GitBranch className="size-3" />
 										{build.branch}
 									</span>
 									{build.author && (
-										<span className="ml-3">by {build.author}</span>
+										<span className="ml-3 max-sm:hidden">
+											by {build.author}
+										</span>
 									)}
 									<span className="ml-3">
 										{formatRelativeTime(build.createdAt)}
 									</span>
 									{build.startedAt && (
 										<span className="ml-3">
-											Duration:{" "}
+											<span className="max-sm:hidden">Duration: </span>
 											{formatElapsedDurationBetween(
 												build.startedAt,
 												build.completedAt,
