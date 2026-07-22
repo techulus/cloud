@@ -269,7 +269,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 		const buildStageIndex = ACTIVE_BUILD_STATUSES.indexOf(barState.buildStatus);
 
 		content = (
-			<div className="mx-auto max-w-5xl overflow-hidden rounded-b-lg border border-blue-500/40 border-t-0 bg-blue-500/5">
+			<div className="mx-auto mt-2 max-w-5xl overflow-hidden rounded-lg border border-blue-500/40 bg-blue-500/5 lg:mt-0 lg:rounded-t-none lg:border-t-0">
 				<StageProgress
 					current={buildStageIndex}
 					total={ACTIVE_BUILD_STATUSES.length}
@@ -310,7 +310,7 @@ export const DeploymentProgress = memo(function DeploymentProgress({
 		content = (
 			<div
 				className={cn(
-					"mx-auto max-w-5xl overflow-hidden rounded-b-lg border border-t-0",
+					"mx-auto mt-2 max-w-5xl overflow-hidden rounded-lg border lg:mt-0 lg:rounded-t-none lg:border-t-0",
 					isMigrationFailed
 						? "border-red-500/40 bg-red-500/5"
 						: "border-blue-500/40 bg-blue-500/5",
