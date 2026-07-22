@@ -60,18 +60,19 @@ export const NetworkingSection = memo(function NetworkingSection({
 	onUpdate: () => void;
 }) {
 	const router = useRouter();
+	const initialHostname = service.hostname || slugify(service.name);
 	const [newPort, setNewPort] = useState("");
 	const [domain, setDomain] = useState("");
+	const [autoSubdomain, setAutoSubdomain] = useState(initialHostname);
 	const [domainMode, setDomainMode] = useState<"auto" | "custom">(
 		autoSubdomainDomain ? "auto" : "custom",
 	);
 	const [hostnameOverride, setHostnameOverride] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 
-	const hostname =
-		hostnameOverride || service.hostname || slugify(service.name);
+	const hostname = hostnameOverride || initialHostname;
 	const autoDomain = autoSubdomainDomain
-		? `${hostname}.${autoSubdomainDomain}`
+		? `${autoSubdomain.trim()}.${autoSubdomainDomain}`
 		: null;
 	const httpPorts = service.ports.filter(
 		(p) => !p.protocol || p.protocol === "http",
@@ -82,6 +83,9 @@ export const NetworkingSection = memo(function NetworkingSection({
 
 	const handleHostnameChange = async (newHostname: string) => {
 		const result = await updateServiceHostname(service.id, newHostname);
+		if (autoSubdomain === hostname) {
+			setAutoSubdomain(result.hostname);
+		}
 		setHostnameOverride(result.hostname);
 		onUpdate();
 		router.refresh();
@@ -187,7 +191,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 					</div>
 				</div>
 
-				<div className="space-y-4 border-t pt-4">
+				<div className="space-y-4">
 					<div>
 						<h3 className="text-sm font-medium">HTTP endpoints</h3>
 						<p className="text-sm text-muted-foreground">
@@ -260,10 +264,19 @@ export const NetworkingSection = memo(function NetworkingSection({
 								</Button>
 							</div>
 						)}
-						{domainMode === "auto" && autoDomain ? (
-							<code className="flex-1 min-w-48 truncate rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-								{autoDomain}
-							</code>
+						{domainMode === "auto" && autoSubdomainDomain ? (
+							<div className="flex flex-1 min-w-48">
+								<Input
+									type="text"
+									aria-label="Automatic subdomain"
+									value={autoSubdomain}
+									onChange={(e) => setAutoSubdomain(e.target.value)}
+									className="rounded-r-none"
+								/>
+								<span className="flex h-8 shrink-0 items-center rounded-r-lg border border-l-0 border-input bg-muted px-2.5 text-sm text-muted-foreground">
+									.{autoSubdomainDomain}
+								</span>
+							</div>
 						) : (
 							<Input
 								type="text"
@@ -287,7 +300,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 					</div>
 				</div>
 
-				<div className="space-y-4 border-t pt-4">
+				<div className="space-y-4">
 					<div>
 						<h3 className="text-sm font-medium">TCP/UDP endpoints</h3>
 					</div>
