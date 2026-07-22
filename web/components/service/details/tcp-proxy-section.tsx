@@ -11,11 +11,11 @@ import type { ServiceWithDetails as Service } from "@/db/types";
 
 export const TCPUDPPorts = memo(function TCPUDPPorts({
 	service,
-	proxyDomain,
+	edgeDomain,
 	onUpdate,
 }: {
 	service: Service;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	onUpdate: () => void;
 }) {
 	const [newPort, setNewPort] = useState("");
@@ -91,8 +91,8 @@ export const TCPUDPPorts = memo(function TCPUDPPorts({
 		protocol: string | null;
 		externalPort: number | null;
 	}) => {
-		if (!port.externalPort || !proxyDomain) return null;
-		return `${port.protocol}://${proxyDomain}:${port.externalPort}`;
+		if (!port.externalPort || !edgeDomain) return null;
+		return `${port.protocol}://${edgeDomain}:${port.externalPort}`;
 	};
 
 	const copyToClipboard = async (text: string, portId: string) => {
@@ -165,10 +165,10 @@ export const TCPUDPPorts = memo(function TCPUDPPorts({
 				</div>
 			)}
 
-			{!proxyDomain && (
+			{!edgeDomain && (
 				<p className="text-xs text-amber-600">
-					Proxy domain is not configured. Set it in Settings &gt; Infrastructure
-					for connection strings.
+					The Edge Domain is not configured. Set it in Infrastructure settings
+					to show connection strings.
 				</p>
 			)}
 

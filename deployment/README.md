@@ -73,6 +73,30 @@ INNGEST_SIGNING_KEY=signkey-prod-<your-signing-key>
 INNGEST_EVENT_KEY=<your-event-key>
 ```
 
+### Edge Domain
+
+After signing in as an admin, configure **Edge Domain** under
+**Settings → Infrastructure**. This is the canonical hostname used for all
+public edge traffic, including HTTP/HTTPS custom domains and direct TCP/UDP
+connection strings.
+
+Configure this hostname in your DNS provider to resolve to every proxy server's
+public IPv4 address. You can use direct `A` records or your own DNS routing,
+load-balancing, or GeoDNS policy. Custom HTTP/HTTPS subdomains can use a `CNAME`
+to the edge domain; apex domains can use `ALIAS` or `ANAME` where supported.
+
+Techulus Cloud only displays the required DNS configuration. It does not create
+or update DNS records.
+
+### Automatic Service Subdomains
+
+Configure **Automatic Subdomain Domain** under **Settings → Infrastructure** to
+offer generated domains in service Networking settings. Enter only the base
+domain, such as `apps.example.com`, without `*.` or a protocol.
+
+Create wildcard DNS records for `*.apps.example.com` that resolve to every proxy
+server public IPv4 address.
+
 ### Web Replicas
 
 Set `WEB_REPLICAS` in `.env` to run multiple control plane web containers:

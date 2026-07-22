@@ -29,7 +29,7 @@ interface ServiceLayoutClientProps {
 	projectId: string;
 	projectSlug: string;
 	envName: string;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	autoSubdomainDomain: string | null;
 	children: React.ReactNode;
 }
@@ -39,7 +39,7 @@ export function ServiceLayoutClient({
 	projectId,
 	projectSlug,
 	envName,
-	proxyDomain,
+	edgeDomain,
 	autoSubdomainDomain,
 	children,
 }: ServiceLayoutClientProps) {
@@ -112,7 +112,7 @@ export function ServiceLayoutClient({
 						pendingChanges,
 						projectSlug,
 						envName,
-						proxyDomain,
+						edgeDomain,
 						autoSubdomainDomain,
 						onUpdate: handleActionComplete,
 					}
@@ -122,7 +122,7 @@ export function ServiceLayoutClient({
 			pendingChanges,
 			projectSlug,
 			envName,
-			proxyDomain,
+			edgeDomain,
 			autoSubdomainDomain,
 			handleActionComplete,
 		],
@@ -231,7 +231,7 @@ interface ServiceContextType {
 	pendingChanges: ConfigChange[];
 	projectSlug: string;
 	envName: string;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	autoSubdomainDomain: string | null;
 	onUpdate: () => void;
 }

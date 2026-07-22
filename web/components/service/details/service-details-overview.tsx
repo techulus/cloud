@@ -167,10 +167,10 @@ const STATUS_FAMILY_COLORS: Record<string, string> = {
 };
 
 export function ServiceDetailsOverview({ service }: { service: Service }) {
-	const { proxyDomain } = useService();
+	const { edgeDomain } = useService();
 	const overview = useMemo(
-		() => buildOverviewData(service, proxyDomain),
-		[service, proxyDomain],
+		() => buildOverviewData(service, edgeDomain),
+		[service, edgeDomain],
 	);
 	const serviceMetricsUrl = `/api/services/${service.id}/metrics?range=24h`;
 	const {
@@ -651,7 +651,7 @@ function ServiceMetricsTooltip({
 
 function buildOverviewData(
 	service: Service,
-	proxyDomain: string | null,
+	edgeDomain: string | null,
 ): OverviewData {
 	const endpoints: EndpointItem[] = [];
 	const servers = new Map<string, ServerSummary>();
@@ -707,13 +707,13 @@ function buildOverviewData(
 			port.isPublic &&
 			(port.protocol === "tcp" || port.protocol === "udp") &&
 			port.externalPort &&
-			proxyDomain
+			edgeDomain
 		) {
 			endpoints.push({
 				key: port.id,
 				kind: "tcp",
 				typeLabel: port.protocol.toUpperCase(),
-				label: `${port.protocol}://${proxyDomain}:${port.externalPort}`,
+				label: `${port.protocol}://${edgeDomain}:${port.externalPort}`,
 				target: `Container :${port.port}`,
 			});
 		}

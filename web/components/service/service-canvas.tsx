@@ -287,13 +287,13 @@ function ServiceCard({
 	service,
 	projectSlug,
 	envName,
-	proxyDomain,
+	edgeDomain,
 	dragHandleProps,
 }: {
 	service: ServiceWithDetails;
 	projectSlug: string;
 	envName: string;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	dragHandleProps?: AnchorHTMLAttributes<HTMLAnchorElement>;
 }) {
 	const colors = getStatusColorFromDeployments(service.deployments);
@@ -315,7 +315,7 @@ function ServiceCard({
 
 	const hasEndpoints =
 		publicPorts.length > 0 ||
-		(tcpUdpPorts.length > 0 && proxyDomain) ||
+		(tcpUdpPorts.length > 0 && edgeDomain) ||
 		hasInternalDns;
 
 	return (
@@ -368,7 +368,7 @@ function ServiceCard({
 								</div>
 							))}
 							{tcpUdpPorts.length > 0 &&
-								proxyDomain &&
+								edgeDomain &&
 								tcpUdpPorts.map((port) => (
 									<div
 										key={port.id}
@@ -377,7 +377,7 @@ function ServiceCard({
 										<div className="flex items-center gap-2 text-xs text-foreground font-mono">
 											<Network className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 											<span className="truncate">
-												{port.protocol}://{proxyDomain}:{port.externalPort}
+												{port.protocol}://{edgeDomain}:{port.externalPort}
 											</span>
 										</div>
 									</div>
@@ -421,7 +421,7 @@ function DraggableServiceCard({
 	index,
 	projectSlug,
 	envName,
-	proxyDomain,
+	edgeDomain,
 	canvasScale,
 	onPositionChange,
 }: {
@@ -429,7 +429,7 @@ function DraggableServiceCard({
 	index: number;
 	projectSlug: string;
 	envName: string;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 	canvasScale: number;
 	onPositionChange: (serviceId: string, position: CanvasPosition) => void;
 }) {
@@ -550,7 +550,7 @@ function DraggableServiceCard({
 				service={service}
 				projectSlug={projectSlug}
 				envName={envName}
-				proxyDomain={proxyDomain}
+				edgeDomain={edgeDomain}
 				dragHandleProps={{
 					className:
 						"touch-none cursor-grab select-none active:cursor-grabbing",
@@ -571,13 +571,13 @@ export function ServiceCanvas({
 	projectSlug,
 	envId,
 	envName,
-	proxyDomain,
+	edgeDomain,
 }: {
 	projectId: string;
 	projectSlug: string;
 	envId: string;
 	envName: string;
-	proxyDomain: string | null;
+	edgeDomain: string | null;
 }) {
 	const { data: environments } = useSWR<Environment[]>(
 		`/api/projects/${projectId}/environments`,
@@ -827,7 +827,7 @@ export function ServiceCanvas({
 							service={service}
 							projectSlug={projectSlug}
 							envName={envName}
-							proxyDomain={proxyDomain}
+							edgeDomain={edgeDomain}
 						/>
 					))}
 				</div>
@@ -880,7 +880,7 @@ export function ServiceCanvas({
 										index={index}
 										projectSlug={projectSlug}
 										envName={envName}
-										proxyDomain={proxyDomain}
+										edgeDomain={edgeDomain}
 										canvasScale={canvasScale}
 										onPositionChange={handlePositionChange}
 									/>

@@ -31,7 +31,7 @@ export default function ConfigurationPage() {
 		service,
 		projectSlug,
 		envName,
-		proxyDomain,
+		edgeDomain,
 		autoSubdomainDomain,
 		onUpdate,
 	} = useService();
@@ -106,7 +106,7 @@ export default function ConfigurationPage() {
 
 				<NetworkingSection
 					service={service}
-					proxyDomain={proxyDomain}
+					edgeDomain={edgeDomain}
 					autoSubdomainDomain={autoSubdomainDomain}
 					onUpdate={handleConfigSave}
 				/>
