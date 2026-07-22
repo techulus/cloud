@@ -30,6 +30,7 @@ interface ServiceLayoutClientProps {
 	projectSlug: string;
 	envName: string;
 	proxyDomain: string | null;
+	autoSubdomainDomain: string | null;
 	children: React.ReactNode;
 }
 
@@ -39,6 +40,7 @@ export function ServiceLayoutClient({
 	projectSlug,
 	envName,
 	proxyDomain,
+	autoSubdomainDomain,
 	children,
 }: ServiceLayoutClientProps) {
 	const pathname = usePathname();
@@ -111,6 +113,7 @@ export function ServiceLayoutClient({
 						projectSlug,
 						envName,
 						proxyDomain,
+						autoSubdomainDomain,
 						onUpdate: handleActionComplete,
 					}
 				: null,
@@ -120,6 +123,7 @@ export function ServiceLayoutClient({
 			projectSlug,
 			envName,
 			proxyDomain,
+			autoSubdomainDomain,
 			handleActionComplete,
 		],
 	);
@@ -228,6 +232,7 @@ interface ServiceContextType {
 	projectSlug: string;
 	envName: string;
 	proxyDomain: string | null;
+	autoSubdomainDomain: string | null;
 	onUpdate: () => void;
 }
 
