@@ -12,10 +12,11 @@ import {
 	DAY_IN_MILLISECONDS,
 	isDateAfter,
 	MINUTE_IN_MILLISECONDS,
-	SECOND_IN_MILLISECONDS,
 	subtractMilliseconds,
 } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
+import { EDGE_HEARTBEAT_FRESH_MS } from "@/lib/edge-dns";
+import { enqueueEdgeDnsReconciliation } from "@/lib/edge-dns-service";
 import {
 	sendManualRecoveryRequiredAlert,
 	sendServerOfflineAlert,
@@ -24,8 +25,6 @@ import {
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
-
-const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 
 async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
@@ -105,7 +104,10 @@ async function triggerRecoveryForOfflineServers(
 export async function checkAndRecoverStaleServers(
 	excludeServerId?: string,
 ): Promise<void> {
-	const staleThreshold = subtractMilliseconds(new Date(), STALE_THRESHOLD_MS);
+	const staleThreshold = subtractMilliseconds(
+		new Date(),
+		EDGE_HEARTBEAT_FRESH_MS,
+	);
 
 	const conditions = [
 		eq(servers.status, "online"),
@@ -125,9 +127,15 @@ export async function checkAndRecoverStaleServers(
 			name: servers.name,
 			publicIp: servers.publicIp,
 			wireguardIp: servers.wireguardIp,
+			isProxy: servers.isProxy,
 		});
 
 	if (markedOffline.length === 0) return;
+	if (markedOffline.some((server) => server.isProxy)) {
+		await enqueueEdgeDnsReconciliation("proxy-offline").catch((error) => {
+			console.error("Failed to enqueue Edge DNS reconciliation:", error);
+		});
+	}
 
 	const offlineIds = markedOffline.map((s) => s.id);
 	console.log(

@@ -3,6 +3,7 @@ import isFQDN from "validator/es/lib/isFQDN";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { ServiceLayoutClient } from "@/components/service/service-layout-client";
 import { getProjectBySlug, getService, getSetting } from "@/db/queries";
+import { getEffectiveEdgeDomain } from "@/lib/edge-dns";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 export default async function ServiceLayout({
@@ -48,7 +49,7 @@ export default async function ServiceLayout({
 				projectId={project.id}
 				serviceId={serviceId}
 				envName={env}
-				proxyDomain={proxyDomain}
+				proxyDomain={getEffectiveEdgeDomain(proxyDomain).hostname}
 				autoSubdomainDomain={autoSubdomainDomain}
 			>
 				{children}

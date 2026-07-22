@@ -2,6 +2,7 @@ import { eventType, staticSchema } from "inngest";
 
 export type { BackupEvents } from "./backup";
 export type { BuildEvents } from "./build";
+export type { EdgeDnsEvents } from "./edge-dns";
 export type { MigrationEvents } from "./migration";
 export type { ResourceEvents } from "./resource";
 export type { RestoreEvents } from "./restore";
@@ -10,6 +11,7 @@ export type { ServiceDeletionEvents } from "./service-deletion";
 
 import type { BackupEvents } from "./backup";
 import type { BuildEvents } from "./build";
+import type { EdgeDnsEvents } from "./edge-dns";
 import type { MigrationEvents } from "./migration";
 import type { ResourceEvents } from "./resource";
 import type { RestoreEvents } from "./restore";
@@ -21,6 +23,7 @@ export type Events = RolloutEvents &
 	BackupEvents &
 	RestoreEvents &
 	BuildEvents &
+	EdgeDnsEvents &
 	ServiceDeletionEvents &
 	ResourceEvents;
 
@@ -31,6 +34,7 @@ const defineEvent = <TName extends EventName>(name: TName) =>
 	eventType(name, { schema: staticSchema<EventData<TName>>() });
 
 export const inngestEvents = {
+	edgeDnsReconcile: defineEvent("edge-dns/reconcile"),
 	resourceStatusChanged: defineEvent("resource/status-changed"),
 
 	rolloutCreated: defineEvent("rollout/created"),

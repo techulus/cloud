@@ -6,6 +6,7 @@ import {
 	buildWorkflow,
 	certificateRenewal,
 	challengeCleanup,
+	edgeDnsReconciliation,
 	expiredDeletedServicesPurge,
 	migrationWorkflow,
 	oldBackupsCleanup,
@@ -25,6 +26,7 @@ import {
 export const { GET, POST, PUT } = serve({
 	client: inngest,
 	functions: [
+		edgeDnsReconciliation,
 		rolloutWorkflow,
 		onDeploymentFailed,
 		staleServerCheck,

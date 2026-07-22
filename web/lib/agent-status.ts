@@ -26,6 +26,8 @@ import {
 	observedStartingPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
+import { EDGE_HEARTBEAT_FRESH_MS } from "@/lib/edge-dns";
+import { enqueueEdgeDnsReconciliation } from "@/lib/edge-dns-service";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
@@ -648,6 +650,19 @@ export async function applyStatusReport(
 	report: StatusReport,
 	serverlessTransitions: unknown[] = [],
 ) {
+	const [currentServer] = await db
+		.select({
+			isProxy: servers.isProxy,
+			status: servers.status,
+			lastHeartbeat: servers.lastHeartbeat,
+			publicIp: servers.publicIp,
+			networkHealth: servers.networkHealth,
+			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
+			agentUpgradeStatus: servers.agentUpgradeStatus,
+		})
+		.from(servers)
+		.where(eq(servers.id, serverId))
+		.limit(1);
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
 		status: "online",
@@ -684,20 +699,10 @@ export async function applyStatusReport(
 	}
 	if (report.agentHealth) {
 		updateData.agentHealth = report.agentHealth;
-
-		const [server] = await db
-			.select({
-				agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
-				agentUpgradeStatus: servers.agentUpgradeStatus,
-			})
-			.from(servers)
-			.where(eq(servers.id, serverId))
-			.limit(1);
-
 		if (
-			server?.agentUpgradeTargetVersion === report.agentHealth.version &&
-			server.agentUpgradeStatus !== "succeeded" &&
-			server.agentUpgradeStatus !== "idle"
+			currentServer?.agentUpgradeTargetVersion === report.agentHealth.version &&
+			currentServer.agentUpgradeStatus !== "succeeded" &&
+			currentServer.agentUpgradeStatus !== "idle"
 		) {
 			updateData.agentUpgradeStatus = "succeeded";
 			updateData.agentUpgradeError = null;
@@ -706,6 +711,28 @@ export async function applyStatusReport(
 	}
 
 	await db.update(servers).set(updateData).where(eq(servers.id, serverId));
+	const heartbeatWasStale =
+		!currentServer?.lastHeartbeat ||
+		Date.now() - currentServer.lastHeartbeat.getTime() >
+			EDGE_HEARTBEAT_FRESH_MS;
+	const publicIpChanged =
+		Boolean(report.publicIp) && report.publicIp !== currentServer?.publicIp;
+	const tunnelReadinessChanged =
+		report.networkHealth !== undefined &&
+		report.networkHealth.tunnelUp !== currentServer?.networkHealth?.tunnelUp;
+	if (
+		currentServer?.isProxy &&
+		(currentServer.status !== "online" ||
+			heartbeatWasStale ||
+			publicIpChanged ||
+			tunnelReadinessChanged)
+	) {
+		await enqueueEdgeDnsReconciliation("proxy-status-changed").catch(
+			(error) => {
+				console.error("Failed to enqueue Edge DNS reconciliation:", error);
+			},
+		);
+	}
 	if (completedAgentUpgradeTarget) {
 		await db
 			.update(workQueue)

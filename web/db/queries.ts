@@ -14,6 +14,8 @@ import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
 } from "@/lib/control-plane-updates";
+import { getEffectiveEdgeDomain } from "@/lib/edge-dns";
+import { getEdgeDnsOverview } from "@/lib/edge-dns-service";
 import type {
 	EmailAlertsConfig,
 	SmtpConfig,
@@ -300,12 +302,15 @@ export async function getGlobalSettings() {
 		getSetting<ControlPlaneUpdateState>("control_plane_update_state"),
 		getSetting<ControlPlaneUpgradeState>("control_plane_upgrade_state"),
 	]);
+	const effectiveDomain = getEffectiveEdgeDomain(proxyDomain);
+	const edgeDns = await getEdgeDnsOverview(proxyDomain);
 
 	return {
 		buildServerIds: buildServers ?? [],
 		buildTimeoutMinutes: buildTimeout ?? 30,
 		acmeEmail: acmeEmail ?? null,
-		proxyDomain: proxyDomain ?? null,
+		proxyDomain: effectiveDomain.hostname,
+		edgeDns,
 		emailAlertsConfig: emailAlertsConfig ?? null,
 		controlPlaneUpdateState: controlPlaneUpdateState ?? null,
 		controlPlaneUpgradeState: controlPlaneUpgradeState ?? null,

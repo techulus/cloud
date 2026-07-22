@@ -5,6 +5,8 @@ export const SETTING_KEYS = {
 	BUILD_TIMEOUT_MINUTES: "build_timeout_minutes",
 	ACME_EMAIL: "acme_email",
 	PROXY_DOMAIN: "proxy_domain",
+	EDGE_DNS_CONFIG: "edge_dns_config",
+	EDGE_DNS_SYNC_STATE: "edge_dns_sync_state",
 	EMAIL_ALERTS_CONFIG: "email_alerts_config",
 	CONTROL_PLANE_UPDATE_STATE: "control_plane_update_state",
 	CONTROL_PLANE_LAST_UPDATE_CHECK_AT: "control_plane_last_update_check_at",

@@ -12,6 +12,7 @@ export {
 	staleItemsCleanup,
 	staleServerCheck,
 } from "./crons";
+export { edgeDnsReconciliation } from "./edge-dns-reconciliation";
 export { migrationWorkflow } from "./migration-workflow";
 export { onDeploymentFailed } from "./on-deployment-failed";
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
