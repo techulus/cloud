@@ -150,10 +150,13 @@ export function getBarState(
 		}
 	}
 
-	const totalReplicas = service.configuredReplicas.reduce(
-		(sum, r) => sum + r.count,
-		0,
-	);
+	const totalReplicas =
+		service.placementMode === "automatic"
+			? service.replicas
+			: service.configuredReplicas.reduce(
+					(sum, replica) => sum + replica.count,
+					0,
+				);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
 
