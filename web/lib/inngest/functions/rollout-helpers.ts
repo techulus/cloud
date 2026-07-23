@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -15,9 +15,22 @@ import { enqueueWork } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
-export const AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS = 10 * 60 * 1000;
 
 export type Placement = { serverId: string; replicas: number };
+
+export function automaticPlacementIneligibilityReason(
+	server: {
+		status: string;
+		wireguardIp: string | null;
+		isProxy: boolean;
+	},
+	requireProxy = false,
+): string | null {
+	if (server.status !== "online") return `status is ${server.status}`;
+	if (!server.wireguardIp) return "WireGuard is not configured";
+	if (requireProxy && !server.isProxy) return "not a proxy node";
+	return null;
+}
 
 export function distributeReplicas(
 	serverIds: string[],
@@ -160,16 +173,33 @@ export async function resolveRevisionPlacements(
 			and(
 				eq(servers.status, "online"),
 				isNotNull(servers.wireguardIp),
-				isNotNull(servers.onlineSince),
-				lt(
-					servers.onlineSince,
-					new Date(Date.now() - AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS),
-				),
 				...(specification.serverless.enabled
 					? [eq(servers.isProxy, true)]
 					: []),
 			),
 		);
+	if (eligible.length === 0) {
+		const candidates = await db
+			.select({
+				name: servers.name,
+				status: servers.status,
+				wireguardIp: servers.wireguardIp,
+				isProxy: servers.isProxy,
+			})
+			.from(servers);
+		const details = candidates.length
+			? candidates.map((server) => {
+					const reason = automaticPlacementIneligibilityReason(
+						server,
+						specification.serverless.enabled,
+					);
+					return `${server.name}: ${reason ?? "eligible state changed during placement"}`;
+				})
+			: ["no servers configured"];
+		const message = `No eligible servers for deployment (${details.join("; ")})`;
+		console.warn(`[placement] ${message}`);
+		throw new Error(message);
+	}
 	return {
 		placements: distributeReplicas(
 			eligible.map((server) => server.id),

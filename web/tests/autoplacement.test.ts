@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { distributeReplicas } from "@/lib/inngest/functions/rollout-helpers";
+import {
+	automaticPlacementIneligibilityReason,
+	distributeReplicas,
+} from "@/lib/inngest/functions/rollout-helpers";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 describe("automatic placement distribution", () => {
@@ -24,6 +27,28 @@ describe("automatic placement distribution", () => {
 			{ serverId: "a", replicas: 5 },
 			{ serverId: "b", replicas: 5 },
 		]);
+	});
+});
+
+describe("automatic placement eligibility diagnostics", () => {
+	const eligible = {
+		status: "online",
+		wireguardIp: "10.0.0.2",
+		isProxy: false,
+	};
+
+	it.each([
+		[{ ...eligible, status: "offline" }, "status is offline"],
+		[{ ...eligible, wireguardIp: null }, "WireGuard is not configured"],
+	])("reports why a server is ineligible", (server, reason) => {
+		expect(automaticPlacementIneligibilityReason(server)).toBe(reason);
+	});
+
+	it("reports proxy eligibility only when required", () => {
+		expect(automaticPlacementIneligibilityReason(eligible)).toBeNull();
+		expect(automaticPlacementIneligibilityReason(eligible, true)).toBe(
+			"not a proxy node",
+		);
 	});
 });
 

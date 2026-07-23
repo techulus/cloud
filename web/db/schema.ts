@@ -330,7 +330,6 @@ export const servers = pgTable("servers", {
 		.notNull()
 		.default("pending"),
 	lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
-	onlineSince: timestamp("online_since", { withTimezone: true }),
 	resourcesCpu: integer("resources_cpu"),
 	resourcesMemory: integer("resources_memory"),
 	resourcesDisk: integer("resources_disk"),

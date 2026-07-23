@@ -24,7 +24,6 @@ import {
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import {
-	AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS,
 	distributeReplicas,
 	resolveRevisionPlacements,
 } from "@/lib/inngest/functions/rollout-helpers";
@@ -152,14 +151,6 @@ export async function rebalanceAutomaticServices(
 				and(
 					eq(servers.status, "online"),
 					isNotNull(servers.wireguardIp),
-					isNotNull(servers.onlineSince),
-					lt(
-						servers.onlineSince,
-						subtractMilliseconds(
-							now,
-							AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS,
-						),
-					),
 					...(spec.serverless.enabled ? [eq(servers.isProxy, true)] : []),
 				),
 			);
@@ -492,7 +483,7 @@ export async function checkAndRecoverStaleServers(
 
 	const markedOffline = await db
 		.update(servers)
-		.set({ status: "offline", onlineSince: null })
+		.set({ status: "offline" })
 		.where(and(...conditions))
 		.returning({
 			id: servers.id,

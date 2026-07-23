@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	type AgentHealth,
@@ -651,7 +651,6 @@ export async function applyStatusReport(
 	const updateData: Record<string, unknown> = {
 		lastHeartbeat: new Date(),
 		status: "online",
-		onlineSince: sql`case when ${servers.status} = 'online' and ${servers.onlineSince} is not null then ${servers.onlineSince} else now() end`,
 	};
 	let completedAgentUpgradeTarget: string | null = null;
 
