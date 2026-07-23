@@ -108,7 +108,6 @@ export function GlobalSettings({
 	const [tab, setTab] = useQueryState("tab", {
 		defaultValue: "infrastructure",
 	});
-	const activeTab = tab === "api-keys" ? "security" : tab;
 	const previousTabRef = useRef<string | null>(null);
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
@@ -125,12 +124,6 @@ export function GlobalSettings({
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [controlPlaneUpgradeDialogOpen, setControlPlaneUpgradeDialogOpen] =
 		useState(false);
-
-	useEffect(() => {
-		if (tab === "api-keys") {
-			void setTab("security", { history: "replace" });
-		}
-	}, [tab, setTab]);
 
 	useEffect(() => {
 		const openedAbout = tab === "update" && previousTabRef.current !== "update";
@@ -265,7 +258,7 @@ export function GlobalSettings({
 	const upgradeRunning = upgradeState?.status === "running";
 
 	return (
-		<Tabs value={activeTab} onValueChange={(value) => setTab(value)}>
+		<Tabs value={tab} onValueChange={(value) => setTab(value)}>
 			<TabsList className="w-full justify-start overflow-x-auto">
 				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
