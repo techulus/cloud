@@ -12,20 +12,12 @@ import { nameSchema } from "@/lib/schemas";
 import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage } from "@/lib/utils";
 
-function generateId(): string {
-	return randomBytes(12).toString("hex");
-}
-
-function generateToken(): string {
-	return randomBytes(32).toString("hex");
-}
-
 export async function createServer(name: string) {
 	await requireDeveloperRole();
 	try {
 		const validatedName = nameSchema.parse(name);
-		const id = generateId();
-		const agentToken = generateToken();
+		const id = randomBytes(12).toString("hex");
+		const agentToken = randomBytes(32).toString("hex");
 		const now = new Date();
 
 		await db.insert(servers).values({

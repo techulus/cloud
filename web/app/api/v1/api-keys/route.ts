@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { z } from "zod";
 import { requireRequestRole } from "@/lib/api-auth";
 import { auth as betterAuth } from "@/lib/auth";

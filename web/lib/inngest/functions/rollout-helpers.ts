@@ -62,16 +62,6 @@ export type DeploymentContext = {
 	isRollingUpdate: boolean;
 };
 
-export function normalizeImage(image: string): string {
-	if (!image.includes("/")) {
-		return `docker.io/library/${image}`;
-	}
-	if (!image.includes(".") && image.split("/").length === 2) {
-		return `docker.io/${image}`;
-	}
-	return image;
-}
-
 async function getUsedPorts(serverId: string): Promise<Set<number>> {
 	const existingPorts = await db
 		.select({ hostPort: deploymentPorts.hostPort })

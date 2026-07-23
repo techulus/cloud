@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { requireApiKeyRole } from "@/lib/api-auth";
 import {
 	apiError,

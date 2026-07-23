@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { environments, services } from "@/db/schema";
