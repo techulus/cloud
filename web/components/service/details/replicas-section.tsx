@@ -383,7 +383,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 		>
 			<div className="space-y-4">
 				<Tabs value={placementMode} onValueChange={handleModeChange}>
-					<TabsList className="w-full sm:w-auto" aria-label="Placement mode">
+					<TabsList className="w-fit" aria-label="Placement mode">
 						{!service.serverlessEnabled && (
 							<TabsTrigger value="automatic" className="px-4">
 								Automatic
