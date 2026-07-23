@@ -631,7 +631,7 @@ func TestSleepingLocalDeploymentStartsExistingStoppedContainer(t *testing.T) {
 	}
 }
 
-func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
+func TestSleepServiceStopsLocalContainerAndReportsSleep(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -641,7 +641,7 @@ func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
 	}
 	gateway := NewGateway(runtime)
 
-	gateway.sleepHost("app.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 1 || stopped[0] != "ctr-local" {
@@ -655,7 +655,7 @@ func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
 	}
 }
 
-func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
+func TestSleepServiceRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -665,10 +665,10 @@ func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	}
 	gateway := NewGateway(runtime)
 	runtime.afterList = func() {
-		gateway.beginActivity(serviceActivityKey("svc_1"))
+		gateway.beginActivity("svc_1")
 	}
 
-	gateway.sleepHost("app.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 0 {
@@ -679,7 +679,7 @@ func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	}
 }
 
-func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
+func TestSleepServiceUsesServiceActivityAcrossDomains(t *testing.T) {
 	state := testExpectedState("running")
 	secondRoute := state.Serverless.Routes[0]
 	secondRoute.Domain = "api.example.com"
@@ -691,9 +691,9 @@ func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
 		},
 	}
 	gateway := NewGateway(runtime)
-	gateway.beginActivity(serviceActivityKey("svc_1"))
+	gateway.beginActivity("svc_1")
 
-	gateway.sleepHost("api.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 0 {

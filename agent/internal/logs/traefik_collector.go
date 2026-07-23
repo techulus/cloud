@@ -37,38 +37,16 @@ type HTTPLogSender interface {
 }
 
 type TraefikLogEntry struct {
-	ClientAddr             string `json:"ClientAddr"`
-	ClientHost             string `json:"ClientHost"`
-	ClientPort             string `json:"ClientPort"`
-	ClientUsername         string `json:"ClientUsername"`
-	DownstreamContentSize  int    `json:"DownstreamContentSize"`
-	DownstreamStatus       int    `json:"DownstreamStatus"`
-	Duration               int64  `json:"Duration"`
-	OriginContentSize      int    `json:"OriginContentSize"`
-	OriginDuration         int64  `json:"OriginDuration"`
-	OriginStatus           int    `json:"OriginStatus"`
-	Overhead               int64  `json:"Overhead"`
-	RequestAddr            string `json:"RequestAddr"`
-	RequestContentSize     int    `json:"RequestContentSize"`
-	RequestCount           int    `json:"RequestCount"`
-	RequestHost            string `json:"RequestHost"`
-	RequestMethod          string `json:"RequestMethod"`
-	RequestPath            string `json:"RequestPath"`
-	RequestPort            string `json:"RequestPort"`
-	RequestProtocol        string `json:"RequestProtocol"`
-	RequestScheme          string `json:"RequestScheme"`
-	RetryAttempts          int    `json:"RetryAttempts"`
-	RouterName             string `json:"RouterName"`
-	ServiceAddr            string `json:"ServiceAddr"`
-	ServiceName            string `json:"ServiceName"`
-	ServiceURL             string `json:"ServiceURL"`
-	StartLocal             string `json:"StartLocal"`
-	StartUTC               string `json:"StartUTC"`
-	TLSCipher              string `json:"TLSCipher"`
-	TLSVersion             string `json:"TLSVersion"`
-	Time                   string `json:"time"`
-	Level                  string `json:"level"`
-	Msg                    string `json:"msg"`
+	ClientHost            string `json:"ClientHost"`
+	DownstreamContentSize int    `json:"DownstreamContentSize"`
+	DownstreamStatus      int    `json:"DownstreamStatus"`
+	Duration              int64  `json:"Duration"`
+	RequestHost           string `json:"RequestHost"`
+	RequestMethod         string `json:"RequestMethod"`
+	RequestPath           string `json:"RequestPath"`
+	RouterName            string `json:"RouterName"`
+	StartUTC              string `json:"StartUTC"`
+	Time                  string `json:"time"`
 }
 
 type TraefikCollector struct {
