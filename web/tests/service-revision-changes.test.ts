@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { diffServiceRevisionSpecs } from "@/lib/service-revision-changes";
+import {
+	diffServiceRevisionSpecs,
+	parseServiceRevisionSpec,
+} from "@/lib/service-revision-changes";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function spec(): ServiceRevisionSpec {
@@ -154,6 +157,17 @@ describe("diffServiceRevisionSpecs", () => {
 		expect(diffServiceRevisionSpecs(manual, previous)).toEqual([
 			{ field: "Placement mode", from: "Manual", to: "Automatic" },
 		]);
+	});
+
+	it("rejects persisted automatic serverless revisions", () => {
+		const automatic = spec();
+		automatic.placement = { mode: "automatic", replicas: 1 };
+		automatic.placements = [];
+		automatic.serverless.enabled = true;
+
+		expect(() => parseServiceRevisionSpec(automatic)).toThrow(
+			"Serverless services cannot use automatic placement",
+		);
 	});
 
 	it("never exposes secret ciphertext while detecting additions, updates, and removals", () => {

@@ -105,6 +105,11 @@ const serviceRevisionSpecSchema = z
 				code: "custom",
 				message: "Stateful services cannot use automatic placement",
 			});
+		if (spec.serverless.enabled && spec.placement.mode === "automatic")
+			context.addIssue({
+				code: "custom",
+				message: "Serverless services cannot use automatic placement",
+			});
 	});
 
 export type ServiceRevisionChange = {

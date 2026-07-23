@@ -152,7 +152,7 @@ describe("service revision specification", () => {
 		});
 	});
 
-	it("rejects automatic placement for stateful and volume-backed services", () => {
+	it("rejects automatic placement for stateful, volume-backed, and serverless services", () => {
 		const stateful = draft({ volumes: [] });
 		stateful.service.stateful = true;
 		stateful.service.placementMode = "automatic";
@@ -168,6 +168,15 @@ describe("service revision specification", () => {
 
 		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
 			"Services with volumes cannot use automatic placement",
+		);
+
+		const serverless = draft({ volumes: [] });
+		serverless.service.serverlessEnabled = true;
+		serverless.service.placementMode = "automatic";
+		serverless.service.replicas = 1;
+
+		expect(() => buildServiceRevisionSpec(serverless)).toThrow(
+			"Serverless services cannot use automatic placement",
 		);
 	});
 

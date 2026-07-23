@@ -53,7 +53,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 	const [placementMode, setPlacementMode] = useState<PlacementMode>(
-		service.placementMode,
+		service.serverlessEnabled ? "manual" : service.placementMode,
 	);
 	const [desiredReplicas, setDesiredReplicas] = useState(service.replicas);
 	const [isEditing, setIsEditing] = useState(false);
@@ -86,7 +86,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 				}
 			}
 			setLocalReplicas(replicaMap);
-			setPlacementMode(service.placementMode);
+			setPlacementMode(
+				service.serverlessEnabled ? "manual" : service.placementMode,
+			);
 			setDesiredReplicas(service.replicas);
 		}
 	}, [
@@ -95,6 +97,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 		service.stateful,
 		service.lockedServerId,
 		service.placementMode,
+		service.serverlessEnabled,
 		service.replicas,
 		isEditing,
 	]);
@@ -202,6 +205,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 	const handleModeChange = (mode: string) => {
 		const nextMode = mode as PlacementMode;
+		if (nextMode === "automatic" && service.serverlessEnabled) return;
 		if (nextMode === placementMode) return;
 		setIsEditing(true);
 		if (nextMode === "automatic") {
@@ -380,9 +384,11 @@ export const ReplicasSection = memo(function ReplicasSection({
 			<div className="space-y-4">
 				<Tabs value={placementMode} onValueChange={handleModeChange}>
 					<TabsList className="w-full sm:w-auto" aria-label="Placement mode">
-						<TabsTrigger value="automatic" className="px-4">
-							Automatic
-						</TabsTrigger>
+						{!service.serverlessEnabled && (
+							<TabsTrigger value="automatic" className="px-4">
+								Automatic
+							</TabsTrigger>
+						)}
 						<TabsTrigger value="manual" className="px-4">
 							Manual
 						</TabsTrigger>
@@ -397,8 +403,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 							</label>
 							<p className="text-sm text-muted-foreground">
 								The control plane distributes replicas evenly across healthy
-								{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
-								moves them after failures.
+								nodes and moves them after failures.
 							</p>
 						</div>
 						<Input

@@ -209,7 +209,7 @@ Use manual placement to choose exact servers:
 }
 ```
 
-Manual placement requires online servers with WireGuard configured. Serverless services require proxy servers. Automatic placement is not available for stateful or volume-backed services. The legacy top-level `replicas` field remains supported when placement is unchanged. It must match the existing manual placement.
+Manual placement requires online servers with WireGuard configured. Serverless services require proxy servers. Automatic placement is not available for stateful, serverless, or volume-backed services. The legacy top-level `replicas` field remains supported when placement is unchanged. It must match the existing manual placement.
 
 The API only manages stateless services with HTTP ports. Existing volumes, stateful mode, TCP or UDP ports, TLS passthrough, or invalid resource limits return a conflict with an actionable code.
 

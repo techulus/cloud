@@ -411,6 +411,10 @@ export const services = pgTable(
 		lastAutomaticPlacementAt: timestamp("last_automatic_placement_at", {
 			withTimezone: true,
 		}),
+		lastAutomaticRecoveryAttemptAt: timestamp(
+			"last_automatic_recovery_attempt_at",
+			{ withTimezone: true },
+		),
 		stateful: boolean("stateful").notNull().default(false),
 		lockedServerId: text("locked_server_id").references(() => servers.id, {
 			onDelete: "set null",

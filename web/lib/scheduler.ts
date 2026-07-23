@@ -38,6 +38,7 @@ import {
 const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
 export const MAX_REBALANCES_PER_RUN = 5;
+export const MAX_AUTOMATIC_RECOVERIES_PER_RUN = 5;
 
 async function enqueueSystemRollout(
 	serviceId: string,
@@ -66,7 +67,10 @@ async function enqueueSystemRollout(
 	}
 }
 
-export async function rebalanceAutomaticServices(): Promise<void> {
+export async function rebalanceAutomaticServices(
+	maxCreated = MAX_REBALANCES_PER_RUN,
+): Promise<number> {
+	if (maxCreated <= 0) return 0;
 	const now = new Date();
 	const candidates = await db
 		.select()
@@ -75,7 +79,7 @@ export async function rebalanceAutomaticServices(): Promise<void> {
 		.orderBy(services.id);
 	let queuedCount = 0;
 	for (const service of candidates) {
-		if (queuedCount >= MAX_REBALANCES_PER_RUN) break;
+		if (queuedCount >= maxCreated) break;
 		if (
 			service.lastAutomaticPlacementAt &&
 			now.getTime() - service.lastAutomaticPlacementAt.getTime() <
@@ -169,15 +173,19 @@ export async function rebalanceAutomaticServices(): Promise<void> {
 				active.revisionId,
 			);
 			if (!result.created) continue;
-			await enqueueSystemRollout(service.id, result);
 			queuedCount++;
+			await enqueueSystemRollout(service.id, result);
 		} catch (error) {
 			console.error(`[scheduler] failed to rebalance ${service.name}`, error);
 		}
 	}
+	return queuedCount;
 }
 
-export async function recoverInvalidAutomaticPlacements(): Promise<void> {
+export async function recoverInvalidAutomaticPlacements(
+	maxCreated = MAX_AUTOMATIC_RECOVERIES_PER_RUN,
+): Promise<number> {
+	if (maxCreated <= 0) return 0;
 	const activeDeployments = await db
 		.select({
 			serviceId: deployments.serviceId,
@@ -186,8 +194,7 @@ export async function recoverInvalidAutomaticPlacements(): Promise<void> {
 			specification: serviceRevisions.specification,
 			serverStatus: servers.status,
 			serverWireguardIp: servers.wireguardIp,
-			serverIsProxy: servers.isProxy,
-			serverOnlineSince: servers.onlineSince,
+			lastRecoveryAttemptAt: services.lastAutomaticRecoveryAttemptAt,
 		})
 		.from(deployments)
 		.innerJoin(services, eq(services.id, deployments.serviceId))
@@ -202,7 +209,8 @@ export async function recoverInvalidAutomaticPlacements(): Promise<void> {
 				eq(deployments.trafficState, "active"),
 				isNull(services.deletedAt),
 			),
-		);
+		)
+		.orderBy(deployments.serviceId, deployments.id);
 
 	const byService = new Map<string, typeof activeDeployments>();
 	for (const deployment of activeDeployments) {
@@ -211,65 +219,84 @@ export async function recoverInvalidAutomaticPlacements(): Promise<void> {
 		byService.set(deployment.serviceId, current);
 	}
 
-	for (const [serviceId, serviceDeployments] of byService) {
-		const revisionIds = new Set(
-			serviceDeployments.map((deployment) => deployment.revisionId),
-		);
-		if (revisionIds.size !== 1) {
-			console.error(
-				`[scheduler] skipping automatic recovery for ${serviceId}: multiple active revisions`,
-			);
-			continue;
-		}
-		const active = serviceDeployments[0];
-		if (!active) continue;
-		const specification = parseServiceRevisionSpec(active.specification);
-		if (specification.stateful || specification.placement.mode !== "automatic")
-			continue;
-		const hasInvalidPlacement = serviceDeployments.some(
-			(deployment) =>
-				deployment.serverStatus !== "online" ||
-				!deployment.serverWireguardIp ||
-				!deployment.serverOnlineSince ||
-				deployment.serverOnlineSince.getTime() >=
-					Date.now() - AUTOMATIC_PLACEMENT_SERVER_STABILIZATION_MS ||
-				(specification.serverless.enabled && !deployment.serverIsProxy),
-		);
-		if (!hasInvalidPlacement) continue;
-
-		const pending = await db
-			.select({ id: rollouts.id })
-			.from(rollouts)
-			.where(
-				and(
-					eq(rollouts.serviceId, serviceId),
-					inArray(rollouts.status, ["queued", "in_progress"]),
-				),
-			)
-			.limit(1)
-			.then((rows) => rows[0]);
-		if (pending) continue;
-
+	const orderedServices = [...byService.entries()].sort(
+		([serviceIdA, deploymentsA], [serviceIdB, deploymentsB]) => {
+			const attemptedAtA = deploymentsA[0]?.lastRecoveryAttemptAt?.getTime();
+			const attemptedAtB = deploymentsB[0]?.lastRecoveryAttemptAt?.getTime();
+			if (attemptedAtA === undefined && attemptedAtB !== undefined) return -1;
+			if (attemptedAtA !== undefined && attemptedAtB === undefined) return 1;
+			if (attemptedAtA !== attemptedAtB)
+				return (attemptedAtA ?? 0) - (attemptedAtB ?? 0);
+			return serviceIdA.localeCompare(serviceIdB);
+		},
+	);
+	let createdCount = 0;
+	for (const [serviceId, serviceDeployments] of orderedServices) {
+		if (createdCount >= maxCreated) break;
 		try {
+			const revisionIds = new Set(
+				serviceDeployments.map((deployment) => deployment.revisionId),
+			);
+			if (revisionIds.size !== 1) {
+				console.error(
+					`[scheduler] skipping automatic recovery for ${serviceId}: multiple active revisions`,
+				);
+				continue;
+			}
+			const active = serviceDeployments[0];
+			if (!active) continue;
+			const specification = parseServiceRevisionSpec(active.specification);
+			if (
+				specification.stateful ||
+				specification.placement.mode !== "automatic"
+			)
+				continue;
+			const hasInvalidPlacement = serviceDeployments.some(
+				(deployment) =>
+					deployment.serverStatus !== "online" || !deployment.serverWireguardIp,
+			);
+			if (!hasInvalidPlacement) continue;
+
+			const pending = await db
+				.select({ id: rollouts.id })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, serviceId),
+						inArray(rollouts.status, ["queued", "in_progress"]),
+					),
+				)
+				.limit(1)
+				.then((rows) => rows[0]);
+			if (pending) continue;
+
+			await db
+				.update(services)
+				.set({ lastAutomaticRecoveryAttemptAt: new Date() })
+				.where(eq(services.id, serviceId));
 			await resolveRevisionPlacements(specification);
 			const result = await cloneActiveRevisionAndQueueSystemRollout(
 				serviceId,
 				active.revisionId,
 			);
+			if (!result.created) continue;
+			createdCount++;
 			await enqueueSystemRollout(serviceId, result);
 		} catch (error) {
 			console.error(
-				`[scheduler] failed level-triggered recovery for ${active.serviceName}`,
+				`[scheduler] failed level-triggered recovery for ${serviceDeployments[0]?.serviceName ?? serviceId}`,
 				error,
 			);
 		}
 	}
+	return createdCount;
 }
 
 async function triggerRecoveryForOfflineServers(
 	offlineServerIds: string[],
-): Promise<void> {
-	if (offlineServerIds.length === 0) return;
+	maxCreated: number,
+): Promise<number> {
+	if (offlineServerIds.length === 0 || maxCreated <= 0) return 0;
 
 	const affectedDeployments = await db
 		.select({
@@ -282,6 +309,7 @@ async function triggerRecoveryForOfflineServers(
 			serviceId: services.id,
 			serviceRevisionId: deployments.serviceRevisionId,
 			specification: serviceRevisions.specification,
+			trafficState: deployments.trafficState,
 		})
 		.from(deployments)
 		.innerJoin(servers, eq(servers.id, deployments.serverId))
@@ -294,39 +322,65 @@ async function triggerRecoveryForOfflineServers(
 			and(
 				inArray(deployments.serverId, offlineServerIds),
 				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
-				eq(deployments.trafficState, "active"),
+				inArray(deployments.trafficState, ["candidate", "active"]),
 				isNull(services.deletedAt),
 			),
-		);
+		)
+		.orderBy(deployments.serviceId, deployments.id);
 
 	if (affectedDeployments.length === 0) {
 		console.log(
 			`[scheduler] ${offlineServerIds.length} server(s) went offline; no active replicas need manual recovery`,
 		);
-		return;
+		return 0;
 	}
-	const automaticallyRecovered = new Set<string>();
-	const recoveryAttempted = new Set<string>();
+	const automaticActiveByService = new Map<
+		string,
+		(typeof affectedDeployments)[number]
+	>();
+	const manualDeploymentIds = new Set<string>();
 	for (const deployment of affectedDeployments) {
-		if (recoveryAttempted.has(deployment.serviceId)) continue;
-		recoveryAttempted.add(deployment.serviceId);
 		try {
 			const specification = parseServiceRevisionSpec(deployment.specification);
-			if (
-				specification.stateful ||
-				specification.placement.mode !== "automatic"
-			)
+			if (specification.placement.mode === "manual") {
+				manualDeploymentIds.add(deployment.deploymentId);
 				continue;
+			}
+			if (
+				!specification.stateful &&
+				deployment.trafficState === "active" &&
+				!automaticActiveByService.has(deployment.serviceId)
+			) {
+				automaticActiveByService.set(deployment.serviceId, deployment);
+			}
+		} catch (error) {
+			console.error(
+				`[scheduler] cannot classify deployment ${deployment.deploymentId} for recovery`,
+				error,
+			);
+		}
+	}
+
+	let createdCount = 0;
+	for (const deployment of automaticActiveByService.values()) {
+		if (createdCount >= maxCreated) break;
+		try {
+			const specification = parseServiceRevisionSpec(deployment.specification);
+			await db
+				.update(services)
+				.set({ lastAutomaticRecoveryAttemptAt: new Date() })
+				.where(eq(services.id, deployment.serviceId));
 			await resolveRevisionPlacements(specification);
 			const queued = await cloneActiveRevisionAndQueueSystemRollout(
 				deployment.serviceId,
 				deployment.serviceRevisionId,
 			);
+			if (!queued.created) continue;
+			createdCount++;
 			await enqueueSystemRollout(deployment.serviceId, queued);
-			automaticallyRecovered.add(deployment.serviceId);
 		} catch (error) {
 			console.error(
-				`[scheduler] automatic recovery failed for ${deployment.serviceName}; falling back to manual alert`,
+				`[scheduler] automatic recovery failed for ${deployment.serviceName}; periodic recovery will retry`,
 				error,
 			);
 		}
@@ -343,7 +397,7 @@ async function triggerRecoveryForOfflineServers(
 	>();
 
 	for (const deployment of affectedDeployments) {
-		if (automaticallyRecovered.has(deployment.serviceId)) continue;
+		if (!manualDeploymentIds.has(deployment.deploymentId)) continue;
 		const current = affectedByServer.get(deployment.serverId) ?? {
 			serverName: deployment.serverName,
 			serverIp:
@@ -373,11 +427,12 @@ async function triggerRecoveryForOfflineServers(
 			);
 		});
 	}
+	return createdCount;
 }
 
 export async function checkAndRecoverStaleServers(
 	excludeServerId?: string,
-): Promise<void> {
+): Promise<number> {
 	const staleThreshold = subtractMilliseconds(new Date(), STALE_THRESHOLD_MS);
 
 	const conditions = [
@@ -400,7 +455,7 @@ export async function checkAndRecoverStaleServers(
 			wireguardIp: servers.wireguardIp,
 		});
 
-	if (markedOffline.length === 0) return;
+	if (markedOffline.length === 0) return 0;
 
 	const offlineIds = markedOffline.map((s) => s.id);
 	console.log(
@@ -419,7 +474,10 @@ export async function checkAndRecoverStaleServers(
 		});
 	}
 
-	await triggerRecoveryForOfflineServers(offlineIds);
+	return triggerRecoveryForOfflineServers(
+		offlineIds,
+		MAX_AUTOMATIC_RECOVERIES_PER_RUN,
+	);
 }
 
 export async function checkAndRunScheduledDeployments(): Promise<void> {

@@ -161,6 +161,12 @@ function validateServiceRevisionSpec(
 	if (specification.stateful && specification.placement.mode === "automatic") {
 		throw new Error("Stateful services cannot use automatic placement");
 	}
+	if (
+		specification.serverless.enabled &&
+		specification.placement.mode === "automatic"
+	) {
+		throw new Error("Serverless services cannot use automatic placement");
+	}
 	if (specification.stateful && totalReplicas !== 1) {
 		throw new Error("Stateful services can only have exactly 1 replica");
 	}

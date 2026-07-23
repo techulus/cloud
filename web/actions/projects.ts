@@ -920,6 +920,11 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
+			if (service.placementMode === "automatic") {
+				throw new Error(
+					"Switch to manual placement before enabling serverless",
+				);
+			}
 			const publicHttpPorts = await tx
 				.select({ id: servicePorts.id })
 				.from(servicePorts)
@@ -947,20 +952,16 @@ export async function updateServiceServerlessSettings(
 				.from(serviceReplicas)
 				.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 				.where(eq(serviceReplicas.serviceId, serviceId));
-			const totalConfiguredReplicas =
-				service.placementMode === "automatic"
-					? service.replicas
-					: configuredReplicas.reduce(
-							(total, replica) => total + replica.count,
-							0,
-						);
+			const totalConfiguredReplicas = configuredReplicas.reduce(
+				(total, replica) => total + replica.count,
+				0,
+			);
 
 			if (totalConfiguredReplicas < 1) {
 				throw new Error("Serverless services require at least one replica");
 			}
 
 			if (
-				service.placementMode === "manual" &&
 				configuredReplicas.some(
 					(replica) => replica.count > 0 && !replica.serverIsProxy,
 				)
@@ -1177,6 +1178,10 @@ export async function updateServiceConfig(
 
 			if (!currentService) throw new Error("Service not found");
 			if (placement.mode === "automatic") {
+				if (currentService.serverlessEnabled)
+					throw new Error(
+						"Automatic placement is not supported for serverless services",
+					);
 				const volume = await tx
 					.select({ id: serviceVolumes.id })
 					.from(serviceVolumes)

@@ -693,10 +693,10 @@ export async function patchConfiguration(
 		const source = resolvePersistedSourceFromRows(persisted, repo);
 		if (
 			input.placement?.mode === "automatic" &&
-			(persisted.stateful || volumes.length > 0)
+			(persisted.stateful || persisted.serverlessEnabled || volumes.length > 0)
 		) {
 			domainError(
-				"Automatic placement is not supported for stateful services or services with volumes",
+				"Automatic placement is not supported for stateful, serverless, or volume-backed services",
 				"AUTOMATIC_PLACEMENT_UNSUPPORTED",
 				400,
 			);
@@ -943,7 +943,14 @@ export async function patchConfiguration(
 									.map(({ serverId, count }) => ({ serverId, count }))
 									.toSorted((a, b) => a.serverId.localeCompare(b.serverId)),
 							},
-					input.placement,
+					input.placement.mode === "manual"
+						? {
+								...input.placement,
+								placements: input.placement.placements.toSorted((a, b) =>
+									a.serverId.localeCompare(b.serverId),
+								),
+							}
+						: input.placement,
 				)
 			) {
 				set.placementMode = input.placement.mode;

@@ -10,6 +10,7 @@ import {
 	checkAndRunScheduledDeployments,
 	cleanupStaleItems,
 	failTimedOutAgentUpgrades,
+	MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 	rebalanceAutomaticServices,
 	recoverInvalidAutomaticPlacements,
 } from "@/lib/scheduler";
@@ -22,15 +23,25 @@ export const staleServerCheck = inngest.createFunction(
 		singleton: { mode: "skip" },
 	},
 	async ({ step }) => {
-		await step.run("check-stale-servers", async () => {
+		const urgentCreated = await step.run("check-stale-servers", async () => {
 			console.log("[cron] running stale server check");
-			await checkAndRecoverStaleServers();
+			return checkAndRecoverStaleServers();
 		});
-		await step.run("recover-invalid-automatic-placements", async () => {
-			await recoverInvalidAutomaticPlacements();
-		});
+		const recoveredCreated = await step.run(
+			"recover-invalid-automatic-placements",
+			async () => {
+				return recoverInvalidAutomaticPlacements(
+					Math.max(0, MAX_AUTOMATIC_RECOVERIES_PER_RUN - urgentCreated),
+				);
+			},
+		);
 		await step.run("rebalance-automatic-services", async () => {
-			await rebalanceAutomaticServices();
+			await rebalanceAutomaticServices(
+				Math.max(
+					0,
+					MAX_AUTOMATIC_RECOVERIES_PER_RUN - urgentCreated - recoveredCreated,
+				),
+			);
 		});
 	},
 );
