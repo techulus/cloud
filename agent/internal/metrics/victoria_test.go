@@ -135,24 +135,20 @@ func TestSendContainerStatsAggregatesStableServiceLabels(t *testing.T) {
 	sender := NewVictoriaMetricsSender(server.URL, "server-1")
 	err := sender.SendContainerStats([]container.ResourceStats{
 		{
-			ContainerID:          "container-a",
-			ServiceID:            "svc-a",
-			DeploymentID:         "dep-a",
-			CPUUsagePercent:      10,
-			MemoryUsagePercent:   1.5,
-			MemoryUsedBytes:      1024,
-			NetworkReceiveBytes:  100,
-			NetworkTransmitBytes: 200,
+			ContainerID:        "container-a",
+			ServiceID:          "svc-a",
+			DeploymentID:       "dep-a",
+			CPUUsagePercent:    10,
+			MemoryUsagePercent: 1.5,
+			MemoryUsedBytes:    1024,
 		},
 		{
-			ContainerID:          "container-b",
-			ServiceID:            "svc-a",
-			DeploymentID:         "dep-b",
-			CPUUsagePercent:      20,
-			MemoryUsagePercent:   2.5,
-			MemoryUsedBytes:      2048,
-			NetworkReceiveBytes:  300,
-			NetworkTransmitBytes: 400,
+			ContainerID:        "container-b",
+			ServiceID:          "svc-a",
+			DeploymentID:       "dep-b",
+			CPUUsagePercent:    20,
+			MemoryUsagePercent: 2.5,
+			MemoryUsedBytes:    2048,
 		},
 	}, time.UnixMilli(1_700_000_000_000))
 	if err != nil {
