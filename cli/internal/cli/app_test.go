@@ -383,6 +383,21 @@ func TestProjectsCommandHelpAndArguments(t *testing.T) {
 	}
 }
 
+func TestCompletionAgentHelpArguments(t *testing.T) {
+	app, out := testApp(t, t.TempDir(), nil)
+	if err := execute(app, "completion", "--help", "--agent"); err != nil {
+		t.Fatal(err)
+	}
+	var help agentHelpInfo
+	if err := json.Unmarshal(out.Bytes(), &help); err != nil {
+		t.Fatal(err)
+	}
+	want := []agentArg{{Name: "shell", Required: true, Choices: []string{"bash", "zsh", "fish", "powershell"}}}
+	if !reflect.DeepEqual(help.Args, want) {
+		t.Fatalf("arguments = %#v, want %#v", help.Args, want)
+	}
+}
+
 func TestMissingIDsFailLocally(t *testing.T) {
 	configHome(t)
 	writeConfig(t, "http://unused")

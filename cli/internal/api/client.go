@@ -75,7 +75,7 @@ func (c *Client) RequestJSON(ctx context.Context, method, path string, query url
 	return JSON(ctx, c.HTTPClient, method, endpoint, headers, body, out)
 }
 
-func JSON(ctx context.Context, client *http.Client, method, endpoint string, headers map[string]string, body any, out any) error {
+func requestJSON(ctx context.Context, client *http.Client, method, endpoint string, headers map[string]string, body any) (int, []byte, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -83,13 +83,13 @@ func JSON(ctx context.Context, client *http.Client, method, endpoint string, hea
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, nil, err
 		}
 		reader = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return err
+		return 0, nil, err
 	}
 	req.Header.Set("content-type", "application/json")
 	for key, value := range headers {
@@ -98,15 +98,20 @@ func JSON(ctx context.Context, client *http.Client, method, endpoint string, hea
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
+	return resp.StatusCode, raw, err
+}
+
+func JSON(ctx context.Context, client *http.Client, method, endpoint string, headers map[string]string, body any, out any) error {
+	status, raw, err := requestJSON(ctx, client, method, endpoint, headers, body)
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if status < 200 || status >= 300 {
 		var apiErr ErrorResponse
 		_ = json.Unmarshal(raw, &apiErr)
 		message := apiErr.Message
@@ -119,7 +124,7 @@ func JSON(ctx context.Context, client *http.Client, method, endpoint string, hea
 			host = NormalizeHost(parsed.Scheme + "://" + parsed.Host)
 		}
 		return &APIError{
-			Status:  resp.StatusCode,
+			Status:  status,
 			Message: message,
 			Code:    apiErr.Code,
 			Host:    host,
@@ -135,36 +140,14 @@ func JSON(ctx context.Context, client *http.Client, method, endpoint string, hea
 }
 
 func JSONStatus(ctx context.Context, client *http.Client, method, endpoint string, body any, out any) (int, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return 0, err
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	status, raw, err := requestJSON(ctx, client, method, endpoint, nil, body)
 	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("content-type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return resp.StatusCode, err
+		return status, err
 	}
 	if len(raw) > 0 && out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return resp.StatusCode, fmt.Errorf("invalid JSON response: %w", err)
+			return status, fmt.Errorf("invalid JSON response: %w", err)
 		}
 	}
-	return resp.StatusCode, nil
+	return status, nil
 }
