@@ -26,6 +26,7 @@ service:
   name: web
   source: {type: image, image: nginx:1.27}
   replicas: 2
+  placement: {mode: automatic}
   hostname: null
   healthCheck: null
   startCommand: null
@@ -117,7 +118,7 @@ func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 		case "/api/v1/projects/p/environments/e/services":
 			w.Write([]byte(`{"services":[{"id":"s","name":"web","source":{"type":"github","repository":"https://github.com/acme/public","branch":"main","rootDir":"cmd/api"}}]}`))
 		case "/api/v1/projects/p/environments/e/services/s/configuration":
-			w.Write([]byte(`{"current":{"replicas":2,"hostname":null,"ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
+			w.Write([]byte(`{"current":{"replicas":2,"placement":{"mode":"manual"},"placements":[{"serverId":"server-a","count":1},{"serverId":"server-b","count":1}],"hostname":null,"ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
 		default:
 			t.Errorf("path=%s", r.URL.Path)
 		}
@@ -136,9 +137,38 @@ func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 	if loaded.Manifest.Service.Source.Repository != "https://github.com/acme/public" || loaded.Manifest.Service.Source.RootDir == nil || *loaded.Manifest.Service.Source.RootDir != root || loaded.Manifest.Service.Replicas != 2 {
 		t.Fatalf("manifest=%#v", loaded.Manifest)
 	}
+	if loaded.Manifest.Service.Placement == nil || loaded.Manifest.Service.Placement.Mode != "manual" || len(loaded.Manifest.Service.Placement.Servers) != 2 || loaded.Manifest.Service.Placement.Servers[1].ServerID != "server-b" {
+		t.Fatalf("placement=%#v", loaded.Manifest.Service.Placement)
+	}
 	want := []string{"/api/v1/projects", "/api/v1/projects/p/environments", "/api/v1/projects/p/environments/e/services", "/api/v1/projects/p/environments/e/services/s/configuration"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("paths=%v", paths)
+	}
+}
+
+func TestLinkRejectsManualServiceWithoutPlacements(t *testing.T) {
+	configHome(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			w.Write([]byte(`{"projects":[{"id":"p","name":"App","slug":"app"}]}`))
+		case "/api/v1/projects/p/environments":
+			w.Write([]byte(`{"environments":[{"id":"e","name":"prod"}]}`))
+		case "/api/v1/projects/p/environments/e/services":
+			w.Write([]byte(`{"services":[{"id":"s","name":"web","source":{"type":"image","image":"nginx"}}]}`))
+		case "/api/v1/projects/p/environments/e/services/s/configuration":
+			w.Write([]byte(`{"current":{"replicas":0,"placement":{"mode":"manual"},"placements":[],"hostname":null,"ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
+		default:
+			t.Errorf("path=%s", r.URL.Path)
+		}
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+	d := t.TempDir()
+	app, _ := testApp(t, d, s.Client())
+	err := execute(app, "link", "--project", "p", "--environment", "e", "--service", "s")
+	if err == nil || !strings.Contains(err.Error(), "configure at least one server placement") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -169,7 +199,8 @@ func TestApplyExactNestedPatchForSources(t *testing.T) {
 				t.Fatalf("%s %s", method, path)
 			}
 			source := body["source"].(map[string]any)
-			if source["type"] != tc.sourceType || body["replicas"] != float64(2) || len(body) != 6 {
+			placement := body["placement"].(map[string]any)
+			if source["type"] != tc.sourceType || placement["mode"] != "automatic" || placement["replicas"] != float64(2) || len(body) != 6 {
 				t.Fatalf("body=%#v", body)
 			}
 			if tc.name == "github_clear_root" {
@@ -177,6 +208,43 @@ func TestApplyExactNestedPatchForSources(t *testing.T) {
 				if !present || rootDir != nil {
 					t.Fatalf("GitHub rootDir must be sent as explicit null: %#v", source)
 				}
+			}
+		})
+	}
+}
+
+func TestApplyPlacementPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml string
+		want       map[string]any
+	}{
+		{"automatic", "", map[string]any{"mode": "automatic", "replicas": float64(2)}},
+		{"manual", "  placement:\n    mode: manual\n    servers:\n      - {serverId: server-a, count: 2}\n", map[string]any{"mode": "manual", "placements": []any{map[string]any{"serverId": "server-a", "count": float64(2)}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configHome(t)
+			d := t.TempDir()
+			manifestYAML := imageManifest
+			if tc.yaml != "" {
+				manifestYAML = strings.Replace(manifestYAML, "  placement: {mode: automatic}\n", tc.yaml, 1)
+			}
+			writeManifest(t, d, manifestYAML)
+			var body map[string]any
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewDecoder(r.Body).Decode(&body)
+				w.Write([]byte(`{"action":"updated"}`))
+			}))
+			defer s.Close()
+			writeConfig(t, s.URL)
+			app, _ := testApp(t, d, s.Client())
+			if err := execute(app, "apply"); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := body["replicas"]; exists {
+				t.Fatalf("top-level replicas present: %#v", body)
+			}
+			if !reflect.DeepEqual(body["placement"], tc.want) {
+				t.Fatalf("placement=%#v want=%#v", body["placement"], tc.want)
 			}
 		})
 	}

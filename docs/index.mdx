@@ -25,7 +25,8 @@ All communication between nodes happens over an encrypted **WireGuard mesh netwo
 - **Persistent volumes** — attach named local volumes for stateful workloads with scheduled backups to S3-compatible storage. Replicated storage and HA failover are not yet supported.
 - **Service discovery** — containers resolve each other by name using `.internal` domains.
 - **Multi-environment** — run production, staging, and dev within the same project.
-- **GeoDNS** — route users to the nearest proxy node with automatic failover.
+- **External edge compatibility** — use a stable load balancer with active health
+  checks, or health-aware GeoDNS when DNS caching tradeoffs are acceptable.
 - **TCP/UDP proxy** — expose non-HTTP services like game servers or custom protocols.
 
 ## Next Steps

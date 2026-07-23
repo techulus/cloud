@@ -39,7 +39,8 @@ function specification(
 	overrides: Partial<ServiceRevisionSpec> = {},
 ): ServiceRevisionSpec {
 	return {
-		schemaVersion: 2,
+		schemaVersion: 3,
+		placement: { mode: "manual" },
 		image: "registry/app:revision-1",
 		source: { type: "image", image: "registry/app:revision-1" },
 		hostname: "app",
@@ -151,6 +152,14 @@ describe("revision-backed build assignment", () => {
 		]);
 		await expect(
 			selectBuildServerForRevision(specification(), "linux/arm64"),
+		).resolves.toBe("server-arm");
+	});
+
+	it("falls back to cross-platform builds when no native builder is online", async () => {
+		mocks.getSetting.mockResolvedValue(null);
+		mocks.queryResults.push([{ id: "server-arm", meta: { arch: "arm64" } }]);
+		await expect(
+			selectBuildServerForRevision(specification(), "linux/amd64"),
 		).resolves.toBe("server-arm");
 	});
 
