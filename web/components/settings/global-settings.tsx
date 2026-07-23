@@ -269,9 +269,6 @@ export function GlobalSettings({
 				<TabsTrigger value="security" className="px-4 shrink-0">
 					Security
 				</TabsTrigger>
-				<TabsTrigger value="api-keys" className="px-4 shrink-0">
-					API Keys
-				</TabsTrigger>
 				{membersData && (
 					<TabsTrigger value="members" className="px-4 shrink-0">
 						Members
@@ -451,9 +448,6 @@ export function GlobalSettings({
 
 			<TabsContent value="security" className="space-y-6 pt-4">
 				<TwoFactorSettings />
-			</TabsContent>
-
-			<TabsContent value="api-keys" className="space-y-6 pt-4">
 				<ApiKeySettings />
 			</TabsContent>
 
