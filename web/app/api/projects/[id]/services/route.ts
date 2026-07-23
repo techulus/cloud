@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";

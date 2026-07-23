@@ -5,39 +5,19 @@ import {
 	normalizeLogCursor,
 	normalizeLogSearch,
 } from "@/lib/log-query";
+import {
+	buildFetchOptions,
+	type EndpointConfig,
+	parseEndpoint,
+} from "@/lib/victoria";
 
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
-
-type EndpointConfig = {
-	url: string;
-	username?: string;
-	password?: string;
-};
-
-function parseEndpoint(endpoint: string): EndpointConfig {
-	const parsed = new URL(endpoint);
-	const username = parsed.username || undefined;
-	const password = parsed.password || undefined;
-	parsed.username = "";
-	parsed.password = "";
-	return { url: parsed.toString().replace(/\/$/, ""), username, password };
-}
 
 function getQueryEndpoint(): EndpointConfig | undefined {
 	const endpoint = VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
 	if (!endpoint) return undefined;
 	return parseEndpoint(endpoint);
-}
-
-function buildFetchOptions(config: EndpointConfig): RequestInit {
-	if (config.username) {
-		const credentials = Buffer.from(
-			`${config.username}:${config.password || ""}`,
-		).toString("base64");
-		return { headers: { Authorization: `Basic ${credentials}` } };
-	}
-	return {};
 }
 
 export type LogType = "container" | "http";

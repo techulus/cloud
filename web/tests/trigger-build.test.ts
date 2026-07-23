@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
 	select: vi.fn(),
 	send: vi.fn(),
 	resolveGitHubCommit: vi.fn(),
-	createBuildTrigger: vi.fn((data) => ({ name: "build/trigger", data })),
+	createBuildTrigger: vi.fn(),
 	createGitHubBuildServiceRevision: vi.fn(),
 	cloneGitHubBuildServiceRevision: vi.fn(),
 }));

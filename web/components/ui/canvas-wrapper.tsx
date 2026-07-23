@@ -1,7 +1,3 @@
-"use client";
-
-import { cn } from "@/lib/utils";
-
 export type StatusColors = {
 	bg: string;
 	border: string;
@@ -100,58 +96,4 @@ export function getStatusColorFromDeployments(
 	if (hasSleeping) return statusColorMap.sleeping;
 	if (hasStopped) return statusColorMap.stopped;
 	return defaultColors;
-}
-
-interface CanvasWrapperProps {
-	children?: React.ReactNode;
-	height?: string;
-	className?: string;
-	isEmpty?: boolean;
-	emptyContent?: React.ReactNode;
-}
-
-export function CanvasWrapper({
-	children,
-	height = "75vh",
-	className,
-	isEmpty,
-	emptyContent,
-}: CanvasWrapperProps) {
-	if (isEmpty && emptyContent) {
-		return (
-			<div
-				className={cn(
-					"rounded-xl border border-slate-200 dark:border-slate-800",
-					"bg-slate-50 dark:bg-slate-900/50",
-					"flex items-center justify-center",
-					className,
-				)}
-				style={{
-					height,
-					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
-					backgroundSize: "20px 20px",
-				}}
-			>
-				{emptyContent}
-			</div>
-		);
-	}
-
-	return (
-		<div
-			className={cn(
-				"p-6 rounded-xl border border-slate-200 dark:border-slate-800",
-				"bg-slate-50/50 dark:bg-slate-900/30",
-				"overflow-auto",
-				className,
-			)}
-			style={{
-				height,
-				backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
-				backgroundSize: "24px 24px",
-			}}
-		>
-			{children}
-		</div>
-	);
 }
