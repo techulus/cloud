@@ -205,6 +205,7 @@ describe("GitHub build service revisions", () => {
 			{ type: "system" },
 			"revision-active",
 		);
+		expect(mocks.db.transaction.mock.calls.at(-1)).toHaveLength(1);
 
 		const inserted = mocks.insertedValues[0] as {
 			specification: ServiceRevisionSpec;

@@ -316,55 +316,50 @@ export async function createRolloutWithServiceRevision(
 	actor: ServiceRevisionActor | null,
 	runtimeBaseRevisionId?: string,
 ) {
-	return db.transaction(
-		async (tx) => {
-			await tx.execute(
-				sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`,
-			);
-			let overrides: ServiceRevisionSpecOverrides | undefined;
-			if (runtimeBaseRevisionId) {
-				const baseRevision = await tx
-					.select({ specification: serviceRevisions.specification })
-					.from(serviceRevisions)
-					.where(
-						and(
-							eq(serviceRevisions.id, runtimeBaseRevisionId),
-							eq(serviceRevisions.serviceId, serviceId),
-						),
-					)
-					.then((rows) => rows[0]);
-				if (!baseRevision) {
-					throw new Error("Runtime base service revision not found");
-				}
-				const baseSpecification = parseServiceRevisionSpec(
-					baseRevision.specification,
-				);
-				if (baseSpecification.source.type !== "github") {
-					throw new Error("GitHub runtime base revision is not a GitHub build");
-				}
-				overrides = {
-					image: baseSpecification.image,
-					source: baseSpecification.source,
-				};
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		let overrides: ServiceRevisionSpecOverrides | undefined;
+		if (runtimeBaseRevisionId) {
+			const baseRevision = await tx
+				.select({ specification: serviceRevisions.specification })
+				.from(serviceRevisions)
+				.where(
+					and(
+						eq(serviceRevisions.id, runtimeBaseRevisionId),
+						eq(serviceRevisions.serviceId, serviceId),
+					),
+				)
+				.then((rows) => rows[0]);
+			if (!baseRevision) {
+				throw new Error("Runtime base service revision not found");
 			}
-			const revision = await createServiceRevisionSnapshot(tx, {
-				id: randomUUID(),
-				serviceId,
-				actor,
-				overrides,
-			});
-			const rolloutId = randomUUID();
-			await tx.insert(rollouts).values({
-				id: rolloutId,
-				serviceId,
-				serviceRevisionId: revision.id,
-				status: "queued",
-				currentStage: "queued",
-			});
-			return { rolloutId, revision };
-		},
-		{ isolationLevel: "repeatable read" },
-	);
+			const baseSpecification = parseServiceRevisionSpec(
+				baseRevision.specification,
+			);
+			if (baseSpecification.source.type !== "github") {
+				throw new Error("GitHub runtime base revision is not a GitHub build");
+			}
+			overrides = {
+				image: baseSpecification.image,
+				source: baseSpecification.source,
+			};
+		}
+		const revision = await createServiceRevisionSnapshot(tx, {
+			id: randomUUID(),
+			serviceId,
+			actor,
+			overrides,
+		});
+		const rolloutId = randomUUID();
+		await tx.insert(rollouts).values({
+			id: rolloutId,
+			serviceId,
+			serviceRevisionId: revision.id,
+			status: "queued",
+			currentStage: "queued",
+		});
+		return { rolloutId, revision };
+	});
 }
 
 /** Clone the deployed specification, never mutable service configuration. */
