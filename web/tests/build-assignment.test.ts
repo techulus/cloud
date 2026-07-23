@@ -155,6 +155,14 @@ describe("revision-backed build assignment", () => {
 		).resolves.toBe("server-arm");
 	});
 
+	it("falls back to cross-platform builds when no native builder is online", async () => {
+		mocks.getSetting.mockResolvedValue(null);
+		mocks.queryResults.push([{ id: "server-arm", meta: { arch: "arm64" } }]);
+		await expect(
+			selectBuildServerForRevision(specification(), "linux/amd64"),
+		).resolves.toBe("server-arm");
+	});
+
 	it("limits stateless build assignment to configured build servers", async () => {
 		mocks.getSetting.mockResolvedValue(["server-arm"]);
 		mocks.queryResults.push([{ id: "server-arm", meta: { arch: "arm64" } }]);
