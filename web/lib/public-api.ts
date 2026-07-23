@@ -594,7 +594,6 @@ export const configurationPatchSchema = z.strictObject({
 	source: publicSourceSchema.optional(),
 	hostname: hostnameSchema.nullable().optional(),
 	ports: z.array(portSchema).max(100).optional(),
-	replicas: z.number().int().min(1).max(10).optional(),
 	placement: placementSchema.optional(),
 	healthCheck: healthCheckSchema.nullable().optional(),
 	startCommand: z.string().trim().min(1).max(4096).nullable().optional(),
@@ -686,10 +685,6 @@ export async function patchConfiguration(
 				.limit(1)
 				.then((rows) => rows[0]),
 		]);
-		const replicaCount =
-			persisted.placementMode === "automatic"
-				? persisted.replicas
-				: placements.reduce((sum, placement) => sum + placement.count, 0);
 		const source = resolvePersistedSourceFromRows(persisted, repo);
 		if (
 			input.placement?.mode === "automatic" &&
@@ -733,34 +728,6 @@ export async function patchConfiguration(
 					"GITHUB_REPOSITORY_SWITCH",
 				);
 			}
-		}
-		if (
-			input.replicas !== undefined &&
-			input.placement &&
-			input.replicas !==
-				(input.placement.mode === "automatic"
-					? input.placement.replicas
-					: input.placement.placements.reduce(
-							(sum, item) => sum + item.count,
-							0,
-						))
-		) {
-			domainError(
-				"replicas and placement describe different desired replica counts",
-				"REPLICA_PLACEMENT_MISMATCH",
-				400,
-			);
-		}
-		if (
-			input.replicas !== undefined &&
-			!input.placement &&
-			persisted.placementMode === "manual" &&
-			input.replicas !== replicaCount
-		) {
-			domainError(
-				`replicas must match the current manual placement of ${replicaCount}`,
-				"REPLICA_PLACEMENT_MISMATCH",
-			);
 		}
 		if (input.placement?.mode === "manual") {
 			const ids = input.placement.placements.map((item) => item.serverId);
@@ -967,12 +934,6 @@ export async function patchConfiguration(
 						})),
 					);
 			}
-		} else if (
-			input.replicas !== undefined &&
-			persisted.placementMode === "automatic" &&
-			changed("placement.replicas", persisted.replicas, input.replicas)
-		) {
-			set.replicas = input.replicas;
 		}
 		if (input.source?.type === "github") {
 			const effectiveBranch =

@@ -300,6 +300,8 @@ service:
     image: nginx:1.27
   hostname: null
   replicas: 1
+  placement:
+    mode: automatic
   healthCheck: null
   startCommand: null
   ports:
@@ -479,7 +481,9 @@ func (a *App) linkCommand() *cobra.Command {
 			if cfg.Current.Placement != nil {
 				if cfg.Current.Placement.Mode == "automatic" {
 					placement = &manifest.Placement{Mode: "automatic"}
-				} else if len(cfg.Current.Placements) > 0 {
+				} else if len(cfg.Current.Placements) == 0 {
+					return errors.New("configure at least one server placement in the web UI before linking this service")
+				} else {
 					placement = &manifest.Placement{Mode: "manual"}
 					placement.Servers = make([]manifest.PlacementServer, len(cfg.Current.Placements))
 					for i, p := range cfg.Current.Placements {
@@ -526,14 +530,15 @@ func (a *App) applyCommand() *cobra.Command {
 			if !loaded.Manifest.Linked() {
 				return errors.New("service is not linked: run `tc link`")
 			}
-			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "replicas": loaded.Manifest.Service.Replicas, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
-			if placement := loaded.Manifest.Service.Placement; placement != nil {
-				delete(body, "replicas")
-				if placement.Mode == "automatic" {
-					body["placement"] = map[string]any{"mode": "automatic", "replicas": loaded.Manifest.Service.Replicas}
-				} else {
-					body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
-				}
+			placement := loaded.Manifest.Service.Placement
+			if placement == nil {
+				return errors.New("service.placement is required")
+			}
+			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
+			if placement.Mode == "automatic" {
+				body["placement"] = map[string]any{"mode": "automatic", "replicas": loaded.Manifest.Service.Replicas}
+			} else {
+				body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
 			}
 			if loaded.Manifest.Service.Resources != nil {
 				body["resources"] = loaded.Manifest.Service.Resources

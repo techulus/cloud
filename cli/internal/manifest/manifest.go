@@ -228,6 +228,9 @@ func Validate(m Manifest) error {
 	if m.Service.Replicas < 1 || m.Service.Replicas > 10 {
 		return errors.New("service.replicas must be between 1 and 10")
 	}
+	if m.Service.Placement == nil {
+		return errors.New("service.placement is required")
+	}
 	if p := m.Service.Placement; p != nil {
 		switch p.Mode {
 		case "automatic":

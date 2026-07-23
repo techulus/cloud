@@ -6,7 +6,7 @@ import (
 )
 
 func base() Manifest {
-	return Manifest{APIVersion: "v1", Project: Project{ID: "p", Slug: "app"}, Environment: Environment{ID: "e", Name: "prod"}, Service: Service{ID: "s", Name: "web", Source: Source{Type: "image", Image: "nginx"}, Replicas: 1}}
+	return Manifest{APIVersion: "v1", Project: Project{ID: "p", Slug: "app"}, Environment: Environment{ID: "e", Name: "prod"}, Service: Service{ID: "s", Name: "web", Source: Source{Type: "image", Image: "nginx"}, Replicas: 1, Placement: &Placement{Mode: "automatic"}}}
 }
 func TestDefaultsAndRoundTrip(t *testing.T) {
 	m := base()
@@ -63,8 +63,8 @@ func TestPlacementRoundTripAndValidation(t *testing.T) {
 	}
 }
 
-func TestPlacementOmittedIsBackwardCompatible(t *testing.T) {
-	m, err := Parse([]byte(`apiVersion: v1
+func TestPlacementIsRequired(t *testing.T) {
+	_, err := Parse([]byte(`apiVersion: v1
 project: {slug: app}
 environment: {name: prod}
 service:
@@ -72,11 +72,8 @@ service:
   source: {type: image, image: nginx}
   replicas: 2
 `))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Service.Placement != nil || m.Service.Replicas != 2 {
-		t.Fatalf("service=%#v", m.Service)
+	if err == nil || !strings.Contains(err.Error(), "service.placement is required") {
+		t.Fatalf("error = %v", err)
 	}
 }
 func TestGitHubCanonical(t *testing.T) {

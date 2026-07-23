@@ -73,9 +73,29 @@ export async function rebalanceAutomaticServices(
 	if (maxCreated <= 0) return 0;
 	const now = new Date();
 	const candidates = await db
-		.select()
+		.select({
+			id: services.id,
+			name: services.name,
+			lastAutomaticPlacementAt: services.lastAutomaticPlacementAt,
+		})
 		.from(services)
-		.where(and(isNull(services.deletedAt)))
+		.innerJoin(deployments, eq(deployments.serviceId, services.id))
+		.innerJoin(
+			serviceRevisions,
+			eq(serviceRevisions.id, deployments.serviceRevisionId),
+		)
+		.where(
+			and(
+				isNull(services.deletedAt),
+				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				eq(deployments.trafficState, "active"),
+				eq(
+					sql<string>`${serviceRevisions.specification} -> 'placement' ->> 'mode'`,
+					"automatic",
+				),
+			),
+		)
+		.groupBy(services.id, services.name, services.lastAutomaticPlacementAt)
 		.orderBy(services.id);
 	let queuedCount = 0;
 	for (const service of candidates) {
@@ -186,6 +206,28 @@ export async function recoverInvalidAutomaticPlacements(
 	maxCreated = MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 ): Promise<number> {
 	if (maxCreated <= 0) return 0;
+	const candidateServices = await db
+		.select({ serviceId: deployments.serviceId })
+		.from(deployments)
+		.innerJoin(services, eq(services.id, deployments.serviceId))
+		.innerJoin(
+			serviceRevisions,
+			eq(serviceRevisions.id, deployments.serviceRevisionId),
+		)
+		.where(
+			and(
+				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				eq(deployments.trafficState, "active"),
+				isNull(services.deletedAt),
+				eq(
+					sql<string>`${serviceRevisions.specification} -> 'placement' ->> 'mode'`,
+					"automatic",
+				),
+			),
+		)
+		.groupBy(deployments.serviceId);
+	if (candidateServices.length === 0) return 0;
+
 	const activeDeployments = await db
 		.select({
 			serviceId: deployments.serviceId,
@@ -208,6 +250,10 @@ export async function recoverInvalidAutomaticPlacements(
 				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
 				eq(deployments.trafficState, "active"),
 				isNull(services.deletedAt),
+				inArray(
+					deployments.serviceId,
+					candidateServices.map((service) => service.serviceId),
+				),
 			),
 		)
 		.orderBy(deployments.serviceId, deployments.id);

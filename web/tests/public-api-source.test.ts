@@ -115,6 +115,12 @@ describe("public API GitHub sources", () => {
 });
 
 describe("public API placement schema", () => {
+	it("rejects the removed standalone replicas field", () => {
+		expect(configurationPatchSchema.safeParse({ replicas: 3 }).success).toBe(
+			false,
+		);
+	});
+
 	it.each([
 		{ mode: "automatic", replicas: 3 },
 		{ mode: "manual", placements: [{ serverId: "server-1", count: 2 }] },

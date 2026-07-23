@@ -989,7 +989,6 @@ export type ServiceConfigUpdate = {
 	source?: { type: "image"; image: string };
 	healthCheck?: ServiceHealthCheckConfig | null;
 	ports?: { add?: PortConfig[]; remove?: string[] };
-	replicas?: { serverId: string; count: number }[];
 	placement?:
 		| { mode: "automatic"; replicas: number }
 		| {
@@ -1154,13 +1153,8 @@ export async function updateServiceConfig(
 		}
 	}
 
-	if (config.placement || config.replicas) {
-		const placement = placementInputSchema.parse(
-			config.placement ?? {
-				mode: "manual",
-				placements: config.replicas?.filter((replica) => replica.count > 0),
-			},
-		);
+	if (config.placement) {
+		const placement = placementInputSchema.parse(config.placement);
 		await db.transaction(async (tx) => {
 			await tx.execute(
 				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
