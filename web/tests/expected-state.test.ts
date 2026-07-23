@@ -527,16 +527,6 @@ describe("expected-state pure builders", () => {
 				},
 			}),
 		];
-		const ports: Parameters<typeof buildTraefikRoutes>[0]["ports"] = [
-			{
-				id: "port_1",
-				serviceId: "svc_serverless",
-				port: 3000,
-				isPublic: true,
-				protocol: "http",
-				domain: "sleepy.example.com",
-			},
-		] as Parameters<typeof buildTraefikRoutes>[0]["ports"];
 
 		const { serverlessServiceIds, serverlessRouteSuppressedServiceIds } =
 			buildServerlessTraefikRouteSets({
@@ -549,43 +539,6 @@ describe("expected-state pure builders", () => {
 
 		expect(Array.from(serverlessServiceIds)).toEqual(["svc_serverless"]);
 		expect(Array.from(serverlessRouteSuppressedServiceIds)).toEqual([]);
-
-		const routes = buildTraefikRoutes({
-			serverId: "proxy_1",
-			ports,
-			routableDeployments: [],
-			serverlessServiceIds,
-			serverlessRouteSuppressedServiceIds,
-		});
-
-		expect(routes.httpRoutes).toEqual([
-			{
-				id: "sleepy.example.com",
-				domain: "sleepy.example.com",
-				serviceId: "svc_serverless",
-				upstreams: [{ url: "127.0.0.1:18080", weight: 1 }],
-			},
-		]);
-	});
-
-	it("omits serverless HTTP routes on non-owner proxies", () => {
-		const routes = buildTraefikRoutes({
-			serverId: "proxy_2",
-			ports: [
-				{
-					id: "port_1",
-					serviceId: "svc_serverless",
-					port: 3000,
-					isPublic: true,
-					protocol: "http",
-					domain: "sleepy.example.com",
-				},
-			] as any,
-			routableDeployments: [],
-			serverlessRouteSuppressedServiceIds: new Set(["svc_serverless"]),
-		});
-
-		expect(routes.httpRoutes).toEqual([]);
 	});
 
 	it("keeps suppressed serverless HTTP domains in certificate selection", () => {

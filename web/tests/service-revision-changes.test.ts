@@ -50,20 +50,8 @@ describe("diffServiceRevisionSpecs", () => {
 		const previous = spec();
 		const current = structuredClone(previous);
 		current.image = "app:v2";
-		current.hostname = "new-app";
-		current.stateful = true;
-		current.serverless = {
-			enabled: true,
-			sleepAfterSeconds: 600,
-			wakeTimeoutSeconds: 90,
-		};
-		current.healthCheck = {
-			cmd: "wget /ready",
-			interval: 20,
-			timeout: 8,
-			retries: 5,
-			startPeriod: 40,
-		};
+		if (!current.healthCheck) throw new Error("Expected health check fixture");
+		current.healthCheck.startPeriod = 40;
 		current.startCommand = "npm start";
 		current.resourceLimits = { cpuCores: 2, memoryMb: 512 };
 

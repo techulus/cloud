@@ -13,7 +13,6 @@ import {
 
 describe("VictoriaLogs queries", () => {
 	afterEach(() => {
-		vi.restoreAllMocks();
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 		vi.resetModules();

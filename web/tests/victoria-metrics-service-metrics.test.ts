@@ -11,7 +11,6 @@ const END_TS = Date.parse("2026-07-02T12:30:00Z") / 1000;
 
 describe("VictoriaMetrics service metrics", () => {
 	afterEach(() => {
-		vi.restoreAllMocks();
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 		vi.resetModules();

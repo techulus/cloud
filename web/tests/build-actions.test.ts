@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => {
 		service: {
 			id: "service-1",
 			sourceType: "github",
-			githubRootDir: "apps/web",
 		},
 		githubRepo: {
 			id: "repo-link-1",
@@ -31,8 +30,6 @@ const mocks = vi.hoisted(() => {
 		db: { select: vi.fn(() => query) },
 		requireDeveloperRole: vi.fn(),
 		listGitHubCommits: vi.fn(),
-		send: vi.fn(),
-		createBuildTrigger: vi.fn((data) => ({ name: "build/trigger", data })),
 		triggerResolvedBuildInternal: vi.fn(),
 	};
 });
@@ -46,16 +43,14 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 	listGitHubCommits: mocks.listGitHubCommits,
 }));
 vi.mock("@/lib/inngest/client", () => ({
-	inngest: { send: mocks.send },
+	inngest: { send: vi.fn() },
 }));
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {
-		buildTrigger: { create: mocks.createBuildTrigger },
+		buildTrigger: { create: vi.fn() },
 	},
 }));
 vi.mock("@/lib/trigger-build", () => ({
-	triggerBuildInternal: vi.fn(),
-	requeueBuildRevisionInternal: vi.fn(),
 	triggerResolvedBuildInternal: mocks.triggerResolvedBuildInternal,
 }));
 
@@ -65,7 +60,6 @@ const selectedCommit = {
 	sha: "0123456789abcdef0123456789abcdef01234567",
 	message: "Deploy this commit",
 	author: "octocat",
-	date: "2026-07-18T00:00:00Z",
 };
 
 describe("manual commit builds", () => {
@@ -76,8 +70,6 @@ describe("manual commit builds", () => {
 			user: { id: "user-1", name: "Alice" },
 		});
 		mocks.listGitHubCommits.mockReset();
-		mocks.send.mockReset();
-		mocks.createBuildTrigger.mockClear();
 		mocks.triggerResolvedBuildInternal.mockReset();
 		mocks.triggerResolvedBuildInternal.mockResolvedValue({ status: "queued" });
 	});

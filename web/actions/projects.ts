@@ -32,6 +32,7 @@ import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	isObservedReady,
+	isRuntimeExpected,
 	markDeploymentRemoved,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
@@ -40,7 +41,6 @@ import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
-import { blocksProjectDeletion } from "@/lib/project-deletion";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -111,7 +111,10 @@ export async function deleteProject(
 			.from(deployments)
 			.where(eq(deployments.serviceId, service.id));
 
-		const hasActiveDeployments = activeDeployments.some(blocksProjectDeletion);
+		// "stopped" can be a sleeping, wakeable serverless deployment.
+		const hasActiveDeployments = activeDeployments.some(
+			({ runtimeDesiredState }) => isRuntimeExpected(runtimeDesiredState),
+		);
 
 		if (hasActiveDeployments) {
 			throw new Error(
@@ -1519,7 +1522,9 @@ export async function removeServiceVolume(volumeId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, volume[0].serviceId));
 
-	const hasRunning = activeDeployments.some(blocksProjectDeletion);
+	const hasRunning = activeDeployments.some(({ runtimeDesiredState }) =>
+		isRuntimeExpected(runtimeDesiredState),
+	);
 	if (hasRunning) {
 		throw new Error("Stop the service before removing volumes");
 	}
