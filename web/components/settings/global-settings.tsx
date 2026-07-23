@@ -108,6 +108,7 @@ export function GlobalSettings({
 	const [tab, setTab] = useQueryState("tab", {
 		defaultValue: "infrastructure",
 	});
+	const activeTab = tab === "api-keys" ? "security" : tab;
 	const previousTabRef = useRef<string | null>(null);
 	const [buildServerIds, setBuildServerIds] = useState<Set<string>>(
 		new Set(initialSettings.buildServerIds),
@@ -124,6 +125,12 @@ export function GlobalSettings({
 	const [isStartingUpgrade, setIsStartingUpgrade] = useState(false);
 	const [controlPlaneUpgradeDialogOpen, setControlPlaneUpgradeDialogOpen] =
 		useState(false);
+
+	useEffect(() => {
+		if (tab === "api-keys") {
+			void setTab("security", { history: "replace" });
+		}
+	}, [tab, setTab]);
 
 	useEffect(() => {
 		const openedAbout = tab === "update" && previousTabRef.current !== "update";
@@ -258,7 +265,7 @@ export function GlobalSettings({
 	const upgradeRunning = upgradeState?.status === "running";
 
 	return (
-		<Tabs value={tab} onValueChange={(value) => setTab(value)}>
+		<Tabs value={activeTab} onValueChange={(value) => setTab(value)}>
 			<TabsList className="w-full justify-start overflow-x-auto">
 				<TabsTrigger value="infrastructure" className="px-4 shrink-0">
 					Infrastructure
@@ -268,9 +275,6 @@ export function GlobalSettings({
 				</TabsTrigger>
 				<TabsTrigger value="security" className="px-4 shrink-0">
 					Security
-				</TabsTrigger>
-				<TabsTrigger value="api-keys" className="px-4 shrink-0">
-					API Keys
 				</TabsTrigger>
 				{membersData && (
 					<TabsTrigger value="members" className="px-4 shrink-0">
@@ -451,9 +455,6 @@ export function GlobalSettings({
 
 			<TabsContent value="security" className="space-y-6 pt-4">
 				<TwoFactorSettings />
-			</TabsContent>
-
-			<TabsContent value="api-keys" className="space-y-6 pt-4">
 				<ApiKeySettings />
 			</TabsContent>
 
