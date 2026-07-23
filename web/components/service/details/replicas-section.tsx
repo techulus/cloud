@@ -396,7 +396,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 				</Tabs>
 
 				{placementMode === "automatic" ? (
-					<div className="space-y-4 rounded-md border bg-muted/30 p-4">
+					<div className="space-y-4">
 						<div className="space-y-1">
 							<label htmlFor="desired-replicas" className="text-sm font-medium">
 								Desired replicas
