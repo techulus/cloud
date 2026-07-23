@@ -1,4 +1,7 @@
-import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
+import {
+	getServiceRevisionTotalReplicas,
+	type ServiceRevisionSpec,
+} from "@/lib/service-revision-spec";
 
 export type ReplicaConfig = {
 	serverId: string;
@@ -98,6 +101,19 @@ export function hasBuildAffectingChanges(changes: ConfigChange[]): boolean {
 	);
 }
 
+export function getServiceTotalReplicas(service: {
+	placementMode?: "manual" | "automatic" | null;
+	replicas: number;
+	configuredReplicas: Array<{ count: number }>;
+}): number {
+	return service.placementMode === "automatic"
+		? service.replicas
+		: service.configuredReplicas.reduce(
+				(sum, replica) => sum + replica.count,
+				0,
+			);
+}
+
 export function buildCurrentConfig(
 	service: {
 		image: string;
@@ -132,10 +148,11 @@ export function buildCurrentConfig(
 	const hasResourceLimits =
 		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
 	const placementMode = service.placementMode ?? "manual";
-	const replicaCount =
-		placementMode === "automatic"
-			? service.replicas
-			: replicas.reduce((sum, replica) => sum + replica.count, 0);
+	const replicaCount = getServiceTotalReplicas({
+		...service,
+		placementMode,
+		configuredReplicas: replicas,
+	});
 
 	return {
 		source,
@@ -678,13 +695,7 @@ export function revisionSpecToDeployedConfig(
 	specification: ServiceRevisionSpec,
 	serverNames: Record<string, string>,
 ): DeployedConfig {
-	const replicaCount =
-		specification.placement.mode === "automatic"
-			? specification.placement.replicas
-			: specification.placements.reduce(
-					(sum, placement) => sum + placement.count,
-					0,
-				);
+	const replicaCount = getServiceRevisionTotalReplicas(specification);
 	return {
 		source:
 			specification.source.type === "github"

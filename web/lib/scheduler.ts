@@ -21,12 +21,11 @@ import {
 	sendManualRecoveryRequiredAlert,
 	sendServerOfflineAlert,
 } from "@/lib/email";
-import { inngest } from "@/lib/inngest/client";
-import { inngestEvents } from "@/lib/inngest/events";
 import {
 	distributeReplicas,
 	resolveRevisionPlacements,
 } from "@/lib/inngest/functions/rollout-helpers";
+import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { cloneActiveRevisionAndQueueSystemRollout } from "@/lib/service-revisions";
 import {
@@ -38,33 +37,6 @@ const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
 export const MAX_REBALANCES_PER_RUN = 5;
 export const MAX_AUTOMATIC_RECOVERIES_PER_RUN = 5;
-
-async function enqueueSystemRollout(
-	serviceId: string,
-	result: { rolloutId: string; created: boolean },
-): Promise<void> {
-	if (!result.created) return;
-	try {
-		await inngest.send(
-			inngestEvents.rolloutCreated.create(
-				{ rolloutId: result.rolloutId, serviceId },
-				{ id: `rollout-created-${result.rolloutId}` },
-			),
-		);
-	} catch (error) {
-		await db
-			.update(rollouts)
-			.set({
-				status: "failed",
-				currentStage: "enqueue_failed",
-				completedAt: new Date(),
-			})
-			.where(
-				and(eq(rollouts.id, result.rolloutId), eq(rollouts.status, "queued")),
-			);
-		throw error;
-	}
-}
 
 export async function rebalanceAutomaticServices(
 	maxCreated = MAX_REBALANCES_PER_RUN,
@@ -185,7 +157,7 @@ export async function rebalanceAutomaticServices(
 			);
 			if (!result.created) continue;
 			queuedCount++;
-			await enqueueSystemRollout(service.id, result);
+			await sendRolloutCreated(result.rolloutId, service.id);
 		} catch (error) {
 			console.error(`[scheduler] failed to rebalance ${service.name}`, error);
 		}
@@ -318,7 +290,7 @@ export async function recoverInvalidAutomaticPlacements(
 			);
 			if (!result.created) continue;
 			createdCount++;
-			await enqueueSystemRollout(serviceId, result);
+			await sendRolloutCreated(result.rolloutId, serviceId);
 		} catch (error) {
 			console.error(
 				`[scheduler] failed level-triggered recovery for ${serviceDeployments[0]?.serviceName ?? serviceId}`,
@@ -414,7 +386,7 @@ async function triggerRecoveryForOfflineServers(
 			);
 			if (!queued.created) continue;
 			createdCount++;
-			await enqueueSystemRollout(deployment.serviceId, queued);
+			await sendRolloutCreated(queued.rolloutId, deployment.serviceId);
 		} catch (error) {
 			console.error(
 				`[scheduler] automatic recovery failed for ${deployment.serviceName}; periodic recovery will retry`,

@@ -4,8 +4,27 @@ import {
 	distributeReplicas,
 } from "@/lib/inngest/functions/rollout-helpers";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { getServiceRevisionTotalReplicas } from "@/lib/service-revision-spec";
 
 describe("automatic placement distribution", () => {
+	it("uses placement intent to determine a revision replica total", () => {
+		expect(
+			getServiceRevisionTotalReplicas({
+				placement: { mode: "automatic", replicas: 4 },
+				placements: [],
+			}),
+		).toBe(4);
+		expect(
+			getServiceRevisionTotalReplicas({
+				placement: { mode: "manual" },
+				placements: [
+					{ serverId: "a", count: 1 },
+					{ serverId: "b", count: 2 },
+				],
+			}),
+		).toBe(3);
+	});
+
 	it.each([
 		[1, [1, 0, 0]],
 		[3, [1, 1, 1]],

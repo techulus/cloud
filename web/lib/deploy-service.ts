@@ -1,11 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import { rollouts, serviceReplicas } from "@/db/schema";
-import { inngest } from "@/lib/inngest/client";
-import { inngestEvents } from "@/lib/inngest/events";
+import { serviceReplicas } from "@/db/schema";
 import { startMigrationInternal } from "@/lib/migrations";
+import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import {
 	createRolloutForServiceRevision,
@@ -25,31 +24,7 @@ export async function deployServiceRevisionInternal(
 	);
 	if (!result.rolloutId) return result;
 
-	try {
-		await inngest.send(
-			inngestEvents.rolloutCreated.create(
-				{
-					rolloutId: result.rolloutId,
-					serviceId,
-				},
-				{
-					id: `rollout-created-${result.rolloutId}`,
-				},
-			),
-		);
-	} catch (error) {
-		await db
-			.update(rollouts)
-			.set({
-				status: "failed",
-				currentStage: "enqueue_failed",
-				completedAt: new Date(),
-			})
-			.where(
-				and(eq(rollouts.id, result.rolloutId), eq(rollouts.status, "queued")),
-			);
-		throw error;
-	}
+	await sendRolloutCreated(result.rolloutId, serviceId);
 
 	return result;
 }
@@ -115,24 +90,7 @@ export async function deployServiceInternal(
 		runtimeBaseRevisionId,
 	);
 
-	try {
-		await inngest.send(
-			inngestEvents.rolloutCreated.create({
-				rolloutId,
-				serviceId,
-			}),
-		);
-	} catch (error) {
-		await db
-			.update(rollouts)
-			.set({
-				status: "failed",
-				currentStage: "enqueue_failed",
-				completedAt: new Date(),
-			})
-			.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")));
-		throw error;
-	}
+	await sendRolloutCreated(rolloutId, serviceId);
 
 	return { rolloutId };
 }

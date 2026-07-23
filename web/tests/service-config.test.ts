@@ -4,6 +4,7 @@ import {
 	type DeployedConfig,
 	diffConfigs,
 	getCurrentServerlessConfig,
+	getServiceTotalReplicas,
 	hasBuildAffectingChanges,
 	MIN_SERVERLESS_SLEEP_AFTER_SECONDS,
 	revisionSpecToDeployedConfig,
@@ -29,6 +30,20 @@ function deployedConfig(
 }
 
 describe("service config", () => {
+	it("uses the placement mode to determine the configured replica total", () => {
+		const service = {
+			replicas: 4,
+			configuredReplicas: [{ count: 1 }, { count: 2 }],
+		};
+
+		expect(
+			getServiceTotalReplicas({ ...service, placementMode: "automatic" }),
+		).toBe(4);
+		expect(
+			getServiceTotalReplicas({ ...service, placementMode: "manual" }),
+		).toBe(3);
+	});
+
 	it("enforces the minimum serverless sleep timeout", () => {
 		expect(
 			getCurrentServerlessConfig({

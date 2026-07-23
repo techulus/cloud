@@ -15,8 +15,12 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { validateDockerImageInternal } from "@/lib/docker-image";
+import { getServiceTotalReplicas } from "@/lib/service-config";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { getDefaultServiceHostname } from "@/lib/service-revision-spec";
+import {
+	getDefaultServiceHostname,
+	getServiceRevisionTotalReplicas,
+} from "@/lib/service-revision-spec";
 
 const githubPathPart = /^[A-Za-z0-9_.-]+$/;
 const windowsAbsolutePath = /^[A-Za-z]:[\\/]/;
@@ -279,10 +283,7 @@ function getManagementBlockers(input: {
 
 function sanitizeSpec(specification: unknown) {
 	const spec = parseServiceRevisionSpec(specification);
-	const replicas =
-		spec.placement.mode === "automatic"
-			? spec.placement.replicas
-			: spec.placements.reduce((sum, placement) => sum + placement.count, 0);
+	const replicas = getServiceRevisionTotalReplicas(spec);
 	const placement =
 		spec.placement.mode === "automatic"
 			? { mode: "automatic" as const, replicas }
@@ -379,10 +380,10 @@ export async function safeConfiguration(service: NestedService) {
 			a.name.localeCompare(b.name, "en") ||
 			a.containerPath.localeCompare(b.containerPath, "en"),
 	);
-	const replicaCount =
-		service.placementMode === "automatic"
-			? service.replicas
-			: sortedPlacements.reduce((sum, placement) => sum + placement.count, 0);
+	const replicaCount = getServiceTotalReplicas({
+		...service,
+		configuredReplicas: sortedPlacements,
+	});
 	const placement =
 		service.placementMode === "automatic"
 			? { mode: "automatic" as const, replicas: replicaCount }
