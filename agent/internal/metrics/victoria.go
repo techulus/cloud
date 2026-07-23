@@ -67,26 +67,7 @@ func (v *VictoriaMetricsSender) SendSystemStats(stats *health.SystemStats, colle
 	writeGauge(&buf, "techulus_node_disk_usage_percent", serverID, stats.DiskUsagePercent, timestampMs)
 	writeGauge(&buf, "techulus_node_disk_used_bytes", serverID, float64(stats.DiskUsedGb)*1024*1024*1024, timestampMs)
 
-	req, err := http.NewRequest("POST", v.endpoint+"/api/v1/import/prometheus", &buf)
-	if err != nil {
-		return fmt.Errorf("failed to create metrics request: %w", err)
-	}
-	req.Header.Set("Content-Type", "text/plain; version=0.0.4")
-	if v.username != "" {
-		req.SetBasicAuth(v.username, v.password)
-	}
-
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send metrics: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected metrics status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	return v.postPrometheusImport(buf.Bytes(), nil)
 }
 
 func (v *VictoriaMetricsSender) SendAgentStats(stats *health.AgentProcessStats, collectedAt time.Time) error {

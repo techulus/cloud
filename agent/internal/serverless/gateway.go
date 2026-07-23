@@ -163,7 +163,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	activityKey := serviceActivityKey(route.ServiceID)
+	activityKey := route.ServiceID
 	g.beginActivity(activityKey)
 	defer g.endActivity(activityKey, route.ServiceID, route.SleepAfterSeconds)
 
@@ -289,10 +289,12 @@ func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream,
 		return nil, fmt.Errorf("no serverless route metadata for host %s", host)
 	}
 
-	ready, sleepingLocalIDs, err := g.readyUpstreams(route, state)
+	resolution, err := g.inspectUpstreams(route, state)
 	if err != nil {
 		return nil, err
 	}
+	ready := resolution.ready
+	sleepingLocalIDs := resolution.sleepingLocalIDs
 	if len(sleepingLocalIDs) == 0 {
 		if len(ready) > 0 {
 			return ready, nil
@@ -329,14 +331,6 @@ func (g *Gateway) resolveUpstreams(host string) ([]agenthttp.ServerlessUpstream,
 		return nil, fmt.Errorf("failed to start local serverless wake")
 	}
 	return g.waitForReadyUpstreams(route, route.WakeTimeoutSeconds, wakeStartedAt, startedIDs)
-}
-
-func (g *Gateway) readyUpstreams(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState) ([]agenthttp.ServerlessUpstream, []string, error) {
-	resolution, err := g.inspectUpstreams(route, state)
-	if err != nil {
-		return nil, nil, err
-	}
-	return resolution.ready, resolution.sleepingLocalIDs, nil
 }
 
 func (g *Gateway) inspectUpstreams(route *agenthttp.ServerlessRoute, state *agenthttp.ExpectedState) (upstreamResolution, error) {
@@ -693,10 +687,6 @@ func formatLocalUpstreamURLs(upstreams []agenthttp.ServerlessUpstream) string {
 }
 
 func summarizeWaitReasons(reasons []upstreamWaitReason) string {
-	return formatWaitReasons(reasons, true)
-}
-
-func formatWaitReasons(reasons []upstreamWaitReason, includeDialLatency bool) string {
 	if len(reasons) == 0 {
 		return ""
 	}
@@ -712,7 +702,7 @@ func formatWaitReasons(reasons []upstreamWaitReason, includeDialLatency bool) st
 		if reason.health != "" {
 			part += fmt.Sprintf(" health=%s", reason.health)
 		}
-		if includeDialLatency && reason.dialLatency > 0 {
+		if reason.dialLatency > 0 {
 			part += fmt.Sprintf(" dial_latency=%s", roundDuration(reason.dialLatency))
 		}
 		if reason.err != nil {
@@ -888,7 +878,7 @@ func (g *Gateway) seedIdleTimers() {
 		if !hasRunningLocalDeployment(route.LocalDeploymentIDs, actualByDeploymentID) {
 			continue
 		}
-		g.scheduleSleepTimer(serviceActivityKey(route.ServiceID), route.ServiceID, route.SleepAfterSeconds)
+		g.scheduleSleepTimer(route.ServiceID, route.ServiceID, route.SleepAfterSeconds)
 	}
 }
 
@@ -950,18 +940,8 @@ func (g *Gateway) endActivity(key string, serviceID string, sleepAfterSeconds in
 	})
 }
 
-func (g *Gateway) sleepHost(host string) {
-	route := findRoute(g.runtime.ExpectedState(), host)
-	if route == nil {
-		log.Printf("[serverless-gateway] sleep skipped host=%s reason=missing_route_metadata", host)
-		return
-	}
-	g.sleepService(route.ServiceID)
-}
-
 func (g *Gateway) sleepService(serviceID string) {
-	activityKey := serviceActivityKey(serviceID)
-	activity := g.activity(activityKey)
+	activity := g.activity(serviceID)
 	activity.mu.Lock()
 	if activity.activeRequests > 0 {
 		activeRequests := activity.activeRequests
@@ -1327,10 +1307,6 @@ func sleepDelay(sleepAfterSeconds int) time.Duration {
 		return 5 * time.Minute
 	}
 	return delay
-}
-
-func serviceActivityKey(serviceID string) string {
-	return "service:" + serviceID
 }
 
 func roundDuration(duration time.Duration) time.Duration {

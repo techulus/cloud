@@ -17,12 +17,11 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	serverID   string
-	keyPair    *crypto.KeyPair
-	client     *http.Client
-	longClient *http.Client
-	dataDir    string
+	baseURL  string
+	serverID string
+	keyPair  *crypto.KeyPair
+	client   *http.Client
+	dataDir  string
 }
 
 func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
@@ -33,9 +32,6 @@ func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string
 		dataDir:  dataDir,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
-		},
-		longClient: &http.Client{
-			Timeout: 40 * time.Second,
 		},
 	}
 }
