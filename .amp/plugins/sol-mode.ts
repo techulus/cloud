@@ -1,10 +1,10 @@
-// @amp-agent-mode {"key":"sol","label":"sol"}
+// @amp-agent-mode {"key":"sol-xhigh","label":"sol-xhigh"}
 
 import type { PluginAPI } from '@ampcode/plugin'
 
 export default function (amp: PluginAPI) {
-	const sol = amp.createAgent({
-		name: 'sol',
+	const solXHigh = amp.createAgent({
+		name: 'sol-xhigh',
 		model: 'openai/gpt-5.6-sol',
 		// Rules inspired by Ponytail: https://github.com/DietrichGebert/ponytail/blob/main/skills/ponytail/SKILL.md#rules
 		instructions: [
@@ -22,9 +22,9 @@ export default function (amp: PluginAPI) {
 	})
 
 	amp.registerAgentMode({
-		key: 'sol',
-		label: 'sol',
+		key: 'sol-xhigh',
+		label: 'sol-xhigh',
 		description: 'GPT-5.6 Sol with all tools and xhigh reasoning.',
-		agent: sol.definition,
+		agent: solXHigh.definition,
 	})
 }
