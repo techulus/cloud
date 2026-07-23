@@ -128,17 +128,22 @@ export type ServiceRevisionSpecOverrides = {
 	allowNoPlacements?: boolean;
 };
 
+export function getServiceRevisionTotalReplicas(
+	specification: Pick<ServiceRevisionSpec, "placement" | "placements">,
+): number {
+	return specification.placement.mode === "automatic"
+		? specification.placement.replicas
+		: specification.placements.reduce(
+				(sum, placement) => sum + placement.count,
+				0,
+			);
+}
+
 function validateServiceRevisionSpec(
 	specification: ServiceRevisionSpec,
 	allowNoPlacements: boolean,
 ) {
-	const totalReplicas =
-		specification.placement.mode === "automatic"
-			? specification.placement.replicas
-			: specification.placements.reduce(
-					(sum, placement) => sum + placement.count,
-					0,
-				);
+	const totalReplicas = getServiceRevisionTotalReplicas(specification);
 
 	if (totalReplicas < 1 && !allowNoPlacements) {
 		throw new Error("At least one replica is required");

@@ -11,7 +11,10 @@ import type {
 	DeploymentStatus,
 	ServiceWithDetails as Service,
 } from "@/db/types";
-import type { ConfigChange } from "@/lib/service-config";
+import {
+	type ConfigChange,
+	getServiceTotalReplicas,
+} from "@/lib/service-config";
 import { cn } from "@/lib/utils";
 
 type StageInfo = {
@@ -150,13 +153,7 @@ export function getBarState(
 		}
 	}
 
-	const totalReplicas =
-		service.placementMode === "automatic"
-			? service.replicas
-			: service.configuredReplicas.reduce(
-					(sum, replica) => sum + replica.count,
-					0,
-				);
+	const totalReplicas = getServiceTotalReplicas(service);
 	const hasNoDeployments = service.deployments.length === 0;
 	const hasChanges = changes.length > 0;
 

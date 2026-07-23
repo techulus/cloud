@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
@@ -54,7 +54,7 @@ function getPreflightFailureReason(error: unknown) {
 	return null;
 }
 
-async function acquireRolloutTurn(
+export async function acquireRolloutTurn(
 	rolloutId: string,
 	serviceId: string,
 ): Promise<RolloutTurnState> {
@@ -79,6 +79,35 @@ async function acquireRolloutTurn(
 			rollout.status === "failed" && rollout.currentStage === "enqueue_failed";
 		if (rollout.status !== "queued" && !recoverableEnqueueFailure) {
 			return rollout.status === "in_progress" ? "acquired" : "terminal";
+		}
+
+		if (recoverableEnqueueFailure) {
+			const newerIntent = await tx
+				.select({ id: rollouts.id })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, serviceId),
+						ne(rollouts.id, rolloutId),
+						gte(rollouts.createdAt, rollout.createdAt),
+					),
+				)
+				.limit(1)
+				.then((rows) => rows[0]);
+
+			if (newerIntent) {
+				await tx
+					.update(rollouts)
+					.set({ currentStage: "superseded" })
+					.where(
+						and(
+							eq(rollouts.id, rolloutId),
+							eq(rollouts.status, "failed"),
+							eq(rollouts.currentStage, "enqueue_failed"),
+						),
+					);
+				return "terminal";
+			}
 		}
 
 		const blockingRollout = await tx

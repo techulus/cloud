@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import {
 	type ConfigChange,
+	getServiceTotalReplicas,
 	hasBuildAffectingChanges,
 } from "@/lib/service-config";
 
@@ -35,13 +36,7 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 	const { mutate } = useSWRConfig();
 	const [isDeploying, setIsDeploying] = useState(false);
 
-	const totalReplicas =
-		service.placementMode === "automatic"
-			? service.replicas
-			: service.configuredReplicas.reduce(
-					(sum, replica) => sum + replica.count,
-					0,
-				);
+	const totalReplicas = getServiceTotalReplicas(service);
 	const hasNoDeployments = service.deployments.length === 0;
 	const shouldBuild =
 		service.sourceType === "github" &&
