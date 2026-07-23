@@ -12,6 +12,54 @@ import (
 	"techulus/cloud-agent/internal/health"
 )
 
+func TestSendSystemStatsPostsPrometheusImport(t *testing.T) {
+	var gotPath string
+	var gotContentType string
+	var gotUsername string
+	var gotPassword string
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		gotUsername, gotPassword, _ = r.BasicAuth()
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	sender := NewVictoriaMetricsSender(strings.Replace(server.URL, "://", "://user:password@", 1), "server-1")
+	err := sender.SendSystemStats(&health.SystemStats{
+		CpuUsagePercent:    1.25,
+		MemoryUsagePercent: 2.5,
+		MemoryUsedMb:       64,
+		DiskUsagePercent:   3.75,
+		DiskUsedGb:         4,
+	}, time.UnixMilli(1_700_000_000_000))
+	if err != nil {
+		t.Fatalf("send system stats: %v", err)
+	}
+
+	if gotPath != "/api/v1/import/prometheus" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotContentType != "text/plain; version=0.0.4" {
+		t.Fatalf("content type = %q", gotContentType)
+	}
+	if gotUsername != "user" || gotPassword != "password" {
+		t.Fatalf("Basic Auth = %q, %q", gotUsername, gotPassword)
+	}
+	lines := strings.Split(strings.TrimSpace(gotBody), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("metric lines = %d, want 5:\n%s", len(lines), gotBody)
+	}
+	for _, line := range lines {
+		if !strings.HasSuffix(line, " 1700000000000") {
+			t.Fatalf("metric has wrong timestamp: %q", line)
+		}
+	}
+}
+
 func TestSendPrometheusMetricsAddsExtraLabels(t *testing.T) {
 	var gotPath string
 	var gotQuery string
