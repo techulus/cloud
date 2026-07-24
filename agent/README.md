@@ -44,13 +44,9 @@ curl -sSL $CONTROL_PLANE_URL/setup.sh | sudo bash
 
 ## Updating
 
-To update an existing agent to the latest version:
+When an update is available, open the server in the control plane and click **Update**. After you confirm the target version, the control plane queues an upgrade work item over the authenticated agent channel.
 
-```bash
-curl -sSL https://your-control-plane.com/update.sh | sudo bash
-```
-
-This downloads the latest agent binary, verifies the checksum, and restarts the service.
+The agent downloads the release binary, verifies its checksum, installs it, and restarts itself.
 
 ## Manual Setup
 
