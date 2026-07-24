@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckCircle2, Clock, Loader2, RotateCcw, XCircle } from "lucide-react";
+import {
+	CheckCircle2,
+	Clock,
+	GitCommit,
+	Loader2,
+	RotateCcw,
+	XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
@@ -31,6 +38,8 @@ type RolloutListItem = {
 	currentStage: string | null;
 	createdAt: string;
 	completedAt: string | null;
+	commitSha: string | null;
+	commitMessage: string | null;
 };
 
 const STATUS_CONFIG: Record<
@@ -205,11 +214,24 @@ export function RolloutHistory({
 								/>
 								<ItemContent>
 									<ItemTitle>
-										<span className="truncate">
-											{rollout.status === "in_progress"
-												? `Deploying — ${formatStage(rollout.currentStage)}`
-												: STATUS_TITLES[rollout.status]}
-										</span>
+										{rollout.commitSha ? (
+											<>
+												<GitCommit className="size-3.5 text-muted-foreground" />
+												<code className="font-mono text-xs">
+													{rollout.commitSha.slice(0, 7)}
+												</code>
+												<span className="truncate text-muted-foreground font-normal">
+													{rollout.commitMessage?.split("\n")[0] ||
+														"No message"}
+												</span>
+											</>
+										) : (
+											<span className="truncate">
+												{rollout.status === "in_progress"
+													? `Deploying — ${formatStage(rollout.currentStage)}`
+													: STATUS_TITLES[rollout.status]}
+											</span>
+										)}
 									</ItemTitle>
 									<ItemDescription>
 										<RolloutStatusBadge
