@@ -146,18 +146,18 @@ async function fetchLogQuery<T>(
 	query: string,
 	{
 		limit,
+		pageSize,
 		errorLabel = "logs",
 		signal,
-		requestTimeout = false,
 		serverTimeout = false,
 	}: {
 		limit?: number;
+		pageSize?: number;
 		errorLabel?: string;
 		signal?: AbortSignal;
-		requestTimeout?: boolean;
 		serverTimeout?: boolean;
 	} = {},
-): Promise<T[]> {
+): Promise<{ logs: T[]; hasMore: boolean }> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
 		throw new Error("VICTORIA_LOGS_URL is not configured");
@@ -165,15 +165,16 @@ async function fetchLogQuery<T>(
 
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
-	if (limit !== undefined) {
-		url.searchParams.set("limit", String(limit));
+	const queryLimit = pageSize === undefined ? limit : pageSize + 1;
+	if (queryLimit !== undefined) {
+		url.searchParams.set("limit", String(queryLimit));
 	}
 	if (serverTimeout) {
 		url.searchParams.set("timeout", "4s");
 	}
 	const response = await fetch(url.toString(), {
 		...buildFetchOptions(endpoint),
-		signal: requestTimeout ? providerSignal(signal) : signal,
+		signal,
 	});
 
 	if (!response.ok) {
@@ -183,11 +184,14 @@ async function fetchLogQuery<T>(
 	}
 
 	const text = await response.text();
-	return text
+	const logs = text
 		.trim()
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => JSON.parse(line) as T);
+	const hasMore = pageSize !== undefined && logs.length > pageSize;
+	if (hasMore) logs.pop();
+	return { logs, hasMore };
 }
 
 function deduplicateIdentifiedLogs(logs: StoredLog[]): StoredLog[] {
@@ -228,9 +232,8 @@ export async function queryPublicServiceLogs(
 		query += ` | first ${pageSize} by (_time desc, event_id desc) | sort by (_time, event_id)`;
 	}
 
-	const rawLogs = await fetchLogQuery<StoredLog>(query, {
-		signal: options.signal,
-		requestTimeout: true,
+	const { logs: rawLogs } = await fetchLogQuery<StoredLog>(query, {
+		signal: providerSignal(options.signal),
 		serverTimeout: true,
 	});
 	if (
@@ -266,16 +269,10 @@ export async function queryLogsByService(
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<StoredLog>(query, {
-		limit: limit + 1,
-		signal: options.signal,
-		requestTimeout: true,
+	return fetchLogQuery<StoredLog>(query, {
+		pageSize: limit,
+		signal: providerSignal(options.signal),
 	});
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
 }
 
 export async function queryLogsByDeployment(
@@ -290,12 +287,7 @@ export async function queryLogsByDeployment(
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<StoredLog>(query, { limit: limit + 1 });
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
+	return fetchLogQuery<StoredLog>(query, { pageSize: limit });
 }
 
 export type BuildLog = {
@@ -347,15 +339,10 @@ export async function queryLogsByServer({
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<AgentLog>(query, {
-		limit: limit + 1,
+	return fetchLogQuery<AgentLog>(query, {
+		pageSize: limit,
 		errorLabel: "server logs",
 	});
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
 }
 
 export type RolloutLog = {
@@ -414,7 +401,7 @@ export async function queryLogsByRollout(
 	}
 	query += " | sort by (_time)";
 
-	const logs = await fetchLogQuery<RolloutLog>(query, {
+	const { logs } = await fetchLogQuery<RolloutLog>(query, {
 		limit,
 		errorLabel: "rollout logs",
 	});
@@ -433,7 +420,7 @@ export async function queryLogsByBuild(
 	}
 	query += " | sort by (_time)";
 
-	const logs = await fetchLogQuery<BuildLog>(query, {
+	const { logs } = await fetchLogQuery<BuildLog>(query, {
 		limit,
 		errorLabel: "build logs",
 	});
