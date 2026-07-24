@@ -2,6 +2,7 @@ import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
+import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
@@ -446,7 +447,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					.where(
 						and(
 							inArray(deployments.id, deploymentIds),
-							inArray(deployments.observedPhase, ["healthy", "running"]),
+							inArray(deployments.observedPhase, observedReadyPhases),
 						),
 					);
 
@@ -483,9 +484,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					.where(inArray(deployments.id, pendingHealthDeploymentIds));
 
 				return deploymentStates.filter(
-					(deployment) =>
-						deployment.observedPhase !== "healthy" &&
-						deployment.observedPhase !== "running",
+					(deployment) => !isObservedReady(deployment.observedPhase),
 				);
 			},
 		);
@@ -562,7 +561,7 @@ export const rolloutWorkflow = inngest.createFunction(
 						and(
 							eq(deployments.rolloutId, rolloutId),
 							eq(deployments.trafficState, "candidate"),
-							inArray(deployments.observedPhase, ["healthy", "running"]),
+							inArray(deployments.observedPhase, observedReadyPhases),
 						),
 					);
 

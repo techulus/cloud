@@ -163,24 +163,14 @@ func (a *Agent) routingSyncedRolloutIds() []string {
 }
 
 func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {
-	httpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-	if traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName) != traefik.GetCurrentConfigHash() {
+	compiled := a.compiledTraefikState(expected)
+	if compiled.HTTPHash != traefik.GetCurrentConfigHash() {
 		return false
 	}
-	tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
-	udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
-	if traefik.HashTCPRoutes(tcpRoutes)+traefik.HashUDPRoutes(udpRoutes) != traefik.GetCurrentL4ConfigHash() {
+	if compiled.L4Hash != traefik.GetCurrentL4ConfigHash() {
 		return false
 	}
-	certificates := make([]traefik.Certificate, len(expected.Traefik.Certificates))
-	for i, certificate := range expected.Traefik.Certificates {
-		certificates[i] = traefik.Certificate{
-			Domain:         certificate.Domain,
-			Certificate:    certificate.Certificate,
-			CertificateKey: certificate.CertificateKey,
-		}
-	}
-	if traefik.HashCertificates(certificates) != traefik.GetCurrentCertificatesHash() {
+	if compiled.CertHash != traefik.GetCurrentCertificatesHash() {
 		return false
 	}
 	reloaded, err := traefik.DynamicConfigReloaded(a.DataDir)

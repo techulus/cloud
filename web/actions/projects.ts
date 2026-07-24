@@ -34,6 +34,7 @@ import {
 	isObservedReady,
 	isRuntimeExpected,
 	markDeploymentRemoved,
+	observedReadyPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { validateDockerImageInternal } from "@/lib/docker-image";
@@ -462,7 +463,7 @@ export async function deleteService(
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.observedPhase, ["running", "healthy"]),
+				inArray(deployments.observedPhase, observedReadyPhases),
 			),
 		)
 		.then((r) => r[0]);

@@ -353,28 +353,19 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 	}
 
 	if a.IsProxy {
-		expectedHttpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-		expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, expected.ServerName)
-		tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
-		udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
-		expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
-		expectedCerts := make([]traefik.Certificate, len(expected.Traefik.Certificates))
-		for i, c := range expected.Traefik.Certificates {
-			expectedCerts[i] = traefik.Certificate{Domain: c.Domain, Certificate: c.Certificate, CertificateKey: c.CertificateKey}
-		}
-		expectedCertsHash := traefik.HashCertificates(expectedCerts)
-		if expectedTraefikHash != actual.TraefikConfigHash ||
-			expectedL4Hash != actual.L4ConfigHash ||
-			expectedCertsHash != actual.CertificatesHash ||
+		compiled := a.compiledTraefikState(expected)
+		if compiled.HTTPHash != actual.TraefikConfigHash ||
+			compiled.L4Hash != actual.L4ConfigHash ||
+			compiled.CertHash != actual.CertificatesHash ||
 			!actual.TraefikReloaded {
 			actions = append(actions, reconcileAction{
 				Kind: actionUpdateTraefik,
 				Description: fmt.Sprintf(
 					"UPDATE Traefik (%d HTTP, %d TCP, %d UDP routes; %d certificates)",
-					len(expected.Traefik.HttpRoutes),
-					len(tcpRoutes),
-					len(udpRoutes),
-					len(expected.Traefik.Certificates),
+					len(compiled.HTTP),
+					len(compiled.TCP),
+					len(compiled.UDP),
+					len(compiled.Certificates),
 				),
 			})
 		}
@@ -570,17 +561,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 }
 
 func (a *Agent) updateTraefik() error {
-	expectedHttpRoutes := ConvertToHttpRoutes(a.expectedState.Traefik.HttpRoutes)
-	tcpRoutes := ConvertToTCPRoutes(a.expectedState.Traefik.TCPRoutes)
-	udpRoutes := ConvertToUDPRoutes(a.expectedState.Traefik.UDPRoutes)
-
-	var tcpPorts, udpPorts []int
-	for _, r := range tcpRoutes {
-		tcpPorts = append(tcpPorts, r.ExternalPort)
-	}
-	for _, r := range udpRoutes {
-		udpPorts = append(udpPorts, r.ExternalPort)
-	}
+	compiled := a.compiledTraefikState(a.expectedState)
 
 	needsRestart := false
 	metricsRestart, err := traefik.EnsureMetricsConfig()
@@ -589,9 +570,9 @@ func (a *Agent) updateTraefik() error {
 	}
 	needsRestart = metricsRestart
 
-	if len(tcpPorts) > 0 || len(udpPorts) > 0 {
-		log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(tcpPorts), len(udpPorts))
-		entryPointsRestart, err := traefik.EnsureEntryPoints(tcpPorts, udpPorts)
+	if len(compiled.TCPPorts) > 0 || len(compiled.UDPPorts) > 0 {
+		log.Printf("[reconcile] ensuring L4 entry points: %d TCP, %d UDP", len(compiled.TCPPorts), len(compiled.UDPPorts))
+		entryPointsRestart, err := traefik.EnsureEntryPoints(compiled.TCPPorts, compiled.UDPPorts)
 		if err != nil {
 			return fmt.Errorf("failed to ensure entry points: %w", err)
 		}
@@ -604,19 +585,9 @@ func (a *Agent) updateTraefik() error {
 		}
 	}
 
-	expectedCerts := make([]traefik.Certificate, len(a.expectedState.Traefik.Certificates))
-	for i, certificate := range a.expectedState.Traefik.Certificates {
-		expectedCerts[i] = traefik.Certificate{
-			Domain:         certificate.Domain,
-			Certificate:    certificate.Certificate,
-			CertificateKey: certificate.CertificateKey,
-		}
-	}
-	expectedTraefikHash := traefik.HashRoutesWithServerName(expectedHttpRoutes, a.expectedState.ServerName)
-	expectedL4Hash := traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes)
-	routesChanged := expectedTraefikHash != traefik.GetCurrentConfigHash() ||
-		expectedL4Hash != traefik.GetCurrentL4ConfigHash()
-	certificatesChanged := traefik.HashCertificates(expectedCerts) != traefik.GetCurrentCertificatesHash()
+	routesChanged := compiled.HTTPHash != traefik.GetCurrentConfigHash() ||
+		compiled.L4Hash != traefik.GetCurrentL4ConfigHash()
+	certificatesChanged := compiled.CertHash != traefik.GetCurrentCertificatesHash()
 	if !routesChanged && !certificatesChanged {
 		if err := traefik.EnsureDynamicConfigReloaded(a.DataDir, 15*time.Second); err != nil {
 			return fmt.Errorf("failed to recover Traefik config reload: %w", err)
@@ -633,13 +604,13 @@ func (a *Agent) updateTraefik() error {
 	}
 
 	if certificatesChanged {
-		if err := traefik.UpdateCertificates(expectedCerts); err != nil {
+		if err := traefik.UpdateCertificates(compiled.Certificates); err != nil {
 			return fmt.Errorf("failed to update Traefik certificates: %w", err)
 		}
 	}
 	if routesChanged {
-		log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(expectedHttpRoutes), len(tcpRoutes), len(udpRoutes))
-		if err := traefik.UpdateHttpRoutesWithL4(expectedHttpRoutes, tcpRoutes, udpRoutes, a.expectedState.ServerName); err != nil {
+		log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(compiled.HTTP), len(compiled.TCP), len(compiled.UDP))
+		if err := traefik.UpdateHttpRoutesWithL4(compiled.HTTP, compiled.TCP, compiled.UDP, a.expectedState.ServerName); err != nil {
 			return fmt.Errorf("failed to update Traefik: %w", err)
 		}
 	}
