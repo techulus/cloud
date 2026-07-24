@@ -23,12 +23,16 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 
-	let data: StatusRequestBody;
+	let parsed: unknown;
 	try {
-		data = JSON.parse(body);
+		parsed = JSON.parse(body);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+	}
+	const data = parsed as StatusRequestBody;
 
 	if (!data.statusReport || !Array.isArray(data.statusReport.containers)) {
 		return NextResponse.json(
@@ -56,7 +60,7 @@ export async function POST(request: NextRequest) {
 		? data.activeWorkItems.filter(isValidActiveWorkItem)
 		: [];
 
-	const { accepted, rejected } = await completeWorkItemResults(
+	const { accepted, rejected, retryable } = await completeWorkItemResults(
 		serverId,
 		completedWorkItems,
 	);
@@ -70,6 +74,7 @@ export async function POST(request: NextRequest) {
 		ok: true,
 		acceptedWorkItemResults: accepted,
 		rejectedWorkItemResults: rejected,
+		retryableWorkItemResults: retryable,
 		rejectedActiveWorkItems: rejectedActive,
 		serverlessTransitionResults,
 		workItems: nextWorkItem ? [nextWorkItem] : [],

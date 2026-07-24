@@ -8,6 +8,7 @@ export type RestoreEvents = {
 	};
 	"restore/started": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			serviceId: string;
 			serverId: string;
@@ -15,6 +16,7 @@ export type RestoreEvents = {
 	};
 	"restore/completed": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			volumeId: string;
 			serviceId: string;
@@ -23,6 +25,7 @@ export type RestoreEvents = {
 	};
 	"restore/failed": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			volumeId: string;
 			serviceId: string;

@@ -4,11 +4,11 @@ An open container deployment platform. See README.md for architecture.
 
 ## Project facts
 
-- **Unreleased beta.** Never build
-  backward-compatibility shims, deprecation windows, or migration paths for
-  old agent or API versions — delete and replace outright.
-- The control plane and agent ship together; cross-cutting protocol changes
-  land in one PR with no rollout ordering concerns.
+- **Unreleased beta.** Prefer direct replacement for internal APIs, but keep a
+  compatibility window for protocols used by independently upgraded agents.
+- For agent protocol changes, deploy backward-compatible control-plane support
+  first, upgrade the agent fleet, then remove the old protocol after the
+  supported agent-version floor advances.
 
 ## Repo map
 

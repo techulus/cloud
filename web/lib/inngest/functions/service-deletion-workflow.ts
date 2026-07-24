@@ -409,47 +409,69 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				};
 			});
 
-			await step.run("restore-deletion-backups", async () => {
-				for (const backup of setup.backups) {
-					if (!backup.storagePath) {
-						throw new Error("Backup data is incomplete");
+			const restoreWorkItemIds = await step.run(
+				"restore-deletion-backups",
+				async () => {
+					const workItemIds: string[] = [];
+					for (const backup of setup.backups) {
+						if (!backup.storagePath || !backup.checksum) {
+							throw new Error("Backup data is incomplete");
+						}
+						const workItemId = await enqueueWork(
+							setup.targetServerId,
+							"restore_volume",
+							{
+								backupId: backup.id,
+								serviceId,
+								volumeName: backup.volumeName,
+								storagePath: backup.storagePath,
+								expectedChecksum: backup.checksum,
+								isMigrationRestore: false,
+								storageConfig: {
+									provider: setup.storageConfig.provider,
+									bucket: setup.storageConfig.bucket,
+									region: setup.storageConfig.region,
+									endpoint: setup.storageConfig.endpoint,
+									accessKey: setup.storageConfig.accessKey,
+									secretKey: setup.storageConfig.secretKey,
+								},
+							},
+						);
+						workItemIds.push(workItemId);
 					}
-					await enqueueWork(setup.targetServerId, "restore_volume", {
-						backupId: backup.id,
-						serviceId,
-						volumeName: backup.volumeName,
-						storagePath: backup.storagePath,
-						expectedChecksum: backup.checksum,
-						isMigrationRestore: false,
-						storageConfig: {
-							provider: setup.storageConfig.provider,
-							bucket: setup.storageConfig.bucket,
-							region: setup.storageConfig.region,
-							endpoint: setup.storageConfig.endpoint,
-							accessKey: setup.storageConfig.accessKey,
-							secretKey: setup.storageConfig.secretKey,
-						},
-					});
-				}
-			});
+					return workItemIds;
+				},
+			);
 
+			const restoreCorrelations =
+				restoreWorkItemIds?.map((workItemId) => ({
+					stepId: workItemId,
+					if: `async.data.workItemId == "${workItemId}"`,
+				})) ??
+				backupIds.map((backupId) => ({
+					stepId: backupId,
+					if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+				}));
 			const restoreResults = await Promise.all(
-				backupIds.map((backupId) =>
+				restoreCorrelations.map((correlation) =>
 					group.parallel(() => {
 						const completed = step
-							.waitForEvent(`wait-delete-restore-${backupId}`, {
+							.waitForEvent(`wait-delete-restore-${correlation.stepId}`, {
 								event: inngestEvents.restoreCompleted,
 								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+								if: correlation.if,
 							})
 							.then((result) => ({ status: "completed" as const, result }));
 
 						const failed = step
-							.waitForEvent(`wait-delete-restore-failed-${backupId}`, {
-								event: inngestEvents.restoreFailed,
-								timeout: "30m",
-								if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
-							})
+							.waitForEvent(
+								`wait-delete-restore-failed-${correlation.stepId}`,
+								{
+									event: inngestEvents.restoreFailed,
+									timeout: "30m",
+									if: correlation.if,
+								},
+							)
 							.then((result) => ({ status: "failed" as const, result }));
 
 						return Promise.race([completed, failed]);

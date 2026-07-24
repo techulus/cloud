@@ -20,12 +20,14 @@ export type MigrationEvents = {
 	};
 	"migration/restore-completed": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			serviceId: string;
 		};
 	};
 	"migration/restore-failed": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			serviceId: string;
 			error: string;
@@ -33,6 +35,7 @@ export type MigrationEvents = {
 	};
 	"migration/restore-finished": {
 		data: {
+			workItemId?: string;
 			backupId: string;
 			serviceId: string;
 			status: "completed" | "failed";

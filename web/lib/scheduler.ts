@@ -7,6 +7,7 @@ import {
 	servers,
 	serviceRevisions,
 	services,
+	workCompletionOutbox,
 	workQueue,
 } from "@/db/schema";
 import {
@@ -29,6 +30,7 @@ import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { cloneActiveRevisionAndQueueSystemRollout } from "@/lib/service-revisions";
 import {
+	completeWorkItemResults,
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
@@ -626,16 +628,53 @@ export async function cleanupStaleItems(): Promise<void> {
 	// Pending work is intentionally retained so commands can run when an agent
 	// reconnects. Only exhausted processing attempts are failed here.
 	const staleWorkItems = await db
-		.update(workQueue)
-		.set({ status: "failed" })
+		.select({
+			id: workQueue.id,
+			serverId: workQueue.serverId,
+			attempt: workQueue.attempts,
+		})
+		.from(workQueue)
 		.where(
 			and(
 				eq(workQueue.status, "processing"),
 				lt(workQueue.startedAt, workItemLeaseThreshold),
 				sql`${workQueue.attempts} >= ${WORK_QUEUE_MAX_ATTEMPTS}`,
 			),
-		)
-		.returning({ id: workQueue.id });
+		);
+
+	for (const item of staleWorkItems) {
+		const completion = await completeWorkItemResults(
+			item.serverId,
+			[
+				{
+					id: item.id,
+					attempt: item.attempt,
+					status: "failed",
+					error: "Work item attempts exhausted",
+				},
+			],
+			{ source: "system", processingStartedBefore: workItemLeaseThreshold },
+		);
+		if (
+			completion.accepted.length === 0 &&
+			completion.retryable.length === 0 &&
+			!completion.rejected.some((result) => result.reason === "not_stale")
+		) {
+			// Permanently malformed work cannot produce domain events, but it must
+			// not remain in the queue forever.
+			await db
+				.update(workQueue)
+				.set({ status: "failed" })
+				.where(
+					and(
+						eq(workQueue.id, item.id),
+						eq(workQueue.status, "processing"),
+						eq(workQueue.attempts, item.attempt),
+						lt(workQueue.startedAt, workItemLeaseThreshold),
+					),
+				);
+		}
+	}
 
 	if (staleWorkItems.length > 0) {
 		console.log(
@@ -662,4 +701,13 @@ export async function cleanupStaleItems(): Promise<void> {
 			`[scheduler] deleted ${deletedWorkItems.length} old work queue items`,
 		);
 	}
+
+	await db
+		.delete(workCompletionOutbox)
+		.where(
+			and(
+				isNotNull(workCompletionOutbox.processedAt),
+				lt(workCompletionOutbox.createdAt, oldThreshold),
+			),
+		);
 }

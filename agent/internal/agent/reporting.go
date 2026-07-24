@@ -20,7 +20,10 @@ import (
 
 var Version = "dev"
 
-const serverlessGatewayCapability = "serverless_gateway"
+const (
+	serverlessGatewayCapability = "serverless_gateway"
+	typedWorkResultsCapability  = "typed_work_results_v1"
+)
 
 var (
 	agentStartTime    = time.Now()
@@ -133,10 +136,11 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 }
 
 func (a *Agent) agentCapabilities() []string {
-	if !a.IsProxy || !a.serverlessGatewayRunning.Load() {
-		return nil
+	capabilities := []string{typedWorkResultsCapability}
+	if a.IsProxy && a.serverlessGatewayRunning.Load() {
+		capabilities = append(capabilities, serverlessGatewayCapability)
 	}
-	return []string{serverlessGatewayCapability}
+	return capabilities
 }
 
 func (a *Agent) routingSyncedRolloutIds() []string {

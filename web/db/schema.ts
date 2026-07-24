@@ -805,6 +805,32 @@ export const workQueue = pgTable(
 	],
 );
 
+export type WorkCompletionOutboxEvent = {
+	id: string;
+	name: string;
+	data: Record<string, unknown>;
+};
+
+export const workCompletionOutbox = pgTable(
+	"work_completion_outbox",
+	{
+		// Deliberately not a foreign key: queued events must survive work-item or
+		// server deletion until they have been delivered.
+		workItemId: text("work_item_id").primaryKey(),
+		events: jsonb("events").$type<WorkCompletionOutboxEvent[]>().notNull(),
+		revalidateProjects: boolean("revalidate_projects").default(false).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		processedAt: timestamp("processed_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("work_completion_outbox_pending_idx")
+			.on(table.createdAt)
+			.where(sql`${table.processedAt} IS NULL`),
+	],
+);
+
 export const githubInstallations = pgTable(
 	"github_installations",
 	{
