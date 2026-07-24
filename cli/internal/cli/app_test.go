@@ -33,6 +33,35 @@ service:
   ports: []
 `
 
+func TestAppUsesVersionSpecificConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	production := auth.NewConfigStore("v1.0.0")
+	development := auth.NewConfigStore("dev")
+	if err := production.WriteConfig(auth.Config{Host: "https://cloud.example.com", APIKey: "production"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := development.WriteConfig(auth.Config{Host: "http://localhost:3000", APIKey: "development"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		version string
+		wantKey string
+	}{
+		{version: "dev", wantKey: "development"},
+		{version: "v1.0.0", wantKey: "production"},
+	} {
+		app := NewApp(tc.version, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+		config, err := app.requireConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.APIKey != tc.wantKey {
+			t.Fatalf("NewApp(%q) API key = %q, want %q", tc.version, config.APIKey, tc.wantKey)
+		}
+	}
+}
+
 func TestAuthDeviceExchangeCreatesAPIKeyAndWhoamiUsesIt(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	polls := 0
@@ -69,7 +98,7 @@ func TestAuthDeviceExchangeCreatesAPIKeyAndWhoamiUsesIt(t *testing.T) {
 	if err := execute(app, "auth", "login", "--host", server.URL); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _ := auth.ReadConfig()
+	cfg, _ := auth.NewConfigStore("test").ReadConfig()
 	if polls != 1 || cfg == nil || cfg.APIKey != "new-secret" || cfg.KeyID != "key-id" {
 		t.Fatalf("polls=%d config=%#v", polls, cfg)
 	}
@@ -712,7 +741,7 @@ func execute(a *App, args ...string) error {
 func writeConfig(t *testing.T, host string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-	if err := auth.WriteConfig(auth.Config{Host: host, APIKey: "secret"}); err != nil {
+	if err := auth.NewConfigStore("test").WriteConfig(auth.Config{Host: host, APIKey: "secret"}); err != nil {
 		t.Fatal(err)
 	}
 }
