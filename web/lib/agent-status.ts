@@ -37,7 +37,7 @@ import { enqueueWork } from "@/lib/work-queue";
 type ContainerStatus = {
 	deploymentId: string;
 	containerId: string;
-	status: "running" | "stopped" | "failed";
+	status: "running" | "stopped" | "failed" | "transient";
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy";
 };
 
@@ -89,7 +89,7 @@ export function getStoppedContainerReportUpdate(deployment: {
 	};
 }
 
-export function getStaleStoppedServerlessReportUpdate({
+export function getStaleStoppedReportUpdate({
 	hasHealthCheck,
 	healthStatus,
 }: {
@@ -779,6 +779,14 @@ export async function applyStatusReport(
 	}
 
 	for (const container of report.containers) {
+		// Transient containers (e.g. podman "created" mid-deploy) are reported
+		// for presence only — counted in reportedDeploymentIds above so the
+		// deployment isn't marked unknown or deleted, but their unsettled state
+		// must not drive any phase or health transition.
+		if (container.status === "transient") {
+			continue;
+		}
+
 		const healthStatus = container.healthStatus;
 
 		let [deployment] = container.deploymentId
@@ -875,6 +883,7 @@ export async function applyStatusReport(
 		let autohealRestartPayload: Record<string, unknown> | null = null;
 		let autohealRecreatePayload: Record<string, unknown> | null = null;
 		let autohealFailed = false;
+		let restoredToReady = false;
 
 		if (deployment.containerId !== container.containerId) {
 			updateFields.containerId = container.containerId;
@@ -921,16 +930,19 @@ export async function applyStatusReport(
 				.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
 				.then((r) => r[0]);
 
-			if (revision?.specification.serverless.enabled) {
+			if (revision) {
 				Object.assign(
 					updateFields,
-					getStaleStoppedServerlessReportUpdate({
+					getStaleStoppedReportUpdate({
 						hasHealthCheck: revision.specification.healthCheck != null,
 						healthStatus,
 					}),
 				);
+				restoredToReady =
+					updateFields.observedPhase === "healthy" ||
+					updateFields.observedPhase === "running";
 				console.log(
-					`[health:restore] serverless deployment ${deployment.id} restored from ${deployment.observedPhase} to ${updateFields.observedPhase}`,
+					`[health:restore] deployment ${deployment.id} restored from ${deployment.observedPhase} to ${updateFields.observedPhase}`,
 				);
 			}
 		}
@@ -1009,6 +1021,7 @@ export async function applyStatusReport(
 					? "running"
 					: "starting";
 			updateFields.observedPhase = newStatus;
+			restoredToReady = newStatus === "running";
 			console.log(
 				`[health:restore] deployment ${deployment.id} restored from unknown to ${newStatus}`,
 			);
@@ -1078,6 +1091,24 @@ export async function applyStatusReport(
 			.update(deployments)
 			.set(updateFields)
 			.where(eq(deployments.id, deployment.id));
+
+		if (restoredToReady && deployment.rolloutId) {
+			const currentServerName = await getCurrentServerLogName();
+			await ingestRolloutLog(
+				deployment.rolloutId,
+				deployment.serviceId,
+				"health_check",
+				`Container is healthy on server ${currentServerName}`,
+			);
+			await inngest.send(
+				inngestEvents.resourceStatusChanged.create({
+					type: "deployment",
+					id: deployment.id,
+					parentType: "rollout",
+					parentId: deployment.rolloutId,
+				}),
+			);
+		}
 
 		if (autohealRestartPayload) {
 			await enqueueWork(serverId, "restart", autohealRestartPayload);

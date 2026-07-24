@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,15 +35,14 @@ const (
 
 type App struct {
 	Version       string
-	Args          []string
 	In            io.Reader
 	Out           io.Writer
 	Err           io.Writer
 	HTTPClient    *http.Client
 	Sleep         func(time.Duration)
-	Now           func() time.Time
 	IsInteractive func() bool
 	GetCWD        func() (string, error)
+	configStore   auth.ConfigStore
 	flags         globalFlags
 }
 
@@ -80,7 +80,6 @@ func NewApp(version string, in io.Reader, out io.Writer, errOut io.Writer) *App 
 		Out:        out,
 		Err:        errOut,
 		HTTPClient: &http.Client{Timeout: defaultAPITimeout},
-		Now:        time.Now,
 		IsInteractive: func() bool {
 			inFile, inOK := in.(*os.File)
 			outFile, outOK := out.(*os.File)
@@ -99,6 +98,7 @@ func NewApp(version string, in io.Reader, out io.Writer, errOut io.Writer) *App 
 			}
 			return os.Getwd()
 		},
+		configStore: auth.NewConfigStore(version),
 	}
 }
 
@@ -107,14 +107,11 @@ func (a *App) Execute() error {
 	cmd.SetIn(a.In)
 	cmd.SetOut(a.Out)
 	cmd.SetErr(a.Err)
-	if a.Args != nil {
-		cmd.SetArgs(a.Args)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		if a.isMachineOutput() {
-			_ = a.writeError(err)
+			_ = output.Error(a.Out, err)
 			return handledError{err: err}
 		}
 		return err
@@ -197,7 +194,7 @@ func (a *App) authLoginCommand() *cobra.Command {
 				return errors.New("tc auth login requires human browser approval and does not support --agent or --json")
 			}
 			if host == "" {
-				existing, err := auth.ReadConfig()
+				existing, err := a.configStore.ReadConfig()
 				if err != nil {
 					return err
 				}
@@ -220,7 +217,7 @@ func (a *App) authLogoutCommand() *cobra.Command {
 		Use:   "logout",
 		Short: "Remove the saved CLI session",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := auth.DeleteConfig(); err != nil {
+			if err := a.configStore.DeleteConfig(); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
@@ -238,7 +235,7 @@ func (a *App) authWhoamiCommand() *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the current CLI account",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -300,6 +297,8 @@ service:
     image: nginx:1.27
   hostname: null
   replicas: 1
+  placement:
+    mode: automatic
   healthCheck: null
   startCommand: null
   ports:
@@ -345,7 +344,7 @@ func (a *App) linkCommand() *cobra.Command {
 			if explicitIDs == 0 && !a.IsInteractive() {
 				return errors.New("tc link requires an interactive terminal or all ID flags")
 			}
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -380,7 +379,7 @@ func (a *App) linkCommand() *cobra.Command {
 					return errors.New("project ID not found")
 				}
 			} else {
-				project, err = selectFromList(reader, a.Out, "Select a project:", ps.Projects, func(v projectItem) string { return v.Name }, nil)
+				project, err = selectFromList(reader, a.Out, "Select a project:", ps.Projects, func(v projectItem) string { return v.Name })
 				if err != nil {
 					return err
 				}
@@ -401,7 +400,7 @@ func (a *App) linkCommand() *cobra.Command {
 					return errors.New("environment ID not found")
 				}
 			} else {
-				environment, err = selectFromList(reader, a.Out, "Select an environment:", es.Environments, func(v environmentItem) string { return v.Name }, nil)
+				environment, err = selectFromList(reader, a.Out, "Select an environment:", es.Environments, func(v environmentItem) string { return v.Name })
 				if err != nil {
 					return err
 				}
@@ -422,7 +421,7 @@ func (a *App) linkCommand() *cobra.Command {
 					return errors.New("service ID not found")
 				}
 			} else {
-				service, err = selectFromList(reader, a.Out, "Select a service:", ss.Services, func(v serviceItem) string { return v.Name }, nil)
+				service, err = selectFromList(reader, a.Out, "Select a service:", ss.Services, func(v serviceItem) string { return v.Name })
 				if err != nil {
 					return err
 				}
@@ -435,7 +434,14 @@ func (a *App) linkCommand() *cobra.Command {
 						IsPublic      bool    `json:"public"`
 						Domain        *string `json:"domain"`
 					} `json:"ports"`
-					Replicas     int                   `json:"replicas"`
+					Replicas  int `json:"replicas"`
+					Placement *struct {
+						Mode string `json:"mode"`
+					} `json:"placement"`
+					Placements []struct {
+						ServerID string `json:"serverId"`
+						Count    int    `json:"count"`
+					} `json:"placements"`
 					HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
 					StartCommand *string               `json:"startCommand"`
 					Resources    *manifest.Resources   `json:"resources"`
@@ -468,7 +474,21 @@ func (a *App) linkCommand() *cobra.Command {
 			for i, p := range cfg.Current.Ports {
 				ports[i] = manifest.Port{ContainerPort: p.ContainerPort, Public: p.IsPublic, Domain: p.Domain}
 			}
-			m := manifest.Manifest{APIVersion: "v1", Project: manifest.Project{ID: project.ID, Slug: project.Slug}, Environment: manifest.Environment{ID: environment.ID, Name: environment.Name}, Service: manifest.Service{ID: service.ID, Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
+			var placement *manifest.Placement
+			if cfg.Current.Placement != nil {
+				if cfg.Current.Placement.Mode == "automatic" {
+					placement = &manifest.Placement{Mode: "automatic"}
+				} else if len(cfg.Current.Placements) == 0 {
+					return errors.New("configure at least one server placement in the web UI before linking this service")
+				} else {
+					placement = &manifest.Placement{Mode: "manual"}
+					placement.Servers = make([]manifest.PlacementServer, len(cfg.Current.Placements))
+					for i, p := range cfg.Current.Placements {
+						placement.Servers[i] = manifest.PlacementServer{ServerID: p.ServerID, Count: p.Count}
+					}
+				}
+			}
+			m := manifest.Manifest{APIVersion: "v1", Project: manifest.Project{ID: project.ID, Slug: project.Slug}, Environment: manifest.Environment{ID: environment.ID, Name: environment.Name}, Service: manifest.Service{ID: service.ID, Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, Placement: placement, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
 			if err := manifest.Save(manifestPath, m); err != nil {
 				return err
 			}
@@ -494,7 +514,7 @@ func (a *App) applyCommand() *cobra.Command {
 			"agent_notes": "Requires techulus.yml in the current directory and sends the full desired manifest to the control plane.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -507,7 +527,16 @@ func (a *App) applyCommand() *cobra.Command {
 			if !loaded.Manifest.Linked() {
 				return errors.New("service is not linked: run `tc link`")
 			}
-			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "replicas": loaded.Manifest.Service.Replicas, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
+			placement := loaded.Manifest.Service.Placement
+			if placement == nil {
+				return errors.New("service.placement is required")
+			}
+			body := map[string]any{"source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand}
+			if placement.Mode == "automatic" {
+				body["placement"] = map[string]any{"mode": "automatic", "replicas": loaded.Manifest.Service.Replicas}
+			} else {
+				body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
+			}
 			if loaded.Manifest.Service.Resources != nil {
 				body["resources"] = loaded.Manifest.Service.Resources
 			}
@@ -531,7 +560,7 @@ func (a *App) deployCommand() *cobra.Command {
 			"agent_notes": "Requires techulus.yml in the current directory and queues a deployment for that service.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -585,7 +614,7 @@ func (a *App) statusCommand() *cobra.Command {
 			"agent_notes": "Without explicit target flags, tc reads techulus.yml from the current directory.\nFor agent use outside a linked directory, pass --project, --environment, and --service together.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -630,7 +659,7 @@ func (a *App) logsCommand() *cobra.Command {
 				}
 				follow = false
 			}
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -638,7 +667,7 @@ func (a *App) logsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if logRange != "" && !contains([]string{"1h", "6h", "24h", "7d"}, logRange) {
+			if logRange != "" && !slices.Contains([]string{"1h", "6h", "24h", "7d"}, logRange) {
 				return errors.New("invalid log range")
 			}
 			return a.runLogs(cmd.Context(), config, value, tail, follow, query, logRange)
@@ -658,7 +687,7 @@ func (a *App) projectsCommand() *cobra.Command {
 		Short: "List projects",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := requireConfig()
+			cfg, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -681,7 +710,7 @@ func (a *App) projectsCommand() *cobra.Command {
 func (a *App) environmentsCommand() *cobra.Command {
 	var id string
 	c := &cobra.Command{Use: "environments", Short: "List project environments", RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -712,7 +741,7 @@ func (a *App) environmentsCommand() *cobra.Command {
 func (a *App) servicesCommand() *cobra.Command {
 	var p, eid string
 	c := &cobra.Command{Use: "services", Short: "List environment services", RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -750,7 +779,7 @@ func (a *App) servicesCommand() *cobra.Command {
 func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command) url.Values, print func(io.Writer, map[string]any)) *cobra.Command {
 	var target serviceTargetFlags
 	c := &cobra.Command{Use: name, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -821,7 +850,7 @@ func (a *App) rolloutCommand() *cobra.Command {
 	return c
 }
 func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id string, logs bool, q string, limit int) error {
-	cfg, e := requireConfig()
+	cfg, e := a.requireConfig()
 	if e != nil {
 		return e
 	}
@@ -857,7 +886,7 @@ func (a *App) metricsCommand() *cobra.Command {
 	c := a.resourceCommand("metrics", "Show service metrics", "/metrics", func(*cobra.Command) url.Values { return url.Values{"range": {r}} }, printMetrics)
 	c.Flags().StringVar(&r, "range", "1h", "Range: 1h, 6h, 24h, 7d, 30d")
 	c.PreRunE = func(*cobra.Command, []string) error {
-		if !contains([]string{"1h", "6h", "24h", "7d", "30d"}, r) {
+		if !slices.Contains([]string{"1h", "6h", "24h", "7d", "30d"}, r) {
 			return errors.New("invalid metrics range")
 		}
 		return nil
@@ -876,15 +905,6 @@ func (a *App) revisionsCommand() *cobra.Command {
 	c.Flags().StringVar(&cursor, "cursor", "", "Pagination cursor")
 	return c
 }
-func contains(v []string, s string) bool {
-	for _, x := range v {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 func (a *App) versionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
@@ -956,10 +976,6 @@ func (a *App) writeData(data any, summary string) error {
 
 func (a *App) writeRaw(data any) error {
 	return output.JSON(a.Out, data)
-}
-
-func (a *App) writeError(err error) error {
-	return output.Error(a.Out, err)
 }
 
 type agentHelpInfo struct {
@@ -1057,36 +1073,13 @@ func parseAgentArgs(cmd *cobra.Command) []agentArg {
 			continue
 		}
 		arg := agentArg{Name: name, Required: required}
-		if choices := parseAgentArgChoices(name); len(choices) > 0 {
-			arg.Name = agentChoiceArgName(cmd)
-			arg.Choices = choices
+		if strings.Contains(name, "|") {
+			arg.Name = "shell"
+			arg.Choices = strings.Split(name, "|")
 		}
 		args = append(args, arg)
 	}
 	return args
-}
-
-func parseAgentArgChoices(name string) []string {
-	if !strings.Contains(name, "|") {
-		return nil
-	}
-	parts := strings.Split(name, "|")
-	choices := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			return nil
-		}
-		choices = append(choices, part)
-	}
-	return choices
-}
-
-func agentChoiceArgName(cmd *cobra.Command) string {
-	if cmd.Name() == "completion" {
-		return "shell"
-	}
-	return "value"
 }
 
 type serviceTargetFlags struct {
@@ -1237,8 +1230,8 @@ func sourcesEqual(expected, actual manifest.Source) bool {
 	return *expected.RootDir == *actual.RootDir
 }
 
-func requireConfig() (*auth.Config, error) {
-	config, err := auth.ReadConfig()
+func (a *App) requireConfig() (*auth.Config, error) {
+	config, err := a.configStore.ReadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -1271,16 +1264,16 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	expiresAt := a.Now().Add(time.Duration(deviceCode.ExpiresIn) * time.Second)
+	expiresAt := time.Now().Add(time.Duration(deviceCode.ExpiresIn) * time.Second)
 	var accessToken string
 	for accessToken == "" {
-		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
+		if deviceCode.ExpiresIn > 0 && !time.Now().Before(expiresAt) {
 			return errors.New("device authorization expired")
 		}
 		if err := a.sleep(ctx, interval); err != nil {
 			return err
 		}
-		if deviceCode.ExpiresIn > 0 && !a.Now().Before(expiresAt) {
+		if deviceCode.ExpiresIn > 0 && !time.Now().Before(expiresAt) {
 			return errors.New("device authorization expired")
 		}
 		var tokenResponse deviceTokenResponse
@@ -1333,7 +1326,7 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	}, &exchange); err != nil {
 		return err
 	}
-	if err := auth.WriteConfig(auth.Config{
+	if err := a.configStore.WriteConfig(auth.Config{
 		Host:    host,
 		APIKey:  exchange.APIKey,
 		KeyID:   exchange.KeyID,
@@ -2088,7 +2081,6 @@ func selectFromList[T any](
 	title string,
 	items []T,
 	render func(T) string,
-	disabledReason func(T) string,
 ) (T, error) {
 	var zero T
 	if len(items) == 0 {
@@ -2113,16 +2105,6 @@ func selectFromList[T any](
 			}
 			continue
 		}
-		selected := items[choice-1]
-		if disabledReason != nil {
-			if reason := disabledReason(selected); reason != "" {
-				fmt.Fprintln(out, reason)
-				if errors.Is(err, io.EOF) {
-					return zero, io.ErrUnexpectedEOF
-				}
-				continue
-			}
-		}
-		return selected, nil
+		return items[choice-1], nil
 	}
 }

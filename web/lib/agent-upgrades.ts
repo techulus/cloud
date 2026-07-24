@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
 
@@ -116,21 +116,4 @@ function isUniqueViolation(error: unknown) {
 		"code" in error &&
 		(error as Error & { code?: string }).code === "23505"
 	);
-}
-
-export async function clearCompletedAgentUpgrade(serverId: string) {
-	await db
-		.update(servers)
-		.set({
-			agentUpgradeTargetVersion: null,
-			agentUpgradeStatus: "idle",
-			agentUpgradeStartedAt: null,
-			agentUpgradeError: null,
-		})
-		.where(
-			and(
-				eq(servers.id, serverId),
-				eq(servers.agentUpgradeStatus, "succeeded"),
-			),
-		);
 }

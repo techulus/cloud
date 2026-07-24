@@ -16,10 +16,10 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
-import {
-	SERVICE_REVISION_SCHEMA_VERSION,
-	type ServiceRevisionSecret,
-	type ServiceRevisionSpec,
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import type {
+	ServiceRevisionSecret,
+	ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
 import { getWireGuardPeers } from "@/lib/wireguard";
 
@@ -241,9 +241,7 @@ async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 
 	const runtimeServices = new Map<string, RuntimeServiceRevision>();
 	for (const row of rows) {
-		if (row.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION) {
-			throw new Error(`Service ${row.serviceId} uses an unsupported revision`);
-		}
+		const specification = parseServiceRevisionSpec(row.specification);
 		const existing = runtimeServices.get(row.serviceId);
 		if (existing && existing.revisionId !== row.revisionId) {
 			throw new Error(`Service ${row.serviceId} has multiple active revisions`);
@@ -252,7 +250,7 @@ async function getRuntimeServiceRevisions(): Promise<RuntimeServiceRevision[]> {
 			id: row.serviceId,
 			name: row.serviceName,
 			revisionId: row.revisionId,
-			specification: row.specification,
+			specification,
 		});
 	}
 	return [...runtimeServices.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -271,10 +269,10 @@ async function buildExpectedContainers(
 			),
 		);
 
-	const serviceIds = unique(serverDeployments.map((dep) => dep.serviceId));
-	const revisionIds = unique(
-		serverDeployments.map((dep) => dep.serviceRevisionId),
-	);
+	const serviceIds = [...new Set(serverDeployments.map((dep) => dep.serviceId))];
+	const revisionIds = [
+		...new Set(serverDeployments.map((dep) => dep.serviceRevisionId)),
+	];
 	if (serviceIds.length === 0) return [];
 
 	const [activeServices, revisions, depPorts] = await Promise.all([
@@ -329,7 +327,7 @@ export function buildExpectedContainersFromRows({
 	const servicesById = new Map(
 		serviceRows.map((service) => [service.id, service]),
 	);
-	const portsByDeploymentId = groupBy(
+	const portsByDeploymentId = Map.groupBy(
 		deploymentPortRows,
 		(port) => port.deploymentId,
 	);
@@ -352,14 +350,7 @@ export function buildExpectedContainersFromRows({
 			if (!revision) {
 				throw new Error(`Deployment ${dep.id} has no service revision`);
 			}
-			if (
-				revision.specification.schemaVersion !== SERVICE_REVISION_SCHEMA_VERSION
-			) {
-				throw new Error(
-					`Deployment ${dep.id} uses an unsupported service revision`,
-				);
-			}
-			const specification = revision.specification;
+			const specification = parseServiceRevisionSpec(revision.specification);
 			const ports = (portsByDeploymentId.get(dep.id) ?? [])
 				.slice()
 				.sort(
@@ -471,11 +462,11 @@ export function buildServerlessRoutesFromRows({
 	deployments: ServerlessDeploymentRow[];
 	containers: ExpectedContainer[];
 }): ServerlessRoute[] {
-	const deploymentsByServiceId = groupBy(
+	const deploymentsByServiceId = Map.groupBy(
 		deploymentRows,
 		(deployment) => deployment.serviceId,
 	);
-	const portsByServiceId = groupBy(ports, (port) => port.serviceId);
+	const portsByServiceId = Map.groupBy(ports, (port) => port.serviceId);
 	const expectedDeploymentIds = new Set(
 		containers.map((container) => container.deploymentId),
 	);
@@ -559,7 +550,7 @@ async function buildDnsRecords(allServices: RuntimeServiceRevision[]) {
 			),
 		);
 
-	const ipsByServiceId = groupBy(
+	const ipsByServiceId = Map.groupBy(
 		dnsDeployments,
 		(deployment) => deployment.serviceId,
 	);
@@ -671,7 +662,7 @@ export function buildTraefikRoutes({
 	const httpRoutes: HttpRoute[] = [];
 	const tcpRoutes: TcpRoute[] = [];
 	const udpRoutes: UdpRoute[] = [];
-	const deploymentsByServiceId = groupBy(
+	const deploymentsByServiceId = Map.groupBy(
 		routableDeployments,
 		(deployment) => deployment.serviceId,
 	);
@@ -843,20 +834,6 @@ function normalizeImage(image: string) {
 	return image;
 }
 
-function groupBy<T, K>(items: T[], keyFn: (item: T) => K) {
-	const groups = new Map<K, T[]>();
-	for (const item of items) {
-		const key = keyFn(item);
-		const group = groups.get(key);
-		if (group) {
-			group.push(item);
-		} else {
-			groups.set(key, [item]);
-		}
-	}
-	return groups;
-}
-
 export function buildRuntimeRoutePorts(
 	serviceRows: RuntimeServiceRevision[],
 ): RouteServicePort[] {
@@ -880,8 +857,4 @@ function compareServicePorts(a: RouteServicePort, b: RouteServicePort) {
 		a.protocol.localeCompare(b.protocol) ||
 		a.port - b.port
 	);
-}
-
-function unique<T>(items: T[]) {
-	return Array.from(new Set(items));
 }

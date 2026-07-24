@@ -113,3 +113,43 @@ describe("public API GitHub sources", () => {
 		expect(cleared).toHaveProperty("rootDir", null);
 	});
 });
+
+describe("public API placement schema", () => {
+	it("rejects the removed standalone replicas field", () => {
+		expect(configurationPatchSchema.safeParse({ replicas: 3 }).success).toBe(
+			false,
+		);
+	});
+
+	it.each([
+		{ mode: "automatic", replicas: 3 },
+		{ mode: "manual", placements: [{ serverId: "server-1", count: 2 }] },
+	])("accepts valid placement intent", (placement) => {
+		expect(configurationPatchSchema.safeParse({ placement }).success).toBe(
+			true,
+		);
+	});
+
+	it.each([
+		{ mode: "automatic", replicas: 0 },
+		{ mode: "manual", placements: [] },
+		{
+			mode: "manual",
+			placements: [
+				{ serverId: "a", count: 6 },
+				{ serverId: "b", count: 5 },
+			],
+		},
+		{
+			mode: "manual",
+			placements: [
+				{ serverId: "a", count: 1 },
+				{ serverId: "a", count: 1 },
+			],
+		},
+	])("rejects invalid placement intent", (placement) => {
+		expect(configurationPatchSchema.safeParse({ placement }).success).toBe(
+			false,
+		);
+	});
+});

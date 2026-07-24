@@ -5,7 +5,6 @@ describe("log routes", () => {
 		vi.restoreAllMocks();
 		vi.resetModules();
 		vi.doUnmock("next/headers");
-		vi.doUnmock("@/lib/api-auth");
 		vi.doUnmock("@/lib/auth");
 		vi.doUnmock("@/lib/victoria-logs");
 	});
@@ -121,9 +120,7 @@ describe("log routes", () => {
 	});
 });
 
-async function loadServiceLogsRoute(
-	queryLogsByService = vi.fn(async () => ({ logs: [], hasMore: false })),
-) {
+function mockAuthenticatedSession() {
 	vi.resetModules();
 	vi.doMock("next/headers", () => ({
 		headers: async () => new Headers(),
@@ -135,6 +132,12 @@ async function loadServiceLogsRoute(
 			},
 		},
 	}));
+}
+
+async function loadServiceLogsRoute(
+	queryLogsByService = vi.fn(async () => ({ logs: [], hasMore: false })),
+) {
+	mockAuthenticatedSession();
 	vi.doMock("@/lib/victoria-logs", () => ({
 		isLoggingEnabled: () => true,
 		queryLogsByService,
@@ -147,17 +150,7 @@ async function loadServiceLogsRoute(
 async function loadDeploymentLogsRoute(
 	queryLogsByDeployment = vi.fn(async () => ({ logs: [], hasMore: false })),
 ) {
-	vi.resetModules();
-	vi.doMock("next/headers", () => ({
-		headers: async () => new Headers(),
-	}));
-	vi.doMock("@/lib/auth", () => ({
-		auth: {
-			api: {
-				getSession: async () => ({ user: { id: "user-1" } }),
-			},
-		},
-	}));
+	mockAuthenticatedSession();
 	vi.doMock("@/lib/victoria-logs", () => ({
 		isLoggingEnabled: () => true,
 		queryLogsByDeployment,

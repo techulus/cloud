@@ -25,12 +25,11 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { authClient, useSession } from "@/lib/auth-client";
-import { getTotpSecret } from "@/lib/two-factor";
-
-type AuthClientError = {
-	message?: string;
-	error_description?: string;
-} | null;
+import {
+	getAuthErrorMessage,
+	getTotpSecret,
+	normalizeTwoFactorCode,
+} from "@/lib/two-factor";
 
 type TwoFactorSessionUser = {
 	twoFactorEnabled?: boolean | null;
@@ -41,14 +40,6 @@ type PendingSetup = {
 	secret: string;
 	backupCodes: string[];
 };
-
-function getErrorMessage(error: AuthClientError, fallback: string) {
-	return error?.message || error?.error_description || fallback;
-}
-
-function normalizeCode(value: string) {
-	return value.replace(/\s/g, "");
-}
 
 async function copyToClipboard(label: string, value: string) {
 	try {
@@ -120,7 +111,7 @@ export function TwoFactorSettings() {
 		sessionUser?.twoFactorEnabled || recoveryCodes.length,
 	);
 	const formattedVerificationCode = useMemo(
-		() => normalizeCode(verificationCode),
+		() => normalizeTwoFactorCode(verificationCode),
 		[verificationCode],
 	);
 
@@ -168,7 +159,7 @@ export function TwoFactorSettings() {
 
 			if (response.error || !response.data?.totpURI) {
 				throw new Error(
-					getErrorMessage(response.error, "Failed to start 2FA setup"),
+					getAuthErrorMessage(response.error, "Failed to start 2FA setup"),
 				);
 			}
 
@@ -202,7 +193,7 @@ export function TwoFactorSettings() {
 
 			if (response.error) {
 				throw new Error(
-					getErrorMessage(
+					getAuthErrorMessage(
 						response.error,
 						"Failed to verify authenticator code",
 					),
@@ -238,7 +229,7 @@ export function TwoFactorSettings() {
 
 			if (response.error || !response.data?.backupCodes) {
 				throw new Error(
-					getErrorMessage(response.error, "Failed to generate backup codes"),
+					getAuthErrorMessage(response.error, "Failed to generate backup codes"),
 				);
 			}
 
@@ -267,7 +258,7 @@ export function TwoFactorSettings() {
 
 			if (response.error || response.data?.status !== true) {
 				throw new Error(
-					getErrorMessage(response.error, "Failed to disable 2FA"),
+					getAuthErrorMessage(response.error, "Failed to disable 2FA"),
 				);
 			}
 

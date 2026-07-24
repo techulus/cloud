@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
@@ -32,6 +32,7 @@ import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
 	isObservedReady,
+	isRuntimeExpected,
 	markDeploymentRemoved,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
@@ -40,7 +41,6 @@ import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
-import { blocksProjectDeletion } from "@/lib/project-deletion";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -111,7 +111,10 @@ export async function deleteProject(
 			.from(deployments)
 			.where(eq(deployments.serviceId, service.id));
 
-		const hasActiveDeployments = activeDeployments.some(blocksProjectDeletion);
+		// "stopped" can be a sleeping, wakeable serverless deployment.
+		const hasActiveDeployments = activeDeployments.some(
+			({ runtimeDesiredState }) => isRuntimeExpected(runtimeDesiredState),
+		);
 
 		if (hasActiveDeployments) {
 			throw new Error(
@@ -920,6 +923,11 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
+			if (service.placementMode === "automatic") {
+				throw new Error(
+					"Switch to manual placement before enabling serverless",
+				);
+			}
 			const publicHttpPorts = await tx
 				.select({ id: servicePorts.id })
 				.from(servicePorts)
@@ -984,8 +992,50 @@ export type ServiceConfigUpdate = {
 	source?: { type: "image"; image: string };
 	healthCheck?: ServiceHealthCheckConfig | null;
 	ports?: { add?: PortConfig[]; remove?: string[] };
-	replicas?: { serverId: string; count: number }[];
+	placement?:
+		| { mode: "automatic"; replicas: number }
+		| {
+				mode: "manual";
+				placements: { serverId: string; count: number }[];
+		  };
 };
+
+const placementInputSchema = z.discriminatedUnion("mode", [
+	z.strictObject({
+		mode: z.literal("automatic"),
+		replicas: z.number().int().min(1).max(10),
+	}),
+	z
+		.strictObject({
+			mode: z.literal("manual"),
+			placements: z
+				.array(
+					z.strictObject({
+						serverId: z.string().min(1),
+						count: z.number().int().min(1).max(10),
+					}),
+				)
+				.min(1),
+		})
+		.superRefine((value, context) => {
+			if (
+				new Set(value.placements.map((item) => item.serverId)).size !==
+				value.placements.length
+			)
+				context.addIssue({
+					code: "custom",
+					message: "Server IDs must be unique",
+					path: ["placements"],
+				});
+			const total = value.placements.reduce((sum, item) => sum + item.count, 0);
+			if (total > 10)
+				context.addIssue({
+					code: "custom",
+					message: "Total replicas must be between 1 and 10",
+					path: ["placements"],
+				});
+		}),
+]);
 
 export async function updateServiceConfig(
 	serviceId: string,
@@ -1106,33 +1156,72 @@ export async function updateServiceConfig(
 		}
 	}
 
-	if (config.replicas) {
-		const replicas = config.replicas;
+	if (config.placement) {
+		const placement = placementInputSchema.parse(config.placement);
 		await db.transaction(async (tx) => {
 			await tx.execute(
 				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 			);
 
 			const [currentService] = await tx
-				.select({ serverlessEnabled: services.serverlessEnabled })
+				.select({
+					serverlessEnabled: services.serverlessEnabled,
+					stateful: services.stateful,
+					placementMode: services.placementMode,
+				})
 				.from(services)
 				.where(eq(services.id, serviceId))
 				.limit(1);
 
-			if (currentService?.serverlessEnabled) {
-				const selectedServerIds = replicas
-					.filter((replica) => replica.count > 0)
-					.map((replica) => replica.serverId);
+			if (!currentService) throw new Error("Service not found");
+			if (placement.mode === "automatic") {
+				if (currentService.serverlessEnabled)
+					throw new Error(
+						"Automatic placement is not supported for serverless services",
+					);
+				const volume = await tx
+					.select({ id: serviceVolumes.id })
+					.from(serviceVolumes)
+					.where(eq(serviceVolumes.serviceId, serviceId))
+					.limit(1);
+				if (currentService.stateful || volume.length > 0)
+					throw new Error(
+						"Automatic placement is not supported for stateful services or services with volumes",
+					);
+				await tx
+					.update(services)
+					.set({ placementMode: "automatic", replicas: placement.replicas })
+					.where(eq(services.id, serviceId));
+				await tx
+					.delete(serviceReplicas)
+					.where(eq(serviceReplicas.serviceId, serviceId));
+				return;
+			}
+
+			const replicas = placement.placements;
+			const selectedServerIds = replicas.map((replica) => replica.serverId);
+			const selectedServers = await tx
+				.select({
+					id: servers.id,
+					isProxy: servers.isProxy,
+					status: servers.status,
+					wireguardIp: servers.wireguardIp,
+				})
+				.from(servers)
+				.where(inArray(servers.id, selectedServerIds));
+			if (selectedServers.length !== selectedServerIds.length)
+				throw new Error("One or more selected servers do not exist");
+			if (
+				selectedServers.some(
+					(server) => server.status !== "online" || !server.wireguardIp,
+				)
+			)
+				throw new Error("Manual placement requires online, configured servers");
+			if (currentService.serverlessEnabled) {
 				if (selectedServerIds.length > 0) {
-					const workerServers = await tx
-						.select({ id: servers.id })
-						.from(servers)
-						.where(
-							and(
-								inArray(servers.id, selectedServerIds),
-								eq(servers.isProxy, false),
-							),
-						);
+					const workerServers = selectedServers.filter(
+						(server) => !server.isProxy,
+					);
 					if (workerServers.length > 0) {
 						throw new Error(
 							"Disable serverless before deploying to worker nodes",
@@ -1141,6 +1230,13 @@ export async function updateServiceConfig(
 				}
 			}
 
+			await tx
+				.update(services)
+				.set({
+					placementMode: "manual",
+					replicas: replicas.reduce((sum, replica) => sum + replica.count, 0),
+				})
+				.where(eq(services.id, serviceId));
 			await tx
 				.delete(serviceReplicas)
 				.where(eq(serviceReplicas.serviceId, serviceId));
@@ -1341,55 +1437,60 @@ export async function addServiceVolume(
 		const validatedName = volumeNameSchema.parse(name);
 		const validatedPath = containerPathSchema.parse(containerPath);
 
-		const service = await getService(serviceId);
-		if (!service) {
-			throw new Error("Service not found");
-		}
-
-		const configuredReplicas = await db
-			.select({ count: serviceReplicas.count })
-			.from(serviceReplicas)
-			.where(eq(serviceReplicas.serviceId, serviceId));
-		const totalReplicas = configuredReplicas.reduce(
-			(sum, r) => sum + r.count,
-			0,
-		);
-
-		if (totalReplicas > 1) {
-			throw new Error(
-				"Volumes can only be added to services with 1 replica. Reduce replicas to 1 first.",
+		return await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 			);
-		}
+			const service = await tx
+				.select()
+				.from(services)
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.then((rows) => rows[0]);
+			if (!service) throw new Error("Service not found");
+			if (service.placementMode === "automatic") {
+				throw new Error("Switch to manual placement before adding a volume");
+			}
 
-		const existing = await db
-			.select()
-			.from(serviceVolumes)
-			.where(eq(serviceVolumes.serviceId, serviceId));
+			const configuredReplicas = await tx
+				.select({ count: serviceReplicas.count })
+				.from(serviceReplicas)
+				.where(eq(serviceReplicas.serviceId, serviceId));
+			const totalReplicas = configuredReplicas.reduce(
+				(sum, replica) => sum + replica.count,
+				0,
+			);
+			if (totalReplicas > 1) {
+				throw new Error(
+					"Volumes can only be added to services with 1 replica. Reduce replicas to 1 first.",
+				);
+			}
 
-		if (existing.some((v) => v.name === validatedName)) {
-			throw new Error("Volume with this name already exists");
-		}
+			const existing = await tx
+				.select()
+				.from(serviceVolumes)
+				.where(eq(serviceVolumes.serviceId, serviceId));
+			if (existing.some((volume) => volume.name === validatedName)) {
+				throw new Error("Volume with this name already exists");
+			}
+			if (existing.some((volume) => volume.containerPath === validatedPath)) {
+				throw new Error("A volume with this container path already exists");
+			}
 
-		if (existing.some((v) => v.containerPath === validatedPath)) {
-			throw new Error("A volume with this container path already exists");
-		}
-
-		const id = randomUUID();
-		await db.insert(serviceVolumes).values({
-			id,
-			serviceId,
-			name: validatedName,
-			containerPath: validatedPath,
+			const id = randomUUID();
+			await tx.insert(serviceVolumes).values({
+				id,
+				serviceId,
+				name: validatedName,
+				containerPath: validatedPath,
+			});
+			if (!service.stateful) {
+				await tx
+					.update(services)
+					.set({ stateful: true })
+					.where(eq(services.id, serviceId));
+			}
+			return { id, name: validatedName, containerPath: validatedPath };
 		});
-
-		if (!service.stateful) {
-			await db
-				.update(services)
-				.set({ stateful: true })
-				.where(eq(services.id, serviceId));
-		}
-
-		return { id, name: validatedName, containerPath: validatedPath };
 	} catch (error) {
 		if (error instanceof ZodError) {
 			throw new Error(
@@ -1421,7 +1522,9 @@ export async function removeServiceVolume(volumeId: string) {
 		.from(deployments)
 		.where(eq(deployments.serviceId, volume[0].serviceId));
 
-	const hasRunning = activeDeployments.some(blocksProjectDeletion);
+	const hasRunning = activeDeployments.some(({ runtimeDesiredState }) =>
+		isRuntimeExpected(runtimeDesiredState),
+	);
 	if (hasRunning) {
 		throw new Error("Stop the service before removing volumes");
 	}

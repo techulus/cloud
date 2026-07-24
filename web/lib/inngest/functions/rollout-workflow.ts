@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
 import { deployments, rollouts, servers } from "@/db/schema";
@@ -9,13 +9,13 @@ import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import {
-	calculateRevisionPlacements,
 	checkForRollingUpdate,
 	cleanupExistingDeployments,
 	cleanupTerminalDeployments,
 	completeRollout,
 	createDeploymentRecords,
 	issueCertificatesForRevision,
+	resolveRevisionPlacements,
 	validateServers,
 } from "./rollout-helpers";
 import { handleRolloutFailure } from "./rollout-utils";
@@ -54,7 +54,7 @@ function getPreflightFailureReason(error: unknown) {
 	return null;
 }
 
-async function acquireRolloutTurn(
+export async function acquireRolloutTurn(
 	rolloutId: string,
 	serviceId: string,
 ): Promise<RolloutTurnState> {
@@ -62,7 +62,11 @@ async function acquireRolloutTurn(
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
 
 		const rollout = await tx
-			.select({ status: rollouts.status, createdAt: rollouts.createdAt })
+			.select({
+				status: rollouts.status,
+				currentStage: rollouts.currentStage,
+				createdAt: rollouts.createdAt,
+			})
 			.from(rollouts)
 			.where(eq(rollouts.id, rolloutId))
 			.then((rows) => rows[0]);
@@ -71,8 +75,39 @@ async function acquireRolloutTurn(
 			throw new Error("Rollout not found");
 		}
 
-		if (rollout.status !== "queued") {
+		const recoverableEnqueueFailure =
+			rollout.status === "failed" && rollout.currentStage === "enqueue_failed";
+		if (rollout.status !== "queued" && !recoverableEnqueueFailure) {
 			return rollout.status === "in_progress" ? "acquired" : "terminal";
+		}
+
+		if (recoverableEnqueueFailure) {
+			const newerIntent = await tx
+				.select({ id: rollouts.id })
+				.from(rollouts)
+				.where(
+					and(
+						eq(rollouts.serviceId, serviceId),
+						ne(rollouts.id, rolloutId),
+						gte(rollouts.createdAt, rollout.createdAt),
+					),
+				)
+				.limit(1)
+				.then((rows) => rows[0]);
+
+			if (newerIntent) {
+				await tx
+					.update(rollouts)
+					.set({ currentStage: "superseded" })
+					.where(
+						and(
+							eq(rollouts.id, rolloutId),
+							eq(rollouts.status, "failed"),
+							eq(rollouts.currentStage, "enqueue_failed"),
+						),
+					);
+				return "terminal";
+			}
 		}
 
 		const blockingRollout = await tx
@@ -104,6 +139,7 @@ async function acquireRolloutTurn(
 			.set({
 				status: "in_progress",
 				currentStage: "preparing",
+				completedAt: null,
 			})
 			.where(eq(rollouts.id, rolloutId));
 
@@ -219,7 +255,7 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const placementResult = await step.run("load-placements", async () => {
 			try {
-				const result = calculateRevisionPlacements(specification);
+				const result = await resolveRevisionPlacements(specification);
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,

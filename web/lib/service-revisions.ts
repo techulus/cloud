@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+	deployments,
 	githubRepos,
 	rollouts,
 	secrets,
@@ -16,7 +17,6 @@ import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
 	buildServiceRevisionSpec,
-	SERVICE_REVISION_SCHEMA_VERSION,
 	type ServiceRevisionSource,
 	type ServiceRevisionSpec,
 	type ServiceRevisionSpecOverrides,
@@ -186,76 +186,74 @@ export async function createGitHubBuildServiceRevision(input: {
 	expectedBranch: string;
 	actor: ServiceRevisionActor | null;
 }) {
-	return db.transaction(
-		async (tx) => {
-			const existing = await tx
+	return db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${input.serviceId}))`,
+		);
+		const existing = await tx
+			.select()
+			.from(serviceRevisions)
+			.where(eq(serviceRevisions.id, input.id))
+			.then((rows) => rows[0]);
+		if (existing) {
+			assertMatchingGitHubBuildRevision(existing, input);
+			return existing;
+		}
+
+		const [service, repo] = await Promise.all([
+			tx
 				.select()
-				.from(serviceRevisions)
-				.where(eq(serviceRevisions.id, input.id))
-				.then((rows) => rows[0]);
-			if (existing) {
-				assertMatchingGitHubBuildRevision(existing, input);
-				return existing;
-			}
+				.from(services)
+				.where(
+					and(eq(services.id, input.serviceId), isNull(services.deletedAt)),
+				)
+				.then((rows) => rows[0]),
+			tx
+				.select()
+				.from(githubRepos)
+				.where(eq(githubRepos.serviceId, input.serviceId))
+				.then((rows) => rows[0]),
+		]);
+		if (!service || service.sourceType !== "github") {
+			throw new Error("Active GitHub service not found");
+		}
 
-			const [service, repo] = await Promise.all([
-				tx
-					.select()
-					.from(services)
-					.where(
-						and(eq(services.id, input.serviceId), isNull(services.deletedAt)),
-					)
-					.then((rows) => rows[0]),
-				tx
-					.select()
-					.from(githubRepos)
-					.where(eq(githubRepos.serviceId, input.serviceId))
-					.then((rows) => rows[0]),
-			]);
-			if (!service || service.sourceType !== "github") {
-				throw new Error("Active GitHub service not found");
-			}
+		const currentSource = resolvePersistedSourceFromRows(service, repo);
+		if (
+			currentSource.type !== "github" ||
+			!currentSource.repository ||
+			currentSource.repository !== input.expectedRepository ||
+			currentSource.branch !== input.expectedBranch
+		) {
+			throw new Error("GitHub source changed while resolving the build commit");
+		}
 
-			const currentSource = resolvePersistedSourceFromRows(service, repo);
-			if (
-				currentSource.type !== "github" ||
-				!currentSource.repository ||
-				currentSource.repository !== input.expectedRepository ||
-				currentSource.branch !== input.expectedBranch
-			) {
-				throw new Error(
-					"GitHub source changed while resolving the build commit",
-				);
-			}
+		const source: ServiceRevisionSource = {
+			type: "github",
+			repository: currentSource.repository,
+			repositoryId: repo?.repoId ?? null,
+			branch: currentSource.branch,
+			commitSha: input.commitSha,
+			rootDir: currentSource.rootDir?.trim() || null,
+			authentication: repo
+				? {
+						type: "github_app",
+						installationId: repo.installationId,
+					}
+				: { type: "anonymous" },
+		};
 
-			const source: ServiceRevisionSource = {
-				type: "github",
-				repository: currentSource.repository,
-				repositoryId: repo?.repoId ?? null,
-				branch: currentSource.branch,
-				commitSha: input.commitSha,
-				rootDir: currentSource.rootDir?.trim() || null,
-				authentication: repo
-					? {
-							type: "github_app",
-							installationId: repo.installationId,
-						}
-					: { type: "anonymous" },
-			};
-
-			return createServiceRevisionSnapshot(tx, {
-				id: input.id,
-				serviceId: input.serviceId,
-				actor: input.actor,
-				overrides: {
-					image: input.image,
-					source,
-					allowNoPlacements: true,
-				},
-			});
-		},
-		{ isolationLevel: "repeatable read" },
-	);
+		return createServiceRevisionSnapshot(tx, {
+			id: input.id,
+			serviceId: input.serviceId,
+			actor: input.actor,
+			overrides: {
+				image: input.image,
+				source,
+				allowNoPlacements: true,
+			},
+		});
+	});
 }
 
 export async function cloneGitHubBuildServiceRevision(input: {
@@ -318,52 +316,109 @@ export async function createRolloutWithServiceRevision(
 	actor: ServiceRevisionActor | null,
 	runtimeBaseRevisionId?: string,
 ) {
-	return db.transaction(
-		async (tx) => {
-			let overrides: ServiceRevisionSpecOverrides | undefined;
-			if (runtimeBaseRevisionId) {
-				const baseRevision = await tx
-					.select({ specification: serviceRevisions.specification })
-					.from(serviceRevisions)
-					.where(
-						and(
-							eq(serviceRevisions.id, runtimeBaseRevisionId),
-							eq(serviceRevisions.serviceId, serviceId),
-						),
-					)
-					.then((rows) => rows[0]);
-				if (!baseRevision) {
-					throw new Error("Runtime base service revision not found");
-				}
-				const baseSpecification = parseServiceRevisionSpec(
-					baseRevision.specification,
-				);
-				if (baseSpecification.source.type !== "github") {
-					throw new Error("GitHub runtime base revision is not a GitHub build");
-				}
-				overrides = {
-					image: baseSpecification.image,
-					source: baseSpecification.source,
-				};
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		let overrides: ServiceRevisionSpecOverrides | undefined;
+		if (runtimeBaseRevisionId) {
+			const baseRevision = await tx
+				.select({ specification: serviceRevisions.specification })
+				.from(serviceRevisions)
+				.where(
+					and(
+						eq(serviceRevisions.id, runtimeBaseRevisionId),
+						eq(serviceRevisions.serviceId, serviceId),
+					),
+				)
+				.then((rows) => rows[0]);
+			if (!baseRevision) {
+				throw new Error("Runtime base service revision not found");
 			}
-			const revision = await createServiceRevisionSnapshot(tx, {
-				id: randomUUID(),
-				serviceId,
-				actor,
-				overrides,
-			});
-			const rolloutId = randomUUID();
-			await tx.insert(rollouts).values({
-				id: rolloutId,
-				serviceId,
-				serviceRevisionId: revision.id,
-				status: "queued",
-				currentStage: "queued",
-			});
-			return { rolloutId, revision };
-		},
-		{ isolationLevel: "repeatable read" },
-	);
+			const baseSpecification = parseServiceRevisionSpec(
+				baseRevision.specification,
+			);
+			if (baseSpecification.source.type !== "github") {
+				throw new Error("GitHub runtime base revision is not a GitHub build");
+			}
+			overrides = {
+				image: baseSpecification.image,
+				source: baseSpecification.source,
+			};
+		}
+		const revision = await createServiceRevisionSnapshot(tx, {
+			id: randomUUID(),
+			serviceId,
+			actor,
+			overrides,
+		});
+		const rolloutId = randomUUID();
+		await tx.insert(rollouts).values({
+			id: rolloutId,
+			serviceId,
+			serviceRevisionId: revision.id,
+			status: "queued",
+			currentStage: "queued",
+		});
+		return { rolloutId, revision };
+	});
+}
+
+/** Clone the deployed specification, never mutable service configuration. */
+export async function cloneActiveRevisionAndQueueSystemRollout(
+	serviceId: string,
+	sourceRevisionId?: string,
+) {
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const pending = await tx
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				and(
+					eq(rollouts.serviceId, serviceId),
+					inArray(rollouts.status, ["queued", "in_progress"]),
+				),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (pending) return { rolloutId: pending.id, created: false };
+		const active = await tx
+			.select({ specification: serviceRevisions.specification })
+			.from(serviceRevisions)
+			.innerJoin(
+				deployments,
+				eq(deployments.serviceRevisionId, serviceRevisions.id),
+			)
+			.where(
+				and(
+					eq(serviceRevisions.serviceId, serviceId),
+					...(sourceRevisionId
+						? [eq(serviceRevisions.id, sourceRevisionId)]
+						: []),
+					inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+					eq(deployments.trafficState, "active"),
+				),
+			)
+			.orderBy(desc(deployments.createdAt), desc(deployments.id))
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (!active) throw new Error("Service has no active revision");
+		const revisionId = randomUUID();
+		await tx.insert(serviceRevisions).values({
+			id: revisionId,
+			serviceId,
+			specification: active.specification,
+			actor: { type: "system" },
+		});
+		const rolloutId = randomUUID();
+		await tx.insert(rollouts).values({
+			id: rolloutId,
+			serviceId,
+			serviceRevisionId: revisionId,
+			status: "queued",
+			currentStage: "queued",
+		});
+		return { rolloutId, created: true };
+	});
 }
 
 export async function createRolloutForServiceRevision(
@@ -372,6 +427,7 @@ export async function createRolloutForServiceRevision(
 	artifactImageUri: string,
 ) {
 	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const [revision, activeService] = await Promise.all([
 			tx
 				.select()
@@ -398,7 +454,10 @@ export async function createRolloutForServiceRevision(
 		if (specification.image !== artifactImageUri) {
 			throw new Error("Built artifact does not match the service revision");
 		}
-		if (!specification.placements.some((placement) => placement.count > 0)) {
+		if (
+			specification.placement.mode === "manual" &&
+			!specification.placements.some((placement) => placement.count > 0)
+		) {
 			return { rolloutId: null, revision, created: false };
 		}
 
@@ -441,12 +500,8 @@ export async function getRolloutServiceRevision(rolloutId: string) {
 		.then((rows) => rows[0]);
 
 	if (!result) throw new Error("Rollout revision not found");
-	if (
-		result.revision.specification.schemaVersion !==
-		SERVICE_REVISION_SCHEMA_VERSION
-	) {
-		throw new Error("Unsupported service revision schema version");
-	}
-
-	return result.revision;
+	return {
+		...result.revision,
+		specification: parseServiceRevisionSpec(result.revision.specification),
+	};
 }

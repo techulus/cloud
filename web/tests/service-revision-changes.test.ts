@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { diffServiceRevisionSpecs } from "@/lib/service-revision-changes";
+import {
+	diffServiceRevisionSpecs,
+	parseServiceRevisionSpec,
+} from "@/lib/service-revision-changes";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function spec(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 2,
+		schemaVersion: 3,
+		placement: { mode: "manual" },
 		image: "app:v1",
 		source: { type: "image", image: "app:v1" },
 		hostname: "app",
@@ -46,20 +50,8 @@ describe("diffServiceRevisionSpecs", () => {
 		const previous = spec();
 		const current = structuredClone(previous);
 		current.image = "app:v2";
-		current.hostname = "new-app";
-		current.stateful = true;
-		current.serverless = {
-			enabled: true,
-			sleepAfterSeconds: 600,
-			wakeTimeoutSeconds: 90,
-		};
-		current.healthCheck = {
-			cmd: "wget /ready",
-			interval: 20,
-			timeout: 8,
-			retries: 5,
-			startPeriod: 40,
-		};
+		if (!current.healthCheck) throw new Error("Expected health check fixture");
+		current.healthCheck.startPeriod = 40;
 		current.startCommand = "npm start";
 		current.resourceLimits = { cpuCores: 2, memoryMb: 512 };
 
@@ -136,6 +128,34 @@ describe("diffServiceRevisionSpecs", () => {
 			from: "1 replicas",
 			to: "2 replicas",
 		});
+	});
+
+	it("reports automatic placement intent without transient server assignments", () => {
+		const previous = spec();
+		previous.placement = { mode: "automatic", replicas: 2 };
+		previous.placements = [];
+		const current = structuredClone(previous);
+		current.placement = { mode: "automatic", replicas: 4 };
+
+		expect(diffServiceRevisionSpecs(previous, current)).toEqual([
+			{ field: "Desired replicas", from: "2", to: "4" },
+		]);
+
+		const manual = spec();
+		expect(diffServiceRevisionSpecs(manual, previous)).toEqual([
+			{ field: "Placement mode", from: "Manual", to: "Automatic" },
+		]);
+	});
+
+	it("rejects persisted automatic serverless revisions", () => {
+		const automatic = spec();
+		automatic.placement = { mode: "automatic", replicas: 1 };
+		automatic.placements = [];
+		automatic.serverless.enabled = true;
+
+		expect(() => parseServiceRevisionSpec(automatic)).toThrow(
+			"Serverless services cannot use automatic placement",
+		);
 	});
 
 	it("never exposes secret ciphertext while detecting additions, updates, and removals", () => {

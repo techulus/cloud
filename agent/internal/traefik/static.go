@@ -63,6 +63,37 @@ func validateStaticConfig(data []byte) error {
 	return nil
 }
 
+func updateStaticConfig(mutate func(map[string]interface{}) bool) (bool, error) {
+	originalData, err := os.ReadFile(traefikStaticConfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to read static config: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(originalData, &config); err != nil {
+		return false, fmt.Errorf("failed to parse static config: %w", err)
+	}
+
+	if !mutate(config) {
+		return false, nil
+	}
+
+	newData, err := yaml.Marshal(config)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal static config: %w", err)
+	}
+
+	if err := validateStaticConfig(newData); err != nil {
+		return false, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
+		return false, fmt.Errorf("failed to write static config: %w", err)
+	}
+
+	return true, nil
+}
+
 func EnsureEntryPoints(tcpPorts []int, udpPorts []int) (needsRestart bool, err error) {
 	for _, port := range tcpPorts {
 		if err := ValidateTCPPort(port); err != nil {
@@ -75,61 +106,39 @@ func EnsureEntryPoints(tcpPorts []int, udpPorts []int) (needsRestart bool, err e
 		}
 	}
 
-	originalData, err := os.ReadFile(traefikStaticConfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to read static config: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := yaml.Unmarshal(originalData, &config); err != nil {
-		return false, fmt.Errorf("failed to parse static config: %w", err)
-	}
-
-	entryPoints, ok := config["entryPoints"].(map[string]interface{})
-	if !ok {
-		entryPoints = make(map[string]interface{})
-		config["entryPoints"] = entryPoints
-	}
-
-	modified := false
-
-	for _, port := range tcpPorts {
-		name := fmt.Sprintf("tcp-%d", port)
-		if _, exists := entryPoints[name]; !exists {
-			entryPoints[name] = map[string]interface{}{
-				"address": fmt.Sprintf(":%d", port),
-			}
-			modified = true
-			log.Printf("[traefik] adding TCP entry point: %s", name)
+	needsRestart, err = updateStaticConfig(func(config map[string]interface{}) bool {
+		entryPoints, ok := config["entryPoints"].(map[string]interface{})
+		if !ok {
+			entryPoints = make(map[string]interface{})
+			config["entryPoints"] = entryPoints
 		}
-	}
 
-	for _, port := range udpPorts {
-		name := fmt.Sprintf("udp-%d", port)
-		if _, exists := entryPoints[name]; !exists {
-			entryPoints[name] = map[string]interface{}{
-				"address": fmt.Sprintf(":%d/udp", port),
+		modified := false
+		for _, port := range tcpPorts {
+			name := fmt.Sprintf("tcp-%d", port)
+			if _, exists := entryPoints[name]; !exists {
+				entryPoints[name] = map[string]interface{}{
+					"address": fmt.Sprintf(":%d", port),
+				}
+				modified = true
+				log.Printf("[traefik] adding TCP entry point: %s", name)
 			}
-			modified = true
-			log.Printf("[traefik] adding UDP entry point: %s", name)
 		}
-	}
 
-	if !modified {
-		return false, nil
-	}
-
-	newData, err := yaml.Marshal(config)
-	if err != nil {
-		return false, fmt.Errorf("failed to marshal static config: %w", err)
-	}
-
-	if err := validateStaticConfig(newData); err != nil {
-		return false, fmt.Errorf("config validation failed: %w", err)
-	}
-
-	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
-		return false, fmt.Errorf("failed to write static config: %w", err)
+		for _, port := range udpPorts {
+			name := fmt.Sprintf("udp-%d", port)
+			if _, exists := entryPoints[name]; !exists {
+				entryPoints[name] = map[string]interface{}{
+					"address": fmt.Sprintf(":%d/udp", port),
+				}
+				modified = true
+				log.Printf("[traefik] adding UDP entry point: %s", name)
+			}
+		}
+		return modified
+	})
+	if err != nil || !needsRestart {
+		return needsRestart, err
 	}
 
 	log.Printf("[traefik] static config updated, restart required")
@@ -137,31 +146,9 @@ func EnsureEntryPoints(tcpPorts []int, udpPorts []int) (needsRestart bool, err e
 }
 
 func EnsureMetricsConfig() (needsRestart bool, err error) {
-	originalData, err := os.ReadFile(traefikStaticConfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to read static config: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := yaml.Unmarshal(originalData, &config); err != nil {
-		return false, fmt.Errorf("failed to parse static config: %w", err)
-	}
-
-	if !ensurePrometheusMetricsConfig(config) {
-		return false, nil
-	}
-
-	newData, err := yaml.Marshal(config)
-	if err != nil {
-		return false, fmt.Errorf("failed to marshal static config: %w", err)
-	}
-
-	if err := validateStaticConfig(newData); err != nil {
-		return false, fmt.Errorf("config validation failed: %w", err)
-	}
-
-	if err := atomicWrite(traefikStaticConfigPath, newData, 0644); err != nil {
-		return false, fmt.Errorf("failed to write static config: %w", err)
+	needsRestart, err = updateStaticConfig(ensurePrometheusMetricsConfig)
+	if err != nil || !needsRestart {
+		return needsRestart, err
 	}
 
 	log.Printf("[traefik] metrics config updated, restart required")

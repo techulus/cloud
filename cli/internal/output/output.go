@@ -29,11 +29,7 @@ func OK(w io.Writer, data any, summary string) error {
 }
 
 func Error(w io.Writer, err error) error {
-	message := ""
-	if err != nil {
-		message = err.Error()
-	}
-	return JSON(w, ErrorEnvelope{OK: false, Error: message})
+	return JSON(w, ErrorEnvelope{OK: false, Error: err.Error()})
 }
 
 func Section(w io.Writer, title string) {
