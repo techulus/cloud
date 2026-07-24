@@ -113,10 +113,12 @@ describe("VictoriaLogs queries", () => {
 	it("searches service logs before applying the result limit and range", async () => {
 		const { queryLogsByService } = await loadVictoriaLogs();
 		const urls: URL[] = [];
+		let requestSignal: AbortSignal | null | undefined;
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async (input: string | URL | Request) => {
+			vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 				urls.push(new URL(String(input)));
+				requestSignal = init?.signal;
 				return jsonLinesResponse([
 					storedLog("2026-07-10T01:00:00Z", "first match"),
 					storedLog("2026-07-10T00:00:00Z", "older match"),
@@ -137,6 +139,8 @@ describe("VictoriaLogs queries", () => {
 		expect(result.hasMore).toBe(true);
 		const url = urls[0];
 		expect(url?.searchParams.get("limit")).toBe("2");
+		expect(url?.searchParams.has("timeout")).toBe(false);
+		expect(requestSignal).toBeInstanceOf(AbortSignal);
 		const query = url?.searchParams.get("query") || "";
 		expect(query).toContain("service_id:service-1");
 		expect(query).toContain("_time:24h");

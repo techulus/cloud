@@ -5,12 +5,16 @@ import {
 	normalizeLogCursor,
 	normalizeLogSearch,
 } from "@/lib/log-query";
-import { buildFetchOptions, parseEndpoint } from "@/lib/victoria";
+import {
+	buildFetchOptions,
+	type EndpointConfig,
+	parseEndpoint,
+} from "@/lib/victoria";
 
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
 
-function getQueryEndpoint() {
+function getQueryEndpoint(): EndpointConfig | undefined {
 	const endpoint = VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
 	if (!endpoint) return undefined;
 	return parseEndpoint(endpoint);
@@ -140,10 +144,19 @@ function providerSignal(signal?: AbortSignal): AbortSignal {
 
 async function fetchLogQuery<T>(
 	query: string,
-	limit?: number,
-	errorLabel = "logs",
-	signal?: AbortSignal,
-	withTimeout = false,
+	{
+		limit,
+		errorLabel = "logs",
+		signal,
+		requestTimeout = false,
+		serverTimeout = false,
+	}: {
+		limit?: number;
+		errorLabel?: string;
+		signal?: AbortSignal;
+		requestTimeout?: boolean;
+		serverTimeout?: boolean;
+	} = {},
 ): Promise<T[]> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) {
@@ -155,12 +168,12 @@ async function fetchLogQuery<T>(
 	if (limit !== undefined) {
 		url.searchParams.set("limit", String(limit));
 	}
-	if (withTimeout) {
+	if (serverTimeout) {
 		url.searchParams.set("timeout", "4s");
 	}
 	const response = await fetch(url.toString(), {
 		...buildFetchOptions(endpoint),
-		...(withTimeout && { signal: providerSignal(signal) }),
+		signal: requestTimeout ? providerSignal(signal) : signal,
 	});
 
 	if (!response.ok) {
@@ -215,13 +228,11 @@ export async function queryPublicServiceLogs(
 		query += ` | first ${pageSize} by (_time desc, event_id desc) | sort by (_time, event_id)`;
 	}
 
-	const rawLogs = await fetchLogQuery<StoredLog>(
-		query,
-		undefined,
-		"logs",
-		options.signal,
-		true,
-	);
+	const rawLogs = await fetchLogQuery<StoredLog>(query, {
+		signal: options.signal,
+		requestTimeout: true,
+		serverTimeout: true,
+	});
 	if (
 		options.cursor &&
 		rawLogs.some((log) => !isPublicServiceLogEventId(log.event_id))
@@ -255,13 +266,11 @@ export async function queryLogsByService(
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<StoredLog>(
-		query,
-		limit + 1,
-		"logs",
-		options.signal,
-		true,
-	);
+	const logs = await fetchLogQuery<StoredLog>(query, {
+		limit: limit + 1,
+		signal: options.signal,
+		requestTimeout: true,
+	});
 
 	const hasMore = logs.length > limit;
 	if (hasMore) logs.pop();
@@ -281,7 +290,7 @@ export async function queryLogsByDeployment(
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<StoredLog>(query, limit + 1);
+	const logs = await fetchLogQuery<StoredLog>(query, { limit: limit + 1 });
 
 	const hasMore = logs.length > limit;
 	if (hasMore) logs.pop();
@@ -338,7 +347,10 @@ export async function queryLogsByServer({
 	}
 	query += " | sort by (_time desc)";
 
-	const logs = await fetchLogQuery<AgentLog>(query, limit + 1, "server logs");
+	const logs = await fetchLogQuery<AgentLog>(query, {
+		limit: limit + 1,
+		errorLabel: "server logs",
+	});
 
 	const hasMore = logs.length > limit;
 	if (hasMore) logs.pop();
@@ -402,7 +414,10 @@ export async function queryLogsByRollout(
 	}
 	query += " | sort by (_time)";
 
-	const logs = await fetchLogQuery<RolloutLog>(query, limit, "rollout logs");
+	const logs = await fetchLogQuery<RolloutLog>(query, {
+		limit,
+		errorLabel: "rollout logs",
+	});
 
 	return { logs };
 }
@@ -418,7 +433,10 @@ export async function queryLogsByBuild(
 	}
 	query += " | sort by (_time)";
 
-	const logs = await fetchLogQuery<BuildLog>(query, limit, "build logs");
+	const logs = await fetchLogQuery<BuildLog>(query, {
+		limit,
+		errorLabel: "build logs",
+	});
 
 	return { logs };
 }
