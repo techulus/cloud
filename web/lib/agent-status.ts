@@ -37,7 +37,7 @@ import { enqueueWork } from "@/lib/work-queue";
 type ContainerStatus = {
 	deploymentId: string;
 	containerId: string;
-	status: "running" | "stopped" | "failed";
+	status: "running" | "stopped" | "failed" | "transient";
 	healthStatus: "none" | "starting" | "healthy" | "unhealthy";
 };
 
@@ -779,6 +779,14 @@ export async function applyStatusReport(
 	}
 
 	for (const container of report.containers) {
+		// Transient containers (e.g. podman "created" mid-deploy) are reported
+		// for presence only — counted in reportedDeploymentIds above so the
+		// deployment isn't marked unknown or deleted, but their unsettled state
+		// must not drive any phase or health transition.
+		if (container.status === "transient") {
+			continue;
+		}
+
 		const healthStatus = container.healthStatus;
 
 		let [deployment] = container.deploymentId
@@ -1013,6 +1021,7 @@ export async function applyStatusReport(
 					? "running"
 					: "starting";
 			updateFields.observedPhase = newStatus;
+			restoredToReady = newStatus === "running";
 			console.log(
 				`[health:restore] deployment ${deployment.id} restored from unknown to ${newStatus}`,
 			);
