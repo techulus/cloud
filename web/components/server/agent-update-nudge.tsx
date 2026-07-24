@@ -93,9 +93,9 @@ export function AgentUpdateNudge({
 					</DialogHeader>
 
 					<div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-						The control plane will send a signed work item to the agent. The
-						agent downloads the release binary, verifies its checksum, and
-						restarts itself after installation.
+						The control plane will send a work item over the authenticated
+						agent channel. The agent downloads the release binary, verifies
+						its checksum, and restarts itself after installation.
 					</div>
 
 					{isTargetUpgradeActive && (
