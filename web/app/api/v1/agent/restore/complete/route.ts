@@ -1,11 +1,6 @@
-import { eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { type NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { volumeBackups } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { inngest } from "@/lib/inngest/client";
-import { inngestEvents } from "@/lib/inngest/events";
+import { completeLegacyVolumeWorkItem } from "@/lib/work-queue";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -14,93 +9,54 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 
-	let data: {
-		backupId: string;
-		success: boolean;
-		error?: string;
-		isMigrationRestore?: boolean;
-	};
+	let parsed: unknown;
 	try {
-		data = JSON.parse(body);
+		parsed = JSON.parse(body);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
-
-	const { backupId, success, error, isMigrationRestore } = data;
-
-	if (!backupId) {
-		return NextResponse.json({ error: "Missing backupId" }, { status: 400 });
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
+	const data = parsed as {
+		backupId?: unknown;
+		success?: unknown;
+		error?: unknown;
+	};
 
-	const backup = await db
-		.select()
-		.from(volumeBackups)
-		.where(eq(volumeBackups.id, backupId))
-		.then((r) => r[0]);
-
-	if (!backup) {
-		return NextResponse.json({ ok: true });
-	}
-
-	const isMigration = isMigrationRestore ?? backup.isMigrationBackup ?? false;
-
-	revalidatePath("/dashboard/projects");
-
-	if (success) {
-		await inngest.send(
-			inngestEvents.restoreCompleted.create({
-				backupId,
-				volumeId: backup.volumeId,
-				serviceId: backup.serviceId,
-				isMigrationRestore: isMigration,
-			}),
+	if (
+		typeof data.backupId !== "string" ||
+		typeof data.success !== "boolean" ||
+		(data.error !== undefined && typeof data.error !== "string")
+	) {
+		return NextResponse.json(
+			{ error: "Invalid restore completion payload" },
+			{ status: 400 },
 		);
-
-		if (isMigration) {
-			await inngest.send(
-				inngestEvents.migrationRestoreCompleted.create({
-					backupId,
-					serviceId: backup.serviceId,
-				}),
-			);
-			await inngest.send(
-				inngestEvents.migrationRestoreFinished.create({
-					backupId,
-					serviceId: backup.serviceId,
-					status: "completed",
-				}),
-			);
-		}
-	} else {
-		await inngest.send(
-			inngestEvents.restoreFailed.create({
-				backupId,
-				volumeId: backup.volumeId,
-				serviceId: backup.serviceId,
-				error: error || "Restore failed",
-				isMigrationRestore: isMigration,
-			}),
-		);
-
-		if (isMigration) {
-			const message = error || "Restore failed";
-			await inngest.send(
-				inngestEvents.migrationRestoreFailed.create({
-					backupId,
-					serviceId: backup.serviceId,
-					error: message,
-				}),
-			);
-			await inngest.send(
-				inngestEvents.migrationRestoreFinished.create({
-					backupId,
-					serviceId: backup.serviceId,
-					status: "failed",
-					error: message,
-				}),
-			);
-		}
 	}
 
-	return NextResponse.json({ ok: true });
+	const outcome = await completeLegacyVolumeWorkItem(
+		auth.serverId,
+		"restore_volume",
+		data.backupId,
+		{
+			status: data.success ? "completed" : "failed",
+			error: data.success ? undefined : data.error || "Restore failed",
+		},
+	);
+
+	if (outcome === "completed") return NextResponse.json({ ok: true });
+	if (outcome === "pending") {
+		return NextResponse.json(
+			{ error: "Completion is pending" },
+			{ status: 503 },
+		);
+	}
+	if (outcome === "conflict") {
+		return NextResponse.json(
+			{ error: "Conflicting work item" },
+			{ status: 409 },
+		);
+	}
+	return NextResponse.json({ error: "Work item not found" }, { status: 404 });
 }

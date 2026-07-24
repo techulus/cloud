@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -219,7 +219,7 @@ export const migrationWorkflow = inngest.createFunction(
 			return { status: "failed", reason: "backup_failed" };
 		}
 
-		await step.run("restore-volumes", async () => {
+		const restoreWorkItemIds = await step.run("restore-volumes", async () => {
 			await db
 				.update(services)
 				.set({ migrationStatus: "restoring" })
@@ -230,16 +230,21 @@ export const migrationWorkflow = inngest.createFunction(
 				.from(volumeBackups)
 				.where(
 					and(
-						eq(volumeBackups.serviceId, serviceId),
-						eq(volumeBackups.isMigrationBackup, true),
+						inArray(volumeBackups.id, backupIds),
 						eq(volumeBackups.status, "completed"),
 					),
 				);
+			if (backups.length !== backupIds.length) {
+				throw new Error("Migration backup data is incomplete");
+			}
 
+			const workItemIds: string[] = [];
 			for (const backup of backups) {
-				if (!backup.storagePath || !backup.checksum) continue;
+				if (!backup.storagePath || !backup.checksum) {
+					throw new Error("Migration backup data is incomplete");
+				}
 
-				await enqueueWork(targetServerId, "restore_volume", {
+				const workItemId = await enqueueWork(targetServerId, "restore_volume", {
 					backupId: backup.id,
 					serviceId,
 					volumeName: backup.volumeName,
@@ -255,16 +260,27 @@ export const migrationWorkflow = inngest.createFunction(
 						secretKey: storageConfig.secretKey,
 					},
 				});
+				workItemIds.push(workItemId);
 			}
+			return workItemIds;
 		});
 
+		const restoreCorrelations =
+			restoreWorkItemIds?.map((workItemId) => ({
+				stepId: workItemId,
+				if: `async.data.workItemId == "${workItemId}"`,
+			})) ??
+			backupIds.map((backupId) => ({
+				stepId: backupId,
+				if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+			}));
 		const restoreResults = await Promise.all(
-			backupIds.map((backupId) =>
+			restoreCorrelations.map((correlation) =>
 				group.parallel(() =>
-					step.waitForEvent(`wait-restore-${backupId}`, {
+					step.waitForEvent(`wait-restore-${correlation.stepId}`, {
 						event: inngestEvents.migrationRestoreFinished,
 						timeout: "30m",
-						if: `async.data.backupId == "${backupId}" && async.data.serviceId == "${serviceId}"`,
+						if: correlation.if,
 					}),
 				),
 			),

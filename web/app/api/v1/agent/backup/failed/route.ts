@@ -1,11 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { volumeBackups } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import { inngest } from "@/lib/inngest/client";
-import { inngestEvents } from "@/lib/inngest/events";
-import { revalidatePath } from "next/cache";
+import { completeLegacyVolumeWorkItem } from "@/lib/work-queue";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -14,50 +9,49 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 
-	let data: { backupId: string; error: string };
+	let parsed: unknown;
 	try {
-		data = JSON.parse(body);
+		parsed = JSON.parse(body);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+	}
+	const data = parsed as { backupId?: unknown; error?: unknown };
 
-	const { backupId, error } = data;
-
-	if (!backupId) {
-		return NextResponse.json({ error: "Missing backupId" }, { status: 400 });
+	if (
+		typeof data.backupId !== "string" ||
+		(data.error !== undefined && typeof data.error !== "string")
+	) {
+		return NextResponse.json(
+			{ error: "Invalid backup failure payload" },
+			{ status: 400 },
+		);
 	}
 
-	const { serverId } = auth;
-
-	const backup = await db
-		.select()
-		.from(volumeBackups)
-		.where(
-			and(eq(volumeBackups.id, backupId), eq(volumeBackups.serverId, serverId)),
-		)
-		.then((r) => r[0]);
-
-	if (!backup) {
-		return NextResponse.json({ error: "Backup not found" }, { status: 404 });
-	}
-
-	await db
-		.update(volumeBackups)
-		.set({
+	const outcome = await completeLegacyVolumeWorkItem(
+		auth.serverId,
+		"backup_volume",
+		data.backupId,
+		{
 			status: "failed",
-			errorMessage: error || "Unknown error",
-		})
-		.where(eq(volumeBackups.id, backupId));
-
-	revalidatePath("/dashboard/projects");
-
-	await inngest.send(
-		inngestEvents.resourceStatusChanged.create({
-			type: "backup",
-			id: backupId,
-			parentType: "service",
-			parentId: backup.serviceId,
-		}),
+			error: data.error || "Unknown error",
+		},
 	);
-	return NextResponse.json({ ok: true });
+
+	if (outcome === "completed") return NextResponse.json({ ok: true });
+	if (outcome === "pending") {
+		return NextResponse.json(
+			{ error: "Completion is pending" },
+			{ status: 503 },
+		);
+	}
+	if (outcome === "conflict") {
+		return NextResponse.json(
+			{ error: "Conflicting work item" },
+			{ status: 409 },
+		);
+	}
+	return NextResponse.json({ error: "Work item not found" }, { status: 404 });
 }

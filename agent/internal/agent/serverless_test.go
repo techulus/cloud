@@ -50,6 +50,9 @@ func TestPendingServerlessWakeDoesNotStopStaleStoppedExpectedContainer(t *testin
 func TestServerlessGatewayCapabilityRequiresStartedGateway(t *testing.T) {
 	agent := &Agent{IsProxy: true}
 
+	if !slices.Contains(agent.agentCapabilities(), typedWorkResultsCapability) {
+		t.Fatal("agent did not report typed work results capability")
+	}
 	if slices.Contains(agent.agentCapabilities(), serverlessGatewayCapability) {
 		t.Fatal("proxy reported serverless gateway capability before gateway start")
 	}

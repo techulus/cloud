@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -87,7 +88,8 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	status := "completed"
 	errorMsg := ""
 	restartAfterReport := false
-	if err := a.ProcessWorkItem(item); err != nil {
+	output, err := a.ProcessWorkItem(item)
+	if err != nil {
 		if errors.Is(err, errAgentUpgradeRestartNeeded) {
 			restartAfterReport = true
 		} else {
@@ -108,6 +110,7 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 		Attempt: item.Attempt,
 		Status:  status,
 		Error:   errorMsg,
+		Output:  output,
 	})
 	a.workMutex.Unlock()
 
@@ -119,30 +122,32 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	}
 }
 
-func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
+// ProcessWorkItem returns the work item's terminal output, which is sent to
+// the control plane with the completion result.
+func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) (json.RawMessage, error) {
 	switch item.Type {
 	case "restart":
-		return a.ProcessRestart(item)
+		return nil, a.ProcessRestart(item)
 	case "stop":
-		return a.ProcessStop(item)
+		return nil, a.ProcessStop(item)
 	case "deploy", "reconcile":
 		a.RequestReconcile("reconcile work item " + Truncate(item.ID, 8))
-		return nil
+		return nil, nil
 	case "force_cleanup":
-		return a.ProcessForceCleanup(item)
+		return nil, a.ProcessForceCleanup(item)
 	case "cleanup_volumes":
-		return a.ProcessCleanupVolumes(item)
+		return nil, a.ProcessCleanupVolumes(item)
 	case "build":
-		return a.ProcessBuild(item)
+		return nil, a.ProcessBuild(item)
 	case "backup_volume":
 		return a.ProcessBackupVolume(item)
 	case "restore_volume":
-		return a.ProcessRestoreVolume(item)
+		return nil, a.ProcessRestoreVolume(item)
 	case "create_manifest":
-		return a.ProcessCreateManifest(item)
+		return nil, a.ProcessCreateManifest(item)
 	case "upgrade_agent":
-		return a.ProcessAgentUpgrade(item)
+		return nil, a.ProcessAgentUpgrade(item)
 	default:
-		return fmt.Errorf("unknown work item type: %s", item.Type)
+		return nil, fmt.Errorf("unknown work item type: %s", item.Type)
 	}
 }

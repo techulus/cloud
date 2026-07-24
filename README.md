@@ -1,6 +1,6 @@
 # Techulus Cloud
 
-A container deployment platform with private-first networking.
+Techulus Cloud builds, deploys, and operates applications across servers you control.
 
 > **Beta**: This project is currently in beta and pre-production. Use at your own risk.
 

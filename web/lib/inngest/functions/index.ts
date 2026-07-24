@@ -11,6 +11,7 @@ export {
 	scheduledDeploymentsCheck,
 	staleItemsCleanup,
 	staleServerCheck,
+	workCompletionDispatch,
 } from "./crons";
 export { migrationWorkflow } from "./migration-workflow";
 export { onDeploymentFailed } from "./on-deployment-failed";

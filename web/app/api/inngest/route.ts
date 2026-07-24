@@ -20,6 +20,7 @@ import {
 	serviceRestoreWorkflow,
 	staleItemsCleanup,
 	staleServerCheck,
+	workCompletionDispatch,
 } from "@/lib/inngest/functions";
 
 export const { GET, POST, PUT } = serve({
@@ -44,5 +45,6 @@ export const { GET, POST, PUT } = serve({
 		serviceDeletionWorkflow,
 		serviceRestoreWorkflow,
 		expiredDeletedServicesPurge,
+		workCompletionDispatch,
 	],
 });

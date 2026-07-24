@@ -14,6 +14,7 @@ import {
 	rebalanceAutomaticServices,
 	recoverInvalidAutomaticPlacements,
 } from "@/lib/scheduler";
+import { retryPendingWorkCompletions } from "@/lib/work-queue";
 import { inngest } from "../client";
 
 export const staleServerCheck = inngest.createFunction(
@@ -140,6 +141,17 @@ export const staleItemsCleanup = inngest.createFunction(
 			console.log("[cron] cleaning up stale items");
 			await cleanupStaleItems();
 		});
+	},
+);
+
+export const workCompletionDispatch = inngest.createFunction(
+	{
+		id: "cron-work-completion-dispatch",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("dispatch-work-completions", retryPendingWorkCompletions);
 	},
 );
 

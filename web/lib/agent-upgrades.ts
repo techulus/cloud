@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
+import type { WorkPayloadByType } from "@/lib/work-queue";
 
 const GITHUB_RELEASE_BASE_URL =
 	"https://github.com/techulus/cloud/releases/download";
@@ -80,6 +81,10 @@ export async function enqueueAgentUpgrade(
 
 	const arch = getReleaseArch(server.meta);
 	const expectedSha256 = await fetchExpectedSha256(targetVersion, arch);
+	const payload = {
+		targetVersion,
+		expectedSha256,
+	} satisfies WorkPayloadByType["upgrade_agent"];
 
 	try {
 		await db.transaction(async (tx) => {
@@ -97,7 +102,7 @@ export async function enqueueAgentUpgrade(
 				id: randomUUID(),
 				serverId,
 				type: "upgrade_agent",
-				payload: JSON.stringify({ targetVersion, expectedSha256 }),
+				payload: JSON.stringify(payload),
 			});
 		});
 	} catch (error) {

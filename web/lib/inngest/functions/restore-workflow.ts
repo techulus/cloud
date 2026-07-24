@@ -7,14 +7,17 @@ export const restoreWorkflow = inngest.createFunction(
 		triggers: [inngestEvents.restoreStarted],
 	},
 	async ({ event, step, group }) => {
-		const { backupId } = event.data;
+		const { backupId, workItemId } = event.data;
+		const completionMatch = workItemId
+			? `async.data.workItemId == "${workItemId}"`
+			: `async.data.backupId == "${backupId}"`;
 
 		const outcome = await group.parallel(() => {
 			const completedPromise = step
 				.waitForEvent("wait-restore-completed", {
 					event: inngestEvents.restoreCompleted,
 					timeout: "30m",
-					if: `async.data.backupId == "${backupId}"`,
+					if: completionMatch,
 				})
 				.then((result) => ({ status: "completed" as const, result }));
 
@@ -22,7 +25,7 @@ export const restoreWorkflow = inngest.createFunction(
 				.waitForEvent("wait-restore-failed", {
 					event: inngestEvents.restoreFailed,
 					timeout: "30m",
-					if: `async.data.backupId == "${backupId}"`,
+					if: completionMatch,
 				})
 				.then((result) => ({ status: "failed" as const, result }));
 
@@ -50,7 +53,7 @@ export const onRestoreFailed = inngest.createFunction(
 		id: "on-restore-failed",
 		triggers: [inngestEvents.restoreFailed],
 	},
-	async ({ event, step }) => {
+	async ({ event }) => {
 		const { backupId, error } = event.data;
 		return { status: "failed", backupId, error };
 	},

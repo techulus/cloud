@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { deployments, volumeBackups } from "@/db/schema";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -14,7 +15,7 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 	async ({ event, step }) => {
 		const { serviceId, backupId, targetServerId } = event.data;
 
-		const serverId = await step.run("setup-restore", async () => {
+		const restore = await step.run("setup-restore", async () => {
 			const storageConfig = await getBackupStorageConfig();
 			if (!storageConfig) {
 				throw new Error("Backup storage not configured");
@@ -51,7 +52,7 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 				.where(
 					and(
 						eq(deployments.serviceId, serviceId),
-						inArray(deployments.observedPhase, ["healthy", "running"]),
+						inArray(deployments.observedPhase, observedReadyPhases),
 					),
 				)
 				.then((r) => r[0]);
@@ -62,7 +63,7 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 
 			const resolvedServerId = targetServerId ?? deployment.serverId;
 
-			await enqueueWork(resolvedServerId, "restore_volume", {
+			const workItemId = await enqueueWork(resolvedServerId, "restore_volume", {
 				backupId,
 				serviceId,
 				containerId:
@@ -83,15 +84,16 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 				},
 			});
 
-			return resolvedServerId;
+			return { serverId: resolvedServerId, workItemId };
 		});
 
 		await step.run("send-restore-started", async () => {
 			await inngest.send(
 				inngestEvents.restoreStarted.create({
+					workItemId: restore.workItemId,
 					backupId,
 					serviceId,
-					serverId,
+					serverId: restore.serverId,
 				}),
 			);
 		});
