@@ -42,6 +42,7 @@ type App struct {
 	Sleep         func(time.Duration)
 	IsInteractive func() bool
 	GetCWD        func() (string, error)
+	configStore   auth.ConfigStore
 	flags         globalFlags
 }
 
@@ -97,6 +98,7 @@ func NewApp(version string, in io.Reader, out io.Writer, errOut io.Writer) *App 
 			}
 			return os.Getwd()
 		},
+		configStore: auth.NewConfigStore(version),
 	}
 }
 
@@ -192,7 +194,7 @@ func (a *App) authLoginCommand() *cobra.Command {
 				return errors.New("tc auth login requires human browser approval and does not support --agent or --json")
 			}
 			if host == "" {
-				existing, err := auth.ReadConfig()
+				existing, err := a.configStore.ReadConfig()
 				if err != nil {
 					return err
 				}
@@ -215,7 +217,7 @@ func (a *App) authLogoutCommand() *cobra.Command {
 		Use:   "logout",
 		Short: "Remove the saved CLI session",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := auth.DeleteConfig(); err != nil {
+			if err := a.configStore.DeleteConfig(); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
@@ -233,7 +235,7 @@ func (a *App) authWhoamiCommand() *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the current CLI account",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -342,7 +344,7 @@ func (a *App) linkCommand() *cobra.Command {
 			if explicitIDs == 0 && !a.IsInteractive() {
 				return errors.New("tc link requires an interactive terminal or all ID flags")
 			}
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -512,7 +514,7 @@ func (a *App) applyCommand() *cobra.Command {
 			"agent_notes": "Requires techulus.yml in the current directory and sends the full desired manifest to the control plane.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -558,7 +560,7 @@ func (a *App) deployCommand() *cobra.Command {
 			"agent_notes": "Requires techulus.yml in the current directory and queues a deployment for that service.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -612,7 +614,7 @@ func (a *App) statusCommand() *cobra.Command {
 			"agent_notes": "Without explicit target flags, tc reads techulus.yml from the current directory.\nFor agent use outside a linked directory, pass --project, --environment, and --service together.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -657,7 +659,7 @@ func (a *App) logsCommand() *cobra.Command {
 				}
 				follow = false
 			}
-			config, err := requireConfig()
+			config, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -685,7 +687,7 @@ func (a *App) projectsCommand() *cobra.Command {
 		Short: "List projects",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := requireConfig()
+			cfg, err := a.requireConfig()
 			if err != nil {
 				return err
 			}
@@ -708,7 +710,7 @@ func (a *App) projectsCommand() *cobra.Command {
 func (a *App) environmentsCommand() *cobra.Command {
 	var id string
 	c := &cobra.Command{Use: "environments", Short: "List project environments", RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -739,7 +741,7 @@ func (a *App) environmentsCommand() *cobra.Command {
 func (a *App) servicesCommand() *cobra.Command {
 	var p, eid string
 	c := &cobra.Command{Use: "services", Short: "List environment services", RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -777,7 +779,7 @@ func (a *App) servicesCommand() *cobra.Command {
 func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command) url.Values, print func(io.Writer, map[string]any)) *cobra.Command {
 	var target serviceTargetFlags
 	c := &cobra.Command{Use: name, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, e := requireConfig()
+		cfg, e := a.requireConfig()
 		if e != nil {
 			return e
 		}
@@ -848,7 +850,7 @@ func (a *App) rolloutCommand() *cobra.Command {
 	return c
 }
 func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id string, logs bool, q string, limit int) error {
-	cfg, e := requireConfig()
+	cfg, e := a.requireConfig()
 	if e != nil {
 		return e
 	}
@@ -1228,8 +1230,8 @@ func sourcesEqual(expected, actual manifest.Source) bool {
 	return *expected.RootDir == *actual.RootDir
 }
 
-func requireConfig() (*auth.Config, error) {
-	config, err := auth.ReadConfig()
+func (a *App) requireConfig() (*auth.Config, error) {
+	config, err := a.configStore.ReadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -1324,7 +1326,7 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	}, &exchange); err != nil {
 		return err
 	}
-	if err := auth.WriteConfig(auth.Config{
+	if err := a.configStore.WriteConfig(auth.Config{
 		Host:    host,
 		APIKey:  exchange.APIKey,
 		KeyID:   exchange.KeyID,
