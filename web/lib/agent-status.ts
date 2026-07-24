@@ -89,7 +89,7 @@ export function getStoppedContainerReportUpdate(deployment: {
 	};
 }
 
-export function getStaleStoppedServerlessReportUpdate({
+export function getStaleStoppedReportUpdate({
 	hasHealthCheck,
 	healthStatus,
 }: {
@@ -875,6 +875,7 @@ export async function applyStatusReport(
 		let autohealRestartPayload: Record<string, unknown> | null = null;
 		let autohealRecreatePayload: Record<string, unknown> | null = null;
 		let autohealFailed = false;
+		let restoredToReady = false;
 
 		if (deployment.containerId !== container.containerId) {
 			updateFields.containerId = container.containerId;
@@ -921,16 +922,19 @@ export async function applyStatusReport(
 				.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
 				.then((r) => r[0]);
 
-			if (revision?.specification.serverless.enabled) {
+			if (revision) {
 				Object.assign(
 					updateFields,
-					getStaleStoppedServerlessReportUpdate({
+					getStaleStoppedReportUpdate({
 						hasHealthCheck: revision.specification.healthCheck != null,
 						healthStatus,
 					}),
 				);
+				restoredToReady =
+					updateFields.observedPhase === "healthy" ||
+					updateFields.observedPhase === "running";
 				console.log(
-					`[health:restore] serverless deployment ${deployment.id} restored from ${deployment.observedPhase} to ${updateFields.observedPhase}`,
+					`[health:restore] deployment ${deployment.id} restored from ${deployment.observedPhase} to ${updateFields.observedPhase}`,
 				);
 			}
 		}
@@ -1078,6 +1082,24 @@ export async function applyStatusReport(
 			.update(deployments)
 			.set(updateFields)
 			.where(eq(deployments.id, deployment.id));
+
+		if (restoredToReady && deployment.rolloutId) {
+			const currentServerName = await getCurrentServerLogName();
+			await ingestRolloutLog(
+				deployment.rolloutId,
+				deployment.serviceId,
+				"health_check",
+				`Container is healthy on server ${currentServerName}`,
+			);
+			await inngest.send(
+				inngestEvents.resourceStatusChanged.create({
+					type: "deployment",
+					id: deployment.id,
+					parentType: "rollout",
+					parentId: deployment.rolloutId,
+				}),
+			);
+		}
 
 		if (autohealRestartPayload) {
 			await enqueueWork(serverId, "restart", autohealRestartPayload);

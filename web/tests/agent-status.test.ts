@@ -49,10 +49,11 @@ vi.mock("@/lib/work-queue", () => ({
 import {
 	applyStatusReport,
 	getSleepTransitionDeploymentIds,
-	getStaleStoppedServerlessReportUpdate,
+	getStaleStoppedReportUpdate,
 	getStoppedContainerReportUpdate,
 	shouldAttachReportedContainer,
 } from "@/lib/agent-status";
+import { inngest } from "@/lib/inngest/client";
 
 beforeEach(() => {
 	mocks.selectResults.length = 0;
@@ -97,9 +98,9 @@ describe("agent status serverless attachment", () => {
 		});
 	});
 
-	it("restores stale stopped serverless observations from live running reports", () => {
+	it("restores stale stopped observations from live running reports", () => {
 		expect(
-			getStaleStoppedServerlessReportUpdate({
+			getStaleStoppedReportUpdate({
 				hasHealthCheck: false,
 				healthStatus: "none",
 			}),
@@ -110,7 +111,7 @@ describe("agent status serverless attachment", () => {
 		});
 
 		expect(
-			getStaleStoppedServerlessReportUpdate({
+			getStaleStoppedReportUpdate({
 				hasHealthCheck: true,
 				healthStatus: "starting",
 			}),
@@ -121,7 +122,7 @@ describe("agent status serverless attachment", () => {
 		});
 
 		expect(
-			getStaleStoppedServerlessReportUpdate({
+			getStaleStoppedReportUpdate({
 				hasHealthCheck: true,
 				healthStatus: "healthy",
 			}),
@@ -194,5 +195,50 @@ describe("agent status deployment cleanup", () => {
 		});
 
 		expect(mocks.db.delete).not.toHaveBeenCalled();
+	});
+});
+
+describe("agent status stopped-phase recovery", () => {
+	it("promotes a non-serverless stopped deployment with a running container and notifies its rollout", async () => {
+		const deployment = {
+			id: "deployment_1",
+			serviceId: "service_1",
+			serviceRevisionId: "revision_1",
+			serverId: "server_1",
+			containerId: "container_1",
+			runtimeDesiredState: "running",
+			trafficState: "active",
+			observedPhase: "stopped",
+			rolloutId: "rollout_1",
+		};
+		mocks.selectResults.push(
+			[deployment],
+			[deployment],
+			[
+				{
+					specification: { serverless: { enabled: false }, healthCheck: null },
+				},
+			],
+		);
+
+		await applyStatusReport("server_1", {
+			containers: [
+				{
+					deploymentId: deployment.id,
+					containerId: "container_1",
+					status: "running",
+					healthStatus: "none",
+				},
+			],
+		});
+
+		expect(inngest.send).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "deployment",
+				id: "deployment_1",
+				parentType: "rollout",
+				parentId: "rollout_1",
+			}),
+		);
 	});
 });

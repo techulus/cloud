@@ -89,12 +89,17 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 			if a.ShouldSuppressServerlessContainerReport(c.DeploymentID) {
 				continue
 			}
+			// A container in a transient state (e.g. "created" mid-deploy) must not
+			// be reported as stopped: the control plane would move its deployment to
+			// a stopped phase it never recovers from. Report it on a later tick once
+			// it settles.
+			if c.State != "running" && c.State != "exited" {
+				continue
+			}
 
 			status := "stopped"
 			if c.State == "running" {
 				status = "running"
-			} else if c.State == "exited" {
-				status = "stopped"
 			}
 
 			healthStatus := "none"
