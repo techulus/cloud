@@ -1,9 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import {
-	applyStatusReport,
-	type StatusReport,
-} from "@/lib/agent-status";
+import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimNextWorkItem,
@@ -88,7 +85,9 @@ function isValidWorkItemResult(value: unknown): value is WorkItemResult {
 		Number.isInteger(candidate.attempt) &&
 		candidate.attempt > 0 &&
 		(candidate.status === "completed" || candidate.status === "failed") &&
-		(candidate.error === undefined || typeof candidate.error === "string")
+		(candidate.error === undefined || typeof candidate.error === "string") &&
+		(candidate.output === undefined ||
+			(typeof candidate.output === "object" && candidate.output !== null))
 	);
 }
 

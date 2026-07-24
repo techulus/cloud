@@ -20,9 +20,8 @@ import { SourceSection } from "@/components/service/details/source-section";
 import { StartCommandSection } from "@/components/service/details/start-command-section";
 import { VolumesSection } from "@/components/service/details/volumes-section";
 import { useService } from "@/components/service/service-layout-client";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import type { DeleteConfirmation } from "@/lib/two-factor";
-
-const ACTIVE_DELETE_BACKUP_STATUSES = ["running", "healthy"] as const;
 
 export default function ConfigurationPage() {
 	const router = useRouter();
@@ -37,8 +36,8 @@ export default function ConfigurationPage() {
 	} = useService();
 	const hasActiveDeploymentForBackup = service.deployments.some(
 		(deployment) =>
-			ACTIVE_DELETE_BACKUP_STATUSES.includes(
-				deployment.observedPhase as (typeof ACTIVE_DELETE_BACKUP_STATUSES)[number],
+			(observedReadyPhases as readonly string[]).includes(
+				deployment.observedPhase,
 			) && !!deployment.containerId,
 	);
 	const hasVolumes = (service.volumes?.length ?? 0) > 0;

@@ -8,6 +8,7 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 
 type TriggerBackupInput = {
@@ -54,7 +55,7 @@ export async function triggerBackup({
 		.where(
 			and(
 				eq(deployments.serviceId, serviceId),
-				inArray(deployments.observedPhase, ["healthy", "running"]),
+				inArray(deployments.observedPhase, observedReadyPhases),
 			),
 		)
 		.then((r) => r[0]);

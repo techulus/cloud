@@ -23,6 +23,7 @@ import {
 	isObservedReady,
 	markDeploymentFailedRemoved,
 	type ObservedPhase,
+	observedReadyPhases,
 	observedStartingPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
@@ -32,7 +33,7 @@ import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
-import { enqueueWork } from "@/lib/work-queue";
+import { enqueueWork, type WorkPayloadByType } from "@/lib/work-queue";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -331,7 +332,7 @@ async function applyServerlessTransitions(
 						eq(deployments.serverId, serverId),
 						eq(deployments.containerId, transition.containerId),
 						eq(deployments.runtimeDesiredState, "running"),
-						inArray(deployments.observedPhase, ["healthy", "running"]),
+						inArray(deployments.observedPhase, observedReadyPhases),
 					),
 				)
 				.returning({ id: deployments.id });
@@ -583,7 +584,11 @@ function getInvalidServerlessTransitionReason({
 		if (deployment.runtimeDesiredState !== "running") {
 			return `deployment is not expected running (${deployment.runtimeDesiredState})`;
 		}
-		if (!["healthy", "running"].includes(deployment.observedPhase)) {
+		if (
+			!(observedReadyPhases as readonly string[]).includes(
+				deployment.observedPhase,
+			)
+		) {
 			return `deployment is not sleepable from ${deployment.observedPhase}`;
 		}
 		if (deployment.containerId !== transition.containerId) {
@@ -880,8 +885,9 @@ export async function applyStatusReport(
 		}
 
 		const updateFields: Record<string, unknown> = { healthStatus };
-		let autohealRestartPayload: Record<string, unknown> | null = null;
-		let autohealRecreatePayload: Record<string, unknown> | null = null;
+		let autohealRestartPayload: WorkPayloadByType["restart"] | null = null;
+		let autohealRecreatePayload: WorkPayloadByType["force_cleanup"] | null =
+			null;
 		let autohealFailed = false;
 		let restoredToReady = false;
 
@@ -1289,7 +1295,7 @@ function prepareAutohealRecreatePayload({
 	deployment: typeof deployments.$inferSelect;
 	containerId: string;
 	updateFields: Record<string, unknown>;
-}): Record<string, unknown> | null {
+}): WorkPayloadByType["force_cleanup"] | null {
 	const decision = getSteadyStateRecreateDecision({ deployment, containerId });
 	Object.assign(updateFields, decision.updateFields);
 

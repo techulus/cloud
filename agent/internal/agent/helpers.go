@@ -50,3 +50,69 @@ func ConvertToUDPRoutes(routes []agenthttp.TraefikUDPRoute) []traefik.TraefikUDP
 	}
 	return udpRoutes
 }
+
+// CompiledTraefikState is the routing data of one expected-state snapshot
+// converted and hashed exactly once. Reconciliation planning, Traefik
+// application, and routing-sync reporting all consume the same compiled
+// snapshot so they can never disagree on convergence.
+type CompiledTraefikState struct {
+	HTTP         []traefik.TraefikRoute
+	TCP          []traefik.TraefikTCPRoute
+	UDP          []traefik.TraefikUDPRoute
+	Certificates []traefik.Certificate
+	TCPPorts     []int
+	UDPPorts     []int
+
+	HTTPHash string
+	L4Hash   string
+	CertHash string
+}
+
+func CompileTraefikState(expected *agenthttp.ExpectedState) *CompiledTraefikState {
+	httpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
+	tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
+	udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
+
+	certificates := make([]traefik.Certificate, len(expected.Traefik.Certificates))
+	for i, c := range expected.Traefik.Certificates {
+		certificates[i] = traefik.Certificate{
+			Domain:         c.Domain,
+			Certificate:    c.Certificate,
+			CertificateKey: c.CertificateKey,
+		}
+	}
+
+	var tcpPorts, udpPorts []int
+	for _, r := range tcpRoutes {
+		tcpPorts = append(tcpPorts, r.ExternalPort)
+	}
+	for _, r := range udpRoutes {
+		udpPorts = append(udpPorts, r.ExternalPort)
+	}
+
+	return &CompiledTraefikState{
+		HTTP:         httpRoutes,
+		TCP:          tcpRoutes,
+		UDP:          udpRoutes,
+		Certificates: certificates,
+		TCPPorts:     tcpPorts,
+		UDPPorts:     udpPorts,
+		HTTPHash:     traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName),
+		L4Hash:       traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes),
+		CertHash:     traefik.HashCertificates(certificates),
+	}
+}
+
+// compiledTraefikState memoizes CompileTraefikState per expected-state
+// snapshot. Snapshots are immutable once received, so identity of the
+// pointer is enough to key the cache.
+func (a *Agent) compiledTraefikState(expected *agenthttp.ExpectedState) *CompiledTraefikState {
+	a.compiledTraefikMutex.Lock()
+	defer a.compiledTraefikMutex.Unlock()
+
+	if a.compiledTraefikFor != expected || a.compiledTraefik == nil {
+		a.compiledTraefik = CompileTraefikState(expected)
+		a.compiledTraefikFor = expected
+	}
+	return a.compiledTraefik
+}

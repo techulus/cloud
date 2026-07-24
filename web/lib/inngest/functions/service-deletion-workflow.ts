@@ -25,7 +25,11 @@ import {
 import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { addUtcDays, toDate } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import { markDeploymentRemoved } from "@/lib/deployment-status";
+import {
+	isObservedReady,
+	markDeploymentRemoved,
+	observedReadyPhases,
+} from "@/lib/deployment-status";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -84,7 +88,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 					.where(
 						and(
 							eq(deployments.serviceId, serviceId),
-							inArray(deployments.observedPhase, ["running", "healthy"]),
+							inArray(deployments.observedPhase, observedReadyPhases),
 						),
 					)
 					.then((r) => r[0]);
@@ -407,6 +411,9 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			await step.run("restore-deletion-backups", async () => {
 				for (const backup of setup.backups) {
+					if (!backup.storagePath) {
+						throw new Error("Backup data is incomplete");
+					}
 					await enqueueWork(setup.targetServerId, "restore_volume", {
 						backupId: backup.id,
 						serviceId,
@@ -536,10 +543,8 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				},
 			);
 
-			const healthyDeployment = restoredDeployments.find(
-				(deployment) =>
-					deployment.observedPhase === "healthy" ||
-					deployment.observedPhase === "running",
+			const healthyDeployment = restoredDeployments.find((deployment) =>
+				isObservedReady(deployment.observedPhase),
 			);
 			const failedDeployment = restoredDeployments.find(
 				(deployment) => deployment.observedPhase === "failed",

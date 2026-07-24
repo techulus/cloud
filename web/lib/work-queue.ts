@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { deployments, servers, workQueue } from "@/db/schema";
+import { deployments, servers, volumeBackups, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
@@ -10,11 +11,71 @@ import { inngestEvents } from "@/lib/inngest/events";
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
 
+export type WorkQueueStorageConfig = {
+	provider: string;
+	bucket: string;
+	region: string;
+	endpoint: string;
+	accessKey: string;
+	secretKey: string;
+};
+
+type ReconcileWorkPayload = {
+	reason: string;
+	deploymentId?: string;
+};
+
+export type WorkPayloadByType = {
+	deploy: ReconcileWorkPayload;
+	reconcile: ReconcileWorkPayload;
+	stop: { deploymentId: string; containerId: string | null };
+	restart: {
+		deploymentId: string;
+		containerId: string | null;
+		reason?: string;
+	};
+	force_cleanup: {
+		serviceId: string;
+		containerIds: string[];
+		reason?: string;
+		deploymentId?: string;
+	};
+	cleanup_volumes: { serviceId: string };
+	build: { buildId: string };
+	backup_volume: {
+		backupId: string;
+		serviceId: string;
+		containerId: string | null;
+		volumeName: string;
+		storagePath: string;
+		storageConfig: WorkQueueStorageConfig;
+	};
+	restore_volume: {
+		backupId: string;
+		serviceId: string;
+		containerId?: string | null;
+		volumeName: string;
+		storagePath: string;
+		expectedChecksum: string | null;
+		isMigrationRestore: boolean;
+		storageConfig: WorkQueueStorageConfig;
+	};
+	create_manifest: {
+		images: string[];
+		finalImageUri: string;
+		serviceId: string;
+		serviceRevisionId: string;
+		buildGroupId: string;
+	};
+	upgrade_agent: { targetVersion: string; expectedSha256: string };
+};
+
 export type WorkItemResult = {
 	id: string;
 	attempt: number;
 	status: "completed" | "failed";
 	error?: string;
+	output?: unknown;
 };
 
 export type ActiveWorkItem = {
@@ -39,10 +100,10 @@ export type RejectedActiveWorkItem = {
 	reason: string;
 };
 
-export async function enqueueWork(
+export async function enqueueWork<T extends WorkQueue["type"]>(
 	serverId: string,
-	type: WorkQueue["type"],
-	payload: Record<string, unknown>,
+	type: T,
+	payload: WorkPayloadByType[T],
 	options: { id?: string } = {},
 ) {
 	await db
@@ -244,17 +305,24 @@ async function runWorkItemCompletionSideEffects(
 		return;
 	}
 
+	if (item.type === "backup_volume" && item.payload) {
+		await runBackupVolumeCompletionSideEffects(item, result);
+		return;
+	}
+
+	if (item.type === "restore_volume" && item.payload) {
+		await runRestoreVolumeCompletionSideEffects(item, result);
+		return;
+	}
+
 	if (item.type !== "create_manifest" || !item.payload) {
 		return;
 	}
 
 	try {
-		const payload = JSON.parse(item.payload) as {
-			serviceId?: string;
-			serviceRevisionId?: string;
-			finalImageUri?: string;
-			buildGroupId?: string;
-		};
+		const payload = JSON.parse(item.payload) as Partial<
+			WorkPayloadByType["create_manifest"]
+		>;
 
 		if (result.status === "completed") {
 			if (
@@ -350,6 +418,160 @@ async function runAgentUpgradeCompletionSideEffects(
 	} catch (error) {
 		console.error(
 			"[work-queue] failed to run agent upgrade completion side effects:",
+			error,
+		);
+	}
+}
+
+async function runBackupVolumeCompletionSideEffects(
+	item: WorkQueue,
+	result: WorkItemResult,
+): Promise<void> {
+	try {
+		const payload = JSON.parse(item.payload) as Partial<
+			WorkPayloadByType["backup_volume"]
+		>;
+		if (!payload.backupId) return;
+
+		const output =
+			result.output && typeof result.output === "object"
+				? (result.output as { sizeBytes?: number; checksum?: string })
+				: {};
+
+		const updateValues =
+			result.status === "completed" && typeof output.checksum === "string"
+				? {
+						status: "completed" as const,
+						sizeBytes:
+							typeof output.sizeBytes === "number" ? output.sizeBytes : null,
+						checksum: output.checksum,
+						completedAt: new Date(),
+					}
+				: {
+						status: "failed" as const,
+						errorMessage: result.error || "Backup failed",
+					};
+
+		// Only transition non-terminal backups so a stale attempt can't
+		// clobber the final state.
+		const updated = await db
+			.update(volumeBackups)
+			.set(updateValues)
+			.where(
+				and(
+					eq(volumeBackups.id, payload.backupId),
+					eq(volumeBackups.serverId, item.serverId),
+					notInArray(volumeBackups.status, ["completed", "failed"]),
+				),
+			)
+			.returning({ serviceId: volumeBackups.serviceId });
+
+		if (updated.length === 0) return;
+
+		revalidatePath("/dashboard/projects");
+		await inngest.send(
+			inngestEvents.resourceStatusChanged.create({
+				type: "backup",
+				id: payload.backupId,
+				parentType: "service",
+				parentId: updated[0].serviceId,
+			}),
+		);
+	} catch (error) {
+		console.error(
+			"[work-queue] failed to run backup completion side effects:",
+			error,
+		);
+	}
+}
+
+async function runRestoreVolumeCompletionSideEffects(
+	item: WorkQueue,
+	result: WorkItemResult,
+): Promise<void> {
+	try {
+		const payload = JSON.parse(item.payload) as Partial<
+			WorkPayloadByType["restore_volume"]
+		>;
+		if (!payload.backupId) return;
+		const backupId = payload.backupId;
+
+		const backup = await db
+			.select({
+				volumeId: volumeBackups.volumeId,
+				serviceId: volumeBackups.serviceId,
+				isMigrationBackup: volumeBackups.isMigrationBackup,
+			})
+			.from(volumeBackups)
+			.where(eq(volumeBackups.id, backupId))
+			.then((r) => r[0]);
+
+		if (!backup) return;
+
+		const isMigrationRestore =
+			payload.isMigrationRestore ?? backup.isMigrationBackup ?? false;
+
+		revalidatePath("/dashboard/projects");
+
+		if (result.status === "completed") {
+			await inngest.send(
+				inngestEvents.restoreCompleted.create({
+					backupId,
+					volumeId: backup.volumeId,
+					serviceId: backup.serviceId,
+					isMigrationRestore,
+				}),
+			);
+
+			if (isMigrationRestore) {
+				await inngest.send(
+					inngestEvents.migrationRestoreCompleted.create({
+						backupId,
+						serviceId: backup.serviceId,
+					}),
+				);
+				await inngest.send(
+					inngestEvents.migrationRestoreFinished.create({
+						backupId,
+						serviceId: backup.serviceId,
+						status: "completed",
+					}),
+				);
+			}
+			return;
+		}
+
+		const message = result.error || "Restore failed";
+		await inngest.send(
+			inngestEvents.restoreFailed.create({
+				backupId,
+				volumeId: backup.volumeId,
+				serviceId: backup.serviceId,
+				error: message,
+				isMigrationRestore,
+			}),
+		);
+
+		if (isMigrationRestore) {
+			await inngest.send(
+				inngestEvents.migrationRestoreFailed.create({
+					backupId,
+					serviceId: backup.serviceId,
+					error: message,
+				}),
+			);
+			await inngest.send(
+				inngestEvents.migrationRestoreFinished.create({
+					backupId,
+					serviceId: backup.serviceId,
+					status: "failed",
+					error: message,
+				}),
+			);
+		}
+	} catch (error) {
+		console.error(
+			"[work-queue] failed to run restore completion side effects:",
 			error,
 		);
 	}

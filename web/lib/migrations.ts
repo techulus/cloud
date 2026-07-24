@@ -7,6 +7,7 @@ import {
 	services,
 	serviceVolumes,
 } from "@/db/schema";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
@@ -63,7 +64,7 @@ export async function startMigrationInternal(
 			and(
 				eq(deployments.serviceId, serviceId),
 				eq(deployments.trafficState, "active"),
-				inArray(deployments.observedPhase, ["healthy", "running"]),
+				inArray(deployments.observedPhase, observedReadyPhases),
 			),
 		)
 		.then((r) => r[0]);
