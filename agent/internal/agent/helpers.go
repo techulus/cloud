@@ -50,3 +50,62 @@ func ConvertToUDPRoutes(routes []agenthttp.TraefikUDPRoute) []traefik.TraefikUDP
 	}
 	return udpRoutes
 }
+
+type compiledTraefikState struct {
+	HTTP         []traefik.TraefikRoute
+	TCP          []traefik.TraefikTCPRoute
+	UDP          []traefik.TraefikUDPRoute
+	Certificates []traefik.Certificate
+	TCPPorts     []int
+	UDPPorts     []int
+
+	HTTPHash string
+	L4Hash   string
+	CertHash string
+}
+
+func compileTraefikState(expected *agenthttp.ExpectedState) *compiledTraefikState {
+	httpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
+	tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
+	udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
+
+	certificates := make([]traefik.Certificate, len(expected.Traefik.Certificates))
+	for i, c := range expected.Traefik.Certificates {
+		certificates[i] = traefik.Certificate{
+			Domain:         c.Domain,
+			Certificate:    c.Certificate,
+			CertificateKey: c.CertificateKey,
+		}
+	}
+
+	var tcpPorts, udpPorts []int
+	for _, r := range tcpRoutes {
+		tcpPorts = append(tcpPorts, r.ExternalPort)
+	}
+	for _, r := range udpRoutes {
+		udpPorts = append(udpPorts, r.ExternalPort)
+	}
+
+	return &compiledTraefikState{
+		HTTP:         httpRoutes,
+		TCP:          tcpRoutes,
+		UDP:          udpRoutes,
+		Certificates: certificates,
+		TCPPorts:     tcpPorts,
+		UDPPorts:     udpPorts,
+		HTTPHash:     traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName),
+		L4Hash:       traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes),
+		CertHash:     traefik.HashCertificates(certificates),
+	}
+}
+
+func (a *Agent) compiledTraefikState(expected *agenthttp.ExpectedState) *compiledTraefikState {
+	a.compiledTraefikMutex.Lock()
+	defer a.compiledTraefikMutex.Unlock()
+
+	if a.compiledTraefikFor != expected || a.compiledTraefik == nil {
+		a.compiledTraefik = compileTraefikState(expected)
+		a.compiledTraefikFor = expected
+	}
+	return a.compiledTraefik
+}

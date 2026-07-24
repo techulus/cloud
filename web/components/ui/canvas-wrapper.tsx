@@ -1,3 +1,8 @@
+import {
+	observedReadyPhases,
+	observedStartingPhases,
+} from "@/lib/deployment-status";
+
 export type StatusColors = {
 	bg: string;
 	border: string;
@@ -70,22 +75,16 @@ export function getStatusColor(status: string): StatusColors {
 export function getStatusColorFromDeployments(
 	deployments: { observedPhase: string; runtimeDesiredState?: string }[],
 ): StatusColors {
-	const hasRunning = deployments.some(
-		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
+	const hasRunning = deployments.some((d) =>
+		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	);
-	const hasPending = deployments.some(
-		(d) =>
-			d.observedPhase === "pending" ||
-			d.observedPhase === "pulling" ||
-			d.observedPhase === "starting" ||
-			d.observedPhase === "waking",
+	const hasPending = deployments.some((d) =>
+		(observedStartingPhases as readonly string[]).includes(d.observedPhase),
 	);
 	const hasFailed = deployments.some((d) => d.observedPhase === "failed");
 	const hasSleeping = deployments.some((d) => d.observedPhase === "sleeping");
 	const hasStopped = deployments.some(
-		(d) =>
-			d.observedPhase === "stopped" ||
-			d.runtimeDesiredState === "removed",
+		(d) => d.observedPhase === "stopped" || d.runtimeDesiredState === "removed",
 	);
 	const hasUnknown = deployments.some((d) => d.observedPhase === "unknown");
 

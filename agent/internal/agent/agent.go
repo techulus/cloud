@@ -72,6 +72,9 @@ type Agent struct {
 	pendingServerlessWake        map[string]serverlessTransitionGuard
 	expectedStateMutex           sync.RWMutex
 	latestExpectedState          *agenthttp.ExpectedState
+	compiledTraefikMutex         sync.Mutex
+	compiledTraefikFor           *agenthttp.ExpectedState
+	compiledTraefik              *compiledTraefikState
 	Client                       *agenthttp.Client
 	Reconciler                   *reconcile.Reconciler
 	Config                       *Config

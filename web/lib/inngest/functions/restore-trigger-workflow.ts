@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { deployments, volumeBackups } from "@/db/schema";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -51,7 +52,7 @@ export const restoreTriggerWorkflow = inngest.createFunction(
 				.where(
 					and(
 						eq(deployments.serviceId, serviceId),
-						inArray(deployments.observedPhase, ["healthy", "running"]),
+						inArray(deployments.observedPhase, observedReadyPhases),
 					),
 				)
 				.then((r) => r[0]);
