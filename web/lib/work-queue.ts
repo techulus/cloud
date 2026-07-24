@@ -545,7 +545,8 @@ export async function completeWorkItemResults(
 			if (outcome.outbox) outboxIds.push(result.id);
 		} catch (error) {
 			console.error(
-				`[work-queue] failed to durably complete ${result.id}:`,
+				"[work-queue] failed to durably complete work item:",
+				result.id,
 				error,
 			);
 			retryable.push({ id: result.id, reason: "completion_failed" });
@@ -556,7 +557,7 @@ export async function completeWorkItemResults(
 		try {
 			await dispatchWorkCompletionOutbox(id);
 		} catch (error) {
-			console.error(`[work-queue] deferred event dispatch for ${id}:`, error);
+			console.error("[work-queue] deferred event dispatch:", id, error);
 		}
 	}
 
