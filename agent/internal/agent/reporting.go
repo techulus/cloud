@@ -89,19 +89,27 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 			if a.ShouldSuppressServerlessContainerReport(c.DeploymentID) {
 				continue
 			}
-			// A container in a transient state (e.g. "created" mid-deploy) must not
-			// be reported as stopped — the control plane would move its deployment
-			// into a stopped phase — nor omitted, which would read as the container
-			// being gone. Report it as "transient" so the control plane keeps
-			// tracking it without acting until the state settles.
+			// Intermediate podman states (e.g. "created" mid-deploy) must not be
+			// reported as stopped — the control plane would move the deployment
+			// into a stopped phase — nor omitted, which would read as the
+			// container being gone. They are reported as "transient" so the
+			// control plane keeps tracking the deployment without acting until
+			// the state settles. Settled non-running states ("stopped",
+			// "paused") map to stopped so the deployment leaves routing and
+			// drift reconciliation can repair it; the same goes for "unknown"
+			// or unrecognized states, since presence-only reporting there would
+			// leave a broken container marked healthy indefinitely.
 			var status string
 			switch c.State {
 			case "running":
 				status = "running"
-			case "exited":
+			case "exited", "stopped", "paused":
 				status = "stopped"
-			default:
+			case "created", "configured", "initialized", "stopping", "removing":
 				status = "transient"
+			default:
+				log.Printf("[status] container %s in unexpected state %q, reporting as stopped", c.ID, c.State)
+				status = "stopped"
 			}
 
 			healthStatus := "none"
