@@ -955,14 +955,12 @@ export function LogViewer(props: LogViewerProps) {
 	const newestFilteredLogTimestamp = (
 		filteredLogs.at(-1) as BaseEntry | undefined
 	)?.timestamp;
-	const serializedLogs = useMemo(
-		() => serializeLogs(filteredLogs, props.variant),
-		[filteredLogs, props.variant],
-	);
 
 	const copyLogs = async () => {
 		try {
-			await navigator.clipboard.writeText(serializedLogs);
+			await navigator.clipboard.writeText(
+				serializeLogs(filteredLogs, props.variant),
+			);
 			toast.success("Logs copied to clipboard");
 		} catch {
 			toast.error("Failed to copy logs");
@@ -970,17 +968,29 @@ export function LogViewer(props: LogViewerProps) {
 	};
 
 	const downloadLogs = () => {
-		const blob = new Blob([serializedLogs], {
-			type: "text/plain;charset=utf-8",
-		});
-		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
-		const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-		link.href = url;
-		link.download = `${props.variant}-${timestamp}.log`;
-		link.click();
-		URL.revokeObjectURL(url);
-		toast.success("Logs downloaded");
+		let url: string | undefined;
+
+		try {
+			const blob = new Blob([serializeLogs(filteredLogs, props.variant)], {
+				type: "text/plain;charset=utf-8",
+			});
+			url = URL.createObjectURL(blob);
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			link.href = url;
+			link.download = `${props.variant}-${timestamp}.log`;
+			document.body.append(link);
+			link.click();
+			toast.success("Logs downloaded");
+		} catch {
+			toast.error("Failed to download logs");
+		} finally {
+			link.remove();
+			if (url) {
+				const objectUrl = url;
+				window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+			}
+		}
 	};
 
 	useLayoutEffect(() => {
