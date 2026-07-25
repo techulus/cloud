@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if pg_isready --host=localhost --port=5432 --timeout=1 --quiet; then
-	echo "PostgreSQL is ready."
-	exit 0
-fi
-
-echo "Restarting PostgreSQL..."
-timeout 4s sudo -n pg_ctlcluster 18 main start >/dev/null 2>&1 || true
-
-for _ in 1 2 3; do
-	if pg_isready --host=localhost --port=5432 --timeout=1 --quiet; then
-		echo "PostgreSQL is ready."
-		exit 0
-	fi
-	sleep 0.2
-done
-
-echo "PostgreSQL did not become ready during orb resume." >&2
-exit 1
+echo "No persistent services require repair."

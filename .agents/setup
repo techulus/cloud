@@ -3,10 +3,6 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mise_bin="$HOME/.local/bin/mise"
-database_url="postgres://techulus:password@localhost:5432/techulus"
-admin_email="admin@example.com"
-credentials_dir="$HOME/.config/techulus-cloud"
-credentials_file="$credentials_dir/admin-credentials"
 
 echo "Installing mise..."
 if [[ ! -x "$mise_bin" ]]; then
@@ -45,17 +41,6 @@ echo "Installing web dependencies..."
 	"$mise_bin" exec -- pnpm install --frozen-lockfile
 )
 
-if [[ ! -f "$repo_root/web/.env" ]]; then
-	cp -- "$repo_root/web/.env.example" "$repo_root/web/.env"
-	echo "Created web/.env from web/.env.example."
-fi
-
-configured_database_url="$(sed -n 's/^DATABASE_URL=//p' "$repo_root/web/.env" | head -n 1)"
-if [[ "$configured_database_url" != "$database_url" ]]; then
-	echo "web/.env must use the orb database URL from web/.env.example." >&2
-	exit 1
-fi
-
 echo "Downloading Go dependencies..."
 for module in agent cli deployment/updater; do
 	(
@@ -63,88 +48,5 @@ for module in agent cli deployment/updater; do
 		"$mise_bin" exec -- go mod download
 	)
 done
-
-echo "Preparing PostgreSQL..."
-if ! pg_isready --host=localhost --port=5432 --quiet; then
-	sudo -n pg_ctlcluster 18 main start
-fi
-pg_isready --host=localhost --port=5432 --timeout=5 --quiet
-
-sudo -n -u postgres psql --set ON_ERROR_STOP=1 <<'SQL'
-DO $$
-BEGIN
-	IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'techulus') THEN
-		CREATE ROLE techulus LOGIN PASSWORD 'password';
-	ELSE
-		ALTER ROLE techulus WITH LOGIN;
-	END IF;
-END
-$$;
-SQL
-
-if ! sudo -n -u postgres psql -tAc \
-	"SELECT 1 FROM pg_database WHERE datname = 'techulus'" | grep -q 1; then
-	sudo -n -u postgres createdb --owner=techulus techulus
-fi
-
-echo "Applying the database schema..."
-(
-	cd "$repo_root/web"
-	DATABASE_URL="$database_url" timeout 30s "$mise_bin" exec -- \
-		pnpm exec drizzle-kit push </dev/null
-)
-
-admin_emails="$(
-	PGPASSWORD=password psql \
-		--host=localhost \
-		--username=techulus \
-		--dbname=techulus \
-		--tuples-only \
-		--no-align \
-		--command="select email from \"user\" where role = 'admin' order by email"
-)"
-
-umask 077
-mkdir -p "$credentials_dir"
-chmod 700 "$credentials_dir"
-
-if [[ -z "$admin_emails" ]]; then
-	echo "Creating the seeded admin account..."
-	temporary_credentials="$(mktemp "$credentials_dir/admin-credentials.XXXXXX")"
-	(
-		cd "$repo_root/web"
-		DATABASE_URL="$database_url" "$mise_bin" exec -- \
-			node scripts/admin.mjs --create "$admin_email" > "$temporary_credentials"
-	)
-	if [[ ! -s "$temporary_credentials" ]]; then
-		echo "Admin creation did not produce credentials; recovery file: $temporary_credentials" >&2
-		exit 1
-	fi
-	mv -- "$temporary_credentials" "$credentials_file"
-	chmod 600 "$credentials_file"
-elif [[ "$admin_emails" == "$admin_email" ]]; then
-	if [[ ! -s "$credentials_file" ]]; then
-		echo "The seeded admin exists but $credentials_file is missing or empty." >&2
-		echo "Reset its password with web/scripts/admin.mjs, save the output there, and rerun setup." >&2
-		exit 1
-	fi
-	chmod 600 "$credentials_file"
-else
-	echo "Expected exactly one seeded admin ($admin_email), found: $admin_emails" >&2
-	exit 1
-fi
-
-agent_guide="$HOME/.config/amp/AGENTS.md"
-guide_marker="# Techulus Cloud orb development environment"
-if ! grep -Fqx "$guide_marker" "$agent_guide" 2>/dev/null; then
-	mkdir -p "$(dirname "$agent_guide")"
-	cat >> "$agent_guide" <<'EOF'
-
-# Techulus Cloud orb development environment
-- Native PostgreSQL is available at localhost:5432 using web/.env.
-- The seeded admin email is admin@example.com.
-- The generated admin credentials are stored in ~/.config/techulus-cloud/admin-credentials.
-EOF
-fi
 
 echo "Orb setup complete."
