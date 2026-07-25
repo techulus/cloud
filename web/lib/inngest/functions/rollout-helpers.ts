@@ -417,15 +417,18 @@ export async function completeRollout(
 					.returning({ id: deployments.id })
 			: [];
 
-		await tx
-			.update(services)
-			.set({
-				...(specification.placement.mode === "automatic"
-					? { lastAutomaticPlacementAt: new Date() }
-					: {}),
-				...(lockedServerId ? { lockedServerId } : {}),
-			})
-			.where(eq(services.id, serviceId));
+		const serviceUpdate =
+			specification.placement.mode === "automatic"
+				? { lastAutomaticPlacementAt: new Date() }
+				: lockedServerId
+					? { lockedServerId }
+					: null;
+		if (serviceUpdate) {
+			await tx
+				.update(services)
+				.set(serviceUpdate)
+				.where(eq(services.id, serviceId));
+		}
 
 		await tx
 			.update(rollouts)
