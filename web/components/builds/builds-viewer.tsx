@@ -388,7 +388,7 @@ export function BuildsViewer({
 						>
 							<BuildStatusBadge
 								status={build.status}
-								className="max-sm:hidden"
+								className="w-28 max-sm:hidden"
 							/>
 							<ItemContent>
 								<ItemTitle>
