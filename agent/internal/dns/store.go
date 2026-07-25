@@ -1,10 +1,7 @@
 package dns
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,7 +45,7 @@ func (s *RecordStore) Update(records []DnsRecord) {
 
 	s.records = newRecords
 	s.rrIndex = newRRIndex
-	s.hash = hashRecordsInternal(records)
+	s.hash = HashRecords(records)
 }
 
 func (s *RecordStore) Lookup(name string) []net.IP {
@@ -86,25 +83,4 @@ func normalizeName(name string) string {
 		name = name + "."
 	}
 	return name
-}
-
-func hashRecordsInternal(records []DnsRecord) string {
-	sortedRecords := make([]DnsRecord, len(records))
-	copy(sortedRecords, records)
-	sort.Slice(sortedRecords, func(i, j int) bool {
-		return sortedRecords[i].Name < sortedRecords[j].Name
-	})
-
-	var sb strings.Builder
-	for _, r := range sortedRecords {
-		sb.WriteString(r.Name)
-		sb.WriteString(":")
-		sortedIps := make([]string, len(r.Ips))
-		copy(sortedIps, r.Ips)
-		sort.Strings(sortedIps)
-		sb.WriteString(strings.Join(sortedIps, ","))
-		sb.WriteString("|")
-	}
-	hash := sha256.Sum256([]byte(sb.String()))
-	return hex.EncodeToString(hash[:])
 }

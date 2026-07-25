@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 	startMigrationInternal: vi.fn(),
 	triggerBuildInternal: vi.fn(),
 	send: vi.fn(),
+	updateWhere: vi.fn(),
 	createRolloutCreated: vi.fn((data, options) => ({
 		name: "rollout/created",
 		data,
@@ -17,6 +18,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/db", () => ({
 	db: {
+		update: vi.fn(() => ({
+			set: vi.fn(() => ({ where: mocks.updateWhere })),
+		})),
 		select: vi.fn(() => ({
 			from: vi.fn(() => ({
 				where: vi.fn(() => Promise.resolve(mocks.replicaRows)),
@@ -129,6 +133,7 @@ describe("revision rollout idempotency", () => {
 		expect(mocks.send.mock.calls[0]?.[0].id).toBe(
 			mocks.send.mock.calls[1]?.[0].id,
 		);
+		expect(mocks.updateWhere).toHaveBeenCalledTimes(1);
 	});
 
 	it("bases a GitHub redeployment on an explicit runtime revision", async () => {

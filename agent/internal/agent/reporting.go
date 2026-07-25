@@ -89,11 +89,26 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 			if a.ShouldSuppressServerlessContainerReport(c.DeploymentID) {
 				continue
 			}
-
-			status := "stopped"
-			if c.State == "running" {
+			// Intermediate podman states (e.g. "created" mid-deploy) must not be
+			// reported as stopped — the control plane would move the deployment
+			// into a stopped phase — nor omitted, which would read as the
+			// container being gone. They are reported as "transient" so the
+			// control plane keeps tracking the deployment without acting until
+			// the state settles. Settled non-running states ("stopped",
+			// "paused") map to stopped so the deployment leaves routing and
+			// drift reconciliation can repair it; the same goes for "unknown"
+			// or unrecognized states, since presence-only reporting there would
+			// leave a broken container marked healthy indefinitely.
+			var status string
+			switch c.State {
+			case "running":
 				status = "running"
-			} else if c.State == "exited" {
+			case "exited", "stopped", "paused":
+				status = "stopped"
+			case "created", "configured", "initialized", "stopping", "removing":
+				status = "transient"
+			default:
+				log.Printf("[status] container %s in unexpected state %q, reporting as stopped", c.ID, c.State)
 				status = "stopped"
 			}
 
@@ -148,24 +163,14 @@ func (a *Agent) routingSyncedRolloutIds() []string {
 }
 
 func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {
-	httpRoutes := ConvertToHttpRoutes(expected.Traefik.HttpRoutes)
-	if traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName) != traefik.GetCurrentConfigHash() {
+	compiled := a.compiledTraefikState(expected)
+	if compiled.HTTPHash != traefik.GetCurrentConfigHash() {
 		return false
 	}
-	tcpRoutes := ConvertToTCPRoutes(expected.Traefik.TCPRoutes)
-	udpRoutes := ConvertToUDPRoutes(expected.Traefik.UDPRoutes)
-	if traefik.HashTCPRoutes(tcpRoutes)+traefik.HashUDPRoutes(udpRoutes) != traefik.GetCurrentL4ConfigHash() {
+	if compiled.L4Hash != traefik.GetCurrentL4ConfigHash() {
 		return false
 	}
-	certificates := make([]traefik.Certificate, len(expected.Traefik.Certificates))
-	for i, certificate := range expected.Traefik.Certificates {
-		certificates[i] = traefik.Certificate{
-			Domain:         certificate.Domain,
-			Certificate:    certificate.Certificate,
-			CertificateKey: certificate.CertificateKey,
-		}
-	}
-	if traefik.HashCertificates(certificates) != traefik.GetCurrentCertificatesHash() {
+	if compiled.CertHash != traefik.GetCurrentCertificatesHash() {
 		return false
 	}
 	reloaded, err := traefik.DynamicConfigReloaded(a.DataDir)

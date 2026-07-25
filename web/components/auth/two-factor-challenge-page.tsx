@@ -24,20 +24,11 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { authClient, useSession } from "@/lib/auth-client";
-import { getSafeAuthRedirect } from "@/lib/two-factor";
-
-type AuthClientError = {
-	message?: string;
-	error_description?: string;
-} | null;
-
-function getErrorMessage(error: AuthClientError, fallback: string) {
-	return error?.message || error?.error_description || fallback;
-}
-
-function normalizeCode(value: string) {
-	return value.replace(/\s/g, "");
-}
+import {
+	getAuthErrorMessage,
+	getSafeAuthRedirect,
+	normalizeTwoFactorCode,
+} from "@/lib/two-factor";
 
 export function TwoFactorChallengePage() {
 	const router = useRouter();
@@ -49,7 +40,7 @@ export function TwoFactorChallengePage() {
 	const [trustDevice, setTrustDevice] = useState(false);
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
-	const normalizedCode = useMemo(() => normalizeCode(code), [code]);
+	const normalizedCode = useMemo(() => normalizeTwoFactorCode(code), [code]);
 
 	useEffect(() => {
 		if (!isPending && session) {
@@ -77,7 +68,7 @@ export function TwoFactorChallengePage() {
 
 		if (response.error) {
 			setError(
-				getErrorMessage(
+				getAuthErrorMessage(
 					response.error,
 					mode === "totp"
 						? "Invalid authenticator code"

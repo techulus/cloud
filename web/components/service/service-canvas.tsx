@@ -41,6 +41,7 @@ import {
 	NativeSelectOption,
 } from "@/components/ui/native-select";
 import type { Environment, ServiceWithDetails } from "@/db/types";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import {
@@ -306,11 +307,11 @@ function ServiceCard({
 			p.isPublic &&
 			p.externalPort,
 	);
-	const hasInternalDns = service.deployments.some(
-		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
+	const hasInternalDns = service.deployments.some((d) =>
+		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	);
-	const runningCount = service.deployments.filter(
-		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
+	const runningCount = service.deployments.filter((d) =>
+		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	).length;
 
 	const hasEndpoints =

@@ -80,10 +80,12 @@ export async function selectBuildServerForRevision(
 	const matchingServers = onlineServers.filter(
 		(server) => server.meta?.arch === arch,
 	);
-	if (matchingServers.length === 0) {
+	const buildServers =
+		matchingServers.length > 0 ? matchingServers : onlineServers;
+	if (buildServers.length === 0) {
 		throw new Error(`No online servers available for platform ${platform}`);
 	}
-	return matchingServers[Math.floor(Math.random() * matchingServers.length)].id;
+	return buildServers[Math.floor(Math.random() * buildServers.length)].id;
 }
 
 export async function getTargetPlatformsForRevision(

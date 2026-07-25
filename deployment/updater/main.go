@@ -33,7 +33,6 @@ type server struct {
 	token      string
 	rawBaseURL string
 	healthURL  string
-	statusFile string
 
 	mu     sync.Mutex
 	status updaterStatus
@@ -42,13 +41,11 @@ type server struct {
 var versionPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 
 func main() {
-	deployDir := getenv("DEPLOY_DIR", "/opt/techulus-cloud")
 	s := &server{
-		deployDir:  deployDir,
+		deployDir:  getenv("DEPLOY_DIR", "/opt/techulus-cloud"),
 		token:      os.Getenv("CONTROL_PLANE_UPDATER_TOKEN"),
 		rawBaseURL: getenv("RAW_BASE_URL", "https://raw.githubusercontent.com/techulus/cloud"),
 		healthURL:  getenv("WEB_HEALTH_URL", "http://web:3000/api/health"),
-		statusFile: filepath.Join(deployDir, "updater-status.json"),
 	}
 	s.status = s.readStatus()
 
@@ -74,7 +71,7 @@ func getenv(key, fallback string) string {
 }
 
 func (s *server) readStatus() updaterStatus {
-	data, err := os.ReadFile(s.statusFile)
+	data, err := os.ReadFile(filepath.Join(s.deployDir, "updater-status.json"))
 	if err != nil {
 		return updaterStatus{Status: "idle", Logs: []string{}}
 	}
@@ -99,7 +96,7 @@ func (s *server) persistStatusLocked() {
 		log.Printf("failed to marshal updater status: %v", err)
 		return
 	}
-	if err := os.WriteFile(s.statusFile, data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(s.deployDir, "updater-status.json"), data, 0o600); err != nil {
 		log.Printf("failed to persist updater status: %v", err)
 	}
 }
@@ -456,10 +453,7 @@ func (s *server) run(name string, args []string, displayArgs []string) error {
 	go s.pipeLogs(&wg, stderr)
 	wg.Wait()
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-	return nil
+	return cmd.Wait()
 }
 
 func (s *server) pipeLogs(wg *sync.WaitGroup, reader io.Reader) {
@@ -480,15 +474,14 @@ func (s *server) pipeLogs(wg *sync.WaitGroup, reader io.Reader) {
 func (s *server) runOutput(name string, args []string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = s.deployDir
-	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	stdout, err := cmd.Output()
+	if err != nil {
 		if stderr.Len() > 0 {
 			return "", errors.New(strings.TrimSpace(stderr.String()))
 		}
 		return "", err
 	}
-	return stdout.String(), nil
+	return string(stdout), nil
 }

@@ -7,8 +7,7 @@ import type {
 	ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
 
-const serviceRevisionSpecSchema = z.strictObject({
-	schemaVersion: z.literal(2),
+const serviceRevisionSpecFields = {
 	image: z.string(),
 	source: z.discriminatedUnion("type", [
 		z.strictObject({ type: z.literal("image"), image: z.string() }),
@@ -72,7 +71,46 @@ const serviceRevisionSpecSchema = z.strictObject({
 	volumes: z.array(
 		z.strictObject({ name: z.string(), containerPath: z.string() }),
 	),
+};
+
+const serviceRevisionSpecV2Schema = z.strictObject({
+	schemaVersion: z.literal(2),
+	...serviceRevisionSpecFields,
 });
+const serviceRevisionSpecSchema = z
+	.strictObject({
+		schemaVersion: z.literal(3),
+		placement: z.discriminatedUnion("mode", [
+			z.strictObject({ mode: z.literal("manual") }),
+			z.strictObject({
+				mode: z.literal("automatic"),
+				replicas: z.number().int().min(1).max(10),
+			}),
+		]),
+		...serviceRevisionSpecFields,
+	})
+	.superRefine((spec, context) => {
+		if (spec.placement.mode === "automatic" && spec.placements.length > 0)
+			context.addIssue({
+				code: "custom",
+				message: "Automatic placement snapshots cannot contain placements",
+			});
+		if (spec.placement.mode === "automatic" && spec.volumes.length > 0)
+			context.addIssue({
+				code: "custom",
+				message: "Services with volumes cannot use automatic placement",
+			});
+		if (spec.stateful && spec.placement.mode === "automatic")
+			context.addIssue({
+				code: "custom",
+				message: "Stateful services cannot use automatic placement",
+			});
+		if (spec.serverless.enabled && spec.placement.mode === "automatic")
+			context.addIssue({
+				code: "custom",
+				message: "Serverless services cannot use automatic placement",
+			});
+	});
 
 export type ServiceRevisionChange = {
 	field: string;
@@ -102,7 +140,12 @@ export type ServiceRevisionChangelogResponse = {
 };
 
 export function parseServiceRevisionSpec(value: unknown): ServiceRevisionSpec {
-	return serviceRevisionSpecSchema.parse(value);
+	const version = (value as { schemaVersion?: unknown } | null)?.schemaVersion;
+	if (version === 2) {
+		const legacy = serviceRevisionSpecV2Schema.parse(value);
+		return { ...legacy, schemaVersion: 3, placement: { mode: "manual" } };
+	}
+	return serviceRevisionSpecSchema.parse(value) as ServiceRevisionSpec;
 }
 
 function compareStrings(a: string, b: string): number {
@@ -249,25 +292,44 @@ export function diffServiceRevisionSpecs(
 			: `${current.resourceLimits.memoryMb} MB`,
 	);
 
-	const previousPlacements = new Map(
-		previous.placements.map((placement) => [placement.serverId, placement]),
+	add(
+		"Placement mode",
+		previous.placement.mode === "automatic" ? "Automatic" : "Manual",
+		current.placement.mode === "automatic" ? "Automatic" : "Manual",
 	);
-	const currentPlacements = new Map(
-		current.placements.map((placement) => [placement.serverId, placement]),
-	);
-	for (const serverId of [
-		...new Set([...previousPlacements.keys(), ...currentPlacements.keys()]),
-	].sort(compareStrings)) {
-		const before = previousPlacements.get(serverId);
-		const after = currentPlacements.get(serverId);
-		const serverName = serverNames.get(serverId)?.trim();
+	if (
+		previous.placement.mode === "automatic" &&
+		current.placement.mode === "automatic"
+	) {
 		add(
-			serverName
-				? `${serverName} replicas`
-				: `Deleted server (${serverId.slice(0, 8)}) replicas`,
-			before ? `${before.count} replicas` : "(none)",
-			after ? `${after.count} replicas` : "(removed)",
+			"Desired replicas",
+			String(previous.placement.replicas),
+			String(current.placement.replicas),
 		);
+	} else if (
+		previous.placement.mode === "manual" &&
+		current.placement.mode === "manual"
+	) {
+		const previousPlacements = new Map(
+			previous.placements.map((placement) => [placement.serverId, placement]),
+		);
+		const currentPlacements = new Map(
+			current.placements.map((placement) => [placement.serverId, placement]),
+		);
+		for (const serverId of [
+			...new Set([...previousPlacements.keys(), ...currentPlacements.keys()]),
+		].sort(compareStrings)) {
+			const before = previousPlacements.get(serverId);
+			const after = currentPlacements.get(serverId);
+			const serverName = serverNames.get(serverId)?.trim();
+			add(
+				serverName
+					? `${serverName} replicas`
+					: `Deleted server (${serverId.slice(0, 8)}) replicas`,
+				before ? `${before.count} replicas` : "(none)",
+				after ? `${after.count} replicas` : "(removed)",
+			);
+		}
 	}
 
 	const previousPorts = new Map(

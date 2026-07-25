@@ -160,22 +160,18 @@ func (a *Agent) SnapshotServerlessTransitions() []agenthttp.ServerlessTransition
 	return append([]agenthttp.ServerlessTransition(nil), a.pendingServerlessTransitions...)
 }
 
-func (a *Agent) ClearReportedServerlessTransitions(count int) {
-	if count <= 0 {
-		return
-	}
-
-	a.serverlessMutex.Lock()
-	defer a.serverlessMutex.Unlock()
-	if count > len(a.pendingServerlessTransitions) {
-		count = len(a.pendingServerlessTransitions)
-	}
-	a.pendingServerlessTransitions = a.pendingServerlessTransitions[count:]
-}
-
 func (a *Agent) AcknowledgeServerlessTransitions(results []agenthttp.ServerlessTransitionResult, reportedCount int) {
 	if len(results) == 0 {
-		a.ClearReportedServerlessTransitions(reportedCount)
+		if reportedCount <= 0 {
+			return
+		}
+
+		a.serverlessMutex.Lock()
+		defer a.serverlessMutex.Unlock()
+		if reportedCount > len(a.pendingServerlessTransitions) {
+			reportedCount = len(a.pendingServerlessTransitions)
+		}
+		a.pendingServerlessTransitions = a.pendingServerlessTransitions[reportedCount:]
 		return
 	}
 

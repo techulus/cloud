@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
@@ -25,6 +23,7 @@ import {
 	revisionSpecToDeployedConfig,
 	type SourceConfig,
 } from "@/lib/service-config";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 export async function GET(
 	request: Request,
@@ -154,22 +153,25 @@ export async function GET(
 						.where(eq(serviceRevisions.id, activeDeployment.serviceRevisionId))
 						.then((rows) => rows[0])
 				: null;
-			const revisionServers = activeRevision
+			const activeSpecification = activeRevision
+				? parseServiceRevisionSpec(activeRevision.specification)
+				: null;
+			const revisionServers = activeSpecification
 				? await db
 						.select({ id: servers.id, name: servers.name })
 						.from(servers)
 						.where(
 							inArray(
 								servers.id,
-								activeRevision.specification.placements.map(
+								activeSpecification.placements.map(
 									(placement) => placement.serverId,
 								),
 							),
 						)
 				: [];
-			const activeConfig = activeRevision
+			const activeConfig = activeSpecification
 				? revisionSpecToDeployedConfig(
-						activeRevision.specification,
+						activeSpecification,
 						Object.fromEntries(
 							revisionServers.map((server) => [server.id, server.name]),
 						),

@@ -7,7 +7,7 @@ description: "Bind custom domains with automatic HTTPS."
 
 Custom domains are bound to a specific service port. When you add a domain:
 
-1. Point your domain's DNS to a proxy node's IP address (or your GeoDNS hostname).
+1. Point your domain's DNS to your edge hostname.
 2. Add the domain in the service port settings.
 3. The platform automatically provisions a TLS certificate via Let's Encrypt.
 
@@ -20,9 +20,9 @@ offer automatic domains in service networking settings. For example, with the
 setting configured as `apps.example.com`, a service whose private hostname is
 `project-api-production` can use `project-api-production.apps.example.com`.
 
-Create a wildcard DNS record for `*.apps.example.com` that points to all proxy
-servers. The setting contains only the base domain, without `*.` or a protocol.
-Custom domains remain available alongside automatic domains.
+Create a wildcard `CNAME` record for `*.apps.example.com` that points to your
+edge hostname. The setting contains only the base domain, without `*.` or a
+protocol. Custom domains remain available alongside automatic domains.
 
 ## TLS Certificates
 
@@ -37,7 +37,14 @@ Certificates are:
 
 When using multiple proxy nodes for geographic distribution, all proxies share the same TLS certificates from the control plane.
 
-Set up a GeoDNS hostname that routes clients to the nearest healthy proxy, then point your custom domains to that hostname. See the [Architecture](/architecture#multiple-proxy-nodes) page for details.
+A stable external load balancer with active health checks is the ideal production
+solution for proxy failure. Configure every proxy as an origin, point the edge
+hostname to the load balancer, and point custom domains to the edge hostname.
+
+Health-aware GeoDNS is an alternative, but failover remains subject to DNS and
+client caching. Plain multiple A records provide best-effort distribution and do
+not guarantee that clients avoid an offline proxy. See the
+[Architecture](/architecture#multiple-proxy-nodes) page for details.
 
 ## Protocols
 

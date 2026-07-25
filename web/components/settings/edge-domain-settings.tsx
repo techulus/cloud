@@ -114,10 +114,16 @@ export function EdgeDomainSettings({
 					</div>
 
 					<div>
-						<Label>DNS records for the canonical hostname</Label>
+						<Label>Proxy origin addresses</Label>
 						<p className="text-sm text-muted-foreground mt-1">
-							Create one A record for each proxy IPv4 address using your DNS
-							provider and routing policy.
+							Configure these addresses as origins behind your external load
+							balancer. A stable external load balancer with active health
+							checks is the ideal production solution for proxy failure.
+						</p>
+						<p className="mt-2 text-xs text-muted-foreground">
+							A direct A record to one proxy has no ingress failover. Multiple A
+							records provide best-effort distribution, but clients may continue
+							using an offline proxy because of DNS caching.
 						</p>
 						<div className="mt-3 rounded-md border divide-y">
 							{initial.hostname && ipv4Targets.length > 0 ? (
@@ -127,7 +133,7 @@ export function EdgeDomainSettings({
 										className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[4rem_1fr_1fr]"
 									>
 										<Badge variant="outline" className="w-fit font-mono">
-											A
+											IP
 										</Badge>
 										<span className="font-mono break-all">
 											{initial.hostname}
@@ -199,12 +205,14 @@ export function EdgeDomainSettings({
 					</div>
 
 					<p className="text-sm text-muted-foreground">
-						Create wildcard DNS records for{" "}
+						Create a wildcard CNAME record for{" "}
 						<code>
 							*.
 							{initialAutoSubdomainDomain ?? "your automatic subdomain domain"}
 						</code>{" "}
-						that resolve to every proxy server public IPv4 address.
+						that points to the edge domain. In production, the edge domain
+						should resolve to a stable external load balancer with active health
+						checks.
 					</p>
 				</div>
 			</div>

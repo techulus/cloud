@@ -14,21 +14,27 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
 	Server as ServerType,
 	ServiceWithDetails as Service,
 } from "@/db/types";
 
-type ServerInfo = Pick<ServerType, "id" | "name" | "isProxy">;
-type ServerWithStatus = ServerInfo & { status: string };
+type ServerInfo = Pick<
+	ServerType,
+	"id" | "name" | "isProxy" | "status" | "wireguardIp"
+>;
+type PlacementMode = "manual" | "automatic";
 
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	const res = await fetch(url);
-	const servers: ServerWithStatus[] = await res.json();
-	return servers.map(({ id, name, isProxy }) => ({
+	const servers: ServerInfo[] = await res.json();
+	return servers.map(({ id, name, isProxy, status, wireguardIp }) => ({
 		id,
 		name,
 		isProxy,
+		status,
+		wireguardIp,
 	}));
 };
 
@@ -46,6 +52,11 @@ export const ReplicasSection = memo(function ReplicasSection({
 		{},
 	);
 	const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+	const [placementMode, setPlacementMode] = useState<PlacementMode>(
+		service.serverlessEnabled ? "manual" : service.placementMode,
+	);
+	const [desiredReplicas, setDesiredReplicas] = useState(service.replicas);
+	const [isEditing, setIsEditing] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 
 	const configuredReplicas = useMemo(
@@ -64,7 +75,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 			} else {
 				setSelectedServerId(null);
 			}
-		} else {
+		} else if (!isEditing) {
 			const replicaMap: Record<string, number> = {};
 			for (const r of configuredReplicas) {
 				replicaMap[r.serverId] = r.count;
@@ -75,14 +86,78 @@ export const ReplicasSection = memo(function ReplicasSection({
 				}
 			}
 			setLocalReplicas(replicaMap);
+			setPlacementMode(
+				service.serverlessEnabled ? "manual" : service.placementMode,
+			);
+			setDesiredReplicas(service.replicas);
 		}
-	}, [servers, configuredReplicas, service.stateful, service.lockedServerId]);
+	}, [
+		servers,
+		configuredReplicas,
+		service.stateful,
+		service.lockedServerId,
+		service.placementMode,
+		service.serverlessEnabled,
+		service.replicas,
+		isEditing,
+	]);
+
+	useEffect(() => {
+		if (!servers || service.stateful) return;
+		setLocalReplicas((current) => {
+			const next = { ...current };
+			for (const server of servers) next[server.id] ??= 0;
+			return next;
+		});
+	}, [servers, service.stateful]);
+
+	useEffect(() => {
+		if (
+			!isEditing ||
+			service.stateful ||
+			placementMode !== service.placementMode
+		)
+			return;
+		if (placementMode === "automatic" && desiredReplicas === service.replicas) {
+			setIsEditing(false);
+			return;
+		}
+		if (placementMode === "manual") {
+			const configuredMap = new Map(
+				configuredReplicas.map((replica) => [replica.serverId, replica.count]),
+			);
+			const localEntries = Object.entries(localReplicas).filter(
+				([, count]) => count > 0,
+			);
+			if (
+				localEntries.length === configuredMap.size &&
+				localEntries.every(
+					([serverId, count]) => configuredMap.get(serverId) === count,
+				)
+			) {
+				setIsEditing(false);
+			}
+		}
+	}, [
+		configuredReplicas,
+		desiredReplicas,
+		isEditing,
+		localReplicas,
+		placementMode,
+		service.placementMode,
+		service.replicas,
+		service.stateful,
+	]);
 
 	const hasChanges = useMemo(() => {
 		if (service.stateful) {
 			const currentServerId =
 				configuredReplicas.length > 0 ? configuredReplicas[0].serverId : null;
 			return selectedServerId !== currentServerId;
+		}
+		if (placementMode !== service.placementMode) return true;
+		if (placementMode === "automatic") {
+			return desiredReplicas !== service.replicas;
 		}
 
 		const configuredMap = new Map(
@@ -93,7 +168,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 			if (configured !== count) return true;
 		}
 		return false;
-	}, [configuredReplicas, localReplicas, service.stateful, selectedServerId]);
+	}, [
+		configuredReplicas,
+		desiredReplicas,
+		localReplicas,
+		placementMode,
+		service.placementMode,
+		service.replicas,
+		service.stateful,
+		selectedServerId,
+	]);
 
 	const isChangingServer = useMemo(() => {
 		if (!service.stateful || !service.lockedServerId) return false;
@@ -112,11 +196,27 @@ export const ReplicasSection = memo(function ReplicasSection({
 	]);
 
 	const updateReplicas = useCallback((serverId: string, value: number) => {
+		setIsEditing(true);
 		setLocalReplicas((prev) => ({
 			...prev,
-			[serverId]: Math.max(0, Math.min(10, value)),
+			[serverId]: Math.max(0, Math.min(10, Math.floor(value))),
 		}));
 	}, []);
+
+	const handleModeChange = (mode: string) => {
+		const nextMode = mode as PlacementMode;
+		if (nextMode === "automatic" && service.serverlessEnabled) return;
+		if (nextMode === placementMode) return;
+		setIsEditing(true);
+		if (nextMode === "automatic") {
+			const manualTotal = Object.values(localReplicas).reduce(
+				(sum, count) => sum + count,
+				0,
+			);
+			setDesiredReplicas(Math.max(1, Math.min(10, manualTotal || 1)));
+		}
+		setPlacementMode(nextMode);
+	};
 
 	const handleSave = async () => {
 		setIsSaving(true);
@@ -126,12 +226,25 @@ export const ReplicasSection = memo(function ReplicasSection({
 				replicas = selectedServerId
 					? [{ serverId: selectedServerId, count: 1 }]
 					: [];
-			} else {
+			} else if (placementMode === "manual") {
 				replicas = Object.entries(localReplicas)
 					.filter(([, count]) => count > 0)
 					.map(([serverId, count]) => ({ serverId, count }));
+				await updateServiceConfig(service.id, {
+					placement: { mode: "manual", placements: replicas },
+				});
+				onUpdate();
+				return;
+			} else {
+				await updateServiceConfig(service.id, {
+					placement: { mode: "automatic", replicas: desiredReplicas },
+				});
+				onUpdate();
+				return;
 			}
-			await updateServiceConfig(service.id, { replicas });
+			await updateServiceConfig(service.id, {
+				placement: { mode: "manual", placements: replicas },
+			});
 			onUpdate();
 		} finally {
 			setIsSaving(false);
@@ -148,11 +261,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 	const workerUnavailableReason = service.serverlessEnabled
 		? "Disable serverless before deploying to worker nodes"
 		: null;
+	const manualServerUnavailableReason = (server: ServerInfo) => {
+		if (server.status !== "online" || !server.wireguardIp) {
+			return "Server must be online and configured before placement";
+		}
+		return service.serverlessEnabled && !server.isProxy
+			? workerUnavailableReason
+			: null;
+	};
 
-	const configuredTotal = configuredReplicas.reduce(
-		(sum, r) => sum + r.count,
-		0,
-	);
+	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 10;
 
 	if (service.stateful) {
 		return (
@@ -215,12 +333,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 										type="button"
 										key={server.id}
 										onClick={() => setSelectedServerId(server.id)}
-										disabled={service.serverlessEnabled && !server.isProxy}
-										title={
-											service.serverlessEnabled && !server.isProxy
-												? workerUnavailableReason || undefined
-												: undefined
-										}
+										disabled={!!manualServerUnavailableReason(server)}
+										title={manualServerUnavailableReason(server) || undefined}
 										className={`flex items-center gap-4 p-3 rounded-md text-left transition-colors ${
 											selectedServerId === server.id
 												? "bg-primary text-primary-foreground"
@@ -264,15 +378,68 @@ export const ReplicasSection = memo(function ReplicasSection({
 	return (
 		<ConfigSection
 			title="Replicas"
-			summary={
-				configuredTotal > 0
-					? `${configuredTotal} replica${configuredTotal !== 1 ? "s" : ""}`
-					: "No replicas"
-			}
-			summaryMuted={configuredTotal === 0}
+			summary={`${service.placementMode === "automatic" ? "Automatic" : "Manual"} · ${service.replicas} desired`}
+			summaryMuted={service.replicas === 0}
 		>
 			<div className="space-y-4">
-				{isLoading ? (
+				<Tabs value={placementMode} onValueChange={handleModeChange}>
+					<TabsList className="w-fit" aria-label="Placement mode">
+						{!service.serverlessEnabled && (
+							<TabsTrigger value="automatic" className="px-4">
+								Automatic
+							</TabsTrigger>
+						)}
+						<TabsTrigger value="manual" className="px-4">
+							Manual
+						</TabsTrigger>
+					</TabsList>
+				</Tabs>
+
+				{placementMode === "automatic" ? (
+					<div className="space-y-4">
+						<div className="space-y-1">
+							<label htmlFor="desired-replicas" className="text-sm font-medium">
+								Desired replicas
+							</label>
+							<p className="text-sm text-muted-foreground">
+								The control plane distributes replicas evenly across healthy
+								nodes and moves them after failures.
+							</p>
+						</div>
+						<Input
+							id="desired-replicas"
+							type="number"
+							min={1}
+							max={10}
+							step={1}
+							value={desiredReplicas}
+							onChange={(event) => {
+								setIsEditing(true);
+								setDesiredReplicas(
+									Math.max(
+										1,
+										Math.min(10, Math.floor(event.target.valueAsNumber || 1)),
+									),
+								);
+							}}
+							className="w-24"
+							aria-describedby="automatic-replica-range"
+						/>
+						<p
+							id="automatic-replica-range"
+							className="text-xs text-muted-foreground"
+						>
+							Choose between 1 and 10 replicas.
+						</p>
+						{hasChanges ? (
+							<div className="pt-3 border-t">
+								<Button onClick={handleSave} disabled={isSaving} size="sm">
+									{isSaving ? "Saving..." : "Save"}
+								</Button>
+							</div>
+						) : null}
+					</div>
+				) : isLoading ? (
 					<div className="flex justify-center py-4">
 						<Spinner />
 					</div>
@@ -283,7 +450,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 						</EmptyMedia>
 						<EmptyTitle>No online servers available</EmptyTitle>
 						<EmptyDescription>
-							Add a server to deploy this service.
+							Add a server to place replicas manually, or use automatic
+							placement.
 						</EmptyDescription>
 					</Empty>
 				) : (
@@ -292,11 +460,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 							{servers.map((server) => (
 								<div
 									key={server.id}
-									title={
-										service.serverlessEnabled && !server.isProxy
-											? workerUnavailableReason || undefined
-											: undefined
-									}
+									title={manualServerUnavailableReason(server) || undefined}
 									className="flex items-center justify-between gap-4 p-3 bg-muted rounded-md"
 								>
 									<div className="flex-1 min-w-0">
@@ -316,14 +480,12 @@ export const ReplicasSection = memo(function ReplicasSection({
 													(localReplicas[server.id] || 0) - 1,
 												)
 											}
-											disabled={
-												(localReplicas[server.id] || 0) <= 0 ||
-												(service.serverlessEnabled && !server.isProxy)
-											}
+											disabled={(localReplicas[server.id] || 0) <= 0}
 										>
 											-
 										</Button>
 										<Input
+											aria-label={`Replicas on ${server.name}`}
 											type="number"
 											value={localReplicas[server.id] || 0}
 											onChange={(e) =>
@@ -332,7 +494,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 													parseInt(e.target.value, 10) || 0,
 												)
 											}
-											disabled={service.serverlessEnabled && !server.isProxy}
+											disabled={!!manualServerUnavailableReason(server)}
 											min={0}
 											max={10}
 											className="w-16 h-8 text-center"
@@ -349,7 +511,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 											}
 											disabled={
 												(localReplicas[server.id] || 0) >= 10 ||
-												(service.serverlessEnabled && !server.isProxy)
+												!!manualServerUnavailableReason(server)
 											}
 										>
 											+
@@ -364,14 +526,18 @@ export const ReplicasSection = memo(function ReplicasSection({
 								{totalReplicas !== 1 ? "s" : ""}
 							</span>
 						</div>
-						{totalReplicas === 0 && (
+						{!manualTotalIsValid && (
 							<p className="text-sm text-amber-600 dark:text-amber-400">
-								Add at least 1 replica to deploy
+								Manual placement requires 1 to 10 replicas in total.
 							</p>
 						)}
 						{hasChanges && (
 							<div className="pt-3 border-t">
-								<Button onClick={handleSave} disabled={isSaving} size="sm">
+								<Button
+									onClick={handleSave}
+									disabled={isSaving || !manualTotalIsValid}
+									size="sm"
+								>
 									{isSaving ? "Saving..." : "Save"}
 								</Button>
 							</div>

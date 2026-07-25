@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { servers } from "@/db/schema";

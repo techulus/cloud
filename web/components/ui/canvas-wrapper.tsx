@@ -1,6 +1,7 @@
-"use client";
-
-import { cn } from "@/lib/utils";
+import {
+	observedReadyPhases,
+	observedStartingPhases,
+} from "@/lib/deployment-status";
 
 export type StatusColors = {
 	bg: string;
@@ -74,22 +75,16 @@ export function getStatusColor(status: string): StatusColors {
 export function getStatusColorFromDeployments(
 	deployments: { observedPhase: string; runtimeDesiredState?: string }[],
 ): StatusColors {
-	const hasRunning = deployments.some(
-		(d) => d.observedPhase === "running" || d.observedPhase === "healthy",
+	const hasRunning = deployments.some((d) =>
+		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	);
-	const hasPending = deployments.some(
-		(d) =>
-			d.observedPhase === "pending" ||
-			d.observedPhase === "pulling" ||
-			d.observedPhase === "starting" ||
-			d.observedPhase === "waking",
+	const hasPending = deployments.some((d) =>
+		(observedStartingPhases as readonly string[]).includes(d.observedPhase),
 	);
 	const hasFailed = deployments.some((d) => d.observedPhase === "failed");
 	const hasSleeping = deployments.some((d) => d.observedPhase === "sleeping");
 	const hasStopped = deployments.some(
-		(d) =>
-			d.observedPhase === "stopped" ||
-			d.runtimeDesiredState === "removed",
+		(d) => d.observedPhase === "stopped" || d.runtimeDesiredState === "removed",
 	);
 	const hasUnknown = deployments.some((d) => d.observedPhase === "unknown");
 
@@ -100,58 +95,4 @@ export function getStatusColorFromDeployments(
 	if (hasSleeping) return statusColorMap.sleeping;
 	if (hasStopped) return statusColorMap.stopped;
 	return defaultColors;
-}
-
-interface CanvasWrapperProps {
-	children?: React.ReactNode;
-	height?: string;
-	className?: string;
-	isEmpty?: boolean;
-	emptyContent?: React.ReactNode;
-}
-
-export function CanvasWrapper({
-	children,
-	height = "75vh",
-	className,
-	isEmpty,
-	emptyContent,
-}: CanvasWrapperProps) {
-	if (isEmpty && emptyContent) {
-		return (
-			<div
-				className={cn(
-					"rounded-xl border border-slate-200 dark:border-slate-800",
-					"bg-slate-50 dark:bg-slate-900/50",
-					"flex items-center justify-center",
-					className,
-				)}
-				style={{
-					height,
-					backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.3) 1px, transparent 1px)`,
-					backgroundSize: "20px 20px",
-				}}
-			>
-				{emptyContent}
-			</div>
-		);
-	}
-
-	return (
-		<div
-			className={cn(
-				"p-6 rounded-xl border border-slate-200 dark:border-slate-800",
-				"bg-slate-50/50 dark:bg-slate-900/30",
-				"overflow-auto",
-				className,
-			)}
-			style={{
-				height,
-				backgroundImage: `radial-gradient(circle, rgb(161 161 170 / 0.2) 1px, transparent 1px)`,
-				backgroundSize: "24px 24px",
-			}}
-		>
-			{children}
-		</div>
-	);
 }

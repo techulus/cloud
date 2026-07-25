@@ -4,8 +4,6 @@ import type {
 	deploymentPorts,
 	deployments,
 	environments,
-	githubInstallations,
-	githubRepos,
 	memberInvitations,
 	projects,
 	rollouts,
@@ -16,7 +14,6 @@ import type {
 	services,
 	serviceVolumes,
 	user,
-	volumeBackups,
 	workQueue,
 } from "./schema";
 
@@ -31,10 +28,7 @@ export type Secret = typeof secrets.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
 export type Rollout = typeof rollouts.$inferSelect;
-export type GithubRepo = typeof githubRepos.$inferSelect;
-export type GithubInstallation = typeof githubInstallations.$inferSelect;
 export type Build = typeof builds.$inferSelect;
-export type VolumeBackup = typeof volumeBackups.$inferSelect;
 export type WorkQueue = typeof workQueue.$inferSelect;
 export type User = typeof user.$inferSelect;
 export type MemberInvitation = typeof memberInvitations.$inferSelect;
@@ -42,7 +36,6 @@ export type MemberRole = User["role"];
 export type InvitableMemberRole = MemberInvitation["role"];
 
 export type DeploymentStatus = NonNullable<Deployment["observedPhase"]>;
-export type HealthStatus = Deployment["healthStatus"];
 export type RolloutStatus = NonNullable<Rollout["status"]>;
 export type BuildStatus = NonNullable<Build["status"]>;
 

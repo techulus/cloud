@@ -303,41 +303,14 @@ func ForceRemove(containerID string) error {
 }
 
 func Restart(containerID string) error {
-	exists, err := ContainerExists(containerID)
-	if err != nil {
-		return fmt.Errorf("failed to check container existence: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("container does not exist: %s", containerID)
-	}
-
-	log.Printf("[podman:restart] restarting container %s", containerID)
-	restartCmd := exec.Command("podman", "restart", containerID)
-	if output, err := restartCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to restart container: %s: %w", string(output), err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	log.Printf("[podman:restart] verifying container %s is running", containerID)
-	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
-		running, err := IsContainerRunning(containerID)
-		if err != nil {
-			return false, err
-		}
-		return running, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("container failed to restart: %w", err)
-	}
-
-	log.Printf("[podman:restart] container %s restarted successfully", containerID)
-	return nil
+	return startOrRestart(containerID, "restart")
 }
 
 func Start(containerID string) error {
+	return startOrRestart(containerID, "start")
+}
+
+func startOrRestart(containerID, operation string) error {
 	exists, err := ContainerExists(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to check container existence: %w", err)
@@ -346,16 +319,16 @@ func Start(containerID string) error {
 		return fmt.Errorf("container does not exist: %s", containerID)
 	}
 
-	log.Printf("[podman:start] starting container %s", containerID)
-	startCmd := exec.Command("podman", "start", containerID)
-	if output, err := startCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to start container: %s: %w", string(output), err)
+	log.Printf("[podman:%s] %sing container %s", operation, operation, containerID)
+	cmd := exec.Command("podman", operation, containerID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to %s container: %s: %w", operation, string(output), err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	log.Printf("[podman:start] verifying container %s is running", containerID)
+	log.Printf("[podman:%s] verifying container %s is running", operation, containerID)
 	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
 		running, err := IsContainerRunning(containerID)
 		if err != nil {
@@ -365,10 +338,10 @@ func Start(containerID string) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("container failed to start: %w", err)
+		return fmt.Errorf("container failed to %s: %w", operation, err)
 	}
 
-	log.Printf("[podman:start] container %s started successfully", containerID)
+	log.Printf("[podman:%s] container %s %sed successfully", operation, containerID, operation)
 	return nil
 }
 

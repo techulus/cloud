@@ -210,8 +210,8 @@ Worker nodes do not run Traefik.
 
 Public HTTP services can be configured as serverless. Serverless scale-to-zero is
 proxy-local: deployments placed on proxy nodes may sleep after an idle period,
-then wake on the next public request handled by that proxy. Deployments placed on
-worker nodes stay always on and remain routable.
+then wake on the next public request handled by that proxy. Serverless services
+use manual placement on proxy nodes.
 
 Serverless uses the same declarative expected-state model as normal
 deployments, but proxy agents own the local lifecycle decision:
@@ -220,8 +220,6 @@ deployments, but proxy agents own the local lifecycle decision:
   `runtimeDesiredState: "stopped"` and `observedPhase: "sleeping"`.
 - Expected state advertises proxy-hosted sleeping containers with
   `desiredState: "stopped"` so normal reconciliation does not restart them.
-- Expected state advertises worker-hosted deployments with
-  `desiredState: "running"` even when the service is serverless-enabled.
 - The proxy gateway wakes local sleeping deployments from expected-state
   metadata and reports `wake_started` through the next status report.
 - The proxy agent reports local sleep with a `sleep` status transition after it
@@ -248,18 +246,15 @@ sequenceDiagram
 
 Proxy Traefik routes point to the local wake gateway only on proxy nodes that
 host a local proxy deployment for that serverless service. Non-owner proxies do
-not emit a public HTTP route for that service, even when always-on worker
-upstreams exist. Worker-only serverless services use normal direct routes because
-there is nothing local to wake.
+not emit a public HTTP route for that service.
 
 Public DNS or external load balancers must therefore send serverless traffic only
 to proxy nodes that own a local proxy replica for that service. Cross-proxy wake
 coordination is intentionally out of scope.
 
 The wake gateway keeps the incoming request open while it starts local proxy
-replicas, unless an always-on worker upstream is already ready. Queued requests
-resume when one upstream is ready. If no upstream becomes ready and no local wake
-is still in progress, the gateway returns a 503.
+replicas. Queued requests resume when one upstream is ready. If no upstream
+becomes ready and no local wake is still in progress, the gateway returns a 503.
 
 Sleep is driven by the proxy gateway's in-memory activity timer. The control
 plane does not scan request activity and does not enqueue sleep work. It accepts
@@ -273,11 +268,13 @@ deployments.
 
 ### Multiple Proxy Nodes
 
-The platform supports geographically distributed proxy nodes with proximity steering:
+The platform supports multiple proxy nodes behind a shared edge hostname. A
+stable external load balancer with active health checks is the ideal production
+solution for proxy failure:
 
-- Users point custom domains to a single GeoDNS-managed hostname.
-- GeoDNS routes clients to the nearest healthy proxy.
-- Health checks fail over automatically when a proxy becomes unavailable.
+- Users point custom domains to one shared edge hostname.
+- The load balancer sends new connections only to healthy proxy origins.
+- Workload placement changes proxy routes without changing public DNS.
 - All proxies share the same TLS certificates from the control plane.
 
 Example:
@@ -287,11 +284,15 @@ Proxy US:   1.2.3.4
 Proxy EU:   5.6.7.8
 Proxy SYD:  9.10.11.12
 
-GeoDNS:
+External load balancer:
   example.com -> lb.techulus.cloud
-  -> route client to nearest proxy
-  -> fail over when a proxy is unhealthy
+  -> actively health-check proxy origins
+  -> stop new traffic to an unhealthy proxy
 ```
+
+Health-aware GeoDNS can provide proximity steering, but recovery remains subject
+to resolver and client caching. Plain multiple A records are best-effort traffic
+distribution, not reliable proxy failover.
 
 ### Proximity-Aware Load Balancing
 

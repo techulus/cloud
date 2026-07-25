@@ -17,11 +17,6 @@ and stops the local container. The next public HTTP request wakes local
 proxy-hosted deployments and is held until an upstream is ready or the wake
 timeout is reached.
 
-Worker-hosted deployments do not sleep. If a serverless-enabled service has only
-worker replicas, it stays always on and routes directly. If a service has both
-proxy and worker replicas, proxy replicas may sleep while worker replicas remain
-routable.
-
 For services with proxy-hosted serverless replicas, public traffic must be sent
 only to proxy nodes that host a local proxy replica for that service. Non-owner
 proxies do not emit a public HTTP route for the service, so DNS or the external
@@ -36,15 +31,20 @@ Serverless settings are configured per service:
 | Wake timeout | `300s` | Maximum time the wake gateway waits for ready upstreams |
 
 A cold wake starts the sleeping local proxy replicas for that host. Held
-requests resume when one upstream is ready. If a worker upstream is already
-ready, the gateway can serve it immediately while local proxy replicas wake in
-the background.
+requests resume when one upstream is ready.
 
 Serverless services require at least one configured replica.
 
 ## Placement
 
-Services use manual placement. Select the target servers and replica counts explicitly before deploying.
+Stateless services support automatic and manual placement. Automatic placement
+stores the desired replica count and distributes replicas across online,
+configured nodes during rollout. Manual placement selects exact target servers
+and replica counts.
+
+Serverless services currently require manual placement on proxy nodes. Automatic
+serverless placement will remain unavailable until every healthy proxy can route
+requests through the owning proxy's wake gateway.
 
 ## Server Pinning
 
@@ -61,6 +61,6 @@ You can also manually lock any service to a specific server by setting the locke
 - Stateful services do not automatically fail over to another server.
 - Maximum 10 replicas per service.
 - Serverless scaling requires a public HTTP service domain.
-- Sleep and wake are proxy-local. Worker replicas are intentionally always on.
+- Sleep and wake are proxy-local; serverless replicas must be placed on proxy nodes.
 - Serverless traffic must be routed only to proxy nodes that own a local proxy replica for that service.
 - Proxy agents report sleep and wake transitions through normal status reports.

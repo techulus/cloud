@@ -89,4 +89,35 @@ describe("public API configuration state", () => {
 		expect(configuration.hasPendingChanges).toBe(false);
 		expect(configuration.changes).toEqual([]);
 	});
+
+	it("serializes automatic placement from desired service replicas", async () => {
+		mocks.rows.push([], [], [], [], []);
+		const configuration = await safeConfiguration({
+			id: "service-1",
+			name: "Automatic",
+			sourceType: "image",
+			image: "nginx",
+			hostname: null,
+			stateful: false,
+			placementMode: "automatic",
+			replicas: 4,
+			healthCheckCmd: null,
+			startCommand: null,
+			resourceCpuLimit: null,
+			resourceMemoryLimitMb: null,
+			serverlessEnabled: false,
+			serverlessSleepAfterSeconds: 300,
+			serverlessWakeTimeoutSeconds: 300,
+			deploymentSchedule: null,
+			backupEnabled: false,
+			backupSchedule: null,
+		} as never);
+
+		expect(configuration.current.placement).toEqual({
+			mode: "automatic",
+			replicas: 4,
+		});
+		expect(configuration.current.replicas).toBe(4);
+		expect(configuration.current.placements).toEqual([]);
+	});
 });

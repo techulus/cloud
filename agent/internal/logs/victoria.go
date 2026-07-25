@@ -47,6 +47,32 @@ func (v *VictoriaLogsSender) setAuthHeader(req *http.Request) {
 	}
 }
 
+func (v *VictoriaLogsSender) post(body []byte, transportError string) (int, time.Duration, error) {
+	req, err := http.NewRequest("POST", v.endpoint+"/insert/jsonline", bytes.NewReader(body))
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	v.setAuthHeader(req)
+
+	start := time.Now()
+	resp, err := v.client.Do(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		return 0, elapsed, fmt.Errorf("%s: %w", transportError, err)
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode, elapsed, nil
+}
+
+func acceptedVictoriaStatus(status int) error {
+	if status != http.StatusOK && status != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code: %d", status)
+	}
+	return nil
+}
+
 type victoriaLogEntry struct {
 	Msg          string `json:"_msg"`
 	Time         string `json:"_time"`
@@ -89,27 +115,12 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 	url := v.endpoint + "/insert/jsonline"
 	log.Printf("[logs] sending %d logs (%d bytes) to %s", len(batch.Logs), buf.Len(), url)
 
-	req, err := http.NewRequest("POST", url, &buf)
+	status, elapsed, err := v.post(buf.Bytes(), "failed to send logs")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	v.setAuthHeader(req)
-
-	start := time.Now()
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send logs: %w", err)
-	}
-	defer resp.Body.Close()
-
-	log.Printf("[logs] response: %d in %v", resp.StatusCode, time.Since(start))
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	log.Printf("[logs] response: %d in %v", status, elapsed)
+	return acceptedVictoriaStatus(status)
 }
 
 type victoriaHTTPLogEntry struct {
@@ -156,27 +167,12 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 	url := v.endpoint + "/insert/jsonline"
 	log.Printf("[traefik-logs] sending %d HTTP logs (%d bytes) to %s", len(logs), buf.Len(), url)
 
-	req, err := http.NewRequest("POST", url, &buf)
+	status, elapsed, err := v.post(buf.Bytes(), "failed to send HTTP logs")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	v.setAuthHeader(req)
-
-	start := time.Now()
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send HTTP logs: %w", err)
-	}
-	defer resp.Body.Close()
-
-	log.Printf("[traefik-logs] response: %d in %v", resp.StatusCode, time.Since(start))
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	log.Printf("[traefik-logs] response: %d in %v", status, elapsed)
+	return acceptedVictoriaStatus(status)
 }
 
 type victoriaBuildLogEntry struct {
@@ -229,26 +225,11 @@ func (v *VictoriaLogsSender) SendBuildLogs(buildID, serviceID, projectID string,
 		return nil
 	}
 
-	url := v.endpoint + "/insert/jsonline"
-
-	req, err := http.NewRequest("POST", url, &buf)
+	status, _, err := v.post(buf.Bytes(), "failed to send build logs")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	v.setAuthHeader(req)
-
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send build logs: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	return acceptedVictoriaStatus(status)
 }
 
 func (v *VictoriaLogsSender) SendAgentLogs(logs []AgentLog) error {
@@ -273,24 +254,9 @@ func (v *VictoriaLogsSender) SendAgentLogs(logs []AgentLog) error {
 		return nil
 	}
 
-	url := v.endpoint + "/insert/jsonline"
-
-	req, err := http.NewRequest("POST", url, &buf)
+	status, _, err := v.post(buf.Bytes(), "failed to send agent logs")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	v.setAuthHeader(req)
-
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send agent logs: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	return acceptedVictoriaStatus(status)
 }

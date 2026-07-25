@@ -9,16 +9,15 @@ import {
 	type MetricRange,
 	parseMetricRange,
 } from "@/lib/metric-ranges";
+import {
+	buildFetchOptions,
+	type EndpointConfig,
+	parseEndpoint,
+} from "@/lib/victoria";
 
 export { METRIC_RANGE_OPTIONS, type MetricRange, parseMetricRange };
 
 let hasWarnedMissingMetricsConfig = false;
-
-type EndpointConfig = {
-	url: string;
-	username?: string;
-	password?: string;
-};
 
 type VictoriaInstantResponse = {
 	status: string;
@@ -93,8 +92,6 @@ export type NodeMetricsHistory = {
 	diskUsedBytes: NodeMetricPoint[];
 };
 
-export type MetricsHistory = NodeMetricsHistory;
-
 const METRIC_NAMES = {
 	cpuUsagePercent: "techulus_node_cpu_usage_percent",
 	memoryUsagePercent: "techulus_node_memory_usage_percent",
@@ -103,31 +100,12 @@ const METRIC_NAMES = {
 	diskUsedBytes: "techulus_node_disk_used_bytes",
 } as const;
 
-function parseEndpoint(endpoint: string): EndpointConfig {
-	const parsed = new URL(endpoint);
-	const username = parsed.username || undefined;
-	const password = parsed.password || undefined;
-	parsed.username = "";
-	parsed.password = "";
-	return { url: parsed.toString().replace(/\/$/, ""), username, password };
-}
-
 function getQueryEndpoint(): EndpointConfig | undefined {
 	const endpoint =
 		process.env.VICTORIA_METRICS_PRIVATE_URL ||
 		process.env.VICTORIA_METRICS_URL;
 	if (!endpoint) return undefined;
 	return parseEndpoint(endpoint);
-}
-
-function buildFetchOptions(config: EndpointConfig): RequestInit {
-	if (config.username) {
-		const credentials = Buffer.from(
-			`${config.username}:${config.password || ""}`,
-		).toString("base64");
-		return { headers: { Authorization: `Basic ${credentials}` } };
-	}
-	return {};
 }
 
 export function isMetricsEnabled(): boolean {

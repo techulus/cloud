@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { requireApiKeyRole } from "@/lib/api-auth";
 export async function GET(request: Request) {
 	const auth = await requireApiKeyRole(request, [

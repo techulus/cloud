@@ -80,10 +80,16 @@ After signing in as an admin, configure **Edge Domain** under
 public edge traffic, including HTTP/HTTPS custom domains and direct TCP/UDP
 connection strings.
 
-Configure this hostname in your DNS provider to resolve to every proxy server's
-public IPv4 address. You can use direct `A` records or your own DNS routing,
-load-balancing, or GeoDNS policy. Custom HTTP/HTTPS subdomains can use a `CNAME`
-to the edge domain; apex domains can use `ALIAS` or `ANAME` where supported.
+A stable external load balancer with active health checks is the ideal production
+solution for proxy failure. Configure each proxy public IPv4 address as an origin,
+then point the edge hostname to the load balancer's stable address. A direct `A`
+record to one proxy has no ingress failover. Multiple proxy `A` records provide
+best-effort DNS distribution, but cached answers may continue sending clients to
+an offline proxy.
+
+Custom HTTP/HTTPS subdomains can use a `CNAME` to the edge domain; apex domains
+can use `ALIAS` or `ANAME` where supported. Health-aware GeoDNS is an alternative,
+but its failover time remains subject to DNS and client caching.
 
 Techulus Cloud only displays the required DNS configuration. It does not create
 or update DNS records.
@@ -94,8 +100,7 @@ Configure **Automatic Subdomain Domain** under **Settings → Infrastructure** t
 offer generated domains in service Networking settings. Enter only the base
 domain, such as `apps.example.com`, without `*.` or a protocol.
 
-Create wildcard DNS records for `*.apps.example.com` that resolve to every proxy
-server public IPv4 address.
+Create a wildcard `CNAME` for `*.apps.example.com` that points to the edge domain.
 
 ### Web Replicas
 

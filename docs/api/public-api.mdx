@@ -156,7 +156,10 @@ Configuration and revision responses never include secret names, values, or ciph
       "domain": "cloud.example.com"
     }
   ],
-  "replicas": 1,
+  "placement": {
+    "mode": "automatic",
+    "replicas": 3
+  },
   "healthCheck": {
     "cmd": "curl --fail http://localhost:3000/health",
     "interval": 10,
@@ -189,7 +192,26 @@ The API supports these source variants:
 
 GitHub repository URLs are canonical HTTPS `github.com` URLs. `rootDir` must stay inside the repository. Use `rootDir: null` to clear an existing build root. Source conversion and GitHub repository switching are not supported.
 
-The API only manages stateless services with HTTP ports. Existing volumes, stateful mode, TCP or UDP ports, TLS passthrough, unsupported placement, or invalid resource limits return a conflict with an actionable code. `replicas` must match the existing server placement.
+Use automatic placement for stateless services:
+
+```json
+{ "mode": "automatic", "replicas": 3 }
+```
+
+Use manual placement to choose exact servers:
+
+```json
+{
+  "mode": "manual",
+  "placements": [
+    { "serverId": "server-id", "count": 2 }
+  ]
+}
+```
+
+Manual placement requires online servers with WireGuard configured. Serverless services require proxy servers. Automatic placement is not available for stateful, serverless, or volume-backed services. Submit replica changes through `placement`; the API rejects a top-level `replicas` field.
+
+The API only manages stateless services with HTTP ports. Existing volumes, stateful mode, TCP or UDP ports, TLS passthrough, or invalid resource limits return a conflict with an actionable code.
 
 ## Deployments and builds
 

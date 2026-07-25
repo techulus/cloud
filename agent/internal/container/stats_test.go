@@ -1,13 +1,14 @@
 package container
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParsePodmanStatsOutputArray(t *testing.T) {
 	containers := []Container{
 		{
 			ID:           "abcdef1234567890",
-			Name:         "api",
-			State:        "running",
 			ServiceID:    "svc_1",
 			DeploymentID: "dep_1",
 		},
@@ -26,37 +27,24 @@ func TestParsePodmanStatsOutputArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse stats: %v", err)
 	}
-	if len(stats) != 1 {
-		t.Fatalf("expected 1 stat, got %d", len(stats))
-	}
-
-	stat := stats[0]
-	if stat.ContainerID != "abcdef1234567890" {
-		t.Fatalf("container id = %q", stat.ContainerID)
-	}
-	if stat.ServiceID != "svc_1" || stat.DeploymentID != "dep_1" {
-		t.Fatalf("unexpected service/deployment labels: %#v", stat)
-	}
-	if stat.CPUUsagePercent != 12.34 {
-		t.Fatalf("cpu = %f", stat.CPUUsagePercent)
-	}
-	if stat.MemoryUsagePercent != 12.5 {
-		t.Fatalf("memory percent = %f", stat.MemoryUsagePercent)
-	}
-	if stat.MemoryUsedBytes != 64*1024*1024 {
-		t.Fatalf("memory bytes = %f", stat.MemoryUsedBytes)
-	}
-	if stat.NetworkReceiveBytes != 1.5*1000*1000 {
-		t.Fatalf("rx bytes = %f", stat.NetworkReceiveBytes)
-	}
-	if stat.NetworkTransmitBytes != 2.5*1000*1000 {
-		t.Fatalf("tx bytes = %f", stat.NetworkTransmitBytes)
+	want := []ResourceStats{{
+		ContainerID:          "abcdef1234567890",
+		ServiceID:            "svc_1",
+		DeploymentID:         "dep_1",
+		CPUUsagePercent:      12.34,
+		MemoryUsagePercent:   12.5,
+		MemoryUsedBytes:      64 * 1024 * 1024,
+		NetworkReceiveBytes:  1.5 * 1000 * 1000,
+		NetworkTransmitBytes: 2.5 * 1000 * 1000,
+	}}
+	if !reflect.DeepEqual(stats, want) {
+		t.Fatalf("stats = %#v, want %#v", stats, want)
 	}
 }
 
 func TestParsePodmanStatsOutputJSONLines(t *testing.T) {
 	containers := []Container{
-		{ID: "1234567890abcdef", Name: "worker", State: "running", ServiceID: "svc_2", DeploymentID: "dep_2"},
+		{ID: "1234567890abcdef", ServiceID: "svc_2", DeploymentID: "dep_2"},
 	}
 
 	stats, err := parsePodmanStatsOutput([]byte(`{"ContainerID":"1234567890","CPUPerc":"0%","MemUsage":"128MB / 1GB","MemPerc":"10%","NetIO":"0B / 32kB"}`), containers)
@@ -76,8 +64,8 @@ func TestParsePodmanStatsOutputJSONLines(t *testing.T) {
 
 func TestParsePodmanStatsOutputNameFallbackDoesNotUseIDPrefix(t *testing.T) {
 	containers := []Container{
-		{ID: "api1234567890", Name: "backend", State: "running", ServiceID: "wrong", DeploymentID: "wrong_dep"},
-		{ID: "fedcba987654", Name: "api", State: "running", ServiceID: "svc_3", DeploymentID: "dep_3"},
+		{ID: "api1234567890", Name: "backend", ServiceID: "wrong", DeploymentID: "wrong_dep"},
+		{ID: "fedcba987654", Name: "api", ServiceID: "svc_3", DeploymentID: "dep_3"},
 	}
 
 	stats, err := parsePodmanStatsOutput([]byte(`[

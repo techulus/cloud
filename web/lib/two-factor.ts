@@ -4,6 +4,19 @@ export type DeleteConfirmation = {
 	totpCode?: string;
 };
 
+export type AuthClientError = {
+	message?: string;
+	error_description?: string;
+} | null;
+
+export function getAuthErrorMessage(error: AuthClientError, fallback: string) {
+	return error?.message || error?.error_description || fallback;
+}
+
+export function normalizeTwoFactorCode(value: string) {
+	return value.replace(/\s/g, "");
+}
+
 const AUTH_REDIRECT_ORIGIN = "https://auth.local";
 
 function hasUnsafeAuthRedirectCharacter(value: string) {

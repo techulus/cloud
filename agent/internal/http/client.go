@@ -17,12 +17,11 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	serverID   string
-	keyPair    *crypto.KeyPair
-	client     *http.Client
-	longClient *http.Client
-	dataDir    string
+	baseURL  string
+	serverID string
+	keyPair  *crypto.KeyPair
+	client   *http.Client
+	dataDir  string
 }
 
 func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
@@ -33,9 +32,6 @@ func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string
 		dataDir:  dataDir,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
-		},
-		longClient: &http.Client{
-			Timeout: 40 * time.Second,
 		},
 	}
 }
@@ -48,6 +44,27 @@ func (c *Client) signRequest(req *http.Request, body string) {
 	req.Header.Set("x-server-id", c.serverID)
 	req.Header.Set("x-timestamp", timestamp)
 	req.Header.Set("x-signature", signature)
+}
+
+func (c *Client) doSignedJSONRequest(url string, body []byte, acceptedStatuses []int, requestError, responseError string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", requestError, err)
+	}
+	for _, status := range acceptedStatuses {
+		if resp.StatusCode == status {
+			return resp, nil
+		}
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	return nil, fmt.Errorf("%s with status %d: %s", responseError, resp.StatusCode, string(respBody))
 }
 
 type PortMapping struct {
@@ -368,24 +385,11 @@ func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha 
 		return fmt.Errorf("failed to marshal status update: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", bytes.NewReader(body))
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", body, []int{http.StatusOK}, "failed to update build status", "build status update failed")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to update build status: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("build status update failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
@@ -438,24 +442,11 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 		return nil, fmt.Errorf("failed to marshal status report: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/status", bytes.NewReader(body))
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/status", body, []int{http.StatusOK, http.StatusAccepted}, "failed to report status", "status report failed")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to report status: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("status report failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	var statusResponse StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&statusResponse); err != nil {
@@ -506,24 +497,11 @@ func (c *Client) ReportBackupComplete(backupID string, sizeBytes int64, checksum
 		return fmt.Errorf("failed to marshal backup complete: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/backup/complete", bytes.NewReader(body))
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/backup/complete", body, []int{http.StatusOK}, "failed to report backup complete", "backup complete report failed")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to report backup complete: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("backup complete report failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
@@ -539,24 +517,11 @@ func (c *Client) ReportBackupFailed(backupID string, errorMsg string) error {
 		return fmt.Errorf("failed to marshal backup failed: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/backup/failed", bytes.NewReader(body))
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/backup/failed", body, []int{http.StatusOK}, "failed to report backup failed", "backup failed report failed")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to report backup failed: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("backup failed report failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
@@ -575,24 +540,11 @@ func (c *Client) ReportRestoreComplete(backupID string, success bool, errorMsg s
 		return fmt.Errorf("failed to marshal restore complete: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/restore/complete", bytes.NewReader(body))
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/restore/complete", body, []int{http.StatusOK}, "failed to report restore complete", "restore complete report failed")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to report restore complete: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("restore complete report failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }

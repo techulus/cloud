@@ -55,7 +55,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api-auth", () => ({
 	requireApiKeyRole: mocks.requireApiKeyRole,
-	requireApiKeyDeveloperRole: vi.fn(),
 	requireRequestSession: mocks.requireRequestSession,
 }));
 

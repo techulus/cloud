@@ -81,7 +81,7 @@ export function ClusterHealthSummary({
 							</div>
 							<div>
 								<p className="text-xs text-muted-foreground">{stat.label}</p>
-								<p className="text-lg font-semibold tabular-nums leading-tight">
+								<p className="font-mono text-lg font-semibold tabular-nums leading-tight">
 									{stat.value}
 									<span className="text-xs font-normal text-muted-foreground ml-1">
 										{stat.subtitle}

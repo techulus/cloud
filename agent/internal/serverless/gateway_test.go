@@ -31,7 +31,6 @@ type fakeRuntime struct {
 	transitions       []agenthttp.ServerlessTransition
 	stopped           []string
 	deployCalls       int
-	deployErr         error
 	afterList         func()
 	healthStatus      string
 	deployStarted     chan struct{}
@@ -58,9 +57,6 @@ func (f *fakeRuntime) DeployServerlessContainer(expected agenthttp.ExpectedConta
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deployCalls += 1
-	if f.deployErr != nil {
-		return f.deployErr
-	}
 	for i, actual := range f.containers {
 		if actual.DeploymentID == expected.DeploymentID {
 			f.containers[i].State = "running"
@@ -144,6 +140,20 @@ func (f *fakeRuntime) setState(state *agenthttp.ExpectedState, containers []cont
 	defer f.mu.Unlock()
 	f.state = state
 	f.containers = append([]container.Container(nil), containers...)
+}
+
+func useFastWakePolling(t *testing.T) {
+	t.Helper()
+	previous := wakePollInterval
+	wakePollInterval = time.Millisecond
+	t.Cleanup(func() { wakePollInterval = previous })
+}
+
+func stubUpstreamReadiness(t *testing.T, check func(string) upstreamReadiness) {
+	t.Helper()
+	previous := checkUpstreamReady
+	checkUpstreamReady = check
+	t.Cleanup(func() { checkUpstreamReady = previous })
 }
 
 func receiveProbe(t *testing.T, probes <-chan string) string {
@@ -406,11 +416,7 @@ func TestRequestCanUseAlwaysOnWorkerWhileLocalDeploymentWakes(t *testing.T) {
 }
 
 func TestSleepingLocalDeploymentWakesAndReturnsLocalUpstream(t *testing.T) {
-	previousPoll := wakePollInterval
-	wakePollInterval = time.Millisecond
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-	})
+	useFastWakePolling(t)
 
 	state := testExpectedState("stopped")
 	state.Serverless.Routes[0].Upstreams = nil
@@ -435,22 +441,16 @@ func TestSleepingLocalDeploymentWakesAndReturnsLocalUpstream(t *testing.T) {
 }
 
 func TestSleepingLocalDeploymentPrefersPublishedLoopbackUpstream(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
 	releaseStatic := make(chan struct{})
-	checkUpstreamReady = func(address string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(address string) upstreamReadiness {
 		if address == "127.0.0.1:31000" {
 			return upstreamReadiness{ready: true}
 		}
 		<-releaseStatic
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		close(releaseStatic)
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
+	t.Cleanup(func() { close(releaseStatic) })
 
 	state := testExpectedState("stopped")
 	state.Containers[0].PublishLocalPorts = true
@@ -471,19 +471,13 @@ func TestSleepingLocalDeploymentPrefersPublishedLoopbackUpstream(t *testing.T) {
 }
 
 func TestSleepingLocalDeploymentFallsBackToStaticIPWhenLoopbackUnreachable(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(address string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(address string) upstreamReadiness {
 		if address == "10.0.0.10:3000" {
 			return upstreamReadiness{ready: true}
 		}
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	state := testExpectedState("stopped")
 	state.Containers[0].PublishLocalPorts = true
@@ -504,22 +498,16 @@ func TestSleepingLocalDeploymentFallsBackToStaticIPWhenLoopbackUnreachable(t *te
 }
 
 func TestPublishedLoopbackAndStaticIPAreProbedConcurrently(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
 	probes := make(chan string, 2)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	checkUpstreamReady = func(address string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(address string) upstreamReadiness {
 		probes <- address
 		<-release
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		releaseOnce.Do(func() { close(release) })
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
 	state := testExpectedState("running")
 	state.Containers[0].PublishLocalPorts = true
@@ -559,20 +547,14 @@ func TestPublishedLoopbackAndStaticIPAreProbedConcurrently(t *testing.T) {
 }
 
 func TestPublishedLocalPortsWithoutMatchingHostPortUsesStaticIP(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(address string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(address string) upstreamReadiness {
 		if address != "10.0.0.10:3000" {
 			t.Errorf("checked %s, want only static IP", address)
 			return upstreamReadiness{err: errors.New("unexpected upstream")}
 		}
 		return upstreamReadiness{ready: true}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	state := testExpectedState("stopped")
 	state.Containers[0].PublishLocalPorts = true
@@ -593,11 +575,7 @@ func TestPublishedLocalPortsWithoutMatchingHostPortUsesStaticIP(t *testing.T) {
 }
 
 func TestSleepingLocalDeploymentStartsExistingStoppedContainer(t *testing.T) {
-	previousPoll := wakePollInterval
-	wakePollInterval = time.Millisecond
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-	})
+	useFastWakePolling(t)
 
 	state := testExpectedState("stopped")
 	state.Serverless.Routes[0].Upstreams = nil
@@ -631,7 +609,7 @@ func TestSleepingLocalDeploymentStartsExistingStoppedContainer(t *testing.T) {
 	}
 }
 
-func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
+func TestSleepServiceStopsLocalContainerAndReportsSleep(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -641,7 +619,7 @@ func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
 	}
 	gateway := NewGateway(runtime)
 
-	gateway.sleepHost("app.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 1 || stopped[0] != "ctr-local" {
@@ -655,7 +633,7 @@ func TestSleepHostStopsLocalContainerAndReportsSleep(t *testing.T) {
 	}
 }
 
-func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
+func TestSleepServiceRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	state := testExpectedState("running")
 	runtime := &fakeRuntime{
 		state: state,
@@ -665,10 +643,10 @@ func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	}
 	gateway := NewGateway(runtime)
 	runtime.afterList = func() {
-		gateway.beginActivity(serviceActivityKey("svc_1"))
+		gateway.beginActivity("svc_1")
 	}
 
-	gateway.sleepHost("app.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 0 {
@@ -679,7 +657,7 @@ func TestSleepHostRechecksActivityBeforeStoppingContainer(t *testing.T) {
 	}
 }
 
-func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
+func TestSleepServiceUsesServiceActivityAcrossDomains(t *testing.T) {
 	state := testExpectedState("running")
 	secondRoute := state.Serverless.Routes[0]
 	secondRoute.Domain = "api.example.com"
@@ -691,9 +669,9 @@ func TestSleepHostUsesServiceActivityAcrossDomains(t *testing.T) {
 		},
 	}
 	gateway := NewGateway(runtime)
-	gateway.beginActivity(serviceActivityKey("svc_1"))
+	gateway.beginActivity("svc_1")
 
-	gateway.sleepHost("api.example.com")
+	gateway.sleepService("svc_1")
 
 	transitions, stopped, _ := runtime.snapshot()
 	if len(stopped) != 0 {
@@ -737,19 +715,13 @@ func TestPendingSleepCanWakeBeforeExpectedStateSettles(t *testing.T) {
 }
 
 func TestBlockingWakeRefreshesRouteAfterRedeploy(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(address string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(address string) upstreamReadiness {
 		if address == "10.0.0.11:3000" {
 			return upstreamReadiness{ready: true}
 		}
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	oldState := testExpectedStateWithLocalDeployment("running", "dep_local", "10.0.0.10")
 	oldState.Serverless.Routes[0].Upstreams = nil
@@ -786,16 +758,10 @@ func TestBlockingWakeRefreshesRouteAfterRedeploy(t *testing.T) {
 }
 
 func TestBlockingWakeReturnsWhenRouteDisappearsDuringRedeploy(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(string) upstreamReadiness {
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	oldState := testExpectedState("running")
 	oldState.Serverless.Routes[0].Upstreams = nil
@@ -836,16 +802,10 @@ func TestBlockingWakeReturnsWhenRouteDisappearsDuringRedeploy(t *testing.T) {
 }
 
 func TestWakeMonitorDropsStaleDeploymentAfterRedeploy(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(string) upstreamReadiness {
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	oldState := testExpectedStateWithLocalDeployment("running", "dep_local", "10.0.0.10")
 	oldState.Serverless.Routes[0].Upstreams = nil
@@ -885,18 +845,11 @@ func TestWakeMonitorDropsStaleDeploymentAfterRedeploy(t *testing.T) {
 }
 
 func TestWakeTimeoutQueuesWakeFailedTransition(t *testing.T) {
-	previousPoll := wakePollInterval
-	wakePollInterval = time.Millisecond
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-	})
+	useFastWakePolling(t)
 
 	state := testExpectedState("stopped")
 	state.Containers[0].HealthCheck = &agenthttp.HealthCheck{
-		Cmd:      "curl http://localhost:3000/health",
-		Interval: 1,
-		Timeout:  1,
-		Retries:  1,
+		Cmd: "curl http://localhost:3000/health",
 	}
 	state.Serverless.Routes[0].Upstreams = nil
 	state.Serverless.Routes[0].WakeTimeoutSeconds = 1
@@ -927,16 +880,10 @@ func TestWakeTimeoutQueuesWakeFailedTransition(t *testing.T) {
 }
 
 func TestWakeTimeoutWhenLocalPortNeverOpens(t *testing.T) {
-	previousPoll := wakePollInterval
-	previousReady := checkUpstreamReady
-	wakePollInterval = time.Millisecond
-	checkUpstreamReady = func(string) upstreamReadiness {
+	stubUpstreamReadiness(t, func(string) upstreamReadiness {
 		return upstreamReadiness{err: errors.New("connection refused")}
-	}
-	t.Cleanup(func() {
-		wakePollInterval = previousPoll
-		checkUpstreamReady = previousReady
 	})
+	useFastWakePolling(t)
 
 	var logs bytes.Buffer
 	previousOutput := log.Writer()
@@ -980,10 +927,7 @@ func testExpectedState(localDesiredState string) *agenthttp.ExpectedState {
 			{
 				DeploymentID: "dep_local",
 				ServiceID:    "svc_1",
-				ServiceName:  "api",
-				Name:         "svc_1-dep_local",
 				DesiredState: localDesiredState,
-				Image:        "nginx",
 				IPAddress:    "10.0.0.10",
 			},
 		},
@@ -999,7 +943,6 @@ func testExpectedState(localDesiredState string) *agenthttp.ExpectedState {
 			Upstreams: []agenthttp.ServerlessUpstream{
 				{
 					DeploymentID: "dep_worker",
-					ServerID:     "server_worker",
 					Url:          "10.0.0.20:3000",
 					AlwaysOn:     true,
 				},
@@ -1012,7 +955,6 @@ func testExpectedState(localDesiredState string) *agenthttp.ExpectedState {
 func testExpectedStateWithLocalDeployment(localDesiredState string, deploymentID string, ipAddress string) *agenthttp.ExpectedState {
 	state := testExpectedState(localDesiredState)
 	state.Containers[0].DeploymentID = deploymentID
-	state.Containers[0].Name = "svc_1-" + deploymentID
 	state.Containers[0].IPAddress = ipAddress
 	state.Serverless.Routes[0].LocalDeploymentIDs = []string{deploymentID}
 	return state

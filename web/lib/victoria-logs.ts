@@ -5,39 +5,19 @@ import {
 	normalizeLogCursor,
 	normalizeLogSearch,
 } from "@/lib/log-query";
+import {
+	buildFetchOptions,
+	type EndpointConfig,
+	parseEndpoint,
+} from "@/lib/victoria";
 
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
-
-type EndpointConfig = {
-	url: string;
-	username?: string;
-	password?: string;
-};
-
-function parseEndpoint(endpoint: string): EndpointConfig {
-	const parsed = new URL(endpoint);
-	const username = parsed.username || undefined;
-	const password = parsed.password || undefined;
-	parsed.username = "";
-	parsed.password = "";
-	return { url: parsed.toString().replace(/\/$/, ""), username, password };
-}
 
 function getQueryEndpoint(): EndpointConfig | undefined {
 	const endpoint = VICTORIA_LOGS_PRIVATE_URL || VICTORIA_LOGS_URL;
 	if (!endpoint) return undefined;
 	return parseEndpoint(endpoint);
-}
-
-function buildFetchOptions(config: EndpointConfig): RequestInit {
-	if (config.username) {
-		const credentials = Buffer.from(
-			`${config.username}:${config.password || ""}`,
-		).toString("base64");
-		return { headers: { Authorization: `Basic ${credentials}` } };
-	}
-	return {};
 }
 
 export type LogType = "container" | "http";
@@ -162,31 +142,56 @@ function providerSignal(signal?: AbortSignal): AbortSignal {
 	return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-async function fetchLogQuery(
-	endpoint: EndpointConfig,
+async function fetchLogQuery<T>(
 	query: string,
-	signal?: AbortSignal,
-): Promise<StoredLog[]> {
+	{
+		limit,
+		pageSize,
+		errorLabel = "logs",
+		signal,
+		serverTimeout = false,
+	}: {
+		limit?: number;
+		pageSize?: number;
+		errorLabel?: string;
+		signal?: AbortSignal;
+		serverTimeout?: boolean;
+	} = {},
+): Promise<{ logs: T[]; hasMore: boolean }> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) {
+		throw new Error("VICTORIA_LOGS_URL is not configured");
+	}
+
 	const url = new URL(`${endpoint.url}/select/logsql/query`);
 	url.searchParams.set("query", query);
-	url.searchParams.set("timeout", "4s");
+	const queryLimit = pageSize === undefined ? limit : pageSize + 1;
+	if (queryLimit !== undefined) {
+		url.searchParams.set("limit", String(queryLimit));
+	}
+	if (serverTimeout) {
+		url.searchParams.set("timeout", "4s");
+	}
 	const response = await fetch(url.toString(), {
 		...buildFetchOptions(endpoint),
-		signal: providerSignal(signal),
+		signal,
 	});
 
 	if (!response.ok) {
 		throw new Error(
-			`Failed to query logs: ${response.status} ${response.statusText}`,
+			`Failed to query ${errorLabel}: ${response.status} ${response.statusText}`,
 		);
 	}
 
 	const text = await response.text();
-	return text
+	const logs = text
 		.trim()
 		.split("\n")
 		.filter(Boolean)
-		.map((line) => JSON.parse(line) as StoredLog);
+		.map((line) => JSON.parse(line) as T);
+	const hasMore = pageSize !== undefined && logs.length > pageSize;
+	if (hasMore) logs.pop();
+	return { logs, hasMore };
 }
 
 function deduplicateIdentifiedLogs(logs: StoredLog[]): StoredLog[] {
@@ -202,11 +207,6 @@ function deduplicateIdentifiedLogs(logs: StoredLog[]): StoredLog[] {
 export async function queryPublicServiceLogs(
 	options: PublicServiceLogsOptions,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	const pageSize = options.limit + 1;
 	let query = buildServiceLogFilter({
 		...options,
@@ -232,7 +232,10 @@ export async function queryPublicServiceLogs(
 		query += ` | first ${pageSize} by (_time desc, event_id desc) | sort by (_time, event_id)`;
 	}
 
-	const rawLogs = await fetchLogQuery(endpoint, query, options.signal);
+	const { logs: rawLogs } = await fetchLogQuery<StoredLog>(query, {
+		signal: providerSignal(options.signal),
+		serverTimeout: true,
+	});
 	if (
 		options.cursor &&
 		rawLogs.some((log) => !isPublicServiceLogEventId(log.event_id))
@@ -255,11 +258,6 @@ export async function queryLogsByService(
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
 	const { limit, after, before } = options;
 
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	let query = buildServiceLogFilter(options);
 	const afterCursor = normalizeLogCursor(after);
 	if (afterCursor) {
@@ -271,29 +269,10 @@ export async function queryLogsByService(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint.url}/select/logsql/query`);
-	url.searchParams.set("query", query);
-	url.searchParams.set("limit", String(limit + 1));
-
-	const response = await fetch(url.toString(), {
-		...buildFetchOptions(endpoint),
+	return fetchLogQuery<StoredLog>(query, {
+		pageSize: limit,
 		signal: providerSignal(options.signal),
 	});
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query logs: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const text = await response.text();
-	const lines = text.trim().split("\n").filter(Boolean);
-	const logs = lines.map((line) => JSON.parse(line) as StoredLog);
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
 }
 
 export async function queryLogsByDeployment(
@@ -301,11 +280,6 @@ export async function queryLogsByDeployment(
 	limit: number,
 	after?: string,
 ): Promise<{ logs: StoredLog[]; hasMore: boolean }> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	let query = formatLogSqlExactFilter("deployment_id", deploymentId);
 	const afterCursor = normalizeLogCursor(after);
 	if (afterCursor) {
@@ -313,26 +287,7 @@ export async function queryLogsByDeployment(
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint.url}/select/logsql/query`);
-	url.searchParams.set("query", query);
-	url.searchParams.set("limit", String(limit + 1));
-
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query logs: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const text = await response.text();
-	const lines = text.trim().split("\n").filter(Boolean);
-	const logs = lines.map((line) => JSON.parse(line) as StoredLog);
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
+	return fetchLogQuery<StoredLog>(query, { pageSize: limit });
 }
 
 export type BuildLog = {
@@ -370,11 +325,6 @@ export async function queryLogsByServer({
 	logs: AgentLog[];
 	hasMore: boolean;
 }> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	let query = `${formatLogSqlExactFilter("server_id", serverId)} log_type:agent`;
 	if (range) {
 		query += ` _time:${range}`;
@@ -389,26 +339,10 @@ export async function queryLogsByServer({
 	}
 	query += " | sort by (_time desc)";
 
-	const url = new URL(`${endpoint.url}/select/logsql/query`);
-	url.searchParams.set("query", query);
-	url.searchParams.set("limit", String(limit + 1));
-
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query server logs: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const text = await response.text();
-	const lines = text.trim().split("\n").filter(Boolean);
-	const logs = lines.map((line) => JSON.parse(line) as AgentLog);
-
-	const hasMore = logs.length > limit;
-	if (hasMore) logs.pop();
-
-	return { logs, hasMore };
+	return fetchLogQuery<AgentLog>(query, {
+		pageSize: limit,
+		errorLabel: "server logs",
+	});
 }
 
 export type RolloutLog = {
@@ -460,11 +394,6 @@ export async function queryLogsByRollout(
 	rolloutId: string,
 	{ limit = 1000, search }: { limit?: number; search?: string } = {},
 ): Promise<{ logs: RolloutLog[] }> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	let query = `${formatLogSqlExactFilter("rollout_id", rolloutId)} log_type:rollout`;
 	const searchFilter = formatLogSqlSearchFilter(search);
 	if (searchFilter) {
@@ -472,21 +401,10 @@ export async function queryLogsByRollout(
 	}
 	query += " | sort by (_time)";
 
-	const url = new URL(`${endpoint.url}/select/logsql/query`);
-	url.searchParams.set("query", query);
-	url.searchParams.set("limit", String(limit));
-
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query rollout logs: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const text = await response.text();
-	const lines = text.trim().split("\n").filter(Boolean);
-	const logs = lines.map((line) => JSON.parse(line) as RolloutLog);
+	const { logs } = await fetchLogQuery<RolloutLog>(query, {
+		limit,
+		errorLabel: "rollout logs",
+	});
 
 	return { logs };
 }
@@ -495,11 +413,6 @@ export async function queryLogsByBuild(
 	buildId: string,
 	{ limit = 1000, search }: { limit?: number; search?: string } = {},
 ): Promise<{ logs: BuildLog[] }> {
-	const endpoint = getQueryEndpoint();
-	if (!endpoint) {
-		throw new Error("VICTORIA_LOGS_URL is not configured");
-	}
-
 	let query = `${formatLogSqlExactFilter("build_id", buildId)} log_type:build`;
 	const searchFilter = formatLogSqlSearchFilter(search);
 	if (searchFilter) {
@@ -507,21 +420,10 @@ export async function queryLogsByBuild(
 	}
 	query += " | sort by (_time)";
 
-	const url = new URL(`${endpoint.url}/select/logsql/query`);
-	url.searchParams.set("query", query);
-	url.searchParams.set("limit", String(limit));
-
-	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to query build logs: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const text = await response.text();
-	const lines = text.trim().split("\n").filter(Boolean);
-	const logs = lines.map((line) => JSON.parse(line) as BuildLog);
+	const { logs } = await fetchLogQuery<BuildLog>(query, {
+		limit,
+		errorLabel: "build logs",
+	});
 
 	return { logs };
 }
