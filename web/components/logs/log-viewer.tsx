@@ -4,6 +4,8 @@ import {
 	ArrowDownToLine,
 	ChevronDown,
 	ChevronUp,
+	Copy,
+	Download,
 	Search,
 	X,
 } from "lucide-react";
@@ -690,6 +692,31 @@ const statusParser = parseAsArrayOf(
 );
 const rangeParser = parseAsStringLiteral(LOG_TIME_RANGES);
 
+function serializeLogs(
+	logs: unknown[],
+	variant: LogViewerProps["variant"],
+): string {
+	return logs
+		.map((log) => {
+			if (variant === "service-logs") {
+				const entry = log as ServiceLogEntry;
+				return `[${entry.timestamp}] [${entry.stream}] ${entry.message}`;
+			}
+			if (variant === "requests") {
+				const entry = log as RequestEntry;
+				return `[${entry.timestamp}] ${entry.status} ${entry.method} ${entry.path} ${Math.round(Number(entry.duration) || 0)}ms ${entry.clientIp}`;
+			}
+			if (variant === "server-logs") {
+				const entry = log as ServerLogEntry;
+				return `[${entry.timestamp}] [${entry.level}] ${entry.message}`;
+			}
+
+			const entry = log as BuildLogEntry;
+			return `[${entry.timestamp}] ${entry.message}`;
+		})
+		.join("\n");
+}
+
 export function LogViewer(props: LogViewerProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const scrollRestorationRef = useRef<{
@@ -928,6 +955,33 @@ export function LogViewer(props: LogViewerProps) {
 	const newestFilteredLogTimestamp = (
 		filteredLogs.at(-1) as BaseEntry | undefined
 	)?.timestamp;
+	const serializedLogs = useMemo(
+		() => serializeLogs(filteredLogs, props.variant),
+		[filteredLogs, props.variant],
+	);
+
+	const copyLogs = async () => {
+		try {
+			await navigator.clipboard.writeText(serializedLogs);
+			toast.success("Logs copied to clipboard");
+		} catch {
+			toast.error("Failed to copy logs");
+		}
+	};
+
+	const downloadLogs = () => {
+		const blob = new Blob([serializedLogs], {
+			type: "text/plain;charset=utf-8",
+		});
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+		link.href = url;
+		link.download = `${props.variant}-${timestamp}.log`;
+		link.click();
+		URL.revokeObjectURL(url);
+		toast.success("Logs downloaded");
+	};
 
 	useLayoutEffect(() => {
 		void logCount;
@@ -1052,6 +1106,26 @@ export function LogViewer(props: LogViewerProps) {
 				)}
 
 				<div className="flex items-center gap-2 ml-auto">
+					<Button
+						variant="outline"
+						size="icon-sm"
+						onClick={() => void copyLogs()}
+						disabled={filteredLogs.length === 0}
+						title="Copy visible logs"
+						aria-label="Copy visible logs"
+					>
+						<Copy className="size-4" />
+					</Button>
+					<Button
+						variant="outline"
+						size="icon-sm"
+						onClick={downloadLogs}
+						disabled={filteredLogs.length === 0}
+						title="Download visible logs"
+						aria-label="Download visible logs"
+					>
+						<Download className="size-4" />
+					</Button>
 					<Button
 						variant={autoScroll ? "default" : "outline"}
 						size="icon-sm"
