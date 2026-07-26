@@ -194,7 +194,6 @@ func buildPodmanRunArgs(config *DeployConfig, image string) []string {
 		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
-		"--label", fmt.Sprintf("techulus.image.identity=%s", image),
 	)
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
@@ -527,16 +526,15 @@ func List() ([]Container, error) {
 			name = pc.Names[0]
 		}
 		containers[i] = Container{
-			ID:            pc.Id,
-			Name:          name,
-			Image:         pc.Image,
-			ImageID:       pc.ImageID,
-			State:         pc.State,
-			Created:       pc.Created,
-			Labels:        pc.Labels,
-			DeploymentID:  pc.Labels["techulus.deployment.id"],
-			ServiceID:     pc.Labels["techulus.service.id"],
-			ImageIdentity: pc.Labels["techulus.image.identity"],
+			ID:           pc.Id,
+			Name:         name,
+			Image:        pc.Image,
+			ImageID:      pc.ImageID,
+			State:        pc.State,
+			Created:      pc.Created,
+			Labels:       pc.Labels,
+			DeploymentID: pc.Labels["techulus.deployment.id"],
+			ServiceID:    pc.Labels["techulus.service.id"],
 		}
 	}
 

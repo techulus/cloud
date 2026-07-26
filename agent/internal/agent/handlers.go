@@ -9,8 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"time"
 
 	"techulus/cloud-agent/internal/build"
@@ -18,10 +16,7 @@ import (
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/paths"
-	"techulus/cloud-agent/internal/retry"
 )
-
-const terminalBuildStatusTimeout = 2 * time.Minute
 
 func (a *Agent) ProcessRestart(item agenthttp.WorkQueueItem) error {
 	var payload struct {
@@ -143,7 +138,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		a.buildMutex.Unlock()
 	}()
 
-	buildDetails, err := a.Client.ClaimBuild(payload.BuildID, item.Attempt)
+	buildDetails, err := a.Client.ClaimBuild(payload.BuildID)
 	if err != nil {
 		return fmt.Errorf("failed to claim build: %w", err)
 	}
@@ -154,12 +149,12 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 	log.Printf("[build] starting build %s for commit %s (timeout: %d minutes)", Truncate(payload.BuildID, 8), Truncate(buildDetails.Build.CommitSha, 8), timeoutMinutes)
 
-	if err := a.Client.UpdateBuildStatus(payload.BuildID, item.Attempt, "cloning", "", "", nil); err != nil {
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "cloning", "", ""); err != nil {
 		log.Printf("[build] failed to update status to cloning: %v", err)
 	}
 
 	checkCancelled := func() bool {
-		status, err := a.Client.GetBuildStatus(payload.BuildID, item.Attempt)
+		status, err := a.Client.GetBuildStatus(payload.BuildID)
 		if err != nil {
 			return false
 		}
@@ -191,7 +186,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 
 	onStatusChange := func(status string) {
-		if err := a.Client.UpdateBuildStatus(payload.BuildID, item.Attempt, status, "", buildConfig.ResolvedCommitSha, buildConfig.Timings); err != nil {
+		if err := a.Client.UpdateBuildStatus(payload.BuildID, status, "", buildConfig.ResolvedCommitSha); err != nil {
 			log.Printf("[build] failed to update status to %s: %v", status, err)
 		}
 	}
@@ -201,28 +196,18 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	err = a.Builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
 		log.Printf("[build] build %s failed: %v", Truncate(payload.BuildID, 8), err)
-		if reportErr := a.reportTerminalBuildStatus(payload.BuildID, item.Attempt, "failed", err.Error(), buildConfig.ResolvedCommitSha, buildConfig.Timings); reportErr != nil {
-			return errors.Join(err, fmt.Errorf("failed to report build failure: %w", reportErr))
+		if updateErr := a.Client.UpdateBuildStatus(payload.BuildID, "failed", err.Error(), buildConfig.ResolvedCommitSha); updateErr != nil {
+			log.Printf("[build] failed to update status to failed: %v", updateErr)
 		}
 		return err
 	}
 
 	log.Printf("[build] build %s completed successfully", Truncate(payload.BuildID, 8))
-	if err := a.reportTerminalBuildStatus(payload.BuildID, item.Attempt, "completed", "", buildConfig.ResolvedCommitSha, buildConfig.Timings); err != nil {
-		return fmt.Errorf("failed to report build completion: %w", err)
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "completed", "", buildConfig.ResolvedCommitSha); err != nil {
+		log.Printf("[build] failed to update status to completed: %v", err)
 	}
 
 	return nil
-}
-
-func (a *Agent) reportTerminalBuildStatus(buildID string, attempt int, status, errorMsg, resolvedCommitSha string, timings any) error {
-	ctx, cancel := context.WithTimeout(context.Background(), terminalBuildStatusTimeout)
-	defer cancel()
-
-	return retry.WithBackoff(ctx, retry.StopBackoff, func() (bool, error) {
-		err := a.Client.UpdateBuildStatus(buildID, attempt, status, errorMsg, resolvedCommitSha, timings)
-		return err == nil, err
-	})
 }
 
 func (a *Agent) RunBuildCleanup() {
@@ -240,7 +225,6 @@ func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
 	var payload struct {
 		Images        []string `json:"images"`
 		FinalImageUri string   `json:"finalImageUri"`
-		BuildGroupID  string   `json:"buildGroupId"`
 	}
 
 	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
@@ -254,36 +238,13 @@ func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
 		craneArgs = append(craneArgs, "-m", img)
 	}
 
-	manifestStarted := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, paths.CranePath, craneArgs...)
+	cmd := exec.Command(paths.CranePath, craneArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[create_manifest] crane failed: %s", string(output))
 		return fmt.Errorf("crane index append failed: %w: %s", err, string(output))
 	}
 
-	digestCmd := exec.CommandContext(ctx, paths.CranePath, "digest", "--insecure", payload.FinalImageUri)
-	digestOutput, err := digestCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("crane digest failed: %w: %s", err, string(digestOutput))
-	}
-	digest := strings.TrimSpace(string(digestOutput))
-	if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(digest) {
-		return fmt.Errorf("crane returned invalid manifest digest %q", digest)
-	}
-	repository := payload.FinalImageUri
-	if at := strings.Index(repository, "@"); at >= 0 {
-		repository = repository[:at]
-	} else if colon := strings.LastIndex(repository, ":"); colon > strings.LastIndex(repository, "/") {
-		repository = repository[:colon]
-	}
-	immutableImage := repository + "@" + digest
-	durationMs := time.Since(manifestStarted).Milliseconds()
-	if err := a.Client.ReportManifestResult(payload.BuildGroupID, item.Attempt, immutableImage, durationMs); err != nil {
-		return fmt.Errorf("failed to report manifest digest: %w", err)
-	}
-	log.Printf("[create_manifest] manifest created successfully for %s in %s", immutableImage, time.Duration(durationMs)*time.Millisecond)
+	log.Printf("[create_manifest] manifest created successfully for %s", payload.FinalImageUri)
 	return nil
 }

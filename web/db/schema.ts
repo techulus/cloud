@@ -7,7 +7,6 @@ import {
 	integer,
 	jsonb,
 	pgTable,
-	primaryKey,
 	real,
 	text,
 	timestamp,
@@ -786,52 +785,6 @@ export const deploymentPorts = pgTable(
 	],
 );
 
-export const rolloutRoutingAcknowledgements = pgTable(
-	"rollout_routing_acknowledgements",
-	{
-		rolloutId: text("rollout_id")
-			.notNull()
-			.references(() => rollouts.id, { onDelete: "cascade" }),
-		serverId: text("server_id")
-			.notNull()
-			.references(() => servers.id, { onDelete: "cascade" }),
-		requiredGeneration: bigint("required_generation", {
-			mode: "number",
-		}).notNull(),
-		requiredAt: timestamp("required_at", { withTimezone: true })
-			.defaultNow()
-			.notNull(),
-		acknowledgedGeneration: bigint("acknowledged_generation", {
-			mode: "number",
-		}),
-		acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
-	},
-	(table) => [primaryKey({ columns: [table.rolloutId, table.serverId] })],
-);
-
-export const rolloutStageTransitions = pgTable(
-	"rollout_stage_transitions",
-	{
-		rolloutId: text("rollout_id")
-			.notNull()
-			.references(() => rollouts.id, { onDelete: "cascade" }),
-		stage: text("stage").notNull(),
-		// Empty for rollout-wide boundaries; server/generation scopes make
-		// expected-state fetches and routing acknowledgements replay-safe.
-		scope: text("scope").notNull().default(""),
-		serverId: text("server_id").references(() => servers.id, {
-			onDelete: "cascade",
-		}),
-		generation: bigint("generation", { mode: "number" }),
-		enteredAt: timestamp("entered_at", { withTimezone: true })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		primaryKey({ columns: [table.rolloutId, table.stage, table.scope] }),
-	],
-);
-
 export const workQueue = pgTable(
 	"work_queue",
 	{
@@ -864,10 +817,6 @@ export const workQueue = pgTable(
 			.defaultNow()
 			.notNull(),
 		startedAt: timestamp("started_at", { withTimezone: true }),
-		claimedAt: timestamp("claimed_at", { withTimezone: true }),
-		completedAt: timestamp("completed_at", { withTimezone: true }),
-		resultImageUri: text("result_image_uri"),
-		durationMs: integer("duration_ms"),
 		attempts: integer("attempts").notNull().default(0),
 	},
 	(table) => [
@@ -967,10 +916,6 @@ export const builds = pgTable(
 		claimedAt: timestamp("claimed_at", { withTimezone: true }),
 		startedAt: timestamp("started_at", { withTimezone: true }),
 		completedAt: timestamp("completed_at", { withTimezone: true }),
-		timings: jsonb("timings").$type<{
-			cloneMs?: number;
-			buildTotalMs?: number;
-		}>(),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

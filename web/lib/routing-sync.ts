@@ -26,3 +26,32 @@ export function isRoutingSyncAcknowledgementEligible(
 		rollout.routingTargets.includes(serverId)
 	);
 }
+
+export function selectRoutingSyncRolloutIds({
+	rollouts,
+	runtimeServices,
+	serverId,
+}: {
+	rollouts: Array<{
+		id: string;
+		serviceId: string;
+		serviceRevisionId: string | null;
+		routingTargets: string[];
+	}>;
+	runtimeServices: Array<{ id: string; revisionId: string }>;
+	serverId: string;
+}) {
+	const runtimeRevisionByServiceId = new Map(
+		runtimeServices.map((service) => [service.id, service.revisionId]),
+	);
+
+	return rollouts
+		.filter(
+			(rollout) =>
+				rollout.routingTargets.includes(serverId) &&
+				rollout.serviceRevisionId !== null &&
+				runtimeRevisionByServiceId.get(rollout.serviceId) ===
+					rollout.serviceRevisionId,
+		)
+		.map((rollout) => rollout.id);
+}

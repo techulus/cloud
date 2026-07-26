@@ -312,8 +312,8 @@ func verifyExpectedContainerIdentities(expected *agenthttp.ExpectedState, actual
 			return fmt.Errorf("deployment %s container is %s, expected running", wanted.DeploymentID, current.State)
 		}
 		resolved := string(images[wanted.Image])
-		if resolved == "" || current.ImageIdentity == "" || current.ImageID == "" || current.ImageIdentity != current.ImageID || current.ImageID != resolved {
-			return fmt.Errorf("deployment %s image identity mismatch: expected=%q label=%q imageID=%q", wanted.DeploymentID, resolved, current.ImageIdentity, current.ImageID)
+		if resolved == "" || current.ImageID == "" || current.ImageID != resolved {
+			return fmt.Errorf("deployment %s image identity mismatch: expected=%q imageID=%q", wanted.DeploymentID, resolved, current.ImageID)
 		}
 	}
 	return nil
@@ -361,7 +361,7 @@ func (a *Agent) applyLifecycleActions(actions []reconcileAction, images map[stri
 			err := a.withDeploymentOperationLock(action.DeploymentID, func() error {
 				resolved := images[action.Expected.Image]
 				if action.Kind == actionStartContainer {
-					if action.Actual.ImageID == string(resolved) && action.Actual.ImageIdentity == string(resolved) {
+					if action.Actual.ImageID == string(resolved) {
 						if err := container.Start(action.Actual.ID); err == nil {
 							a.monitorContainerHealth(action.Actual.ID, *action.Expected)
 							return nil
@@ -513,7 +513,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 			}
 
 			resolved := string(images[exp.Image])
-			identityMismatch := resolved == "" || act.ImageID == "" || act.ImageIdentity == "" || act.ImageID != act.ImageIdentity || act.ImageID != resolved
+			identityMismatch := resolved == "" || act.ImageID == "" || act.ImageID != resolved
 			if normalizeImage(exp.Image) != normalizeImage(act.Image) || identityMismatch {
 				actions = append(actions, reconcileAction{
 					Kind:         actionRedeployContainer,

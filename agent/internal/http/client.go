@@ -172,10 +172,10 @@ type WireGuardPeer struct {
 }
 
 type ExpectedState struct {
-	Generation  int64                `json:"generation"`
-	ServerName  string               `json:"serverName"`
-	RoutingSync []RoutingSyncRequest `json:"routingSync,omitempty"`
-	Containers  []ExpectedContainer  `json:"containers"`
+	Generation  int64               `json:"generation"`
+	ServerName  string              `json:"serverName"`
+	RoutingSync []string            `json:"routingSync,omitempty"`
+	Containers  []ExpectedContainer `json:"containers"`
 	Dns         struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
@@ -295,17 +295,17 @@ type AgentHealth struct {
 }
 
 type StatusReport struct {
-	Resources               *Resources               `json:"resources,omitempty"`
-	PublicIP                string                   `json:"publicIp,omitempty"`
-	PrivateIP               string                   `json:"privateIp,omitempty"`
-	Meta                    map[string]string        `json:"meta,omitempty"`
-	Containers              []ContainerStatus        `json:"containers"`
-	ContainersComplete      bool                     `json:"containersComplete"`
-	DeploymentErrors        []DeploymentError        `json:"deploymentErrors,omitempty"`
-	RoutingAcknowledgements []RoutingAcknowledgement `json:"routingAcknowledgements,omitempty"`
-	NetworkHealth           *health.NetworkHealth    `json:"networkHealth,omitempty"`
-	ContainerHealth         *health.ContainerHealth  `json:"containerHealth,omitempty"`
-	AgentHealth             *AgentHealth             `json:"agentHealth,omitempty"`
+	Resources               *Resources              `json:"resources,omitempty"`
+	PublicIP                string                  `json:"publicIp,omitempty"`
+	PrivateIP               string                  `json:"privateIp,omitempty"`
+	Meta                    map[string]string       `json:"meta,omitempty"`
+	Containers              []ContainerStatus       `json:"containers"`
+	ContainersComplete      bool                    `json:"containersComplete"`
+	DeploymentErrors        []DeploymentError       `json:"deploymentErrors,omitempty"`
+	RoutingAcknowledgements []string                `json:"routingAcknowledgements,omitempty"`
+	NetworkHealth           *health.NetworkHealth   `json:"networkHealth,omitempty"`
+	ContainerHealth         *health.ContainerHealth `json:"containerHealth,omitempty"`
+	AgentHealth             *AgentHealth            `json:"agentHealth,omitempty"`
 }
 
 type CompletedWorkItem struct {
@@ -319,16 +319,6 @@ type ActiveWorkItem struct {
 	ID      string `json:"id"`
 	Attempt int    `json:"attempt"`
 	Type    string `json:"type"`
-}
-
-type RoutingSyncRequest struct {
-	RolloutID          string `json:"rolloutId"`
-	RequiredGeneration int64  `json:"requiredGeneration"`
-}
-
-type RoutingAcknowledgement struct {
-	RolloutID  string `json:"rolloutId"`
-	Generation int64  `json:"generation"`
 }
 
 // WaitForWake long-polls for a state generation newer than generation. A 204
@@ -387,18 +377,13 @@ type BuildDetails struct {
 	TargetPlatforms []string          `json:"targetPlatforms"`
 }
 
-func (c *Client) ClaimBuild(buildID string, attempt int) (*BuildDetails, error) {
-	body, err := json.Marshal(map[string]int{"attempt": attempt})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal build claim: %w", err)
-	}
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID, bytes.NewReader(body))
+func (c *Client) ClaimBuild(buildID string) (*BuildDetails, error) {
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	c.signRequest(req, string(body))
+	c.signRequest(req, "")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -419,10 +404,9 @@ func (c *Client) ClaimBuild(buildID string, attempt int) (*BuildDetails, error) 
 	return &result, nil
 }
 
-func (c *Client) UpdateBuildStatus(buildID string, attempt int, status, errorMsg, resolvedCommitSha string, timings any) error {
-	payload := map[string]any{
-		"status":  status,
-		"attempt": attempt,
+func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha string) error {
+	payload := map[string]string{
+		"status": status,
 	}
 	if errorMsg != "" {
 		payload["error"] = errorMsg
@@ -430,10 +414,6 @@ func (c *Client) UpdateBuildStatus(buildID string, attempt int, status, errorMsg
 	if resolvedCommitSha != "" {
 		payload["resolvedCommitSha"] = resolvedCommitSha
 	}
-	if timings != nil {
-		payload["timings"] = timings
-	}
-
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal status update: %w", err)
@@ -445,19 +425,6 @@ func (c *Client) UpdateBuildStatus(buildID string, attempt int, status, errorMsg
 	}
 	defer resp.Body.Close()
 
-	return nil
-}
-
-func (c *Client) ReportManifestResult(buildGroupID string, attempt int, imageDigest string, durationMs int64) error {
-	payload, err := json.Marshal(map[string]any{"attempt": attempt, "imageDigest": imageDigest, "durationMs": durationMs})
-	if err != nil {
-		return err
-	}
-	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/build-manifests/"+buildGroupID+"/status", payload, []int{http.StatusOK}, "failed to report manifest result", "manifest result update failed")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 	return nil
 }
 
@@ -523,8 +490,8 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 	return &statusResponse, nil
 }
 
-func (c *Client) GetBuildStatus(buildID string, attempt int) (string, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status?attempt="+url.QueryEscape(strconv.Itoa(attempt)), nil)
+func (c *Client) GetBuildStatus(buildID string) (string, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}

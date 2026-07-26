@@ -142,15 +142,9 @@ func (a *Agent) agentCapabilities() []string {
 	return []string{serverlessGatewayCapability}
 }
 
-func (a *Agent) routingAcknowledgements() []agenthttp.RoutingAcknowledgement {
+func (a *Agent) routingAcknowledgements() []string {
 	expected := a.ExpectedState()
 	if expected == nil || len(expected.RoutingSync) == 0 {
-		return nil
-	}
-	a.expectedStateMutex.RLock()
-	applied := a.latestAppliedGeneration
-	a.expectedStateMutex.RUnlock()
-	if applied != expected.Generation {
 		return nil
 	}
 
@@ -168,14 +162,7 @@ func (a *Agent) routingAcknowledgements() []agenthttp.RoutingAcknowledgement {
 		return nil
 	}
 
-	result := make([]agenthttp.RoutingAcknowledgement, 0, len(expected.RoutingSync))
-	for _, sync := range expected.RoutingSync {
-		if applied < sync.RequiredGeneration {
-			continue
-		}
-		result = append(result, agenthttp.RoutingAcknowledgement{RolloutID: sync.RolloutID, Generation: applied})
-	}
-	return result
+	return append([]string(nil), expected.RoutingSync...)
 }
 
 func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {

@@ -16,13 +16,11 @@ export async function deployServiceRevisionInternal(
 	serviceId: string,
 	serviceRevisionId: string,
 	artifactImageUri: string,
-	expectedMutableImageUri = artifactImageUri,
 ) {
 	const result = await createRolloutForServiceRevision(
 		serviceId,
 		serviceRevisionId,
 		artifactImageUri,
-		expectedMutableImageUri,
 	);
 	if (!result.rolloutId) return result;
 

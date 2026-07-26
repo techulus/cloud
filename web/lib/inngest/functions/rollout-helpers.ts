@@ -15,7 +15,6 @@ import {
 	type DbTransaction,
 } from "@/lib/agent-generation";
 import { CONTAINER_SUBNET_PREFIX } from "@/lib/constants";
-import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { buildRolloutReconcileWorkItems } from "@/lib/work-queue";
 
@@ -447,11 +446,6 @@ export async function createDeploymentRecords(
 		for (const serverId of changedServerIds) {
 			await bumpAgentGeneration(tx, serverId);
 		}
-
-		await recordRolloutStageBoundary(tx, {
-			rolloutId,
-			stage: "deployments_committed",
-		});
 	});
 
 	return {
@@ -544,10 +538,6 @@ export async function completeRollout(
 				completedAt: new Date(),
 			})
 			.where(eq(rollouts.id, rolloutId));
-		await recordRolloutStageBoundary(tx, {
-			rolloutId,
-			stage: "completed",
-		});
 		return {
 			completed: true,
 			stoppedCount: stoppedDeployments.length,

@@ -7,7 +7,6 @@ import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { finalizeManifestBuild } from "@/lib/manifest-finalization";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
@@ -145,30 +144,6 @@ export type RejectedActiveWorkItem = {
 	reason: string;
 };
 
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-export async function lockOwnedBuildWork(
-	tx: Transaction,
-	buildId: string,
-	serverId: string,
-	attempt: number,
-) {
-	return tx
-		.select({ id: workQueue.id })
-		.from(workQueue)
-		.where(
-			and(
-				eq(workQueue.id, `build-work-${buildId}`),
-				eq(workQueue.serverId, serverId),
-				eq(workQueue.type, "build"),
-				eq(workQueue.status, "processing"),
-				eq(workQueue.attempts, attempt),
-			),
-		)
-		.for("update")
-		.then((rows) => rows[0]);
-}
-
 export async function enqueueWork<T extends WorkQueue["type"]>(
 	serverId: string,
 	type: T,
@@ -223,7 +198,7 @@ export async function completeWorkItemResults(
 	for (const result of results) {
 		const updated = await db
 			.update(workQueue)
-			.set({ status: result.status, completedAt: new Date() })
+			.set({ status: result.status })
 			.where(
 				and(
 					eq(workQueue.id, result.id),
@@ -235,19 +210,6 @@ export async function completeWorkItemResults(
 			.returning();
 
 		if (updated.length === 0) {
-			const terminalManifest = await getRetryableCompletedManifest(
-				serverId,
-				result,
-			);
-			if (terminalManifest) {
-				try {
-					await runWorkItemCompletionSideEffects(terminalManifest, result);
-				} catch {
-					continue;
-				}
-				accepted.push(result.id);
-				continue;
-			}
 			rejected.push({
 				id: result.id,
 				reason: await getRejectionReason(serverId, result.id, result.attempt),
@@ -255,35 +217,11 @@ export async function completeWorkItemResults(
 			continue;
 		}
 
-		try {
-			await runWorkItemCompletionSideEffects(updated[0], result);
-		} catch {
-			continue;
-		}
 		accepted.push(result.id);
+		await runWorkItemCompletionSideEffects(updated[0], result);
 	}
 
 	return { accepted, rejected };
-}
-
-async function getRetryableCompletedManifest(
-	serverId: string,
-	result: WorkItemResult,
-) {
-	if (result.status !== "completed") return null;
-	return db
-		.select()
-		.from(workQueue)
-		.where(
-			and(
-				eq(workQueue.id, result.id),
-				eq(workQueue.serverId, serverId),
-				eq(workQueue.type, "create_manifest"),
-				eq(workQueue.status, "completed"),
-				eq(workQueue.attempts, result.attempt),
-			),
-		)
-		.then((rows) => rows[0] ?? null);
 }
 
 export async function renewActiveWorkItems(
@@ -396,10 +334,6 @@ export async function claimWorkItems(
 		SET
 			status = 'processing',
 			started_at = NOW(),
-			claimed_at = COALESCE(claimed_at, NOW()),
-			completed_at = NULL,
-			result_image_uri = NULL,
-			duration_ms = NULL,
 			attempts = attempts + 1
 		WHERE id IN (SELECT id FROM claimable)
 		RETURNING id, type, payload, attempts
@@ -504,16 +438,6 @@ async function runWorkItemCompletionSideEffects(
 				payload.buildGroupId &&
 				payload.finalImageUri
 			) {
-				const finalization = await finalizeManifestBuild({
-					serviceId: payload.serviceId,
-					serviceRevisionId: payload.serviceRevisionId,
-					buildGroupId: payload.buildGroupId,
-				});
-				if (finalization?.status !== "completed") {
-					throw new Error(
-						"Completed manifest work item could not be finalized",
-					);
-				}
 				await inngest.send(
 					inngestEvents.manifestCompleted.create(
 						{
@@ -549,7 +473,6 @@ async function runWorkItemCompletionSideEffects(
 		}
 	} catch (error) {
 		console.error("[work-queue] failed to run completion side effects:", error);
-		if (result.status === "completed") throw error;
 	}
 }
 

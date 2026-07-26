@@ -5,7 +5,6 @@ import {
 	type ContainerHealth,
 	deployments,
 	type NetworkHealth,
-	rolloutRoutingAcknowledgements,
 	rollouts,
 	servers,
 	serviceRevisions,
@@ -35,7 +34,6 @@ import {
 } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
@@ -780,7 +778,7 @@ export type StatusReport = {
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
 	containersComplete: boolean;
-	routingAcknowledgements?: Array<{ rolloutId: string; generation: number }>;
+	routingAcknowledgements?: string[];
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
@@ -853,7 +851,7 @@ export async function applyStatusReport(
 	if (completedAgentUpgradeTarget) {
 		await db
 			.update(workQueue)
-			.set({ status: "completed", completedAt: new Date() })
+			.set({ status: "completed" })
 			.where(
 				and(
 					eq(workQueue.serverId, serverId),
@@ -1410,78 +1408,37 @@ export async function applyStatusReport(
 	}
 
 	const routingAcknowledgements = [
-		...new Map(
-			(report.routingAcknowledgements ?? []).map((acknowledgement) => [
-				acknowledgement.rolloutId,
-				acknowledgement,
-			]),
-		).values(),
+		...new Set(report.routingAcknowledgements ?? []),
 	].filter(
-		(acknowledgement) =>
-			acknowledgement.rolloutId &&
-			Number.isSafeInteger(acknowledgement.generation) &&
-			acknowledgement.generation >= 0,
+		(rolloutId): rolloutId is string =>
+			typeof rolloutId === "string" && rolloutId.length > 0,
 	);
 	if (routingAcknowledgements.length > 0) {
+		const reportedRollouts = await db
+			.select({
+				id: rollouts.id,
+				serviceId: rollouts.serviceId,
+				status: rollouts.status,
+				currentStage: rollouts.currentStage,
+				routingTargets: rollouts.routingTargets,
+			})
+			.from(rollouts)
+			.where(inArray(rollouts.id, routingAcknowledgements));
 		const currentServerName = await getCurrentServerLogName();
 
-		for (const acknowledgement of routingAcknowledgements) {
-			const acknowledgedRollout = await db.transaction(async (tx) => {
-				const rollout = await tx
-					.select({
-						id: rollouts.id,
-						serviceId: rollouts.serviceId,
-						status: rollouts.status,
-						currentStage: rollouts.currentStage,
-						routingTargets: rollouts.routingTargets,
-					})
-					.from(rollouts)
-					.where(eq(rollouts.id, acknowledgement.rolloutId))
-					.for("update")
-					.then((rows) => rows[0]);
-				if (
-					!rollout ||
-					!isRoutingSyncAcknowledgementEligible(rollout, serverId)
-				) {
-					return null;
-				}
-				const rows = await tx
-					.update(rolloutRoutingAcknowledgements)
-					.set({
-						acknowledgedGeneration: acknowledgement.generation,
-						acknowledgedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(rolloutRoutingAcknowledgements.rolloutId, rollout.id),
-							eq(rolloutRoutingAcknowledgements.serverId, serverId),
-							isNull(rolloutRoutingAcknowledgements.acknowledgedAt),
-							sql`${rolloutRoutingAcknowledgements.requiredGeneration} <= ${acknowledgement.generation}`,
-						),
-					)
-					.returning({ rolloutId: rolloutRoutingAcknowledgements.rolloutId });
-				if (rows.length) {
-					await recordRolloutStageBoundary(tx, {
-						rolloutId: rollout.id,
-						stage: "routing_acknowledged",
-						serverId,
-						generation: acknowledgement.generation,
-					});
-				}
-				return rows.length ? rollout : null;
-			});
-			if (!acknowledgedRollout) continue;
+		for (const rollout of reportedRollouts) {
+			if (!isRoutingSyncAcknowledgementEligible(rollout, serverId)) continue;
 
 			await ingestRolloutLog(
-				acknowledgedRollout.id,
-				acknowledgedRollout.serviceId,
+				rollout.id,
+				rollout.serviceId,
 				"dns_sync",
 				`Routing synced on server ${currentServerName}`,
 			);
 			await inngest.send(
 				inngestEvents.serverDnsSynced.create({
 					serverId,
-					rolloutId: acknowledgedRollout.id,
+					rolloutId: rollout.id,
 				}),
 			);
 		}

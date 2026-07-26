@@ -51,12 +51,11 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 				if actual.DeploymentID != expected.DeploymentID {
 					continue
 				}
-				if actual.ImageID != string(resolved) || actual.ImageIdentity != string(resolved) {
+				if actual.ImageID != string(resolved) {
 					log.Printf(
-						"[serverless] recreate deployment %s because image identity changed (imageID=%s label=%s expected=%s)",
+						"[serverless] recreate deployment %s because image identity changed (imageID=%s expected=%s)",
 						Truncate(expected.DeploymentID, 8),
 						actual.ImageID,
-						actual.ImageIdentity,
 						resolved,
 					)
 					return a.deployResolvedAndMonitor(expected, resolved)

@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => {
 		const query = {
 			from: vi.fn(() => query),
 			where: vi.fn(() => query),
-			for: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
@@ -34,29 +33,14 @@ const mocks = vi.hoisted(() => {
 		};
 		return query;
 	}
-	const db = {
-		select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
-		update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
-		transaction: vi.fn(),
-	};
-	db.transaction.mockImplementation(async (callback) => {
-		let firstSelect = true;
-		return callback({
-			...db,
-			select: vi.fn(() => {
-				if (firstSelect) {
-					firstSelect = false;
-					return selectQuery([{ id: "build-work-build-amd64" }]);
-				}
-				return selectQuery(selectResults.shift() ?? []);
-			}),
-		});
-	});
 	return {
 		selectResults,
 		updateResults,
 		updateSets,
-		db,
+		db: {
+			select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
+			update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
+		},
 		verifyAgentRequest: vi.fn(),
 		enqueueWork: vi.fn(),
 		send: vi.fn(),
@@ -74,10 +58,7 @@ vi.mock("@/lib/agent-auth", () => ({
 }));
 vi.mock("@/lib/email", () => ({ sendBuildFailureAlert: vi.fn() }));
 vi.mock("@/lib/github", () => ({ updateGitHubDeploymentStatus: vi.fn() }));
-vi.mock("@/lib/work-queue", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@/lib/work-queue")>()),
-	enqueueWork: mocks.enqueueWork,
-}));
+vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {
@@ -136,11 +117,11 @@ function build(status: string, overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function post(status: string, attempt = 1) {
+function post(status: string) {
 	return POST(
 		new Request("http://localhost/api/v1/agent/builds/build-amd64/status", {
 			method: "POST",
-			body: JSON.stringify({ status, attempt, resolvedCommitSha: commitSha }),
+			body: JSON.stringify({ status, resolvedCommitSha: commitSha }),
 		}) as NextRequest,
 		{ params: Promise.resolve({ id: "build-amd64" }) },
 	);
@@ -167,7 +148,6 @@ describe("agent build status transitions", () => {
 		mocks.selectResults.push(
 			[build("pushing")],
 			[{ specification }],
-			[build("pushing")],
 			[
 				completedBuild,
 				build("completed", {
@@ -236,29 +216,6 @@ describe("agent build status transitions", () => {
 		const response = await post("failed");
 
 		expect(response.status).toBe(409);
-		expect(mocks.enqueueWork).not.toHaveBeenCalled();
-		expect(mocks.send).not.toHaveBeenCalled();
-	});
-
-	it("rejects a stale work attempt as part of the build read", async () => {
-		mocks.selectResults.push([]);
-
-		const response = await post("building", 1);
-
-		expect(response.status).toBe(404);
-		expect(mocks.db.update).not.toHaveBeenCalled();
-	});
-
-	it("does not authorize terminal replay after the work attempt changes", async () => {
-		const completedBuild = build("completed", {
-			imageUri: `${finalImage}-amd64`,
-		});
-		mocks.selectResults.push([completedBuild], [{ specification }], []);
-		mocks.updateResults.push([]);
-
-		const response = await post("completed");
-
-		expect(response.status).toBe(404);
 		expect(mocks.enqueueWork).not.toHaveBeenCalled();
 		expect(mocks.send).not.toHaveBeenCalled();
 	});

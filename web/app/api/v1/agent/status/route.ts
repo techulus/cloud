@@ -33,7 +33,9 @@ export async function POST(request: NextRequest) {
 	if (
 		!data.statusReport ||
 		!Array.isArray(data.statusReport.containers) ||
-		typeof data.statusReport.containersComplete !== "boolean"
+		typeof data.statusReport.containersComplete !== "boolean" ||
+		(data.statusReport.routingAcknowledgements !== undefined &&
+			!Array.isArray(data.statusReport.routingAcknowledgements))
 	) {
 		return NextResponse.json(
 			{ error: "Invalid statusReport payload" },

@@ -1,15 +1,26 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { builds } from "@/db/schema";
-import {
-	finalizeManifestBuild,
-	getGroupBuilds,
-} from "@/lib/manifest-finalization";
+import { builds, workQueue } from "@/db/schema";
+import { deployServiceRevisionInternal } from "@/lib/deploy-service";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
 type BuildStatus = typeof builds.$inferSelect.status;
-type GroupBuild = Awaited<ReturnType<typeof getGroupBuilds>>[number];
+type GroupBuild = {
+	id: string;
+	status: BuildStatus;
+	targetPlatform: string;
+	imageUri: string | null;
+};
+type ManifestState =
+	| {
+			status: "completed";
+			finalImageUri: string;
+			images: string[];
+	  }
+	| { status: "failed" }
+	| null;
+
 const nonTerminalBuildStatuses: BuildStatus[] = [
 	"pending",
 	"claimed",
@@ -18,10 +29,130 @@ const nonTerminalBuildStatuses: BuildStatus[] = [
 	"pushing",
 ];
 
+function platformImageForTarget(finalImage: string, targetPlatform: string) {
+	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
+	if (
+		operatingSystem !== "linux" ||
+		!architecture ||
+		extra.length > 0 ||
+		!["amd64", "arm64"].includes(architecture)
+	) {
+		throw new Error(`Invalid build target platform: ${targetPlatform}`);
+	}
+	return `${finalImage}-${architecture}`;
+}
+
+async function getGroupBuilds(
+	serviceId: string,
+	serviceRevisionId: string,
+	buildGroupId: string,
+) {
+	return db
+		.select({
+			id: builds.id,
+			status: builds.status,
+			targetPlatform: builds.targetPlatform,
+			imageUri: builds.imageUri,
+		})
+		.from(builds)
+		.where(
+			and(
+				eq(builds.serviceId, serviceId),
+				eq(builds.serviceRevisionId, serviceRevisionId),
+				eq(builds.buildGroupId, buildGroupId),
+			),
+		);
+}
+
 function groupFailure(groupBuilds: GroupBuild[]) {
 	return groupBuilds.some((build) =>
 		["failed", "cancelled"].includes(build.status),
 	);
+}
+
+async function manifestState({
+	serviceId,
+	serviceRevisionId,
+	buildGroupId,
+}: {
+	serviceId: string;
+	serviceRevisionId: string;
+	buildGroupId: string;
+}): Promise<ManifestState> {
+	const item = await db
+		.select({ status: workQueue.status, payload: workQueue.payload })
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.id, `manifest-work-${buildGroupId}`),
+				eq(workQueue.type, "create_manifest"),
+			),
+		)
+		.then((rows) => rows[0]);
+	if (!item || !["completed", "failed"].includes(item.status)) return null;
+
+	let payload: {
+		serviceId?: string;
+		serviceRevisionId?: string;
+		buildGroupId?: string;
+		finalImageUri?: string;
+		images?: unknown;
+	};
+	try {
+		payload = JSON.parse(item.payload);
+	} catch {
+		throw new Error("Build manifest work item has an invalid payload");
+	}
+	if (
+		payload.serviceId !== serviceId ||
+		payload.serviceRevisionId !== serviceRevisionId ||
+		payload.buildGroupId !== buildGroupId
+	) {
+		throw new Error("Build manifest work item identity does not match");
+	}
+	if (item.status === "failed") return { status: "failed" };
+	if (
+		!payload.finalImageUri ||
+		!Array.isArray(payload.images) ||
+		!payload.images.every((image): image is string => typeof image === "string")
+	) {
+		throw new Error("Completed build manifest is missing artifact metadata");
+	}
+	return {
+		status: "completed",
+		finalImageUri: payload.finalImageUri,
+		images: payload.images,
+	};
+}
+
+function validateCompletedGroup(
+	groupBuilds: GroupBuild[],
+	manifest: Extract<ManifestState, { status: "completed" }>,
+) {
+	if (groupBuilds.length === 0) throw new Error("Build group is missing");
+	const expectedImages = groupBuilds.map((build) => {
+		if (build.status !== "completed") {
+			throw new Error("Build group is not complete");
+		}
+		const expectedImage = platformImageForTarget(
+			manifest.finalImageUri,
+			build.targetPlatform,
+		);
+		if (build.imageUri !== expectedImage) {
+			throw new Error("Platform build artifact does not match its revision");
+		}
+		return expectedImage;
+	});
+	const expected = [...expectedImages].sort();
+	const actual = [...manifest.images].sort();
+	if (
+		expected.length !== actual.length ||
+		expected.some((image, index) => image !== actual[index])
+	) {
+		throw new Error(
+			"Build manifest does not contain the complete platform group",
+		);
+	}
 }
 
 export const buildWorkflow = inngest.createFunction(
@@ -35,8 +166,8 @@ export const buildWorkflow = inngest.createFunction(
 	},
 	async ({ event, step }) => {
 		const { serviceId, serviceRevisionId, buildGroupId } = event.data;
-		const manifestIdentity = { serviceId, serviceRevisionId, buildGroupId };
-		const readGroup = () => getGroupBuilds(manifestIdentity);
+		const readGroup = () =>
+			getGroupBuilds(serviceId, serviceRevisionId, buildGroupId);
 
 		let groupBuilds = await step.run("get-group-builds", readGroup);
 		if (groupBuilds.length === 0) {
@@ -93,30 +224,40 @@ export const buildWorkflow = inngest.createFunction(
 			}
 		}
 
-		let finalization = await step.run("finalize-existing-group-manifest", () =>
-			finalizeManifestBuild(manifestIdentity),
+		const manifestIdentity = { serviceId, serviceRevisionId, buildGroupId };
+		let manifest = await step.run("check-existing-group-manifest", () =>
+			manifestState(manifestIdentity),
 		);
-		if (!finalization) {
+		if (!manifest) {
 			await step.waitForEvent("wait-group-manifest", {
 				event: inngestEvents.manifestCompleted,
 				timeout: "10m",
 				if: `async.data.serviceRevisionId == "${serviceRevisionId}" && async.data.buildGroupId == "${buildGroupId}"`,
 			});
-			finalization = await step.run("finalize-group-manifest-after-wait", () =>
-				finalizeManifestBuild(manifestIdentity),
+			manifest = await step.run("check-group-manifest-after-wait", () =>
+				manifestState(manifestIdentity),
 			);
 		}
-		if (!finalization) {
+		if (!manifest) {
 			return { status: "completed_no_manifest", buildGroupId };
 		}
-		if (finalization.status === "failed") {
+		if (manifest.status === "failed") {
 			return { status: "failed", reason: "manifest_failed", buildGroupId };
 		}
 
+		groupBuilds = await step.run("validate-group-before-deploy", readGroup);
+		validateCompletedGroup(groupBuilds, manifest);
+		const deployment = await step.run("trigger-deploy-group", () =>
+			deployServiceRevisionInternal(
+				serviceId,
+				serviceRevisionId,
+				manifest.finalImageUri,
+			),
+		);
 		return {
 			status: "completed",
 			buildGroupId,
-			rolloutId: finalization.deployment.rolloutId,
+			rolloutId: deployment.rolloutId,
 		};
 	},
 );

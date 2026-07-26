@@ -13,7 +13,6 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { resolvePersistedSourceFromRows } from "@/lib/public-api";
-import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -359,7 +358,6 @@ export async function createRolloutWithServiceRevision(
 			status: "queued",
 			currentStage: "queued",
 		});
-		await recordRolloutStageBoundary(tx, { rolloutId, stage: "created" });
 		return { rolloutId, revision };
 	});
 }
@@ -419,7 +417,6 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 			status: "queued",
 			currentStage: "queued",
 		});
-		await recordRolloutStageBoundary(tx, { rolloutId, stage: "created" });
 		return { rolloutId, created: true };
 	});
 }
@@ -428,7 +425,6 @@ export async function createRolloutForServiceRevision(
 	serviceId: string,
 	serviceRevisionId: string,
 	artifactImageUri: string,
-	expectedMutableImageUri = artifactImageUri,
 ) {
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
@@ -455,21 +451,8 @@ export async function createRolloutForServiceRevision(
 		}
 
 		const specification = parseServiceRevisionSpec(revision.specification);
-		if (
-			specification.image !== expectedMutableImageUri &&
-			specification.image !== artifactImageUri
-		) {
+		if (specification.image !== artifactImageUri) {
 			throw new Error("Built artifact does not match the service revision");
-		}
-		if (
-			specification.source.type === "github" &&
-			specification.image === expectedMutableImageUri
-		) {
-			specification.image = artifactImageUri;
-			await tx
-				.update(serviceRevisions)
-				.set({ specification })
-				.where(eq(serviceRevisions.id, serviceRevisionId));
 		}
 		if (
 			specification.placement.mode === "manual" &&
@@ -492,10 +475,6 @@ export async function createRolloutForServiceRevision(
 			.returning({ id: rollouts.id })
 			.then((rows) => rows[0]);
 		if (created) {
-			await recordRolloutStageBoundary(tx, {
-				rolloutId: created.id,
-				stage: "created",
-			});
 			return { rolloutId: created.id, revision, created: true };
 		}
 

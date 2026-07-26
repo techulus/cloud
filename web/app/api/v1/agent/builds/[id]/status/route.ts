@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { builds, serviceRevisions } from "@/db/schema";
@@ -8,31 +8,14 @@ import { sendBuildFailureAlert } from "@/lib/email";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { platformImageForTarget } from "@/lib/manifest-finalization";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { enqueueWork, lockOwnedBuildWork } from "@/lib/work-queue";
+import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
-	attempt: number;
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
 	error?: string;
 	resolvedCommitSha?: string;
-	timings?: { cloneMs?: number; buildTotalMs?: number };
 };
-
-function validTimings(value: StatusUpdate["timings"]) {
-	return (
-		value === undefined ||
-		(Object.keys(value).every((key) =>
-			["cloneMs", "buildTotalMs"].includes(key),
-		) &&
-			Object.values(value).every(
-				(duration) =>
-					duration === undefined ||
-					(Number.isInteger(duration) && duration >= 0),
-			))
-	);
-}
 
 const validStatuses = new Set<StatusUpdate["status"]>([
 	"cloning",
@@ -55,6 +38,19 @@ const transitionSources: Record<StatusUpdate["status"], BuildStatus[]> = {
 	completed: ["pending", "claimed", "cloning", "building", "pushing"],
 	failed: ["pending", "claimed", "cloning", "building", "pushing"],
 };
+
+function platformImageForTarget(finalImage: string, targetPlatform: string) {
+	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
+	if (
+		operatingSystem !== "linux" ||
+		!architecture ||
+		extra.length > 0 ||
+		!["amd64", "arm64"].includes(architecture)
+	) {
+		throw new Error(`Invalid build target platform: ${targetPlatform}`);
+	}
+	return `${finalImage}-${architecture}`;
+}
 
 async function sendBuildCompletedEvent(data: {
 	buildId: string;
@@ -95,28 +91,12 @@ export async function POST(
 			{ status: 400 },
 		);
 	}
-	if (!Number.isInteger(update.attempt) || update.attempt < 1) {
-		return NextResponse.json(
-			{ error: "Invalid work attempt" },
-			{ status: 400 },
-		);
-	}
-	if (!validTimings(update.timings)) {
-		return NextResponse.json(
-			{ error: "Invalid build timings" },
-			{ status: 400 },
-		);
-	}
 
-	const build = await db.transaction(async (tx) => {
-		if (!(await lockOwnedBuildWork(tx, buildId, auth.serverId, update.attempt)))
-			return;
-		return tx
-			.select()
-			.from(builds)
-			.where(and(eq(builds.id, buildId), eq(builds.claimedBy, auth.serverId)))
-			.then((rows) => rows[0]);
-	});
+	const build = await db
+		.select()
+		.from(builds)
+		.where(and(eq(builds.id, buildId), eq(builds.claimedBy, auth.serverId)))
+		.then((rows) => rows[0]);
 	if (!build) {
 		return NextResponse.json(
 			{ error: "Build not found or not claimed by this agent" },
@@ -200,44 +180,36 @@ export async function POST(
 		updateData.completedAt = new Date();
 	}
 	if (update.error) updateData.error = update.error;
-	if (update.timings) updateData.timings = update.timings;
 	if (platformImageUri) updateData.imageUri = platformImageUri;
 
-	const transition = await db.transaction(async (tx) => {
-		if (!(await lockOwnedBuildWork(tx, buildId, auth.serverId, update.attempt)))
-			return { kind: "unauthorized" } as const;
-		const currentBuild = await tx
+	const transitionedBuild = await db
+		.update(builds)
+		.set(updateData)
+		.where(
+			and(
+				eq(builds.id, buildId),
+				eq(builds.claimedBy, auth.serverId),
+				inArray(builds.status, transitionSources[update.status]),
+			),
+		)
+		.returning()
+		.then((rows) => rows[0]);
+	let replayingTerminalUpdate = false;
+	if (!transitionedBuild) {
+		const currentBuild = await db
 			.select()
 			.from(builds)
 			.where(and(eq(builds.id, buildId), eq(builds.claimedBy, auth.serverId)))
-			.for("update")
 			.then((rows) => rows[0]);
-		if (!currentBuild) return { kind: "unauthorized" } as const;
-		if (currentBuild.status === "cancelled")
-			return { kind: "cancelled" } as const;
-		if (transitionSources[update.status].includes(currentBuild.status)) {
-			const transitionedBuild = await tx
-				.update(builds)
-				.set(updateData)
-				.where(eq(builds.id, buildId))
-				.returning()
-				.then((rows) => rows[0]);
-			return { kind: "transitioned", build: transitionedBuild } as const;
-		}
-		return { kind: "replay", build: currentBuild } as const;
-	});
-	let replayingTerminalUpdate = transition.kind === "replay";
-	if (transition.kind !== "transitioned") {
-		if (transition.kind === "unauthorized") {
+		if (!currentBuild) {
 			return NextResponse.json(
 				{ error: "Build not found or not claimed by this agent" },
 				{ status: 404 },
 			);
 		}
-		if (transition.kind === "cancelled") {
+		if (currentBuild.status === "cancelled") {
 			return NextResponse.json({ ok: true, cancelled: true });
 		}
-		const currentBuild = transition.build;
 		if (
 			!terminalBuildStatuses.has(currentBuild.status) ||
 			currentBuild.status !== update.status
@@ -400,21 +372,11 @@ export async function GET(
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 	const { id: buildId } = await params;
-	const attempt = Number(request.nextUrl.searchParams.get("attempt"));
-	if (!Number.isInteger(attempt) || attempt < 1)
-		return NextResponse.json(
-			{ error: "Invalid work attempt" },
-			{ status: 400 },
-		);
-	const build = await db.transaction(async (tx) => {
-		if (!(await lockOwnedBuildWork(tx, buildId, auth.serverId, attempt)))
-			return;
-		return tx
-			.select({ status: builds.status })
-			.from(builds)
-			.where(eq(builds.id, buildId))
-			.then((rows) => rows[0]);
-	});
+	const build = await db
+		.select({ status: builds.status })
+		.from(builds)
+		.where(eq(builds.id, buildId))
+		.then((rows) => rows[0]);
 	if (!build) {
 		return NextResponse.json({ error: "Build not found" }, { status: 404 });
 	}

@@ -4,7 +4,6 @@ import { deployments, rollouts, servers } from "@/db/schema";
 import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
-import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { enqueueRolloutReconcile } from "@/lib/work-queue";
 
 export async function restoreDrainingDeploymentsForRollback(serviceId: string) {
@@ -51,7 +50,6 @@ export async function handleRolloutFailure(
 				completedAt: new Date(),
 			})
 			.where(eq(rollouts.id, rolloutId));
-		await recordRolloutStageBoundary(tx, { rolloutId, stage: "failed" });
 
 		if (isRollingUpdate) {
 			await tx

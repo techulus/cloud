@@ -632,7 +632,7 @@ export async function failTimedOutAgentUpgrades(): Promise<void> {
 	if (timedOut.length > 0) {
 		await db
 			.update(workQueue)
-			.set({ status: "failed", completedAt: new Date() })
+			.set({ status: "failed" })
 			.where(
 				and(
 					inArray(
@@ -660,7 +660,7 @@ export async function cleanupStaleItems(): Promise<void> {
 	// reconnects. Only exhausted processing attempts are failed here.
 	const staleWorkItems = await db
 		.update(workQueue)
-		.set({ status: "failed", completedAt: new Date() })
+		.set({ status: "failed" })
 		.where(
 			and(
 				eq(workQueue.status, "processing"),

@@ -94,7 +94,6 @@ function completedGroup(
 		[
 			{
 				status: "completed",
-				resultImageUri: `registry/app@sha256:${"a".repeat(64)}`,
 				payload: JSON.stringify({
 					serviceId: "service-1",
 					serviceRevisionId,
@@ -129,14 +128,12 @@ describe("revision-first build completion", () => {
 			1,
 			"service-1",
 			"revision-new",
-			`registry/app@sha256:${"a".repeat(64)}`,
 			"registry/app:revision-new",
 		);
 		expect(mocks.deployServiceRevisionInternal).toHaveBeenNthCalledWith(
 			2,
 			"service-1",
 			"revision-old",
-			`registry/app@sha256:${"a".repeat(64)}`,
 			"registry/app:revision-old",
 		);
 	});
@@ -179,7 +176,6 @@ describe("revision-first build completion", () => {
 			[
 				{
 					status: "completed",
-					resultImageUri: `registry/app@sha256:${"a".repeat(64)}`,
 					payload: JSON.stringify({
 						serviceId: "service-1",
 						serviceRevisionId: "revision-missed-build-event",
@@ -203,8 +199,7 @@ describe("revision-first build completion", () => {
 		expect(mocks.deployServiceRevisionInternal).toHaveBeenCalledWith(
 			"service-1",
 			"revision-missed-build-event",
-			`registry/app@sha256:${"a".repeat(64)}`,
-			"registry/app:revision-missed-build-event",
+			image,
 		);
 	});
 
@@ -224,7 +219,6 @@ describe("revision-first build completion", () => {
 			[
 				{
 					status: "completed",
-					resultImageUri: `registry/app@sha256:${"a".repeat(64)}`,
 					payload: JSON.stringify({
 						serviceId: "service-1",
 						serviceRevisionId: "revision-missed-manifest-event",
@@ -248,8 +242,7 @@ describe("revision-first build completion", () => {
 		expect(mocks.deployServiceRevisionInternal).toHaveBeenCalledWith(
 			"service-1",
 			"revision-missed-manifest-event",
-			`registry/app@sha256:${"a".repeat(64)}`,
-			"registry/app:revision-missed-manifest-event",
+			image,
 		);
 	});
 
@@ -274,7 +267,6 @@ describe("revision-first build completion", () => {
 			[
 				{
 					status: "completed",
-					resultImageUri: `registry/app@sha256:${"a".repeat(64)}`,
 					payload: JSON.stringify({
 						serviceId: "service-1",
 						serviceRevisionId: "revision-incomplete-manifest",

@@ -2,13 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import {
-	deployments,
-	rolloutRoutingAcknowledgements,
-	rollouts,
-	servers,
-	workQueue,
-} from "@/db/schema";
+import { deployments, rollouts, servers, workQueue } from "@/db/schema";
 import { bumpAgentGeneration } from "@/lib/agent-generation";
 import {
 	isObservedReady,
@@ -16,7 +10,6 @@ import {
 	type ObservedPhase,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
-import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
@@ -260,10 +253,6 @@ export async function acquireRolloutTurn(
 			.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")))
 			.returning({ id: rollouts.id });
 		if (!acquired.length) return "terminal";
-		await recordRolloutStageBoundary(tx, {
-			rolloutId,
-			stage: "turn_acquired",
-		});
 
 		return "acquired";
 	});
@@ -280,12 +269,6 @@ export async function failQueuedRolloutOnTimeout(rolloutId: string) {
 			})
 			.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")))
 			.returning({ id: rollouts.id });
-		if (failed.length) {
-			await recordRolloutStageBoundary(tx, {
-				rolloutId,
-				stage: "failed",
-			});
-		}
 		return failed.length > 0;
 	});
 }
@@ -305,28 +288,19 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			if (!rolloutId) return;
 
-			await db.transaction(async (tx) => {
-				const failed = await tx
-					.update(rollouts)
-					.set({
-						status: "failed",
-						currentStage: "workflow_failed",
-						completedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(rollouts.id, rolloutId),
-							inArray(rollouts.status, ["queued", "in_progress"]),
-						),
-					)
-					.returning({ id: rollouts.id });
-				if (failed.length) {
-					await recordRolloutStageBoundary(tx, {
-						rolloutId,
-						stage: "failed",
-					});
-				}
-			});
+			await db
+				.update(rollouts)
+				.set({
+					status: "failed",
+					currentStage: "workflow_failed",
+					completedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(rollouts.id, rolloutId),
+						inArray(rollouts.status, ["queued", "in_progress"]),
+					),
+				);
 		},
 	},
 	async ({ event, step }) => {
@@ -725,15 +699,6 @@ export const rolloutWorkflow = inngest.createFunction(
 			};
 		}
 
-		await step.run("record-control-plane-ready", () =>
-			db.transaction((tx) =>
-				recordRolloutStageBoundary(tx, {
-					rolloutId,
-					stage: "control_plane_ready",
-				}),
-			),
-		);
-
 		const routingTargetResult = await step.run(
 			"prepare-routing-sync",
 			async () => {
@@ -797,41 +762,11 @@ export const rolloutWorkflow = inngest.createFunction(
 						),
 					);
 
-				const generationByServerId = new Map<string, number>();
 				for (const recipient of generationRecipients) {
-					generationByServerId.set(
-						recipient.id,
-						await bumpAgentGeneration(tx, recipient.id),
-					);
+					await bumpAgentGeneration(tx, recipient.id);
 				}
 
 				if (routingTargetIds.length > 0) {
-					const acknowledgementRows = [];
-					for (const serverId of routingTargetIds) {
-						const requiredGeneration = generationByServerId.get(serverId);
-						if (requiredGeneration === undefined) {
-							throw new Error(`Routing target server ${serverId} not found`);
-						}
-						acknowledgementRows.push({
-							rolloutId,
-							serverId,
-							requiredGeneration,
-						});
-					}
-					await tx
-						.insert(rolloutRoutingAcknowledgements)
-						.values(acknowledgementRows)
-						.onConflictDoUpdate({
-							target: [
-								rolloutRoutingAcknowledgements.rolloutId,
-								rolloutRoutingAcknowledgements.serverId,
-							],
-							set: {
-								requiredGeneration: sql`excluded.required_generation`,
-								acknowledgedGeneration: null,
-								acknowledgedAt: null,
-							},
-						});
 					await tx
 						.insert(workQueue)
 						.values(
@@ -843,10 +778,6 @@ export const rolloutWorkflow = inngest.createFunction(
 						)
 						.onConflictDoNothing({ target: workQueue.id });
 				}
-				await recordRolloutStageBoundary(tx, {
-					rolloutId,
-					stage: "promotion_committed",
-				});
 			});
 
 			await ingestRolloutLog(
@@ -857,33 +788,18 @@ export const rolloutWorkflow = inngest.createFunction(
 			);
 		});
 
-		let unacknowledgedServerIds = routingTargetIds;
-		for (
-			let attempt = 0;
-			attempt < 30 && unacknowledgedServerIds.length;
-			attempt++
-		) {
-			await step.waitForEvent(`wait-dns-hint-${attempt}`, {
-				event: inngestEvents.serverDnsSynced,
-				timeout: "10s",
-				if: `async.data.rolloutId == "${rolloutId}"`,
-			});
-			unacknowledgedServerIds = await step.run(
-				`check-routing-acks-${attempt}`,
-				async () =>
-					db
-						.select({ serverId: rolloutRoutingAcknowledgements.serverId })
-						.from(rolloutRoutingAcknowledgements)
-						.where(
-							and(
-								eq(rolloutRoutingAcknowledgements.rolloutId, rolloutId),
-								isNull(rolloutRoutingAcknowledgements.acknowledgedAt),
-							),
-						)
-						.then((rows) => rows.map((row) => row.serverId)),
-			);
-		}
-
+		const dnsResults = await Promise.all(
+			routingTargetIds.map((serverId) =>
+				step.waitForEvent(`wait-dns-${serverId}`, {
+					event: inngestEvents.serverDnsSynced,
+					timeout: "5m",
+					if: `async.data.serverId == "${serverId}" && async.data.rolloutId == "${rolloutId}"`,
+				}),
+			),
+		);
+		const unacknowledgedServerIds = routingTargetIds.filter(
+			(_, index) => dnsResults[index] === null,
+		);
 		const dnsTimedOut = unacknowledgedServerIds.length > 0;
 		const dnsServerNames = await step.run("load-dns-server-names", async () => {
 			if (routingTargetIds.length === 0) {
