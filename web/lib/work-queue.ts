@@ -218,7 +218,11 @@ export async function completeWorkItemResults(
 				result,
 			);
 			if (terminalManifest) {
-				await runWorkItemCompletionSideEffects(terminalManifest, result);
+				try {
+					await runWorkItemCompletionSideEffects(terminalManifest, result);
+				} catch {
+					continue;
+				}
 				accepted.push(result.id);
 				continue;
 			}
@@ -229,7 +233,11 @@ export async function completeWorkItemResults(
 			continue;
 		}
 
-		await runWorkItemCompletionSideEffects(updated[0], result);
+		try {
+			await runWorkItemCompletionSideEffects(updated[0], result);
+		} catch {
+			continue;
+		}
 		accepted.push(result.id);
 	}
 

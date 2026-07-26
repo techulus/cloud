@@ -72,8 +72,13 @@ describe("manifest completion", () => {
 		mocks.send.mockResolvedValue(undefined);
 	});
 
-	it("propagates finalization failure and retries the same terminal result", async () => {
-		mocks.updateResults.push([manifestItem]);
+	it("retries manifest finalization without blocking later results", async () => {
+		const laterItem = {
+			...manifestItem,
+			id: "reconcile-1",
+			type: "reconcile",
+		};
+		mocks.updateResults.push([manifestItem], [laterItem]);
 		mocks.finalizeManifestBuild.mockRejectedValueOnce(
 			new Error("rollout event failed"),
 		);
@@ -81,8 +86,9 @@ describe("manifest completion", () => {
 		await expect(
 			completeWorkItemResults("server-1", [
 				{ id: manifestItem.id, attempt: 2, status: "completed" },
+				{ id: laterItem.id, attempt: 2, status: "completed" },
 			]),
-		).rejects.toThrow("rollout event failed");
+		).resolves.toEqual({ accepted: [laterItem.id], rejected: [] });
 
 		mocks.updateResults.push([]);
 		mocks.selectResults.push([manifestItem]);
