@@ -5,7 +5,8 @@ import { servers } from "@/db/schema";
 
 const CHANNEL = "agent_generation";
 const MAX_POLLS = 1_000;
-const POLL_INTERVAL_MS = 1_000;
+const RECONNECT_INTERVAL_MS = 1_000;
+const GENERATION_RECHECK_INTERVAL_MS = 5_000;
 const WAKE_TIMEOUT_MS = 25_000;
 
 type Subscriber = () => void;
@@ -28,7 +29,7 @@ function scheduleReconnect(disconnectedClient?: Client) {
 	reconnectTimer = setTimeout(() => {
 		reconnectTimer = undefined;
 		void ensureListener().catch(() => scheduleReconnect());
-	}, POLL_INTERVAL_MS);
+	}, RECONNECT_INTERVAL_MS);
 	reconnectTimer.unref();
 }
 
@@ -116,7 +117,8 @@ export async function waitForAgentGeneration(
 	const readGeneration = options.readGeneration ?? readAgentGeneration;
 	const register = options.subscribe ?? subscribe;
 	const timeoutMs = options.timeoutMs ?? WAKE_TIMEOUT_MS;
-	const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+	const pollIntervalMs =
+		options.pollIntervalMs ?? GENERATION_RECHECK_INTERVAL_MS;
 
 	return new Promise<WakeResult>((resolve, reject) => {
 		let finished = false;

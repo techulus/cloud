@@ -4,7 +4,6 @@ import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimWorkItems,
-	classifyWorkType,
 	completeWorkItemResults,
 	renewActiveWorkItems,
 	type WorkItemResult,
@@ -112,7 +111,6 @@ function isValidWorkType(value: unknown): value is ActiveWorkItem["type"] {
 		case "backup_volume":
 		case "restore_volume":
 		case "upgrade_agent":
-			classifyWorkType(value);
 			return true;
 		default:
 			return false;
