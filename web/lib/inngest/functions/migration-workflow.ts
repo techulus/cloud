@@ -4,10 +4,13 @@ import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
 	deployments,
+	servers,
 	serviceReplicas,
 	services,
 	volumeBackups,
+	workQueue,
 } from "@/db/schema";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
 import { enqueueWork } from "@/lib/work-queue";
@@ -55,20 +58,29 @@ export const migrationWorkflow = inngest.createFunction(
 		});
 
 		await step.run("stop-source-volume", async () => {
-			await db
-				.update(services)
-				.set({ migrationStatus: "stopping" })
-				.where(eq(services.id, serviceId));
-
-			await enqueueWork(sourceServerId, "stop", {
-				deploymentId: sourceDeploymentId,
-				containerId: sourceContainerId,
+			await db.transaction(async (tx) => {
+				await tx
+					.update(services)
+					.set({ migrationStatus: "stopping" })
+					.where(eq(services.id, serviceId));
+				await tx.insert(workQueue).values({
+					id: randomUUID(),
+					serverId: sourceServerId,
+					type: "stop",
+					payload: JSON.stringify({
+						deploymentId: sourceDeploymentId,
+						containerId: sourceContainerId,
+					}),
+				});
+				await tx
+					.update(deployments)
+					.set(markDeploymentRemoved())
+					.where(eq(deployments.id, sourceDeploymentId));
+				const recipients = await tx.select({ id: servers.id }).from(servers);
+				for (const recipient of recipients) {
+					await bumpAgentGeneration(tx, recipient.id);
+				}
 			});
-
-			await db
-				.update(deployments)
-				.set(markDeploymentRemoved())
-				.where(eq(deployments.id, sourceDeploymentId));
 		});
 
 		const backupIds = await step.run("start-backups", async () => {

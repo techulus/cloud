@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -22,7 +23,11 @@ func NewReconciler(encryptionKey, dataDir string) *Reconciler {
 	}
 }
 
-func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) (*container.DeployResult, error) {
+func (r *Reconciler) PullImage(ctx context.Context, reference string) (container.ResolvedImage, error) {
+	return container.PullImage(ctx, reference)
+}
+
+func (r *Reconciler) DeployResolved(ctx context.Context, exp agenthttp.ExpectedContainer, image container.ResolvedImage) (*container.DeployResult, error) {
 	portMappings := make([]container.PortMapping, len(exp.Ports))
 	for i, p := range exp.Ports {
 		portMappings[i] = container.PortMapping{
@@ -63,7 +68,7 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) (*container.DeployR
 		}
 	}
 
-	return container.Deploy(&container.DeployConfig{
+	return container.Deploy(ctx, &container.DeployConfig{
 		Name:              exp.Name,
 		Image:             exp.Image,
 		ServiceID:         exp.ServiceID,
@@ -79,5 +84,5 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) (*container.DeployR
 		CPULimit:          exp.ResourceCPULimit,
 		MemoryLimitMb:     exp.ResourceMemoryLimitMb,
 		LogFunc:           func(stream, message string) { log.Printf("[deploy:%s] %s", stream, message) },
-	})
+	}, image)
 }

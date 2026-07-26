@@ -1,19 +1,30 @@
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, rollouts } from "@/db/schema";
+import { deployments, rollouts, servers } from "@/db/schema";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { sendDeploymentFailureAlert } from "@/lib/email";
+import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
+import { enqueueRolloutReconcile } from "@/lib/work-queue";
 
 export async function restoreDrainingDeploymentsForRollback(serviceId: string) {
-	await db
-		.update(deployments)
-		.set({ trafficState: "active" })
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.trafficState, "draining"),
-			),
-		);
+	await db.transaction(async (tx) => {
+		const restored = await tx
+			.update(deployments)
+			.set({ trafficState: "active" })
+			.where(
+				and(
+					eq(deployments.serviceId, serviceId),
+					eq(deployments.trafficState, "draining"),
+				),
+			)
+			.returning({ id: deployments.id });
+		if (restored.length === 0) return;
+		const recipients = await tx.select({ id: servers.id }).from(servers);
+		for (const recipient of recipients) {
+			await bumpAgentGeneration(tx, recipient.id);
+		}
+	});
 }
 
 export async function handleRolloutFailure(
@@ -22,21 +33,60 @@ export async function handleRolloutFailure(
 	reason: string,
 	isRollingUpdate: boolean,
 ): Promise<void> {
-	const rolloutDeployments = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.rolloutId, rolloutId));
+	const affectedServerIds = await db.transaction(async (tx) => {
+		const rolloutDeployments = await tx
+			.select({ serverId: deployments.serverId })
+			.from(deployments)
+			.where(eq(deployments.rolloutId, rolloutId));
+		await tx
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(eq(rollouts.id, rolloutId))
+			.for("update");
+		await tx
+			.update(rollouts)
+			.set({
+				status: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+				currentStage: reason,
+				completedAt: new Date(),
+			})
+			.where(eq(rollouts.id, rolloutId));
+		await recordRolloutStageBoundary(tx, { rolloutId, stage: "failed" });
 
-	await db
-		.update(rollouts)
-		.set({
-			status: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
-			currentStage: reason,
-			completedAt: new Date(),
-		})
-		.where(eq(rollouts.id, rolloutId));
+		if (isRollingUpdate) {
+			await tx
+				.update(deployments)
+				.set({ trafficState: "active" })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.trafficState, "draining"),
+					),
+				);
+		}
+		const removed = await tx
+			.update(deployments)
+			.set(markDeploymentFailedRemoved(reason))
+			.where(
+				and(
+					eq(deployments.rolloutId, rolloutId),
+					ne(deployments.runtimeDesiredState, "removed"),
+				),
+			)
+			.returning({ serverId: deployments.serverId });
+		if (isRollingUpdate || removed.length > 0) {
+			const recipients = await tx.select({ id: servers.id }).from(servers);
+			for (const recipient of recipients) {
+				await bumpAgentGeneration(tx, recipient.id);
+			}
+		}
+		return {
+			rolloutDeployments,
+			serverIds: [...new Set(removed.map((deployment) => deployment.serverId))],
+		};
+	});
 
-	if (rolloutDeployments.length === 0) {
+	if (affectedServerIds.rolloutDeployments.length === 0) {
 		sendDeploymentFailureAlert({
 			serviceId,
 			serverId: null,
@@ -50,21 +100,12 @@ export async function handleRolloutFailure(
 		return;
 	}
 
-	const serverId = rolloutDeployments[0].serverId;
-
-	if (isRollingUpdate) {
-		await restoreDrainingDeploymentsForRollback(serviceId);
-	}
-
-	await db
-		.update(deployments)
-		.set(markDeploymentFailedRemoved(reason))
-		.where(
-			and(
-				eq(deployments.rolloutId, rolloutId),
-				ne(deployments.runtimeDesiredState, "removed"),
-			),
-		);
+	const serverId = affectedServerIds.rolloutDeployments[0].serverId;
+	await enqueueRolloutReconcile(
+		rolloutId,
+		"cleanup",
+		affectedServerIds.serverIds,
+	);
 
 	sendDeploymentFailureAlert({
 		serviceId,

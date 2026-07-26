@@ -49,6 +49,11 @@ const STATUS_CONFIG: Record<
 		icon: RotateCcw,
 		className: "text-orange-600",
 	},
+	superseded: {
+		label: "Superseded",
+		icon: Clock,
+		className: "text-slate-500",
+	},
 };
 
 function RolloutBadge({

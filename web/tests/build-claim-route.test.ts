@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
 		const query = {
 			from: vi.fn(() => query),
 			where: vi.fn(() => query),
+			for: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
@@ -33,14 +34,29 @@ const mocks = vi.hoisted(() => {
 		};
 		return query;
 	}
+	const db = {
+		select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
+		update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
+		transaction: vi.fn(),
+	};
+	db.transaction.mockImplementation(async (callback) => {
+		let firstSelect = true;
+		return callback({
+			...db,
+			select: vi.fn(() => {
+				if (firstSelect) {
+					firstSelect = false;
+					return selectQuery([{ id: "build-work-build-amd64" }]);
+				}
+				return selectQuery(selectResults.shift() ?? []);
+			}),
+		});
+	});
 	return {
 		selectResults,
 		updateResults,
 		updateSets,
-		db: {
-			select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
-			update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
-		},
+		db,
 		verifyAgentRequest: vi.fn(),
 		getSetting: vi.fn(),
 		send: vi.fn(),
@@ -82,14 +98,12 @@ describe("agent build claim", () => {
 
 	it("does not overwrite cancellation when claim validation fails", async () => {
 		mocks.updateResults.push([build], []);
-		mocks.selectResults.push(
-			[{ id: "service-1", projectId: "project-1" }],
-			[],
-		);
+		mocks.selectResults.push([{ id: "service-1", projectId: "project-1" }], []);
 
 		const response = await POST(
 			new Request("http://localhost/api/v1/agent/builds/build-amd64", {
 				method: "POST",
+				body: JSON.stringify({ attempt: 2 }),
 			}) as NextRequest,
 			{ params: Promise.resolve({ id: "build-amd64" }) },
 		);
@@ -105,5 +119,21 @@ describe("agent build claim", () => {
 			completedAt: expect.any(Date),
 		});
 		expect(mocks.send).not.toHaveBeenCalled();
+	});
+
+	it("rejects a stale attempt without changing the build", async () => {
+		mocks.updateResults.push([]);
+
+		const response = await POST(
+			new Request("http://localhost/api/v1/agent/builds/build-amd64", {
+				method: "POST",
+				body: JSON.stringify({ attempt: 1 }),
+			}) as NextRequest,
+			{ params: Promise.resolve({ id: "build-amd64" }) },
+		);
+
+		expect(response.status).toBe(409);
+		expect(mocks.db.update).toHaveBeenCalledOnce();
+		expect(mocks.updateSets).toHaveLength(1);
 	});
 });

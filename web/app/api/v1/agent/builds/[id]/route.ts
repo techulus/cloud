@@ -1,8 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
-import { builds, serviceRevisions, services } from "@/db/schema";
+import { builds, serviceRevisions, services, workQueue } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { cloneUrlForRevisionSource } from "@/lib/build-revision-source";
 import { inngest } from "@/lib/inngest/client";
@@ -20,27 +20,84 @@ function imageRepository(image: string): string {
 	return lastColon > image.lastIndexOf("/") ? image.slice(0, lastColon) : image;
 }
 
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function lockOwnedBuildWork(
+	tx: Transaction,
+	buildId: string,
+	serverId: string,
+	attempt: number,
+) {
+	return tx
+		.select({ id: workQueue.id })
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.id, `build-work-${buildId}`),
+				eq(workQueue.serverId, serverId),
+				eq(workQueue.type, "build"),
+				eq(workQueue.status, "processing"),
+				eq(workQueue.attempts, attempt),
+			),
+		)
+		.for("update")
+		.then((rows) => rows[0]);
+}
+
 export async function POST(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
-	const auth = await verifyAgentRequest(request);
+	const body = await request.text();
+	const auth = await verifyAgentRequest(request, body);
 	if (!auth.success) {
 		return NextResponse.json({ error: auth.error }, { status: auth.status });
 	}
 
 	const { id: buildId } = await params;
 	const { serverId } = auth;
-	const build = await db
-		.update(builds)
-		.set({
-			status: "claimed",
-			claimedBy: serverId,
-			claimedAt: new Date(),
-		})
-		.where(and(eq(builds.id, buildId), eq(builds.status, "pending")))
-		.returning()
-		.then((rows) => rows[0]);
+	let attempt: number;
+	try {
+		attempt = JSON.parse(body).attempt;
+	} catch {
+		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+	}
+	if (!Number.isInteger(attempt) || attempt < 1) {
+		return NextResponse.json(
+			{ error: "Invalid work attempt" },
+			{ status: 400 },
+		);
+	}
+	const build = await db.transaction(async (tx) => {
+		if (!(await lockOwnedBuildWork(tx, buildId, serverId, attempt))) return;
+		return tx
+			.update(builds)
+			.set({
+				status: "claimed",
+				claimedBy: serverId,
+				claimedAt: new Date(),
+				startedAt: null,
+				completedAt: null,
+				error: null,
+				timings: null,
+				imageUri: null,
+			})
+			.where(
+				and(
+					eq(builds.id, buildId),
+					inArray(builds.status, [
+						"pending",
+						"claimed",
+						"cloning",
+						"building",
+						"pushing",
+					]),
+					or(eq(builds.claimedBy, serverId), isNull(builds.claimedBy)),
+				),
+			)
+			.returning()
+			.then((rows) => rows[0]);
+	});
 
 	if (!build) {
 		return NextResponse.json(
@@ -50,18 +107,26 @@ export async function POST(
 	}
 
 	const failClaim = async (message: string, status = 500) => {
-		const failed = await db
-			.update(builds)
-			.set({ status: "failed", error: message, completedAt: new Date() })
-			.where(
-				and(
-					eq(builds.id, buildId),
-					eq(builds.claimedBy, serverId),
-					inArray(builds.status, ["claimed", "cloning", "building", "pushing"]),
-				),
-			)
-			.returning({ id: builds.id })
-			.then((rows) => rows[0]);
+		const failed = await db.transaction(async (tx) => {
+			if (!(await lockOwnedBuildWork(tx, buildId, serverId, attempt))) return;
+			return tx
+				.update(builds)
+				.set({ status: "failed", error: message, completedAt: new Date() })
+				.where(
+					and(
+						eq(builds.id, buildId),
+						eq(builds.claimedBy, serverId),
+						inArray(builds.status, [
+							"claimed",
+							"cloning",
+							"building",
+							"pushing",
+						]),
+					),
+				)
+				.returning({ id: builds.id })
+				.then((rows) => rows[0]);
+		});
 		if (!failed) {
 			return NextResponse.json(
 				{ error: "Build was cancelled while being claimed" },

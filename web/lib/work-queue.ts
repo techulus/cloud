@@ -3,9 +3,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, servers, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { finalizeManifestBuild } from "@/lib/manifest-finalization";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
@@ -97,8 +99,34 @@ export type WorkItemResult = {
 
 export type ActiveWorkItem = {
 	id: string;
+	type: WorkQueue["type"];
 	attempt: number;
 };
+
+export type WorkLane = "runtime" | "build" | "exclusive";
+
+export function classifyWorkType(type: WorkQueue["type"]): WorkLane {
+	switch (type) {
+		case "deploy":
+		case "reconcile":
+		case "stop":
+		case "restart":
+			return "runtime";
+		case "build":
+		case "create_manifest":
+			return "build";
+		case "force_cleanup":
+		case "cleanup_volumes":
+		case "backup_volume":
+		case "restore_volume":
+		case "upgrade_agent":
+			return "exclusive";
+		default: {
+			const exhaustive: never = type;
+			return exhaustive;
+		}
+	}
+}
 
 export type LeasedWorkItem = {
 	id: string;
@@ -123,15 +151,19 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 	payload: WorkPayloadByType[T],
 	options: { id?: string } = {},
 ) {
-	await db
-		.insert(workQueue)
-		.values({
-			id: options.id ?? randomUUID(),
-			serverId,
-			type,
-			payload: JSON.stringify(payload),
-		})
-		.onConflictDoNothing({ target: workQueue.id });
+	await db.transaction(async (tx) => {
+		const inserted = await tx
+			.insert(workQueue)
+			.values({
+				id: options.id ?? randomUUID(),
+				serverId,
+				type,
+				payload: JSON.stringify(payload),
+			})
+			.onConflictDoNothing({ target: workQueue.id })
+			.returning({ id: workQueue.id });
+		if (inserted.length) await bumpAgentGeneration(tx, serverId);
+	});
 }
 
 export async function enqueueRolloutReconcile(
@@ -144,10 +176,16 @@ export async function enqueueRolloutReconcile(
 	);
 	if (items.length === 0) return;
 
-	await db
-		.insert(workQueue)
-		.values(items)
-		.onConflictDoNothing({ target: workQueue.id });
+	await db.transaction(async (tx) => {
+		const inserted = await tx
+			.insert(workQueue)
+			.values(items)
+			.onConflictDoNothing({ target: workQueue.id })
+			.returning({ serverId: workQueue.serverId });
+		for (const serverId of new Set(inserted.map((item) => item.serverId))) {
+			await bumpAgentGeneration(tx, serverId);
+		}
+	});
 }
 
 export async function completeWorkItemResults(
@@ -163,7 +201,7 @@ export async function completeWorkItemResults(
 	for (const result of results) {
 		const updated = await db
 			.update(workQueue)
-			.set({ status: result.status })
+			.set({ status: result.status, completedAt: new Date() })
 			.where(
 				and(
 					eq(workQueue.id, result.id),
@@ -175,6 +213,15 @@ export async function completeWorkItemResults(
 			.returning();
 
 		if (updated.length === 0) {
+			const terminalManifest = await getRetryableCompletedManifest(
+				serverId,
+				result,
+			);
+			if (terminalManifest) {
+				await runWorkItemCompletionSideEffects(terminalManifest, result);
+				accepted.push(result.id);
+				continue;
+			}
 			rejected.push({
 				id: result.id,
 				reason: await getRejectionReason(serverId, result.id, result.attempt),
@@ -182,11 +229,31 @@ export async function completeWorkItemResults(
 			continue;
 		}
 
-		accepted.push(result.id);
 		await runWorkItemCompletionSideEffects(updated[0], result);
+		accepted.push(result.id);
 	}
 
 	return { accepted, rejected };
+}
+
+async function getRetryableCompletedManifest(
+	serverId: string,
+	result: WorkItemResult,
+) {
+	if (result.status !== "completed") return null;
+	return db
+		.select()
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.id, result.id),
+				eq(workQueue.serverId, serverId),
+				eq(workQueue.type, "create_manifest"),
+				eq(workQueue.status, "completed"),
+				eq(workQueue.attempts, result.attempt),
+			),
+		)
+		.then((rows) => rows[0] ?? null);
 }
 
 export async function renewActiveWorkItems(
@@ -222,22 +289,36 @@ export async function renewActiveWorkItems(
 	return rejected;
 }
 
-export async function claimNextWorkItem(
+export async function claimWorkItems(
 	serverId: string,
-): Promise<LeasedWorkItem | null> {
+	activeItems: ActiveWorkItem[],
+): Promise<LeasedWorkItem[]> {
+	const activeLanes = new Set(
+		activeItems.map((item) => classifyWorkType(item.type)),
+	);
+	if (activeLanes.has("exclusive")) return [];
+
+	const runtimeAvailable = !activeLanes.has("runtime");
+	const buildAvailable = !activeLanes.has("build");
+	if (!runtimeAvailable && !buildAvailable) return [];
+
 	const staleThreshold = subtractMilliseconds(
 		new Date(),
 		WORK_QUEUE_LEASE_DURATION_MS,
 	);
 
 	const result = await db.execute(sql`
-		UPDATE work_queue
-		SET
-			status = 'processing',
-			started_at = NOW(),
-			attempts = attempts + 1
-		WHERE id = (
-			SELECT id
+		WITH eligible AS (
+			SELECT
+				id,
+				type,
+				status,
+				created_at,
+				CASE
+					WHEN type IN ('deploy', 'reconcile', 'stop', 'restart') THEN 'runtime'
+					WHEN type IN ('build', 'create_manifest') THEN 'build'
+					ELSE 'exclusive'
+				END AS lane
 			FROM work_queue
 			WHERE server_id = ${serverId}
 				AND (
@@ -248,10 +329,49 @@ export async function claimNextWorkItem(
 						AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
 					)
 				)
-			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
+		),
+		oldest AS (
+			SELECT id, lane
+			FROM eligible
+			ORDER BY (status = 'pending') DESC, created_at ASC
 			LIMIT 1
+		),
+		claimable AS (
+			SELECT id
+			FROM (
+				SELECT
+					id,
+					lane,
+					created_at,
+					ROW_NUMBER() OVER (PARTITION BY lane ORDER BY created_at ASC) AS lane_position
+				FROM eligible
+			) ranked
+			WHERE
+				(
+					${activeItems.length === 0}
+					AND (SELECT lane FROM oldest) = 'exclusive'
+					AND id = (SELECT id FROM oldest)
+				)
+				OR (
+					NOT (${activeItems.length === 0} AND (SELECT lane FROM oldest) = 'exclusive')
+					AND lane_position = 1
+					AND (
+						(lane = 'runtime' AND ${runtimeAvailable})
+						OR (lane = 'build' AND ${buildAvailable})
+					)
+				)
 		)
+		UPDATE work_queue
+		SET
+			status = 'processing',
+			started_at = NOW(),
+			claimed_at = COALESCE(claimed_at, NOW()),
+			completed_at = NULL,
+			result_image_uri = NULL,
+			duration_ms = NULL,
+			attempts = attempts + 1
+		WHERE id IN (SELECT id FROM claimable)
 		RETURNING id, type, payload, attempts
 	`);
 
@@ -262,18 +382,18 @@ export async function claimNextWorkItem(
 		attempts: number;
 	}>;
 
-	const row = rows[0];
-	if (!row) return null;
-	if (row.type === "upgrade_agent") {
-		await markAgentUpgradeStarted(serverId, row.payload);
-	}
+	await Promise.all(
+		rows
+			.filter((row) => row.type === "upgrade_agent")
+			.map((row) => markAgentUpgradeStarted(serverId, row.payload)),
+	);
 
-	return {
+	return rows.map((row) => ({
 		id: row.id,
 		type: row.type,
 		payload: row.payload,
 		attempt: row.attempts,
-	};
+	}));
 }
 
 async function markAgentUpgradeStarted(serverId: string, payloadText: string) {
@@ -354,6 +474,16 @@ async function runWorkItemCompletionSideEffects(
 				payload.buildGroupId &&
 				payload.finalImageUri
 			) {
+				const finalization = await finalizeManifestBuild({
+					serviceId: payload.serviceId,
+					serviceRevisionId: payload.serviceRevisionId,
+					buildGroupId: payload.buildGroupId,
+				});
+				if (finalization?.status !== "completed") {
+					throw new Error(
+						"Completed manifest work item could not be finalized",
+					);
+				}
 				await inngest.send(
 					inngestEvents.manifestCompleted.create(
 						{
@@ -389,6 +519,7 @@ async function runWorkItemCompletionSideEffects(
 		}
 	} catch (error) {
 		console.error("[work-queue] failed to run completion side effects:", error);
+		if (result.status === "completed") throw error;
 	}
 }
 
@@ -463,25 +594,32 @@ async function runForceCleanupCompletionSideEffects(
 		) {
 			return;
 		}
+		const deploymentId = payload.deploymentId;
 
-		await db
-			.update(deployments)
-			.set({
-				containerId: null,
-				runtimeDesiredState: "running",
-				observedPhase: "pending",
-				healthStatus: null,
-				unhealthyReportCount: 0,
-				autohealRestartCount: 0,
-				failedStage: null,
-			})
-			.where(
-				and(
-					eq(deployments.id, payload.deploymentId),
-					eq(deployments.observedPhase, "failed"),
-					eq(deployments.failedStage, "autoheal_recreate"),
-				),
-			);
+		await db.transaction(async (tx) => {
+			const updated = await tx
+				.update(deployments)
+				.set({
+					containerId: null,
+					runtimeDesiredState: "running",
+					observedPhase: "pending",
+					healthStatus: null,
+					unhealthyReportCount: 0,
+					autohealRestartCount: 0,
+					failedStage: null,
+				})
+				.where(
+					and(
+						eq(deployments.id, deploymentId),
+						eq(deployments.observedPhase, "failed"),
+						eq(deployments.failedStage, "autoheal_recreate"),
+					),
+				)
+				.returning({ serverId: deployments.serverId });
+			for (const serverId of new Set(updated.map((row) => row.serverId))) {
+				await bumpAgentGeneration(tx, serverId);
+			}
+		});
 	} catch (error) {
 		console.error(
 			"[work-queue] failed to run force cleanup completion side effects:",

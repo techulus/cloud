@@ -75,6 +75,11 @@ const STATUS_CONFIG: Record<
 		color: "text-orange-500",
 		label: "Rolled Back",
 	},
+	superseded: {
+		icon: Clock,
+		color: "text-slate-500",
+		label: "Superseded",
+	},
 };
 
 const STATUS_TITLES: Record<Exclude<RolloutStatus, "in_progress">, string> = {
@@ -82,6 +87,7 @@ const STATUS_TITLES: Record<Exclude<RolloutStatus, "in_progress">, string> = {
 	completed: "Deployment completed successfully",
 	failed: "Deployment failed",
 	rolled_back: "Deployment rolled back",
+	superseded: "Superseded by a newer deployment",
 };
 
 function RolloutStatusBadge({

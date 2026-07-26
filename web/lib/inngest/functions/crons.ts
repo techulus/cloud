@@ -13,6 +13,7 @@ import {
 	MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 	rebalanceAutomaticServices,
 	recoverInvalidAutomaticPlacements,
+	redispatchQueuedRollouts,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
 
@@ -23,6 +24,9 @@ export const staleServerCheck = inngest.createFunction(
 		singleton: { mode: "skip" },
 	},
 	async ({ step }) => {
+		await step.run("redispatch-queued-rollouts", async () => {
+			await redispatchQueuedRollouts();
+		});
 		const urgentCreated = await step.run("check-stale-servers", async () => {
 			console.log("[cron] running stale server check");
 			return checkAndRecoverStaleServers();

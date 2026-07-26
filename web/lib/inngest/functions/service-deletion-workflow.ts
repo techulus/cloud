@@ -13,23 +13,21 @@ import { cron } from "inngest";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
-	deploymentPorts,
 	deployments,
 	rollouts,
 	secrets,
+	servers,
 	serviceRevisions,
 	services,
 	serviceVolumes,
 	volumeBackups,
+	workQueue,
 } from "@/db/schema";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { deleteBackupInternal } from "@/lib/backups/delete-backup";
 import { addUtcDays, toDate } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
-import {
-	isObservedReady,
-	markDeploymentRemoved,
-	observedReadyPhases,
-} from "@/lib/deployment-status";
+import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -235,58 +233,60 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 			}
 
 			await step.run("cleanup-service", async () => {
-				await db
-					.update(services)
-					.set({ deletionStatus: "deleting", deletionError: null })
-					.where(eq(services.id, serviceId));
-
-				const allDeployments = await db
-					.select()
-					.from(deployments)
-					.where(eq(deployments.serviceId, serviceId));
-
-				for (const deployment of allDeployments) {
-					await db
-						.update(deployments)
-						.set(markDeploymentRemoved())
-						.where(eq(deployments.id, deployment.id));
-
-					if (deployment.containerId) {
-						await enqueueWork(deployment.serverId, "stop", {
-							deploymentId: deployment.id,
-							containerId: deployment.containerId,
+				await db.transaction(async (tx) => {
+					await tx
+						.update(services)
+						.set({ deletionStatus: "deleting", deletionError: null })
+						.where(eq(services.id, serviceId));
+					const allDeployments = await tx
+						.select()
+						.from(deployments)
+						.where(eq(deployments.serviceId, serviceId));
+					for (const deployment of allDeployments) {
+						if (deployment.containerId) {
+							await tx.insert(workQueue).values({
+								id: randomUUID(),
+								serverId: deployment.serverId,
+								type: "stop",
+								payload: JSON.stringify({
+									deploymentId: deployment.id,
+									containerId: deployment.containerId,
+								}),
+							});
+						}
+					}
+					await tx
+						.delete(deployments)
+						.where(eq(deployments.serviceId, serviceId));
+					const cleanupServerId =
+						setup.service.lockedServerId ??
+						setup.runningDeployment?.serverId ??
+						allDeployments.find((deployment) => deployment.serverId)?.serverId;
+					if (cleanupServerId && setup.volumes.length > 0) {
+						await tx.insert(workQueue).values({
+							id: randomUUID(),
+							serverId: cleanupServerId,
+							type: "cleanup_volumes",
+							payload: JSON.stringify({ serviceId }),
 						});
 					}
-
-					await db
-						.delete(deploymentPorts)
-						.where(eq(deploymentPorts.deploymentId, deployment.id));
-				}
-
-				await db
-					.delete(deployments)
-					.where(eq(deployments.serviceId, serviceId));
-
-				const cleanupServerId =
-					setup.service.lockedServerId ??
-					setup.runningDeployment?.serverId ??
-					allDeployments.find((deployment) => deployment.serverId)?.serverId;
-				if (cleanupServerId && setup.volumes.length > 0) {
-					await enqueueWork(cleanupServerId, "cleanup_volumes", { serviceId });
-				}
-
-				const deletedAt = new Date();
-				await db
-					.update(services)
-					.set({
-						deletedAt,
-						purgeAfter: addUtcDays(deletedAt, DELETED_SERVICE_RETENTION_DAYS),
-						originalHostname: setup.service.hostname,
-						hostname: null,
-						deletionStatus: null,
-						deletionError: null,
-					})
-					.where(eq(services.id, serviceId));
+					const deletedAt = new Date();
+					await tx
+						.update(services)
+						.set({
+							deletedAt,
+							purgeAfter: addUtcDays(deletedAt, DELETED_SERVICE_RETENTION_DAYS),
+							originalHostname: setup.service.hostname,
+							hostname: null,
+							deletionStatus: null,
+							deletionError: null,
+						})
+						.where(eq(services.id, serviceId));
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				});
 			});
 
 			return { status: "deleted", serviceId, backupIds };

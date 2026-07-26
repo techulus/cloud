@@ -49,14 +49,16 @@ type DeployResult struct {
 }
 
 type Container struct {
-	ID           string            `json:"Id"`
-	Name         string            `json:"Name"`
-	Image        string            `json:"Image"`
-	State        string            `json:"State"`
-	Created      int64             `json:"Created"`
-	Labels       map[string]string `json:"Labels"`
-	DeploymentID string
-	ServiceID    string
+	ID            string            `json:"Id"`
+	Name          string            `json:"Name"`
+	Image         string            `json:"Image"`
+	ImageID       string            `json:"ImageID"`
+	State         string            `json:"State"`
+	Created       int64             `json:"Created"`
+	Labels        map[string]string `json:"Labels"`
+	DeploymentID  string
+	ServiceID     string
+	ImageIdentity string
 }
 
 type containerInspect struct {

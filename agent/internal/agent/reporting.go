@@ -130,7 +130,7 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 	}
 
 	report.DeploymentErrors = a.SnapshotDeploymentErrors()
-	report.RoutingSyncedRolloutIds = a.routingSyncedRolloutIds()
+	report.RoutingAcknowledgements = a.routingAcknowledgements()
 
 	return report
 }
@@ -142,9 +142,15 @@ func (a *Agent) agentCapabilities() []string {
 	return []string{serverlessGatewayCapability}
 }
 
-func (a *Agent) routingSyncedRolloutIds() []string {
+func (a *Agent) routingAcknowledgements() []agenthttp.RoutingAcknowledgement {
 	expected := a.ExpectedState()
-	if expected == nil || len(expected.RoutingSyncRolloutIds) == 0 {
+	if expected == nil || len(expected.RoutingSync) == 0 {
+		return nil
+	}
+	a.expectedStateMutex.RLock()
+	applied := a.latestAppliedGeneration
+	a.expectedStateMutex.RUnlock()
+	if applied != expected.Generation {
 		return nil
 	}
 
@@ -162,7 +168,14 @@ func (a *Agent) routingSyncedRolloutIds() []string {
 		return nil
 	}
 
-	return append([]string(nil), expected.RoutingSyncRolloutIds...)
+	result := make([]agenthttp.RoutingAcknowledgement, 0, len(expected.RoutingSync))
+	for _, sync := range expected.RoutingSync {
+		if applied < sync.RequiredGeneration {
+			continue
+		}
+		result = append(result, agenthttp.RoutingAcknowledgement{RolloutID: sync.RolloutID, Generation: applied})
+	}
+	return result
 }
 
 func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {

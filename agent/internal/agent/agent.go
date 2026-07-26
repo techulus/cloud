@@ -61,12 +61,19 @@ type Agent struct {
 	refreshMutex                 sync.Mutex
 	pendingExpectedStateRefresh  bool
 	workMutex                    sync.Mutex
-	activeWorkItem               *agenthttp.WorkQueueItem
+	activeWorkItems              map[string]agenthttp.WorkQueueItem
+	pendingWorkItems             map[string]bool
 	pendingWorkResults           []agenthttp.CompletedWorkItem
 	deploymentErrorMutex         sync.Mutex
 	pendingDeploymentErrors      []agenthttp.DeploymentError
-	deployLockMutex              sync.Mutex
-	deploymentDeployLocks        map[string]*sync.Mutex
+	operationLockMutex           sync.Mutex
+	deploymentOperationLocks     map[string]*sync.Mutex
+	workLaneMutex                sync.Mutex
+	runtimeLaneActive            bool
+	internalReconcileLaneActive  bool
+	reconcileWorkLaneActive      bool
+	buildLaneActive              bool
+	exclusiveLaneActive          bool
 	healthMonitorMutex           sync.Mutex
 	healthMonitors               map[string]struct{}
 	runContext                   context.Context
@@ -76,6 +83,7 @@ type Agent struct {
 	pendingServerlessWake        map[string]serverlessTransitionGuard
 	expectedStateMutex           sync.RWMutex
 	latestExpectedState          *agenthttp.ExpectedState
+	latestAppliedGeneration      int64
 	compiledTraefikMutex         sync.Mutex
 	compiledTraefikFor           *agenthttp.ExpectedState
 	compiledTraefik              *compiledTraefikState
@@ -113,26 +121,28 @@ func NewAgent(
 	disableDNS bool,
 ) *Agent {
 	return &Agent{
-		state:                  StateIdle,
-		reconcileRequested:     make(chan struct{}, 1),
-		continueProcessing:     make(chan struct{}, 1),
-		statusReportRequested:  make(chan string, 1),
-		Client:                 client,
-		Reconciler:             reconciler,
-		Config:                 config,
-		PublicIP:               publicIP,
-		PrivateIP:              privateIP,
-		DataDir:                dataDir,
-		LogCollector:           logCollector,
-		TraefikLogCollector:    traefikLogCollector,
-		MetricsSender:          metricsSender,
-		Builder:                builder,
-		IsProxy:                isProxy,
-		DisableDNS:             disableDNS,
-		deploymentDeployLocks:  map[string]*sync.Mutex{},
-		healthMonitors:         map[string]struct{}{},
-		pendingServerlessSleep: map[string]serverlessTransitionGuard{},
-		pendingServerlessWake:  map[string]serverlessTransitionGuard{},
+		state:                    StateIdle,
+		reconcileRequested:       make(chan struct{}, 1),
+		continueProcessing:       make(chan struct{}, 1),
+		statusReportRequested:    make(chan string, 1),
+		Client:                   client,
+		Reconciler:               reconciler,
+		Config:                   config,
+		PublicIP:                 publicIP,
+		PrivateIP:                privateIP,
+		DataDir:                  dataDir,
+		LogCollector:             logCollector,
+		TraefikLogCollector:      traefikLogCollector,
+		MetricsSender:            metricsSender,
+		Builder:                  builder,
+		IsProxy:                  isProxy,
+		DisableDNS:               disableDNS,
+		deploymentOperationLocks: map[string]*sync.Mutex{},
+		activeWorkItems:          map[string]agenthttp.WorkQueueItem{},
+		pendingWorkItems:         map[string]bool{},
+		healthMonitors:           map[string]struct{}{},
+		pendingServerlessSleep:   map[string]serverlessTransitionGuard{},
+		pendingServerlessWake:    map[string]serverlessTransitionGuard{},
 	}
 }
 

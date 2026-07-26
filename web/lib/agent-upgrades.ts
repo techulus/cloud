@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servers, workQueue } from "@/db/schema";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import type { WorkPayloadByType } from "@/lib/work-queue";
 
 const GITHUB_RELEASE_BASE_URL =
@@ -104,6 +105,7 @@ export async function enqueueAgentUpgrade(
 				type: "upgrade_agent",
 				payload: JSON.stringify(payload),
 			});
+			await bumpAgentGeneration(tx, serverId);
 		});
 	} catch (error) {
 		if (isUniqueViolation(error)) {

@@ -2,6 +2,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { bumpAgentGeneration } from "@/lib/agent-generation";
 import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { EncryptionKeyUnavailableError, resolveEncryptionKey } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
@@ -62,29 +63,36 @@ export async function POST(request: NextRequest) {
 
 		const { subnetId, wireguardIp } = await assignSubnet();
 
-		const claimedServers = await db
-			.update(servers)
-			.set({
-				wireguardPublicKey,
-				signingPublicKey,
-				subnetId,
-				wireguardIp,
-				publicIp: publicIp || null,
-				privateIp: privateIp || null,
-				isProxy: isProxy === true,
-				tokenUsedAt: now,
-				status: "online",
-				lastHeartbeat: now,
-			})
-			.where(
-				and(
-					eq(servers.id, server.id),
-					eq(servers.agentToken, token),
-					isNull(servers.tokenUsedAt),
-					gt(servers.tokenCreatedAt, expiryThreshold),
-				),
-			)
-			.returning({ id: servers.id });
+		const claimedServers = await db.transaction(async (tx) => {
+			const claimed = await tx
+				.update(servers)
+				.set({
+					wireguardPublicKey,
+					signingPublicKey,
+					subnetId,
+					wireguardIp,
+					publicIp: publicIp || null,
+					privateIp: privateIp || null,
+					isProxy: isProxy === true,
+					tokenUsedAt: now,
+					status: "online",
+					lastHeartbeat: now,
+				})
+				.where(
+					and(
+						eq(servers.id, server.id),
+						eq(servers.agentToken, token),
+						isNull(servers.tokenUsedAt),
+						gt(servers.tokenCreatedAt, expiryThreshold),
+					),
+				)
+				.returning({ id: servers.id });
+			if (claimed.length) {
+				const peers = await tx.select({ id: servers.id }).from(servers);
+				for (const peer of peers) await bumpAgentGeneration(tx, peer.id);
+			}
+			return claimed;
+		});
 
 		if (claimedServers.length === 0) {
 			return NextResponse.json(

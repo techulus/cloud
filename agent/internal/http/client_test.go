@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"io"
 	stdhttp "net/http"
 	"net/http/httptest"
@@ -8,6 +9,31 @@ import (
 
 	"techulus/cloud-agent/internal/crypto"
 )
+
+func TestRoutingProtocolJSONFixtures(t *testing.T) {
+	fixture := []byte(`{"generation":42,"routingSync":[{"rolloutId":"rollout-1","requiredGeneration":41}],"containers":[],"dns":{"records":[]},"serverless":{"routes":[]},"traefik":{"httpRoutes":[],"tcpRoutes":[],"udpRoutes":[]},"wireguard":{"peers":[]}}`)
+	var state ExpectedState
+	if err := json.Unmarshal(fixture, &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.RoutingSync) != 1 || state.RoutingSync[0].RequiredGeneration != 41 {
+		t.Fatalf("unexpected routing sync decode: %+v", state.RoutingSync)
+	}
+	report, err := json.Marshal(StatusReport{RoutingAcknowledgements: []RoutingAcknowledgement{{RolloutID: "rollout-1", Generation: 42}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(report, &shape); err != nil {
+		t.Fatal(err)
+	}
+	if string(shape["routingAcknowledgements"]) != `[{"rolloutId":"rollout-1","generation":42}]` {
+		t.Fatalf("unexpected status fixture: %s", report)
+	}
+	if _, old := shape["routingSyncedRollouts"]; old {
+		t.Fatalf("legacy routing field emitted: %s", report)
+	}
+}
 
 func TestSignedJSONRequests(t *testing.T) {
 	keyPair, err := crypto.GenerateKeyPair()

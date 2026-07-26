@@ -53,6 +53,11 @@ const STATUS_CONFIG: Record<
 		color: "text-orange-500",
 		label: "Rolled Back",
 	},
+	superseded: {
+		icon: Clock,
+		color: "text-slate-500",
+		label: "Superseded",
+	},
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -63,6 +68,7 @@ const STAGE_LABELS: Record<string, string> = {
 	health_check: "Health Check",
 	dns_sync: "Routing traffic",
 	completed: "Completed",
+	superseded: "Superseded",
 };
 
 function formatStage(stage: string | null): string {

@@ -70,3 +70,31 @@ func TestReconcileActionKey(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyExpectedContainerIdentitiesRejectsDuplicateDeployment(t *testing.T) {
+	expected := &agenthttp.ExpectedState{Containers: []agenthttp.ExpectedContainer{{DeploymentID: "dep_1"}}}
+	actual := []container.Container{
+		{ID: "one", DeploymentID: "dep_1", State: "running", ImageID: "sha256:image", ImageIdentity: "sha256:image"},
+		{ID: "two", DeploymentID: "dep_1", State: "running", ImageID: "sha256:image", ImageIdentity: "sha256:image"},
+	}
+	if err := verifyExpectedContainerIdentities(expected, actual, map[string]container.ResolvedImage{"": "sha256:image"}); err == nil {
+		t.Fatal("duplicate deployment containers were accepted")
+	}
+}
+
+func TestPlanReconcileRedeploysImageIdentityDrift(t *testing.T) {
+	a := NewAgent(nil, nil, nil, "", "", "", nil, nil, nil, nil, false, false)
+	expected := &agenthttp.ExpectedState{Containers: []agenthttp.ExpectedContainer{{DeploymentID: "dep_1", Name: "service", Image: "example/app:latest"}}}
+	resolved := map[string]container.ResolvedImage{"example/app:latest": "sha256:new"}
+
+	for _, actual := range []container.Container{
+		{DeploymentID: "dep_1", State: "running", Image: "example/app:latest", ImageID: "sha256:new"},
+		{DeploymentID: "dep_1", State: "running", Image: "example/app:latest", ImageID: "sha256:old", ImageIdentity: "sha256:old"},
+		{DeploymentID: "dep_1", State: "running", Image: "example/app:latest", ImageID: "sha256:new", ImageIdentity: "sha256:other"},
+	} {
+		actions := a.planReconcile(expected, &ActualState{Containers: []container.Container{actual}}, resolved)
+		if len(actions) == 0 || actions[0].Kind != actionRedeployContainer {
+			t.Fatalf("identity drift did not plan redeploy for %+v: %+v", actual, actions)
+		}
+	}
+}

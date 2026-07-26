@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -68,6 +69,7 @@ func (a *Agent) Run(ctx context.Context) {
 	}
 
 	go a.StatusReportLoop(ctx)
+	go a.WakeLoop(ctx)
 
 	a.Tick()
 
@@ -96,6 +98,29 @@ func (a *Agent) Run(ctx context.Context) {
 			a.CollectLogs()
 		case <-cleanupTickerC:
 			go a.RunBuildCleanup()
+		}
+	}
+}
+
+func (a *Agent) WakeLoop(ctx context.Context) {
+	for {
+		generation := int64(0)
+		if expected := a.ExpectedState(); expected != nil {
+			generation = expected.Generation
+		}
+		_, changed, err := a.Client.WaitForWake(ctx, generation)
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil && changed {
+			a.RequestReconcile("control plane wake")
+			a.RequestStatusReport("control plane wake")
+		}
+		delay := 250*time.Millisecond + time.Duration(rand.Int63n(int64(1750*time.Millisecond)))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"techulus/cloud-agent/internal/paths"
 )
@@ -16,6 +18,7 @@ import (
 const (
 	DefaultInterface = "wg0"
 	DefaultPort      = 51820
+	commandTimeout   = 30 * time.Second
 )
 
 type Peer struct {
@@ -33,14 +36,16 @@ type Config struct {
 }
 
 func GenerateKeyPair() (privateKey, publicKey string, err error) {
-	privCmd := exec.Command("wg", "genkey")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	privCmd := exec.CommandContext(ctx, "wg", "genkey")
 	privOut, err := privCmd.Output()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate private key: %w", err)
 	}
 	privateKey = strings.TrimSpace(string(privOut))
 
-	pubCmd := exec.Command("wg", "pubkey")
+	pubCmd := exec.CommandContext(ctx, "wg", "pubkey")
 	pubCmd.Stdin = strings.NewReader(privateKey)
 	pubOut, err := pubCmd.Output()
 	if err != nil {
@@ -91,7 +96,9 @@ func WriteConfig(interfaceName string, config *Config) error {
 }
 
 func Up(interfaceName string) error {
-	cmd := exec.Command("wg-quick", "up", interfaceName)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wg-quick", "up", interfaceName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -101,7 +108,9 @@ func Up(interfaceName string) error {
 }
 
 func Down(interfaceName string) error {
-	cmd := exec.Command("wg-quick", "down", interfaceName)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wg-quick", "down", interfaceName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -111,7 +120,9 @@ func Down(interfaceName string) error {
 }
 
 func IsUp(interfaceName string) bool {
-	cmd := exec.Command("wg", "show", interfaceName)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wg", "show", interfaceName)
 	return cmd.Run() == nil
 }
 

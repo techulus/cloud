@@ -15,8 +15,47 @@ import (
 	"techulus/cloud-agent/internal/retry"
 )
 
+const (
+	pullTimeout      = 10 * time.Minute
+	operationTimeout = 30 * time.Second
+	registryTimeout  = time.Minute
+)
+
+// ResolvedImage is an immutable local Podman image identity.
+type ResolvedImage string
+
+func commandError(ctx context.Context, stage string, output []byte, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s timed out or was canceled: %s: %w", stage, string(output), ctx.Err())
+	}
+	return fmt.Errorf("%s failed: %s: %w", stage, string(output), err)
+}
+
+func PullImage(ctx context.Context, reference string) (ResolvedImage, error) {
+	pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
+	defer cancel()
+	output, err := exec.CommandContext(pullCtx, "podman", "pull", "--tls-verify=false", reference).CombinedOutput()
+	if err != nil {
+		return "", commandError(pullCtx, "image pull", output, err)
+	}
+
+	inspectCtx, inspectCancel := context.WithTimeout(ctx, operationTimeout)
+	defer inspectCancel()
+	output, err = exec.CommandContext(inspectCtx, "podman", "image", "inspect", "--format", "{{.Id}}", reference).CombinedOutput()
+	if err != nil {
+		return "", commandError(inspectCtx, "pulled image identity inspection", output, err)
+	}
+	identity := ResolvedImage(strings.TrimSpace(string(output)))
+	if identity == "" {
+		return "", fmt.Errorf("pulled image identity inspection returned an empty image ID for %q", reference)
+	}
+	return identity, nil
+}
+
 func ContainerExists(containerID string) (bool, error) {
-	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", "inspect", "--format", "json", containerID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := string(output)
@@ -31,7 +70,9 @@ func ContainerExists(containerID string) (bool, error) {
 }
 
 func IsContainerRunning(containerID string) (bool, error) {
-	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", "inspect", "--format", "json", containerID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := string(output)
@@ -63,23 +104,15 @@ func IsContainerStopped(containerID string) (bool, error) {
 	return !running, nil
 }
 
-func Deploy(config *DeployConfig) (*DeployResult, error) {
+func Deploy(ctx context.Context, config *DeployConfig, image ResolvedImage) (*DeployResult, error) {
 	logFunc := config.LogFunc
 	if logFunc == nil {
 		logFunc = func(stream string, message string) {}
 	}
 
-	image := config.Image
-
-	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
-
-	pullCmd := exec.Command("podman", "pull", "--tls-verify=false", image)
-	pullOutput, err := pullCmd.CombinedOutput()
-	if err != nil {
-		logFunc("stderr", fmt.Sprintf("Pull failed: %s", string(pullOutput)))
-		return nil, fmt.Errorf("failed to pull image: %s: %w", string(pullOutput), err)
+	if image == "" {
+		return nil, fmt.Errorf("resolved image identity is required")
 	}
-	logFunc("stdout", string(pullOutput))
 
 	for _, vm := range config.VolumeMounts {
 		if err := os.MkdirAll(vm.HostPath, 0755); err != nil {
@@ -89,26 +122,30 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 		logFunc("stdout", fmt.Sprintf("Created volume directory: %s", vm.HostPath))
 	}
 
-	args := buildPodmanRunArgs(config, image)
-	exec.Command("podman", "rm", "-f", config.Name).Run()
+	args := buildPodmanRunArgs(config, string(image))
+	removeCtx, removeCancel := context.WithTimeout(ctx, operationTimeout)
+	exec.CommandContext(removeCtx, "podman", "rm", "-f", config.Name).Run()
+	removeCancel()
 
 	logFunc("stdout", fmt.Sprintf("Starting container: %s", config.Name))
 
-	runCmd := exec.Command("podman", args...)
+	runCtx, runCancel := context.WithTimeout(ctx, operationTimeout)
+	defer runCancel()
+	runCmd := exec.CommandContext(runCtx, "podman", args...)
 	output, err := runCmd.CombinedOutput()
 	if err != nil {
 		logFunc("stderr", fmt.Sprintf("Start failed: %s", string(output)))
-		return nil, fmt.Errorf("failed to run container: %s: %w", string(output), err)
+		return nil, commandError(runCtx, "container run", output, err)
 	}
 
 	containerID := strings.TrimSpace(string(output))
 	logFunc("stdout", fmt.Sprintf("Container started: %s", containerID))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	verifyCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
 	logFunc("stdout", "Verifying container is running...")
-	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
+	err = retry.WithBackoff(verifyCtx, retry.DeployBackoff, func() (bool, error) {
 		running, err := IsContainerRunning(containerID)
 		if err != nil {
 			return false, err
@@ -117,7 +154,9 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	})
 
 	if err != nil {
-		logsCmd := exec.Command("podman", "logs", "--tail", "50", containerID)
+		logsCtx, logsCancel := context.WithTimeout(ctx, operationTimeout)
+		defer logsCancel()
+		logsCmd := exec.CommandContext(logsCtx, "podman", "logs", "--tail", "50", containerID)
 		logsOutput, _ := logsCmd.CombinedOutput()
 		logFunc("stderr", fmt.Sprintf("Container failed to stay running. Logs:\n%s", string(logsOutput)))
 		return nil, fmt.Errorf("container failed to stay running after start: %w", err)
@@ -155,6 +194,7 @@ func buildPodmanRunArgs(config *DeployConfig, image string) []string {
 		"--label", fmt.Sprintf("techulus.service.id=%s", config.ServiceID),
 		"--label", fmt.Sprintf("techulus.service.name=%s", config.ServiceName),
 		"--label", fmt.Sprintf("techulus.deployment.id=%s", config.DeploymentID),
+		"--label", fmt.Sprintf("techulus.image.identity=%s", image),
 	)
 	if config.IPAddress != "" {
 		args = append(args, "--network", NetworkName, "--ip", config.IPAddress)
@@ -216,8 +256,11 @@ func Stop(containerID string) error {
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
 	log.Printf("[podman:stop] stopping container %s", containerID)
-	stopCmd := exec.Command("podman", "stop", containerID)
+	stopCmd := exec.CommandContext(ctx, "podman", "stop", containerID)
 	if output, err := stopCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 		if strings.Contains(outputStr, "no such container") ||
@@ -225,11 +268,8 @@ func Stop(containerID string) error {
 			strings.Contains(outputStr, "no such object") {
 			return nil
 		}
-		return fmt.Errorf("failed to stop container: %s: %w", outputStr, err)
+		return commandError(ctx, "container stop", output, err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
 
 	log.Printf("[podman:stop] verifying container %s stopped", containerID)
 	err = retry.WithBackoff(ctx, retry.StopBackoff, func() (bool, error) {
@@ -264,7 +304,7 @@ func ForceRemove(containerID string) error {
 
 	var lastErr error
 	err = retry.WithBackoff(ctx, retry.ForceRemoveBackoff, func() (bool, error) {
-		cmd := exec.Command("podman", "rm", "-f", containerID)
+		cmd := exec.CommandContext(ctx, "podman", "rm", "-f", containerID)
 		output, err := cmd.CombinedOutput()
 		outputStr := string(output)
 
@@ -320,13 +360,12 @@ func startOrRestart(containerID, operation string) error {
 	}
 
 	log.Printf("[podman:%s] %sing container %s", operation, operation, containerID)
-	cmd := exec.Command("podman", operation, containerID)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to %s container: %s: %w", operation, string(output), err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", operation, containerID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return commandError(ctx, "container "+operation, output, err)
+	}
 
 	log.Printf("[podman:%s] verifying container %s is running", operation, containerID)
 	err = retry.WithBackoff(ctx, retry.DeployBackoff, func() (bool, error) {
@@ -382,10 +421,12 @@ func Login(registryURL, username, password string, insecure bool) error {
 	}
 	args = append(args, "-u", username, "-p", password, registryURL)
 
-	cmd := exec.Command("podman", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), registryTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to login to registry: %s: %w", string(output), err)
+		return commandError(ctx, "podman registry login", output, err)
 	}
 
 	log.Printf("[podman:login] successfully logged in to registry %s", registryURL)
@@ -399,7 +440,9 @@ func Login(registryURL, username, password string, insecure bool) error {
 	registryHost = strings.TrimSuffix(registryHost, "/")
 
 	craneArgs := []string{"auth", "login", "-u", username, "-p", password, registryHost}
-	craneCmd := exec.Command("/usr/local/bin/crane", craneArgs...)
+	craneCtx, craneCancel := context.WithTimeout(context.Background(), registryTimeout)
+	defer craneCancel()
+	craneCmd := exec.CommandContext(craneCtx, "/usr/local/bin/crane", craneArgs...)
 	if out, err := craneCmd.CombinedOutput(); err != nil {
 		log.Printf("[crane:login] failed: %s: %v", string(out), err)
 	} else {
@@ -459,6 +502,7 @@ type podmanContainer struct {
 	Id      string            `json:"Id"`
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
 	State   string            `json:"State"`
 	Created int64             `json:"Created"`
 	Labels  map[string]string `json:"Labels"`
@@ -483,14 +527,16 @@ func List() ([]Container, error) {
 			name = pc.Names[0]
 		}
 		containers[i] = Container{
-			ID:           pc.Id,
-			Name:         name,
-			Image:        pc.Image,
-			State:        pc.State,
-			Created:      pc.Created,
-			Labels:       pc.Labels,
-			DeploymentID: pc.Labels["techulus.deployment.id"],
-			ServiceID:    pc.Labels["techulus.service.id"],
+			ID:            pc.Id,
+			Name:          name,
+			Image:         pc.Image,
+			ImageID:       pc.ImageID,
+			State:         pc.State,
+			Created:       pc.Created,
+			Labels:        pc.Labels,
+			DeploymentID:  pc.Labels["techulus.deployment.id"],
+			ServiceID:     pc.Labels["techulus.service.id"],
+			ImageIdentity: pc.Labels["techulus.image.identity"],
 		}
 	}
 
@@ -526,7 +572,9 @@ func EnsureNetwork(subnetId int) error {
 
 	// Podman only creates the bridge interface when a container uses the network.
 	// Run a throwaway container to force bridge creation so DNS can bind to the gateway IP.
-	exec.Command("podman", "run", "--rm", "--network", NetworkName, "busybox", "true").Run()
+	runCtx, runCancel := context.WithTimeout(context.Background(), operationTimeout)
+	defer runCancel()
+	exec.CommandContext(runCtx, "podman", "run", "--rm", "--network", NetworkName, "busybox", "true").Run()
 
 	return nil
 }

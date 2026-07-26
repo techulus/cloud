@@ -1,16 +1,21 @@
-import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	type AgentHealth,
 	type ContainerHealth,
 	deployments,
 	type NetworkHealth,
+	rolloutRoutingAcknowledgements,
 	rollouts,
 	servers,
 	serviceRevisions,
 	services,
 	workQueue,
 } from "@/db/schema";
+import {
+	bumpAgentGeneration,
+	type DbTransaction,
+} from "@/lib/agent-generation";
 import {
 	AUTOHEAL_MAX_RECREATES,
 	AUTOHEAL_MAX_RESTARTS,
@@ -19,6 +24,7 @@ import {
 	getSteadyStateRecreateDecision,
 } from "@/lib/autoheal-policy";
 import {
+	isDeploymentRoutable,
 	isObservedActiveContainer,
 	isObservedReady,
 	markDeploymentFailedRemoved,
@@ -29,6 +35,7 @@ import {
 } from "@/lib/deployment-status";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
@@ -126,6 +133,13 @@ function isMigrationTargetStarting(status: string | null | undefined) {
 	return status === "deploying_target" || status === "starting";
 }
 
+async function bumpExpectedStateRecipients(tx: DbTransaction) {
+	const recipients = await tx.select({ id: servers.id }).from(servers);
+	for (const recipient of recipients) {
+		await bumpAgentGeneration(tx, recipient.id);
+	}
+}
+
 async function getServerLogName(serverId: string) {
 	const server = await db
 		.select({ name: servers.name })
@@ -188,23 +202,32 @@ async function applyStartingHealthCheckFailure({
 			? isNull(deployments.containerId)
 			: eq(deployments.containerId, deployment.containerId);
 
-	const updated = await db
-		.update(deployments)
-		.set({
-			containerId: container.containerId,
-			healthStatus: "unhealthy",
-			...update,
-		})
-		.where(
-			and(
-				eq(deployments.id, deployment.id),
-				eq(deployments.serverId, serverId),
-				eq(deployments.runtimeDesiredState, "running"),
-				inArray(deployments.observedPhase, [...eligiblePhases]),
-				unchangedContainer,
-			),
-		)
-		.returning({ id: deployments.id });
+	const updated = await db.transaction(async (tx) => {
+		const rows = await tx
+			.update(deployments)
+			.set({
+				containerId: container.containerId,
+				healthStatus: "unhealthy",
+				...update,
+			})
+			.where(
+				and(
+					eq(deployments.id, deployment.id),
+					eq(deployments.serverId, serverId),
+					eq(deployments.runtimeDesiredState, "running"),
+					inArray(deployments.observedPhase, [...eligiblePhases]),
+					unchangedContainer,
+				),
+			)
+			.returning({ id: deployments.id });
+		if (rows.length) {
+			const recipients = await tx.select({ id: servers.id }).from(servers);
+			for (const recipient of recipients) {
+				await bumpAgentGeneration(tx, recipient.id);
+			}
+		}
+		return rows;
+	});
 
 	if (updated.length === 0) return false;
 
@@ -288,29 +311,38 @@ async function applyDeploymentErrors(
 			continue;
 		}
 
-		const updated = await db
-			.update(deployments)
-			.set(
-				isServerlessWakeDeployment
-					? getServerlessWakeFailureUpdate({
-							serverlessEnabled: deployment.revisionSpec.serverless.enabled,
-							currentFailureCount: deployment.serverlessWakeFailureCount,
-							failedStage: "serverless_wake",
-						})
-					: markDeploymentFailedRemoved("deploying"),
-			)
-			.where(
-				and(
-					eq(deployments.id, deployment.id),
-					inArray(
-						deployments.observedPhase,
-						isServerlessWakeDeployment
-							? ["waking"]
-							: ["pending", "pulling", "starting"],
+		const updated = await db.transaction(async (tx) => {
+			const rows = await tx
+				.update(deployments)
+				.set(
+					isServerlessWakeDeployment
+						? getServerlessWakeFailureUpdate({
+								serverlessEnabled: deployment.revisionSpec.serverless.enabled,
+								currentFailureCount: deployment.serverlessWakeFailureCount,
+								failedStage: "serverless_wake",
+							})
+						: markDeploymentFailedRemoved("deploying"),
+				)
+				.where(
+					and(
+						eq(deployments.id, deployment.id),
+						inArray(
+							deployments.observedPhase,
+							isServerlessWakeDeployment
+								? ["waking"]
+								: ["pending", "pulling", "starting"],
+						),
 					),
-				),
-			)
-			.returning({ id: deployments.id });
+				)
+				.returning({ id: deployments.id });
+			if (rows.length) {
+				const recipients = await tx.select({ id: servers.id }).from(servers);
+				for (const recipient of recipients) {
+					await bumpAgentGeneration(tx, recipient.id);
+				}
+			}
+			return rows;
+		});
 
 		if (updated.length === 0) continue;
 
@@ -417,25 +449,34 @@ async function applyServerlessTransitions(
 		}
 
 		if (transition.type === "sleep") {
-			const updated = await db
-				.update(deployments)
-				.set({
-					runtimeDesiredState: "stopped",
-					observedPhase: "sleeping",
-					containerId: null,
-					healthStatus: null,
-					failedStage: null,
-				})
-				.where(
-					and(
-						eq(deployments.id, transition.deploymentId),
-						eq(deployments.serverId, serverId),
-						eq(deployments.containerId, transition.containerId),
-						eq(deployments.runtimeDesiredState, "running"),
-						inArray(deployments.observedPhase, observedReadyPhases),
-					),
-				)
-				.returning({ id: deployments.id });
+			const updated = await db.transaction(async (tx) => {
+				const rows = await tx
+					.update(deployments)
+					.set({
+						runtimeDesiredState: "stopped",
+						observedPhase: "sleeping",
+						containerId: null,
+						healthStatus: null,
+						failedStage: null,
+					})
+					.where(
+						and(
+							eq(deployments.id, transition.deploymentId),
+							eq(deployments.serverId, serverId),
+							eq(deployments.containerId, transition.containerId),
+							eq(deployments.runtimeDesiredState, "running"),
+							inArray(deployments.observedPhase, observedReadyPhases),
+						),
+					)
+					.returning({ id: deployments.id });
+				if (rows.length) {
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				}
+				return rows;
+			});
 
 			if (updated.length > 0) {
 				console.log(
@@ -466,24 +507,33 @@ async function applyServerlessTransitions(
 		}
 
 		if (transition.type === "wake_started") {
-			const updated = await db
-				.update(deployments)
-				.set({
-					runtimeDesiredState: "running",
-					observedPhase: "waking",
-					containerId: null,
-					healthStatus: null,
-					failedStage: null,
-				})
-				.where(
-					and(
-						eq(deployments.id, transition.deploymentId),
-						eq(deployments.serverId, serverId),
-						eq(deployments.runtimeDesiredState, "stopped"),
-						eq(deployments.observedPhase, "sleeping"),
-					),
-				)
-				.returning({ id: deployments.id });
+			const updated = await db.transaction(async (tx) => {
+				const rows = await tx
+					.update(deployments)
+					.set({
+						runtimeDesiredState: "running",
+						observedPhase: "waking",
+						containerId: null,
+						healthStatus: null,
+						failedStage: null,
+					})
+					.where(
+						and(
+							eq(deployments.id, transition.deploymentId),
+							eq(deployments.serverId, serverId),
+							eq(deployments.runtimeDesiredState, "stopped"),
+							eq(deployments.observedPhase, "sleeping"),
+						),
+					)
+					.returning({ id: deployments.id });
+				if (rows.length) {
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				}
+				return rows;
+			});
 
 			if (updated.length > 0) {
 				console.log(
@@ -513,24 +563,33 @@ async function applyServerlessTransitions(
 			continue;
 		}
 
-		const updated = await db
-			.update(deployments)
-			.set(
-				getServerlessWakeFailureUpdate({
-					serverlessEnabled: deployment.revisionSpec.serverless.enabled,
-					currentFailureCount: deployment.serverlessWakeFailureCount,
-					failedStage: "serverless_wake",
-				}),
-			)
-			.where(
-				and(
-					eq(deployments.id, transition.deploymentId),
-					eq(deployments.serverId, serverId),
-					inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
-					inArray(deployments.observedPhase, ["sleeping", "waking"]),
-				),
-			)
-			.returning({ id: deployments.id });
+		const updated = await db.transaction(async (tx) => {
+			const rows = await tx
+				.update(deployments)
+				.set(
+					getServerlessWakeFailureUpdate({
+						serverlessEnabled: deployment.revisionSpec.serverless.enabled,
+						currentFailureCount: deployment.serverlessWakeFailureCount,
+						failedStage: "serverless_wake",
+					}),
+				)
+				.where(
+					and(
+						eq(deployments.id, transition.deploymentId),
+						eq(deployments.serverId, serverId),
+						inArray(deployments.runtimeDesiredState, runtimeExpectedStates),
+						inArray(deployments.observedPhase, ["sleeping", "waking"]),
+					),
+				)
+				.returning({ id: deployments.id });
+			if (rows.length) {
+				const recipients = await tx.select({ id: servers.id }).from(servers);
+				for (const recipient of recipients) {
+					await bumpAgentGeneration(tx, recipient.id);
+				}
+			}
+			return rows;
+		});
 
 		if (updated.length > 0) {
 			console.log(
@@ -738,7 +797,7 @@ export type StatusReport = {
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
 	containersComplete: boolean;
-	routingSyncedRolloutIds?: string[];
+	routingAcknowledgements?: Array<{ rolloutId: string; generation: number }>;
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
@@ -811,7 +870,7 @@ export async function applyStatusReport(
 	if (completedAgentUpgradeTarget) {
 		await db
 			.update(workQueue)
-			.set({ status: "completed" })
+			.set({ status: "completed", completedAt: new Date() })
 			.where(
 				and(
 					eq(workQueue.serverId, serverId),
@@ -872,10 +931,23 @@ export async function applyStatusReport(
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} NOT reported, marking UNKNOWN`,
 				);
-				await db
-					.update(deployments)
-					.set({ observedPhase: "unknown", healthStatus: null })
-					.where(eq(deployments.id, dep.id));
+				await db.transaction(async (tx) => {
+					const updated = await tx
+						.update(deployments)
+						.set({ observedPhase: "unknown", healthStatus: null })
+						.where(
+							and(
+								eq(deployments.id, dep.id),
+								sql`${deployments.observedPhase} IS DISTINCT FROM 'unknown'`,
+							),
+						)
+						.returning({ id: deployments.id });
+					if (updated.length === 0) return;
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				});
 			}
 		}
 	}
@@ -942,10 +1014,19 @@ export async function applyStatusReport(
 
 		if (container.status === "stopped") {
 			Object.assign(updateFields, getStoppedContainerReportUpdate(deployment));
-			await db
-				.update(deployments)
-				.set(updateFields)
-				.where(eq(deployments.id, deployment.id));
+			await db.transaction(async (tx) => {
+				const updated = await tx
+					.update(deployments)
+					.set(updateFields)
+					.where(eq(deployments.id, deployment.id))
+					.returning({ id: deployments.id });
+				if (updated.length && isDeploymentRoutable(deployment)) {
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				}
+			});
 			continue;
 		}
 
@@ -953,10 +1034,18 @@ export async function applyStatusReport(
 			updateFields.observedPhase = "failed";
 			updateFields.healthStatus = null;
 			updateFields.failedStage ??= "container_failed";
-			await db
-				.update(deployments)
-				.set(updateFields)
-				.where(eq(deployments.id, deployment.id));
+			await db.transaction(async (tx) => {
+				await tx
+					.update(deployments)
+					.set(updateFields)
+					.where(eq(deployments.id, deployment.id));
+				if (isDeploymentRoutable(deployment)) {
+					const recipients = await tx.select({ id: servers.id }).from(servers);
+					for (const recipient of recipients) {
+						await bumpAgentGeneration(tx, recipient.id);
+					}
+				}
+			});
 			if (deployment.rolloutId) {
 				await inngest.send(
 					inngestEvents.resourceStatusChanged.create({
@@ -1033,30 +1122,41 @@ export async function applyStatusReport(
 				continue;
 			}
 
-			const updated = await db
-				.update(deployments)
-				.set({
-					containerId: container.containerId,
-					observedPhase: attachmentPhase,
-					healthStatus: hasHealthCheck ? healthStatus : "none",
-					serverlessWakeFailureCount: 0,
-					...(attachmentPhase === "healthy"
-						? {
-								autohealRestartCount: 0,
-								autohealRecreateCount: 0,
-							}
-						: {}),
-				})
-				.where(
-					and(
-						eq(deployments.id, deployment.id),
-						eq(deployments.serverId, serverId),
-						eq(deployments.runtimeDesiredState, "running"),
-						inArray(deployments.observedPhase, observedStartingPhases),
-						unchangedContainer,
-					),
-				)
-				.returning({ id: deployments.id });
+			const updated = await db.transaction(async (tx) => {
+				const rows = await tx
+					.update(deployments)
+					.set({
+						containerId: container.containerId,
+						observedPhase: attachmentPhase,
+						healthStatus: hasHealthCheck ? healthStatus : "none",
+						serverlessWakeFailureCount: 0,
+						...(attachmentPhase === "healthy"
+							? {
+									autohealRestartCount: 0,
+									autohealRecreateCount: 0,
+								}
+							: {}),
+					})
+					.where(
+						and(
+							eq(deployments.id, deployment.id),
+							eq(deployments.serverId, serverId),
+							eq(deployments.runtimeDesiredState, "running"),
+							inArray(deployments.observedPhase, observedStartingPhases),
+							eq(deployments.trafficState, deployment.trafficState),
+							unchangedContainer,
+						),
+					)
+					.returning({ id: deployments.id });
+				if (
+					rows.length &&
+					attachmentPhase === "healthy" &&
+					deployment.trafficState === "active"
+				) {
+					await bumpExpectedStateRecipients(tx);
+				}
+				return rows;
+			});
 
 			if (updated.length === 0) continue;
 
@@ -1177,7 +1277,33 @@ export async function applyStatusReport(
 			deployment.observedPhase === "starting" &&
 			container.status === "running" &&
 			(healthStatus === "healthy" || healthStatus === "unhealthy");
-		if (!isStartingTerminalHealthReport) {
+		const readyRecoveryAttempted = restoredToReady;
+		if (readyRecoveryAttempted) {
+			const recovered = await db.transaction(async (tx) => {
+				const unchangedContainer = deployment.containerId
+					? eq(deployments.containerId, deployment.containerId)
+					: isNull(deployments.containerId);
+				const rows = await tx
+					.update(deployments)
+					.set(updateFields)
+					.where(
+						and(
+							eq(deployments.id, deployment.id),
+							eq(deployments.serverId, serverId),
+							eq(deployments.runtimeDesiredState, "running"),
+							eq(deployments.observedPhase, deployment.observedPhase),
+							eq(deployments.trafficState, deployment.trafficState),
+							unchangedContainer,
+						),
+					)
+					.returning({ id: deployments.id });
+				if (rows.length && deployment.trafficState === "active") {
+					await bumpExpectedStateRecipients(tx);
+				}
+				return rows;
+			});
+			restoredToReady = recovered.length > 0;
+		} else if (!isStartingTerminalHealthReport) {
 			await db
 				.update(deployments)
 				.set(updateFields)
@@ -1232,25 +1358,32 @@ export async function applyStatusReport(
 			container.status === "running" &&
 			healthStatus === "healthy"
 		) {
-			const updated = await db
-				.update(deployments)
-				.set({
-					observedPhase: "healthy",
-					healthStatus: "healthy",
-					autohealRestartCount: 0,
-					autohealRecreateCount: 0,
-					serverlessWakeFailureCount: 0,
-				})
-				.where(
-					and(
-						eq(deployments.id, deployment.id),
-						eq(deployments.serverId, serverId),
-						eq(deployments.runtimeDesiredState, "running"),
-						eq(deployments.observedPhase, "starting"),
-						eq(deployments.containerId, container.containerId),
-					),
-				)
-				.returning({ id: deployments.id });
+			const updated = await db.transaction(async (tx) => {
+				const rows = await tx
+					.update(deployments)
+					.set({
+						observedPhase: "healthy",
+						healthStatus: "healthy",
+						autohealRestartCount: 0,
+						autohealRecreateCount: 0,
+						serverlessWakeFailureCount: 0,
+					})
+					.where(
+						and(
+							eq(deployments.id, deployment.id),
+							eq(deployments.serverId, serverId),
+							eq(deployments.runtimeDesiredState, "running"),
+							eq(deployments.observedPhase, "starting"),
+							eq(deployments.containerId, container.containerId),
+							eq(deployments.trafficState, deployment.trafficState),
+						),
+					)
+					.returning({ id: deployments.id });
+				if (rows.length && deployment.trafficState === "active") {
+					await bumpExpectedStateRecipients(tx);
+				}
+				return rows;
+			});
 
 			if (updated.length === 0) continue;
 
@@ -1301,35 +1434,79 @@ export async function applyStatusReport(
 		}
 	}
 
-	const routingSyncRolloutIds = [
-		...new Set(report.routingSyncedRolloutIds || []),
-	].filter(Boolean);
-	if (routingSyncRolloutIds.length > 0) {
-		const reportedRollouts = await db
-			.select({
-				id: rollouts.id,
-				serviceId: rollouts.serviceId,
-				status: rollouts.status,
-				currentStage: rollouts.currentStage,
-				routingTargets: rollouts.routingTargets,
-			})
-			.from(rollouts)
-			.where(inArray(rollouts.id, routingSyncRolloutIds));
+	const routingAcknowledgements = [
+		...new Map(
+			(report.routingAcknowledgements ?? []).map((acknowledgement) => [
+				acknowledgement.rolloutId,
+				acknowledgement,
+			]),
+		).values(),
+	].filter(
+		(acknowledgement) =>
+			acknowledgement.rolloutId &&
+			Number.isSafeInteger(acknowledgement.generation) &&
+			acknowledgement.generation >= 0,
+	);
+	if (routingAcknowledgements.length > 0) {
 		const currentServerName = await getCurrentServerLogName();
 
-		for (const rollout of reportedRollouts) {
-			if (!isRoutingSyncAcknowledgementEligible(rollout, serverId)) continue;
+		for (const acknowledgement of routingAcknowledgements) {
+			const acknowledgedRollout = await db.transaction(async (tx) => {
+				const rollout = await tx
+					.select({
+						id: rollouts.id,
+						serviceId: rollouts.serviceId,
+						status: rollouts.status,
+						currentStage: rollouts.currentStage,
+						routingTargets: rollouts.routingTargets,
+					})
+					.from(rollouts)
+					.where(eq(rollouts.id, acknowledgement.rolloutId))
+					.for("update")
+					.then((rows) => rows[0]);
+				if (
+					!rollout ||
+					!isRoutingSyncAcknowledgementEligible(rollout, serverId)
+				) {
+					return null;
+				}
+				const rows = await tx
+					.update(rolloutRoutingAcknowledgements)
+					.set({
+						acknowledgedGeneration: acknowledgement.generation,
+						acknowledgedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(rolloutRoutingAcknowledgements.rolloutId, rollout.id),
+							eq(rolloutRoutingAcknowledgements.serverId, serverId),
+							isNull(rolloutRoutingAcknowledgements.acknowledgedAt),
+							sql`${rolloutRoutingAcknowledgements.requiredGeneration} <= ${acknowledgement.generation}`,
+						),
+					)
+					.returning({ rolloutId: rolloutRoutingAcknowledgements.rolloutId });
+				if (rows.length) {
+					await recordRolloutStageBoundary(tx, {
+						rolloutId: rollout.id,
+						stage: "routing_acknowledged",
+						serverId,
+						generation: acknowledgement.generation,
+					});
+				}
+				return rows.length ? rollout : null;
+			});
+			if (!acknowledgedRollout) continue;
 
 			await ingestRolloutLog(
-				rollout.id,
-				rollout.serviceId,
+				acknowledgedRollout.id,
+				acknowledgedRollout.serviceId,
 				"dns_sync",
 				`Routing synced on server ${currentServerName}`,
 			);
 			await inngest.send(
 				inngestEvents.serverDnsSynced.create({
 					serverId,
-					rolloutId: rollout.id,
+					rolloutId: acknowledgedRollout.id,
 				}),
 			);
 		}

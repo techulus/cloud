@@ -1,6 +1,7 @@
 package traefik
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -213,8 +214,13 @@ func setMapValue(values map[string]interface{}, key string, value interface{}) b
 }
 
 func ReloadTraefik() error {
-	cmd := exec.Command("systemctl", "restart", "traefik")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", "traefik")
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("traefik restart timed out or was canceled: %w", ctx.Err())
+		}
 		return fmt.Errorf("failed to restart traefik: %w", err)
 	}
 	log.Printf("[traefik] restarted traefik to apply static config changes")

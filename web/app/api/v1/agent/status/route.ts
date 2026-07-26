@@ -3,7 +3,8 @@ import { verifyAgentRequest } from "@/lib/agent-auth";
 import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
-	claimNextWorkItem,
+	claimWorkItems,
+	classifyWorkType,
 	completeWorkItemResults,
 	renewActiveWorkItems,
 	type WorkItemResult,
@@ -57,8 +58,14 @@ export async function POST(request: NextRequest) {
 		? data.completedWorkItems.filter(isValidWorkItemResult)
 		: [];
 	const activeWorkItems = Array.isArray(data.activeWorkItems)
-		? data.activeWorkItems.filter(isValidActiveWorkItem)
+		? data.activeWorkItems
 		: [];
+	if (!activeWorkItems.every(isValidActiveWorkItem)) {
+		return NextResponse.json(
+			{ error: "Invalid activeWorkItems payload" },
+			{ status: 400 },
+		);
+	}
 
 	const { accepted, rejected } = await completeWorkItemResults(
 		serverId,
@@ -67,8 +74,7 @@ export async function POST(request: NextRequest) {
 
 	const rejectedActive = await renewActiveWorkItems(serverId, activeWorkItems);
 
-	const nextWorkItem =
-		activeWorkItems.length === 0 ? await claimNextWorkItem(serverId) : null;
+	const workItems = await claimWorkItems(serverId, activeWorkItems);
 
 	return NextResponse.json({
 		ok: true,
@@ -76,7 +82,7 @@ export async function POST(request: NextRequest) {
 		rejectedWorkItemResults: rejected,
 		rejectedActiveWorkItems: rejectedActive,
 		serverlessTransitionResults,
-		workItems: nextWorkItem ? [nextWorkItem] : [],
+		workItems,
 	});
 }
 
@@ -93,12 +99,33 @@ function isValidWorkItemResult(value: unknown): value is WorkItemResult {
 	);
 }
 
+function isValidWorkType(value: unknown): value is ActiveWorkItem["type"] {
+	switch (value) {
+		case "deploy":
+		case "reconcile":
+		case "stop":
+		case "restart":
+		case "build":
+		case "create_manifest":
+		case "force_cleanup":
+		case "cleanup_volumes":
+		case "backup_volume":
+		case "restore_volume":
+		case "upgrade_agent":
+			classifyWorkType(value);
+			return true;
+		default:
+			return false;
+	}
+}
+
 function isValidActiveWorkItem(value: unknown): value is ActiveWorkItem {
 	if (!value || typeof value !== "object") return false;
 
 	const candidate = value as ActiveWorkItem;
 	return (
 		typeof candidate.id === "string" &&
+		isValidWorkType(candidate.type) &&
 		Number.isInteger(candidate.attempt) &&
 		candidate.attempt > 0
 	);

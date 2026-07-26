@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
+	rolloutRoutingAcknowledgements,
 	rollouts,
 	servers,
 	serviceRevisions,
@@ -15,7 +16,7 @@ import {
 	observedReadyPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
-import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
+import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import type {
 	ServiceRevisionSecret,
@@ -112,8 +113,9 @@ export type ServerlessRoute = {
 };
 
 export type AgentExpectedState = {
+	generation: number;
 	serverName: string;
-	routingSyncRolloutIds: string[];
+	routingSync: Array<{ rolloutId: string; requiredGeneration: number }>;
 	containers: ExpectedContainer[];
 	dns: { records: Array<{ name: string; ips: string[] }> };
 	serverless: { routes: ServerlessRoute[] };
@@ -166,16 +168,72 @@ export async function getServer(serverId: string) {
 export async function buildAgentExpectedState(
 	server: Server,
 ): Promise<AgentExpectedState> {
-	// Read token candidates first. If promotion commits after this query, this
-	// response can contain the new routing state without a token (safe), but it
-	// can never pair a post-promotion token with pre-promotion routing state.
-	const routingSyncRollouts = await getRoutingSyncRollouts();
-	const runtimeServices = await getRuntimeServiceRevisions();
-	const routingSyncRolloutIds = selectRoutingSyncRolloutIds({
-		rollouts: routingSyncRollouts,
-		runtimeServices,
-		serverId: server.id,
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const current = await getServer(server.id);
+		if (!current) throw new Error("Server not found");
+		const state = await buildAgentExpectedStateAtGeneration(current);
+		const generation = await db
+			.select({ generation: servers.agentGeneration })
+			.from(servers)
+			.where(eq(servers.id, server.id))
+			.then((rows) => rows[0]?.generation);
+		if (generation === current.agentGeneration) {
+			await recordExpectedStateFetch(
+				server.id,
+				current.agentGeneration,
+				state.routingSync.map((item) => item.rolloutId),
+			).catch((error) => {
+				console.warn(
+					"[rollout-timeline] failed to record expected-state fetch",
+					error,
+				);
+			});
+			return state;
+		}
+	}
+	throw new Error(`Expected state changed repeatedly for server ${server.id}`);
+}
+
+async function recordExpectedStateFetch(
+	serverId: string,
+	generation: number,
+	routingRolloutIds: string[],
+) {
+	const deploymentRollouts = await db
+		.select({ rolloutId: deployments.rolloutId })
+		.from(deployments)
+		.innerJoin(rollouts, eq(deployments.rolloutId, rollouts.id))
+		.where(
+			and(
+				eq(deployments.serverId, serverId),
+				eq(rollouts.status, "in_progress"),
+				inArray(rollouts.currentStage, ["deploying", "health_check"]),
+			),
+		);
+	const rolloutIds = new Set([
+		...routingRolloutIds,
+		...deploymentRollouts.flatMap((row) =>
+			row.rolloutId ? [row.rolloutId] : [],
+		),
+	]);
+	if (!rolloutIds.size) return;
+	await db.transaction(async (tx) => {
+		for (const rolloutId of rolloutIds) {
+			await recordRolloutStageBoundary(tx, {
+				rolloutId,
+				stage: "expected_state_fetched",
+				serverId,
+				generation,
+			});
+		}
 	});
+}
+
+async function buildAgentExpectedStateAtGeneration(
+	server: Server,
+): Promise<AgentExpectedState> {
+	const routingSync = await getRoutingSync(server.id, server.agentGeneration);
+	const runtimeServices = await getRuntimeServiceRevisions();
 	const [containers, dnsRecords, traefikConfig, wireguardPeers] =
 		await Promise.all([
 			buildExpectedContainers(server.id),
@@ -190,8 +248,9 @@ export async function buildAgentExpectedState(
 	);
 
 	return {
+		generation: server.agentGeneration,
 		serverName: server.name,
-		routingSyncRolloutIds,
+		routingSync,
 		containers,
 		dns: { records: dnsRecords },
 		serverless,
@@ -200,19 +259,18 @@ export async function buildAgentExpectedState(
 	};
 }
 
-async function getRoutingSyncRollouts() {
+async function getRoutingSync(serverId: string, generation: number) {
 	return db
 		.select({
-			id: rollouts.id,
-			serviceId: rollouts.serviceId,
-			serviceRevisionId: rollouts.serviceRevisionId,
-			routingTargets: rollouts.routingTargets,
+			rolloutId: rolloutRoutingAcknowledgements.rolloutId,
+			requiredGeneration: rolloutRoutingAcknowledgements.requiredGeneration,
 		})
-		.from(rollouts)
+		.from(rolloutRoutingAcknowledgements)
 		.where(
 			and(
-				eq(rollouts.status, "in_progress"),
-				eq(rollouts.currentStage, "dns_sync"),
+				eq(rolloutRoutingAcknowledgements.serverId, serverId),
+				isNull(rolloutRoutingAcknowledgements.acknowledgedAt),
+				sql`${rolloutRoutingAcknowledgements.requiredGeneration} <= ${generation}`,
 			),
 		);
 }
@@ -269,7 +327,9 @@ async function buildExpectedContainers(
 			),
 		);
 
-	const serviceIds = [...new Set(serverDeployments.map((dep) => dep.serviceId))];
+	const serviceIds = [
+		...new Set(serverDeployments.map((dep) => dep.serviceId)),
+	];
 	const revisionIds = [
 		...new Set(serverDeployments.map((dep) => dep.serviceRevisionId)),
 	];

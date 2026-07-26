@@ -7,6 +7,7 @@ import {
 	integer,
 	jsonb,
 	pgTable,
+	primaryKey,
 	real,
 	text,
 	timestamp,
@@ -347,6 +348,9 @@ export const servers = pgTable("servers", {
 		withTimezone: true,
 	}),
 	agentUpgradeError: text("agent_upgrade_error"),
+	agentGeneration: bigint("agent_generation", { mode: "number" })
+		.notNull()
+		.default(0),
 	agentToken: text("agent_token"),
 	tokenCreatedAt: timestamp("token_created_at", { withTimezone: true }),
 	tokenUsedAt: timestamp("token_used_at", { withTimezone: true }),
@@ -692,6 +696,10 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
+		unique("deployments_id_server_id_unique").on(table.id, table.serverId),
+		uniqueIndex("deployments_server_ip_address_unique_idx")
+			.on(table.serverId, table.ipAddress)
+			.where(sql`${table.ipAddress} IS NOT NULL`),
 		foreignKey({
 			name: "deployments_service_revision_service_fk",
 			columns: [table.serviceRevisionId, table.serviceId],
@@ -709,7 +717,14 @@ export const rollouts = pgTable(
 			.references(() => services.id, { onDelete: "cascade" }),
 		serviceRevisionId: text("service_revision_id").notNull(),
 		status: text("status", {
-			enum: ["queued", "in_progress", "completed", "failed", "rolled_back"],
+			enum: [
+				"queued",
+				"in_progress",
+				"completed",
+				"failed",
+				"rolled_back",
+				"superseded",
+			],
 		})
 			.notNull()
 			.default("queued"),
@@ -743,9 +758,10 @@ export const deploymentPorts = pgTable(
 	"deployment_ports",
 	{
 		id: text("id").primaryKey(),
-		deploymentId: text("deployment_id")
+		deploymentId: text("deployment_id").notNull(),
+		serverId: text("server_id")
 			.notNull()
-			.references(() => deployments.id, { onDelete: "cascade" }),
+			.references(() => servers.id, { onDelete: "cascade" }),
 		containerPort: integer("container_port").notNull(),
 		hostPort: integer("host_port").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true })
@@ -754,6 +770,66 @@ export const deploymentPorts = pgTable(
 	},
 	(table) => [
 		index("deployment_ports_deployment_id_idx").on(table.deploymentId),
+		uniqueIndex("deployment_ports_server_host_port_unique_idx").on(
+			table.serverId,
+			table.hostPort,
+		),
+		uniqueIndex("deployment_ports_deployment_container_port_unique_idx").on(
+			table.deploymentId,
+			table.containerPort,
+		),
+		foreignKey({
+			name: "deployment_ports_deployment_server_fk",
+			columns: [table.deploymentId, table.serverId],
+			foreignColumns: [deployments.id, deployments.serverId],
+		}).onDelete("cascade"),
+	],
+);
+
+export const rolloutRoutingAcknowledgements = pgTable(
+	"rollout_routing_acknowledgements",
+	{
+		rolloutId: text("rollout_id")
+			.notNull()
+			.references(() => rollouts.id, { onDelete: "cascade" }),
+		serverId: text("server_id")
+			.notNull()
+			.references(() => servers.id, { onDelete: "cascade" }),
+		requiredGeneration: bigint("required_generation", {
+			mode: "number",
+		}).notNull(),
+		requiredAt: timestamp("required_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		acknowledgedGeneration: bigint("acknowledged_generation", {
+			mode: "number",
+		}),
+		acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+	},
+	(table) => [primaryKey({ columns: [table.rolloutId, table.serverId] })],
+);
+
+export const rolloutStageTransitions = pgTable(
+	"rollout_stage_transitions",
+	{
+		rolloutId: text("rollout_id")
+			.notNull()
+			.references(() => rollouts.id, { onDelete: "cascade" }),
+		stage: text("stage").notNull(),
+		// Empty for rollout-wide boundaries; server/generation scopes make
+		// expected-state fetches and routing acknowledgements replay-safe.
+		scope: text("scope").notNull().default(""),
+		serverId: text("server_id").references(() => servers.id, {
+			onDelete: "cascade",
+		}),
+		generation: bigint("generation", { mode: "number" }),
+		enteredAt: timestamp("entered_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+	},
+	(table) => [
+		primaryKey({ columns: [table.rolloutId, table.stage, table.scope] }),
 	],
 );
 
@@ -789,6 +865,10 @@ export const workQueue = pgTable(
 			.defaultNow()
 			.notNull(),
 		startedAt: timestamp("started_at", { withTimezone: true }),
+		claimedAt: timestamp("claimed_at", { withTimezone: true }),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		resultImageUri: text("result_image_uri"),
+		durationMs: integer("duration_ms"),
 		attempts: integer("attempts").notNull().default(0),
 	},
 	(table) => [
@@ -888,6 +968,10 @@ export const builds = pgTable(
 		claimedAt: timestamp("claimed_at", { withTimezone: true }),
 		startedAt: timestamp("started_at", { withTimezone: true }),
 		completedAt: timestamp("completed_at", { withTimezone: true }),
+		timings: jsonb("timings").$type<{
+			cloneMs?: number;
+			buildTotalMs?: number;
+		}>(),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

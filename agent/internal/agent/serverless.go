@@ -40,21 +40,26 @@ func (a *Agent) ExpectedState() *agenthttp.ExpectedState {
 }
 
 func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) error {
-	return a.withDeploymentDeployLock(expected.DeploymentID, func() error {
+	return a.withDeploymentOperationLock(expected.DeploymentID, func() error {
+		resolved, err := a.Reconciler.PullImage(context.Background(), expected.Image)
+		if err != nil {
+			return err
+		}
 		containers, err := container.List()
 		if err == nil {
 			for _, actual := range containers {
 				if actual.DeploymentID != expected.DeploymentID {
 					continue
 				}
-				if normalizeImage(actual.Image) != normalizeImage(expected.Image) {
+				if actual.ImageID != string(resolved) || actual.ImageIdentity != string(resolved) {
 					log.Printf(
-						"[serverless] recreate deployment %s because image changed (%s -> %s)",
+						"[serverless] recreate deployment %s because image identity changed (imageID=%s label=%s expected=%s)",
 						Truncate(expected.DeploymentID, 8),
-						actual.Image,
-						expected.Image,
+						actual.ImageID,
+						actual.ImageIdentity,
+						resolved,
 					)
-					return a.deployAndMonitor(expected)
+					return a.deployResolvedAndMonitor(expected, resolved)
 				}
 				if actual.State == "running" {
 					return nil
@@ -70,18 +75,18 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 						Truncate(expected.DeploymentID, 8),
 						err,
 					)
-					return a.deployAndMonitor(expected)
+					return a.deployResolvedAndMonitor(expected, resolved)
 				}
 				a.monitorContainerHealth(actual.ID, expected)
 				return nil
 			}
 		}
-		return a.deployAndMonitor(expected)
+		return a.deployResolvedAndMonitor(expected, resolved)
 	})
 }
 
 func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) error {
-	return a.withDeploymentDeployLock(expected.DeploymentID, func() error {
+	return a.withDeploymentOperationLock(expected.DeploymentID, func() error {
 		containers, err := container.List()
 		if err == nil {
 			for _, actual := range containers {
@@ -93,12 +98,16 @@ func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) er
 				}
 			}
 		}
-		return a.deployAndMonitor(expected)
+		resolved, err := a.Reconciler.PullImage(context.Background(), expected.Image)
+		if err != nil {
+			return err
+		}
+		return a.deployResolvedAndMonitor(expected, resolved)
 	})
 }
 
-func (a *Agent) deployAndMonitor(expected agenthttp.ExpectedContainer) error {
-	result, err := a.Reconciler.Deploy(expected)
+func (a *Agent) deployResolvedAndMonitor(expected agenthttp.ExpectedContainer, resolved container.ResolvedImage) error {
+	result, err := a.Reconciler.DeployResolved(context.Background(), expected, resolved)
 	if err != nil {
 		return err
 	}
@@ -171,25 +180,60 @@ func pollContainerHealth(ctx context.Context, containerID string, interval, time
 	}
 }
 
-func (a *Agent) withDeploymentDeployLock(deploymentID string, fn func() error) error {
-	a.deployLockMutex.Lock()
-	if a.deploymentDeployLocks == nil {
-		a.deploymentDeployLocks = map[string]*sync.Mutex{}
+func (a *Agent) withDeploymentOperationLock(deploymentID string, fn func() error) error {
+	a.operationLockMutex.Lock()
+	if a.deploymentOperationLocks == nil {
+		a.deploymentOperationLocks = map[string]*sync.Mutex{}
 	}
-	lock, ok := a.deploymentDeployLocks[deploymentID]
+	lock, ok := a.deploymentOperationLocks[deploymentID]
 	if !ok {
 		lock = &sync.Mutex{}
-		a.deploymentDeployLocks[deploymentID] = lock
+		a.deploymentOperationLocks[deploymentID] = lock
 	}
-	a.deployLockMutex.Unlock()
+	a.operationLockMutex.Unlock()
 
 	lock.Lock()
 	defer lock.Unlock()
 	return fn()
 }
 
+func (a *Agent) withContainerDeploymentOperationLock(containerID string, fn func(string) error) error {
+	containers, err := container.List()
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+	for _, current := range containers {
+		if current.ID != containerID {
+			continue
+		}
+		if current.DeploymentID == "" {
+			return fmt.Errorf("container %s has no deployment ID", Truncate(containerID, 12))
+		}
+		deploymentID := current.DeploymentID
+		return a.withDeploymentOperationLock(deploymentID, func() error {
+			currentContainers, err := container.List()
+			if err != nil {
+				return fmt.Errorf("failed to list containers under deployment lock: %w", err)
+			}
+			currentID := ""
+			matches := 0
+			for _, candidate := range currentContainers {
+				if candidate.DeploymentID == deploymentID {
+					currentID = candidate.ID
+					matches++
+				}
+			}
+			if matches != 1 {
+				return fmt.Errorf("deployment %s has %d containers; expected exactly one", Truncate(deploymentID, 8), matches)
+			}
+			return fn(currentID)
+		})
+	}
+	return fmt.Errorf("container %s not found", Truncate(containerID, 12))
+}
+
 func (a *Agent) StopServerlessContainer(containerID string) error {
-	return container.Stop(containerID)
+	return a.withContainerDeploymentOperationLock(containerID, func(currentID string) error { return container.Stop(currentID) })
 }
 
 func (a *Agent) ListServerlessContainers() ([]container.Container, error) {

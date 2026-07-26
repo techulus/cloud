@@ -9,9 +9,12 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"techulus/cloud-agent/internal/paths"
 )
+
+const systemctlTimeout = 30 * time.Second
 
 var (
 	resolvedDropInPath = paths.ResolvedDir + "/internal.conf"
@@ -53,8 +56,13 @@ Domains=~internal
 		return fmt.Errorf("failed to write resolved config: %w", err)
 	}
 
-	cmd := exec.Command("systemctl", "restart", "systemd-resolved")
+	ctx, cancel := context.WithTimeout(context.Background(), systemctlTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", "systemd-resolved")
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("systemd-resolved restart timed out or was canceled: %w", ctx.Err())
+		}
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
 	}
 

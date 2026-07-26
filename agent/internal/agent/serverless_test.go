@@ -40,7 +40,7 @@ func TestPendingServerlessWakeDoesNotStopStaleStoppedExpectedContainer(t *testin
 		},
 	}
 
-	for _, action := range agent.planReconcile(expected, actual) {
+	for _, action := range agent.planReconcile(expected, actual, map[string]container.ResolvedImage{}) {
 		if action.DeploymentID == "dep_serverless" {
 			t.Fatalf("planReconcile returned action for pending wake: %+v", action)
 		}

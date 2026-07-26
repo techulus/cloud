@@ -35,6 +35,13 @@ func TestBuildPodmanRunArgsPublishesLoopbackPortsWithStaticIP(t *testing.T) {
 	}
 }
 
+func TestBuildPodmanRunArgsLabelsImmutableImageIdentity(t *testing.T) {
+	args := buildPodmanRunArgs(&DeployConfig{DeploymentID: "dep", ServiceID: "svc"}, "sha256:full-id")
+	if !slices.Contains(args, "techulus.image.identity=sha256:full-id") {
+		t.Fatalf("args missing immutable image identity label: %+v", args)
+	}
+}
+
 func TestStableMACAddress(t *testing.T) {
 	tests := []struct {
 		name      string

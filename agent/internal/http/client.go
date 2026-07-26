@@ -2,11 +2,13 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -170,10 +172,11 @@ type WireGuardPeer struct {
 }
 
 type ExpectedState struct {
-	ServerName            string              `json:"serverName"`
-	RoutingSyncRolloutIds []string            `json:"routingSyncRolloutIds,omitempty"`
-	Containers            []ExpectedContainer `json:"containers"`
-	Dns                   struct {
+	Generation  int64                `json:"generation"`
+	ServerName  string               `json:"serverName"`
+	RoutingSync []RoutingSyncRequest `json:"routingSync,omitempty"`
+	Containers  []ExpectedContainer  `json:"containers"`
+	Dns         struct {
 		Records []DnsRecord `json:"records"`
 	} `json:"dns"`
 	Serverless struct {
@@ -292,17 +295,17 @@ type AgentHealth struct {
 }
 
 type StatusReport struct {
-	Resources               *Resources              `json:"resources,omitempty"`
-	PublicIP                string                  `json:"publicIp,omitempty"`
-	PrivateIP               string                  `json:"privateIp,omitempty"`
-	Meta                    map[string]string       `json:"meta,omitempty"`
-	Containers              []ContainerStatus       `json:"containers"`
-	ContainersComplete      bool                    `json:"containersComplete"`
-	DeploymentErrors        []DeploymentError       `json:"deploymentErrors,omitempty"`
-	RoutingSyncedRolloutIds []string                `json:"routingSyncedRolloutIds,omitempty"`
-	NetworkHealth           *health.NetworkHealth   `json:"networkHealth,omitempty"`
-	ContainerHealth         *health.ContainerHealth `json:"containerHealth,omitempty"`
-	AgentHealth             *AgentHealth            `json:"agentHealth,omitempty"`
+	Resources               *Resources               `json:"resources,omitempty"`
+	PublicIP                string                   `json:"publicIp,omitempty"`
+	PrivateIP               string                   `json:"privateIp,omitempty"`
+	Meta                    map[string]string        `json:"meta,omitempty"`
+	Containers              []ContainerStatus        `json:"containers"`
+	ContainersComplete      bool                     `json:"containersComplete"`
+	DeploymentErrors        []DeploymentError        `json:"deploymentErrors,omitempty"`
+	RoutingAcknowledgements []RoutingAcknowledgement `json:"routingAcknowledgements,omitempty"`
+	NetworkHealth           *health.NetworkHealth    `json:"networkHealth,omitempty"`
+	ContainerHealth         *health.ContainerHealth  `json:"containerHealth,omitempty"`
+	AgentHealth             *AgentHealth             `json:"agentHealth,omitempty"`
 }
 
 type CompletedWorkItem struct {
@@ -315,6 +318,47 @@ type CompletedWorkItem struct {
 type ActiveWorkItem struct {
 	ID      string `json:"id"`
 	Attempt int    `json:"attempt"`
+	Type    string `json:"type"`
+}
+
+type RoutingSyncRequest struct {
+	RolloutID          string `json:"rolloutId"`
+	RequiredGeneration int64  `json:"requiredGeneration"`
+}
+
+type RoutingAcknowledgement struct {
+	RolloutID  string `json:"rolloutId"`
+	Generation int64  `json:"generation"`
+}
+
+// WaitForWake long-polls for a state generation newer than generation. A 204
+// is a normal timeout. Unsupported endpoints are reported to the caller so it
+// can quietly retain heartbeat-driven reconciliation.
+func (c *Client) WaitForWake(ctx context.Context, generation int64) (int64, bool, error) {
+	u := c.baseURL + "/api/v1/agent/wake?generation=" + url.QueryEscape(strconv.FormatInt(generation, 10))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return generation, false, err
+	}
+	c.signRequest(req, "")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return generation, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return generation, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return generation, false, fmt.Errorf("wake request failed with status %d", resp.StatusCode)
+	}
+	var result struct {
+		Generation int64 `json:"generation"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return generation, false, err
+	}
+	return result.Generation, result.Generation > generation, nil
 }
 
 type ServerlessTransition struct {
@@ -343,13 +387,18 @@ type BuildDetails struct {
 	TargetPlatforms []string          `json:"targetPlatforms"`
 }
 
-func (c *Client) ClaimBuild(buildID string) (*BuildDetails, error) {
-	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID, nil)
+func (c *Client) ClaimBuild(buildID string, attempt int) (*BuildDetails, error) {
+	body, err := json.Marshal(map[string]int{"attempt": attempt})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal build claim: %w", err)
+	}
+	req, err := http.NewRequest("POST", c.baseURL+"/api/v1/agent/builds/"+buildID, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	c.signRequest(req, "")
+	req.Header.Set("Content-Type", "application/json")
+	c.signRequest(req, string(body))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -370,15 +419,19 @@ func (c *Client) ClaimBuild(buildID string) (*BuildDetails, error) {
 	return &result, nil
 }
 
-func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha string) error {
-	payload := map[string]string{
-		"status": status,
+func (c *Client) UpdateBuildStatus(buildID string, attempt int, status, errorMsg, resolvedCommitSha string, timings any) error {
+	payload := map[string]any{
+		"status":  status,
+		"attempt": attempt,
 	}
 	if errorMsg != "" {
 		payload["error"] = errorMsg
 	}
 	if resolvedCommitSha != "" {
 		payload["resolvedCommitSha"] = resolvedCommitSha
+	}
+	if timings != nil {
+		payload["timings"] = timings
 	}
 
 	body, err := json.Marshal(payload)
@@ -392,6 +445,19 @@ func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha 
 	}
 	defer resp.Body.Close()
 
+	return nil
+}
+
+func (c *Client) ReportManifestResult(buildGroupID string, attempt int, imageDigest string, durationMs int64) error {
+	payload, err := json.Marshal(map[string]any{"attempt": attempt, "imageDigest": imageDigest, "durationMs": durationMs})
+	if err != nil {
+		return err
+	}
+	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/build-manifests/"+buildGroupID+"/status", payload, []int{http.StatusOK}, "failed to report manifest result", "manifest result update failed")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 	return nil
 }
 
@@ -457,8 +523,8 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 	return &statusResponse, nil
 }
 
-func (c *Client) GetBuildStatus(buildID string) (string, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status", nil)
+func (c *Client) GetBuildStatus(buildID string, attempt int) (string, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/v1/agent/builds/"+buildID+"/status?attempt="+url.QueryEscape(strconv.Itoa(attempt)), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}

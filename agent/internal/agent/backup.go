@@ -71,43 +71,55 @@ func (a *Agent) processVolumeBackup(backupID, serviceID, containerID, volumeName
 		return reportFailure(fmt.Errorf("volume path does not exist: %s", volumePath))
 	}
 
-	if containerID != "" {
-		running, err := container.IsContainerRunning(containerID)
-		if err != nil {
-			return reportFailure(fmt.Errorf("failed to check container status: %w", err))
-		}
-
-		if running {
-			log.Printf("[backup_volume] stopping container %s before backup", Truncate(containerID, 12))
-			if err := container.Stop(containerID); err != nil {
-				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
-			}
-
-			defer func() {
-				log.Printf("[backup_volume] starting container %s after backup", Truncate(containerID, 12))
-				err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
-					if err := container.Start(containerID); err != nil {
-						log.Printf("[backup_volume] start attempt failed for container %s: %v", Truncate(containerID, 12), err)
-						return false, err
-					}
-					return true, nil
-				})
-				if err != nil {
-					log.Printf("[backup_volume] CRITICAL: failed to start container %s after backup: %v", Truncate(containerID, 12), err)
-				}
-			}()
-		} else {
-			log.Printf("[backup_volume] container %s not running; skipping stop", Truncate(containerID, 12))
-		}
-	}
-
 	tarPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("backup-%s.tar.gz", backupID))
 	if err != nil {
 		return reportFailure(fmt.Errorf("failed to create temp archive path: %w", err))
 	}
 	defer os.Remove(tarPath)
 
-	size, checksum, err := createTarGzWithChecksum(volumePath, tarPath)
+	var size int64
+	var checksum string
+	archiveVolume := func(currentContainerID string) error {
+		if currentContainerID != "" {
+			running, err := container.IsContainerRunning(currentContainerID)
+			if err != nil {
+				return fmt.Errorf("failed to check container status: %w", err)
+			}
+
+			if running {
+				log.Printf("[backup_volume] stopping container %s before backup", Truncate(currentContainerID, 12))
+				if err := container.Stop(currentContainerID); err != nil {
+					return fmt.Errorf("failed to stop container: %w", err)
+				}
+
+				defer func() {
+					log.Printf("[backup_volume] starting container %s after backup", Truncate(currentContainerID, 12))
+					err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
+						if err := container.Start(currentContainerID); err != nil {
+							log.Printf("[backup_volume] start attempt failed for container %s: %v", Truncate(currentContainerID, 12), err)
+							return false, err
+						}
+						return true, nil
+					})
+					if err != nil {
+						log.Printf("[backup_volume] CRITICAL: failed to start container %s after backup: %v", Truncate(currentContainerID, 12), err)
+					}
+				}()
+			} else {
+				log.Printf("[backup_volume] container %s not running; skipping stop", Truncate(currentContainerID, 12))
+			}
+		}
+
+		var err error
+		size, checksum, err = createTarGzWithChecksum(volumePath, tarPath)
+		return err
+	}
+
+	if containerID != "" {
+		err = a.withContainerDeploymentOperationLock(containerID, archiveVolume)
+	} else {
+		err = archiveVolume("")
+	}
 	if err != nil {
 		return reportFailure(fmt.Errorf("failed to create archive: %w", err))
 	}
@@ -206,57 +218,65 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		return reportFailure(fmt.Errorf("failed to extract archive: %w", err))
 	}
 
-	var shouldStartContainer bool
-	if containerID != "" {
-		running, err := container.IsContainerRunning(containerID)
-		if err != nil {
-			log.Printf("[restore_volume] failed to check container status: %v, proceeding without stop", err)
-		} else if running {
-			log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
-			if err := container.Stop(containerID); err != nil {
-				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
+	replaceVolume := func(currentContainerID string) error {
+		var shouldStartContainer bool
+		if currentContainerID != "" {
+			running, err := container.IsContainerRunning(currentContainerID)
+			if err != nil {
+				return fmt.Errorf("failed to check container status: %w", err)
+			} else if running {
+				log.Printf("[restore_volume] stopping container %s before restore", Truncate(currentContainerID, 12))
+				if err := container.Stop(currentContainerID); err != nil {
+					return fmt.Errorf("failed to stop container: %w", err)
+				}
+				shouldStartContainer = true
+			} else {
+				log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(currentContainerID, 12))
 			}
-			shouldStartContainer = true
 		} else {
-			log.Printf("[restore_volume] container %s not running; skipping stop", Truncate(containerID, 12))
+			log.Printf("[restore_volume] no containerID provided, restoring directly to volume path")
 		}
-	} else {
-		log.Printf("[restore_volume] no containerID provided, restoring directly to volume path")
-	}
 
-	startContainerWithRetry := func() {
-		if !shouldStartContainer {
-			return
-		}
-		log.Printf("[restore_volume] starting container %s", Truncate(containerID, 12))
-		err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
-			if err := container.Start(containerID); err != nil {
-				log.Printf("[restore_volume] start attempt failed for container %s: %v", Truncate(containerID, 12), err)
-				return false, err
+		startContainerWithRetry := func() {
+			if !shouldStartContainer {
+				return
 			}
-			return true, nil
-		})
-		if err != nil {
-			log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(containerID, 12), err)
+			log.Printf("[restore_volume] starting container %s", Truncate(currentContainerID, 12))
+			err := retry.WithBackoff(context.Background(), retry.UnpauseBackoff, func() (bool, error) {
+				if err := container.Start(currentContainerID); err != nil {
+					log.Printf("[restore_volume] start attempt failed for container %s: %v", Truncate(currentContainerID, 12), err)
+					return false, err
+				}
+				return true, nil
+			})
+			if err != nil {
+				log.Printf("[restore_volume] CRITICAL: failed to start container %s: %v", Truncate(currentContainerID, 12), err)
+			}
 		}
+		defer startContainerWithRetry()
+
+		if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove existing volume: %w", err)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(volumePath), 0755); err != nil {
+			return fmt.Errorf("failed to create volume parent directory: %w", err)
+		}
+
+		if err := moveDir(tempExtractPath, volumePath); err != nil {
+			return fmt.Errorf("failed to move restored data to volume path: %w", err)
+		}
+		return nil
 	}
 
-	if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
-		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to remove existing volume: %w", err))
+	if containerID != "" {
+		err = a.withContainerDeploymentOperationLock(containerID, replaceVolume)
+	} else {
+		err = replaceVolume("")
 	}
-
-	if err := os.MkdirAll(filepath.Dir(volumePath), 0755); err != nil {
-		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to create volume parent directory: %w", err))
+	if err != nil {
+		return reportFailure(err)
 	}
-
-	if err := moveDir(tempExtractPath, volumePath); err != nil {
-		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to move restored data to volume path: %w", err))
-	}
-
-	startContainerWithRetry()
 
 	log.Printf("[restore_volume] restored volume %s successfully", volumeName)
 

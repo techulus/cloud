@@ -34,6 +34,15 @@ type Config struct {
 	RootDir           string
 	Secrets           map[string]string
 	TargetPlatforms   []string
+	Timings           Timings
+}
+
+// Timings contains only phases whose boundaries are directly observable by
+// the agent. BuildKit combines solve, export, and registry push in one command,
+// so BuildTotalMs intentionally covers all three rather than guessing.
+type Timings struct {
+	CloneMs      int64 `json:"cloneMs,omitempty"`
+	BuildTotalMs int64 `json:"buildTotalMs,omitempty"`
 }
 
 type LogSender interface {
@@ -83,9 +92,12 @@ func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func
 		return fmt.Errorf("build cancelled")
 	}
 
+	cloneStarted := time.Now()
 	if err := b.clone(ctx, config, buildDir); err != nil {
 		return fmt.Errorf("clone failed: %w", err)
 	}
+	config.Timings.CloneMs = time.Since(cloneStarted).Milliseconds()
+	b.sendLog(config, fmt.Sprintf("Clone completed in %s", time.Duration(config.Timings.CloneMs)*time.Millisecond))
 
 	if config.CommitSha == "HEAD" && config.ImageRepository != "" && config.ResolvedCommitSha != "" {
 		config.ImageURI = fmt.Sprintf("%s:%s", config.ImageRepository, config.ResolvedCommitSha)
@@ -100,9 +112,12 @@ func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func
 		onStatusChange("building")
 	}
 
+	buildStarted := time.Now()
 	if err := b.buildAndPush(ctx, config, buildDir); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
+	config.Timings.BuildTotalMs = time.Since(buildStarted).Milliseconds()
+	b.sendLog(config, fmt.Sprintf("Build, export, and push completed in %s", time.Duration(config.Timings.BuildTotalMs)*time.Millisecond))
 
 	return nil
 }

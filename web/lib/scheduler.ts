@@ -1,5 +1,15 @@
 import { CronExpressionParser } from "cron-parser";
-import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import {
+	and,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	lt,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deployments,
@@ -37,6 +47,29 @@ const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
 export const MAX_REBALANCES_PER_RUN = 5;
 export const MAX_AUTOMATIC_RECOVERIES_PER_RUN = 5;
+
+export async function redispatchQueuedRollouts(limit = 100): Promise<number> {
+	if (limit <= 0) return 0;
+	const queued = await db
+		.select({ id: rollouts.id, serviceId: rollouts.serviceId })
+		.from(rollouts)
+		.where(
+			or(
+				eq(rollouts.status, "queued"),
+				and(
+					eq(rollouts.status, "failed"),
+					eq(rollouts.currentStage, "enqueue_failed"),
+				),
+			),
+		)
+		.orderBy(rollouts.createdAt, rollouts.id)
+		.limit(limit);
+
+	for (const rollout of queued) {
+		await sendRolloutCreated(rollout.id, rollout.serviceId);
+	}
+	return queued.length;
+}
 
 export async function rebalanceAutomaticServices(
 	maxCreated = MAX_REBALANCES_PER_RUN,
@@ -599,7 +632,7 @@ export async function failTimedOutAgentUpgrades(): Promise<void> {
 	if (timedOut.length > 0) {
 		await db
 			.update(workQueue)
-			.set({ status: "failed" })
+			.set({ status: "failed", completedAt: new Date() })
 			.where(
 				and(
 					inArray(
@@ -627,7 +660,7 @@ export async function cleanupStaleItems(): Promise<void> {
 	// reconnects. Only exhausted processing attempts are failed here.
 	const staleWorkItems = await db
 		.update(workQueue)
-		.set({ status: "failed" })
+		.set({ status: "failed", completedAt: new Date() })
 		.where(
 			and(
 				eq(workQueue.status, "processing"),

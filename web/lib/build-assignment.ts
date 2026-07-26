@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
@@ -46,6 +47,7 @@ async function getStatefulBuildTargetServer(
 export async function selectBuildServerForRevision(
 	specification: ServiceRevisionSpec,
 	platform: string,
+	serviceId = specification.hostname,
 ): Promise<string> {
 	const arch = platform.split("/")[1];
 	if (!arch) throw new Error(`Invalid build platform ${platform}`);
@@ -85,7 +87,19 @@ export async function selectBuildServerForRevision(
 	if (buildServers.length === 0) {
 		throw new Error(`No online servers available for platform ${platform}`);
 	}
-	return buildServers[Math.floor(Math.random() * buildServers.length)].id;
+	return buildServers
+		.toSorted((left, right) => left.id.localeCompare(right.id))
+		.reduce((selected, candidate) => {
+			const selectedScore = createHash("sha256")
+				.update(`${serviceId}\0${platform}\0${selected.id}`)
+				.digest();
+			const candidateScore = createHash("sha256")
+				.update(`${serviceId}\0${platform}\0${candidate.id}`)
+				.digest();
+			return Buffer.compare(candidateScore, selectedScore) > 0
+				? candidate
+				: selected;
+		}).id;
 }
 
 export async function getTargetPlatformsForRevision(

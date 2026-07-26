@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"techulus/cloud-agent/internal/container"
@@ -56,12 +58,53 @@ func reconcileActionKey(action reconcileAction) string {
 }
 
 func (a *Agent) Tick() {
+	if !a.claimReconcileLane() {
+		return
+	}
+	defer func() {
+		if a.GetState() == StateIdle {
+			a.releaseReconcileLane()
+		}
+	}()
 	switch a.GetState() {
 	case StateIdle:
 		a.handleIdle()
 	case StateProcessing:
 		a.handleProcessing()
 	}
+}
+
+func (a *Agent) claimReconcileLane() bool {
+	a.workLaneMutex.Lock()
+	defer a.workLaneMutex.Unlock()
+	if a.internalReconcileLaneActive {
+		return !a.exclusiveLaneActive && a.runtimeLaneActive
+	}
+	if a.reconcileWorkLaneActive {
+		if a.exclusiveLaneActive || !a.runtimeLaneActive {
+			return false
+		}
+		a.internalReconcileLaneActive = true
+		return true
+	}
+	if a.exclusiveLaneActive || a.runtimeLaneActive {
+		return false
+	}
+	a.runtimeLaneActive = true
+	a.internalReconcileLaneActive = true
+	return true
+}
+
+func (a *Agent) releaseReconcileLane() {
+	a.workLaneMutex.Lock()
+	if a.internalReconcileLaneActive {
+		a.internalReconcileLaneActive = false
+		if !a.reconcileWorkLaneActive {
+			a.runtimeLaneActive = false
+		}
+	}
+	a.workLaneMutex.Unlock()
+	a.startPendingWorkItems()
 }
 
 func (a *Agent) RequestReconcile(reason string) {
@@ -136,7 +179,12 @@ func (a *Agent) handleIdle() {
 		return
 	}
 
-	actions := a.planReconcile(expected, actual)
+	images, err := a.resolveExpectedImages(expected)
+	if err != nil {
+		log.Printf("[idle] failed to resolve expected images: %v", err)
+		return
+	}
+	actions := a.planReconcile(expected, actual, images)
 	if len(actions) > 0 {
 		log.Printf("[idle] drift detected, %d change(s) to apply:", len(actions))
 		for _, action := range actions {
@@ -150,6 +198,13 @@ func (a *Agent) handleIdle() {
 		a.signalContinueProcessing()
 		return
 	}
+	if err := verifyExpectedContainerIdentities(expected, actual.Containers, images); err != nil {
+		log.Printf("[idle] state is not safely converged: %v", err)
+		return
+	}
+	a.expectedStateMutex.Lock()
+	a.latestAppliedGeneration = expected.Generation
+	a.expectedStateMutex.Unlock()
 }
 
 func (a *Agent) handleProcessing() {
@@ -166,7 +221,13 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
-	actions := a.planReconcile(a.expectedState, actual)
+	images, err := a.resolveExpectedImages(a.expectedState)
+	if err != nil {
+		log.Printf("[processing] failed to resolve expected images: %v", err)
+		a.transitionToIdle()
+		return
+	}
+	actions := a.planReconcile(a.expectedState, actual, images)
 
 	if len(actions) == 0 {
 		log.Printf("[processing] state converged, transitioning to IDLE")
@@ -174,24 +235,159 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
-	action := actions[0]
-	actionKey := reconcileActionKey(action)
-	if actionKey == a.lastAppliedActionKey {
-		log.Printf("[processing] action made no observable progress, waiting for the next scheduled tick: %s", action.Description)
-		a.lastAppliedActionKey = ""
-		return
-	}
-	if err := a.applyReconcileAction(action); err != nil {
+	if err := a.applyReconcilePhases(actions, images); err != nil {
 		log.Printf("[processing] reconciliation failed: %v, transitioning to IDLE", err)
-		a.RecordDeploymentError(action.DeploymentID, err)
 		a.RequestStatusReport("reconcile failed")
 		a.transitionToIdle()
 		return
 	}
 
-	a.lastAppliedActionKey = actionKey
 	a.RequestStatusReport("reconcile completed")
 	a.signalContinueProcessing()
+}
+
+func isLifecycleAction(kind reconcileActionKind) bool {
+	return kind == actionDeployMissingContainer || kind == actionRedeployContainer || kind == actionStartContainer
+}
+func isNetworkAction(kind reconcileActionKind) bool {
+	return kind == actionUpdateDNS || kind == actionUpdateTraefik || kind == actionWriteChallengeRoute || kind == actionUpdateWireGuard || kind == actionStartWireGuard
+}
+
+func (a *Agent) applyReconcilePhases(actions []reconcileAction, images map[string]container.ResolvedImage) error {
+	for _, action := range actions {
+		if !isLifecycleAction(action.Kind) && !isNetworkAction(action.Kind) {
+			if err := a.applyReconcileAction(action); err != nil {
+				a.RecordDeploymentError(action.DeploymentID, err)
+				return err
+			}
+		}
+	}
+	lifecycle := make([]reconcileAction, 0)
+	for _, action := range actions {
+		if isLifecycleAction(action.Kind) {
+			lifecycle = append(lifecycle, action)
+		}
+	}
+	if err := a.applyLifecycleActions(lifecycle, images); err != nil {
+		return err
+	}
+	actual, err := a.getActualState()
+	if err != nil {
+		return err
+	}
+	for _, action := range a.planReconcile(a.expectedState, actual, images) {
+		if isNetworkAction(action.Kind) {
+			if err := a.applyReconcileAction(action); err != nil {
+				return err
+			}
+		}
+	}
+	verified, err := a.getActualState()
+	if err != nil {
+		return err
+	}
+	if err := verifyExpectedContainerIdentities(a.expectedState, verified.Containers, images); err != nil {
+		return err
+	}
+	a.expectedStateMutex.Lock()
+	a.latestAppliedGeneration = a.expectedState.Generation
+	a.expectedStateMutex.Unlock()
+	return nil
+}
+
+func verifyExpectedContainerIdentities(expected *agenthttp.ExpectedState, actual []container.Container, images map[string]container.ResolvedImage) error {
+	byDeployment := make(map[string][]container.Container)
+	for _, current := range actual {
+		if current.DeploymentID != "" {
+			byDeployment[current.DeploymentID] = append(byDeployment[current.DeploymentID], current)
+		}
+	}
+	for _, wanted := range expected.Containers {
+		if desiredContainerState(wanted) == "stopped" {
+			continue
+		}
+		matches := byDeployment[wanted.DeploymentID]
+		if len(matches) != 1 {
+			return fmt.Errorf("deployment %s has %d containers; expected exactly one", wanted.DeploymentID, len(matches))
+		}
+		current := matches[0]
+		if current.State != "running" {
+			return fmt.Errorf("deployment %s container is %s, expected running", wanted.DeploymentID, current.State)
+		}
+		resolved := string(images[wanted.Image])
+		if resolved == "" || current.ImageIdentity == "" || current.ImageID == "" || current.ImageIdentity != current.ImageID || current.ImageID != resolved {
+			return fmt.Errorf("deployment %s image identity mismatch: expected=%q label=%q imageID=%q", wanted.DeploymentID, resolved, current.ImageIdentity, current.ImageID)
+		}
+	}
+	return nil
+}
+
+func (a *Agent) resolveExpectedImages(expected *agenthttp.ExpectedState) (map[string]container.ResolvedImage, error) {
+	images := make(map[string]container.ResolvedImage)
+	for _, wanted := range expected.Containers {
+		if desiredContainerState(wanted) == "stopped" {
+			continue
+		}
+		if _, ok := images[wanted.Image]; ok {
+			continue
+		}
+		resolved, err := a.Reconciler.PullImage(context.Background(), wanted.Image)
+		if err != nil {
+			return nil, err
+		}
+		images[wanted.Image] = resolved
+	}
+	return images, nil
+}
+
+func (a *Agent) applyLifecycleActions(actions []reconcileAction, images map[string]container.ResolvedImage) error {
+	sem := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+	for _, current := range actions {
+		action := current
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			err := a.withDeploymentOperationLock(action.DeploymentID, func() error {
+				resolved := images[action.Expected.Image]
+				if action.Kind == actionStartContainer {
+					if action.Actual.ImageID == string(resolved) && action.Actual.ImageIdentity == string(resolved) {
+						if err := container.Start(action.Actual.ID); err == nil {
+							a.monitorContainerHealth(action.Actual.ID, *action.Expected)
+							return nil
+						}
+					}
+					if err := container.Stop(action.Actual.ID); err != nil {
+						log.Printf("[reconcile] warning: failed to stop old container: %v", err)
+					}
+				}
+				if action.Kind == actionRedeployContainer && action.Actual != nil {
+					if err := container.Stop(action.Actual.ID); err != nil {
+						log.Printf("[reconcile] warning: failed to stop old container: %v", err)
+					}
+				}
+				result, err := a.Reconciler.DeployResolved(context.Background(), *action.Expected, images[action.Expected.Image])
+				if err == nil {
+					a.monitorContainerHealth(result.ContainerID, *action.Expected)
+				}
+				return err
+			})
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					a.RecordDeploymentError(action.DeploymentID, err)
+				}
+				errMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
 }
 
 func (a *Agent) getActualState() (*ActualState, error) {
@@ -219,7 +415,7 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	return state, nil
 }
 
-func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualState) []reconcileAction {
+func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualState, images map[string]container.ResolvedImage) []reconcileAction {
 	var actions []reconcileAction
 
 	expectedMap := make(map[string]agenthttp.ExpectedContainer)
@@ -310,10 +506,12 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 				continue
 			}
 
-			if normalizeImage(exp.Image) != normalizeImage(act.Image) {
+			resolved := string(images[exp.Image])
+			identityMismatch := resolved == "" || act.ImageID == "" || act.ImageIdentity == "" || act.ImageID != act.ImageIdentity || act.ImageID != resolved
+			if normalizeImage(exp.Image) != normalizeImage(act.Image) || identityMismatch {
 				actions = append(actions, reconcileAction{
 					Kind:         actionRedeployContainer,
-					Description:  fmt.Sprintf("REDEPLOY %s (image: %s → %s)", exp.Name, act.Image, exp.Image),
+					Description:  fmt.Sprintf("REDEPLOY %s (image identity: %s → %s)", exp.Name, act.ImageID, resolved),
 					DeploymentID: id,
 					Expected:     &expectedContainer,
 					Actual:       &actualContainer,
@@ -399,6 +597,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 			Description: "START WireGuard",
 		})
 	}
+	sort.SliceStable(actions, func(i, j int) bool { return reconcileActionKey(actions[i]) < reconcileActionKey(actions[j]) })
 
 	return actions
 }
@@ -445,7 +644,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		if action.Actual == nil {
 			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
-		if err := container.Stop(action.Actual.ID); err != nil {
+		if err := a.withDeploymentOperationLock(action.DeploymentID, func() error { return container.Stop(action.Actual.ID) }); err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 		return nil
@@ -472,7 +671,7 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		if action.Actual == nil {
 			return fmt.Errorf("missing actual container for %s", action.Kind)
 		}
-		if err := container.ForceRemove(action.Actual.ID); err != nil {
+		if err := a.withDeploymentOperationLock(action.DeploymentID, func() error { return container.ForceRemove(action.Actual.ID) }); err != nil {
 			return fmt.Errorf("failed to remove orphan container: %w", err)
 		}
 		return nil

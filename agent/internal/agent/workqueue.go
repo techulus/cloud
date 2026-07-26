@@ -20,10 +20,9 @@ func (a *Agent) SnapshotWorkStatus() ([]agenthttp.CompletedWorkItem, []agenthttp
 
 	completed := append([]agenthttp.CompletedWorkItem(nil), a.pendingWorkResults...)
 	active := []agenthttp.ActiveWorkItem{}
-	if a.activeWorkItem != nil {
+	for _, item := range a.activeWorkItems {
 		active = append(active, agenthttp.ActiveWorkItem{
-			ID:      a.activeWorkItem.ID,
-			Attempt: a.activeWorkItem.Attempt,
+			ID: item.ID, Attempt: item.Attempt, Type: item.Type,
 		})
 	}
 
@@ -67,18 +66,84 @@ func (a *Agent) AcceptLeasedWorkItems(items []agenthttp.WorkQueueItem) {
 		return
 	}
 
-	item := items[0]
-
-	a.workMutex.Lock()
-	if a.activeWorkItem != nil {
-		log.Printf("[work-queue] ignoring leased item %s while %s is active", Truncate(item.ID, 8), Truncate(a.activeWorkItem.ID, 8))
+	for _, item := range items {
+		a.workMutex.Lock()
+		if _, exists := a.activeWorkItems[item.ID]; exists {
+			a.workMutex.Unlock()
+			continue
+		}
+		a.activeWorkItems[item.ID] = item
+		a.pendingWorkItems[item.ID] = true
 		a.workMutex.Unlock()
-		return
+		a.startPendingWorkItems()
 	}
-	a.activeWorkItem = &item
-	a.workMutex.Unlock()
+	a.RequestStatusReport("work lease accepted")
+}
 
-	go a.processLeasedWorkItem(item)
+func (a *Agent) startPendingWorkItems() {
+	a.workMutex.Lock()
+	defer a.workMutex.Unlock()
+	for id, item := range a.activeWorkItems {
+		if !a.pendingWorkItems[id] || !a.claimWorkLane(item.Type) {
+			continue
+		}
+		delete(a.pendingWorkItems, id)
+		go a.processLeasedWorkItem(item)
+	}
+}
+
+func workLane(itemType string) string {
+	switch itemType {
+	case "deploy", "reconcile", "stop", "restart":
+		return "runtime"
+	case "build", "create_manifest":
+		return "build"
+	default:
+		return "exclusive"
+	}
+}
+
+func (a *Agent) claimWorkLane(itemType string) bool {
+	a.workLaneMutex.Lock()
+	defer a.workLaneMutex.Unlock()
+	lane := workLane(itemType)
+	if lane == "exclusive" {
+		if a.exclusiveLaneActive || a.runtimeLaneActive || a.buildLaneActive {
+			return false
+		}
+		a.exclusiveLaneActive = true
+		return true
+	}
+	if a.exclusiveLaneActive {
+		return false
+	}
+	if lane == "runtime" {
+		if a.runtimeLaneActive {
+			return false
+		}
+		a.runtimeLaneActive = true
+	} else {
+		if a.buildLaneActive {
+			return false
+		}
+		a.buildLaneActive = true
+	}
+	return true
+}
+
+func (a *Agent) releaseWorkLane(itemType string) {
+	a.workLaneMutex.Lock()
+	defer a.workLaneMutex.Unlock()
+	switch workLane(itemType) {
+	case "runtime":
+		if !a.internalReconcileLaneActive {
+			a.runtimeLaneActive = false
+		}
+	case "build":
+		a.buildLaneActive = false
+	default:
+		a.exclusiveLaneActive = false
+	}
 }
 
 func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
@@ -100,8 +165,9 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	}
 
 	a.workMutex.Lock()
-	if !restartAfterReport && a.activeWorkItem != nil && a.activeWorkItem.ID == item.ID && a.activeWorkItem.Attempt == item.Attempt {
-		a.activeWorkItem = nil
+	if !restartAfterReport {
+		delete(a.activeWorkItems, item.ID)
+		delete(a.pendingWorkItems, item.ID)
 	}
 	a.pendingWorkResults = append(a.pendingWorkResults, agenthttp.CompletedWorkItem{
 		ID:      item.ID,
@@ -110,6 +176,8 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 		Error:   errorMsg,
 	})
 	a.workMutex.Unlock()
+	a.releaseWorkLane(item.Type)
+	a.startPendingWorkItems()
 
 	a.RequestStatusReport("work item " + status)
 	if restartAfterReport {
@@ -126,8 +194,34 @@ func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
 	case "stop":
 		return a.ProcessStop(item)
 	case "deploy", "reconcile":
+		a.workLaneMutex.Lock()
+		if !a.runtimeLaneActive || a.exclusiveLaneActive {
+			a.workLaneMutex.Unlock()
+			return fmt.Errorf("reconcile work item does not own runtime lane")
+		}
+		a.reconcileWorkLaneActive = true
+		a.workLaneMutex.Unlock()
+		defer func() {
+			a.workLaneMutex.Lock()
+			a.reconcileWorkLaneActive = false
+			a.workLaneMutex.Unlock()
+		}()
 		a.RequestReconcile("reconcile work item " + Truncate(item.ID, 8))
-		return nil
+		deadline := time.Now().Add(ProcessingTimeout)
+		for time.Now().Before(deadline) {
+			a.expectedStateMutex.RLock()
+			expected := a.latestExpectedState
+			applied := a.latestAppliedGeneration
+			a.expectedStateMutex.RUnlock()
+			a.workLaneMutex.Lock()
+			internalActive := a.internalReconcileLaneActive
+			a.workLaneMutex.Unlock()
+			if expected != nil && applied >= expected.Generation && a.GetState() == StateIdle && !internalActive {
+				return nil
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return fmt.Errorf("reconciliation did not converge within %v", ProcessingTimeout)
 	case "force_cleanup":
 		return a.ProcessForceCleanup(item)
 	case "cleanup_volumes":

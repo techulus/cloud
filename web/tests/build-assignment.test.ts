@@ -144,15 +144,73 @@ describe("revision-backed build assignment", () => {
 		).resolves.toEqual(["linux/arm64"]);
 	});
 
-	it("assigns stateless builds to an online server with the requested architecture", async () => {
+	it("assigns stateless builds only among servers with the requested architecture", async () => {
 		mocks.getSetting.mockResolvedValue(null);
 		mocks.queryResults.push([
-			{ id: "server-amd", meta: { arch: "amd64" } },
+			{ id: "server-amd-a", meta: { arch: "amd64" } },
 			{ id: "server-arm", meta: { arch: "arm64" } },
+			{ id: "server-amd-b", meta: { arch: "amd64" } },
 		]);
-		await expect(
-			selectBuildServerForRevision(specification(), "linux/arm64"),
-		).resolves.toBe("server-arm");
+		const selected = await selectBuildServerForRevision(
+			specification(),
+			"linux/amd64",
+			"service-1",
+		);
+		expect(["server-amd-a", "server-amd-b"]).toContain(selected);
+	});
+
+	it("assigns a service and platform stably regardless of server input order", async () => {
+		mocks.getSetting.mockResolvedValue(null);
+		const servers = [
+			{ id: "server-a", meta: { arch: "amd64" } },
+			{ id: "server-b", meta: { arch: "amd64" } },
+			{ id: "server-c", meta: { arch: "amd64" } },
+		];
+		mocks.queryResults.push(servers, servers.toReversed());
+
+		const first = await selectBuildServerForRevision(
+			specification(),
+			"linux/amd64",
+			"service-stable",
+		);
+		const second = await selectBuildServerForRevision(
+			specification(),
+			"linux/amd64",
+			"service-stable",
+		);
+		expect(second).toBe(first);
+	});
+
+	it("only remaps services assigned to a removed builder", async () => {
+		mocks.getSetting.mockResolvedValue(null);
+		const servers = [
+			{ id: "server-a", meta: { arch: "amd64" } },
+			{ id: "server-b", meta: { arch: "amd64" } },
+			{ id: "server-c", meta: { arch: "amd64" } },
+		];
+		const serviceIds = Array.from(
+			{ length: 50 },
+			(_, index) => `service-${index}`,
+		);
+		for (const _serviceId of serviceIds) mocks.queryResults.push(servers);
+		const original = await Promise.all(
+			serviceIds.map((serviceId) =>
+				selectBuildServerForRevision(specification(), "linux/amd64", serviceId),
+			),
+		);
+		const removed = "server-b";
+		const remaining = servers.filter((server) => server.id !== removed);
+		for (const _serviceId of serviceIds) mocks.queryResults.push(remaining);
+		const reassigned = await Promise.all(
+			serviceIds.map((serviceId) =>
+				selectBuildServerForRevision(specification(), "linux/amd64", serviceId),
+			),
+		);
+
+		for (const [index, selected] of original.entries()) {
+			if (selected !== removed) expect(reassigned[index]).toBe(selected);
+		}
+		expect(original).toContain(removed);
 	});
 
 	it("falls back to cross-platform builds when no native builder is online", async () => {

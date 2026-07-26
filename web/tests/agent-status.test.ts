@@ -2,30 +2,40 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
 	const selectResults: unknown[][] = [];
+	const returningResults: unknown[][] = [];
 
 	function createQuery(result: unknown[] = []) {
+		let queryResult = result;
 		const query = {
 			from: vi.fn(() => query),
 			set: vi.fn(() => query),
 			where: vi.fn(() => query),
-			returning: vi.fn(() => query),
+			returning: vi.fn(() => {
+				queryResult = returningResults.shift() ?? queryResult;
+				return query;
+			}),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
-			) => Promise.resolve(result).then(resolve, reject),
+			) => Promise.resolve(queryResult).then(resolve, reject),
 		};
 
 		return query;
 	}
+	const db = {
+		select: vi.fn(() => createQuery(selectResults.shift() ?? [])),
+		update: vi.fn(() => createQuery()),
+		delete: vi.fn(() => createQuery()),
+		execute: vi.fn(() => Promise.resolve({ rows: [{ agent_generation: 1 }] })),
+		transaction: vi.fn(),
+	};
+	db.transaction.mockImplementation((callback) => callback(db));
 
 	return {
 		selectResults,
-		db: {
-			select: vi.fn(() => createQuery(selectResults.shift() ?? [])),
-			update: vi.fn(() => createQuery()),
-			delete: vi.fn(() => createQuery()),
-		},
+		returningResults,
+		db,
 	};
 });
 
@@ -58,9 +68,12 @@ import { inngest } from "@/lib/inngest/client";
 
 beforeEach(() => {
 	mocks.selectResults.length = 0;
+	mocks.returningResults.length = 0;
 	mocks.db.select.mockClear();
 	mocks.db.update.mockClear();
 	mocks.db.delete.mockClear();
+	mocks.db.execute.mockClear();
+	mocks.db.transaction.mockClear();
 });
 
 describe("agent status serverless attachment", () => {
@@ -309,7 +322,10 @@ describe("agent status stopped-phase recovery", () => {
 					specification: { serverless: { enabled: false }, healthCheck: null },
 				},
 			],
+			[{ id: "server_1" }],
+			[{ name: "Server 1" }],
 		);
+		mocks.returningResults.push([{ id: deployment.id }]);
 
 		await applyStatusReport("server_1", {
 			containersComplete: true,
@@ -331,6 +347,7 @@ describe("agent status stopped-phase recovery", () => {
 				parentId: "rollout_1",
 			}),
 		);
+		expect(mocks.db.execute).toHaveBeenCalledTimes(2);
 	});
 
 	it("notifies the rollout when an unknown deployment is restored to running", async () => {
@@ -345,7 +362,13 @@ describe("agent status stopped-phase recovery", () => {
 			observedPhase: "unknown",
 			rolloutId: "rollout_2",
 		};
-		mocks.selectResults.push([deployment], [deployment]);
+		mocks.selectResults.push(
+			[deployment],
+			[deployment],
+			[{ id: "server_1" }],
+			[{ name: "Server 1" }],
+		);
+		mocks.returningResults.push([{ id: deployment.id }]);
 
 		await applyStatusReport("server_1", {
 			containersComplete: true,
@@ -367,5 +390,6 @@ describe("agent status stopped-phase recovery", () => {
 				parentId: "rollout_2",
 			}),
 		);
+		expect(mocks.db.execute).toHaveBeenCalledTimes(2);
 	});
 });

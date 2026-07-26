@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -10,8 +10,13 @@ import {
 	workQueue,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
+import {
+	bumpAgentGeneration,
+	type DbTransaction,
+} from "@/lib/agent-generation";
+import { CONTAINER_SUBNET_PREFIX } from "@/lib/constants";
+import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
-import { assignContainerIp } from "@/lib/wireguard";
 import { buildRolloutReconcileWorkItem } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
@@ -68,21 +73,24 @@ export type PlannedDeployment = {
 	serverId: string;
 };
 
-async function getUsedPorts(serverId: string): Promise<Set<number>> {
-	const existingPorts = await db
+async function getUsedPorts(
+	tx: DbTransaction,
+	serverId: string,
+): Promise<Set<number>> {
+	const existingPorts = await tx
 		.select({ hostPort: deploymentPorts.hostPort })
 		.from(deploymentPorts)
-		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
-		.where(eq(deployments.serverId, serverId));
+		.where(eq(deploymentPorts.serverId, serverId));
 
 	return new Set(existingPorts.map((port) => port.hostPort));
 }
 
 export async function allocateHostPorts(
+	tx: DbTransaction,
 	serverId: string,
 	count: number,
 ): Promise<number[]> {
-	const unavailablePorts = await getUsedPorts(serverId);
+	const unavailablePorts = await getUsedPorts(tx, serverId);
 	const allocated: number[] = [];
 
 	for (
@@ -100,6 +108,28 @@ export async function allocateHostPorts(
 	}
 
 	return allocated;
+}
+
+async function allocateContainerIp(tx: DbTransaction, serverId: string) {
+	const server = await tx
+		.select({ subnetId: servers.subnetId })
+		.from(servers)
+		.where(eq(servers.id, serverId))
+		.then((rows) => rows[0]);
+	if (!server?.subnetId)
+		throw new Error("Server does not have a subnet assigned");
+	const rows = await tx
+		.select({ ipAddress: deployments.ipAddress })
+		.from(deployments)
+		.where(
+			and(eq(deployments.serverId, serverId), isNotNull(deployments.ipAddress)),
+		);
+	const used = new Set(rows.map((row) => row.ipAddress));
+	for (let host = 2; host <= 254; host++) {
+		const address = `${CONTAINER_SUBNET_PREFIX}.${server.subnetId}.${host}`;
+		if (!used.has(address)) return address;
+	}
+	throw new Error("No available IPs in server subnet");
 }
 
 export function calculateRevisionPlacements(
@@ -256,17 +286,6 @@ export async function cleanupTerminalDeployments(
 		);
 }
 
-export async function cleanupExistingDeployments(
-	serviceId: string,
-): Promise<{ deletedCount: number }> {
-	const deletedDeployments = await db
-		.delete(deployments)
-		.where(eq(deployments.serviceId, serviceId))
-		.returning({ id: deployments.id });
-
-	return { deletedCount: deletedDeployments.length };
-}
-
 export type CertificateProvisioningResult = {
 	domains: string[];
 	existingDomains: string[];
@@ -332,71 +351,114 @@ export async function createDeploymentRecords(
 ): Promise<{ deploymentIds: string[] }> {
 	const { revisionId, specification, serverMap } = context;
 
-	const deploymentIds: string[] = [];
+	const deploymentIds = new Set<string>();
+	const plansByServer = Map.groupBy(deploymentPlan, (plan) => plan.serverId);
+	const serverIds = [...plansByServer.keys()].sort();
 
-	for (const plannedDeployment of deploymentPlan) {
-		const server = serverMap.get(plannedDeployment.serverId);
-		if (!server) {
-			throw new Error(`Server ${plannedDeployment.serverId} not found`);
+	await db.transaction(async (tx) => {
+		const changedServerIds = new Set<string>();
+		for (const serverId of serverIds) {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serverId}))`,
+			);
 		}
-		const deploymentId = plannedDeployment.id;
-		const existingDeployment = await db
-			.select({
-				id: deployments.id,
-				serviceId: deployments.serviceId,
-				rolloutId: deployments.rolloutId,
-				serverId: deployments.serverId,
-			})
-			.from(deployments)
-			.where(eq(deployments.id, deploymentId))
-			.then((rows) => rows[0]);
-		if (existingDeployment) {
-			if (
-				existingDeployment.serviceId !== serviceId ||
-				existingDeployment.rolloutId !== rolloutId ||
-				existingDeployment.serverId !== server.id
-			) {
-				throw new Error(`Deployment plan conflict for ${deploymentId}`);
+
+		if (!context.isRollingUpdate) {
+			const deleted = await tx
+				.delete(deployments)
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						or(
+							isNull(deployments.rolloutId),
+							ne(deployments.rolloutId, rolloutId),
+						),
+					),
+				)
+				.returning({ serverId: deployments.serverId });
+			for (const deployment of deleted)
+				changedServerIds.add(deployment.serverId);
+		}
+
+		for (const serverId of serverIds) {
+			const server = serverMap.get(serverId);
+			if (!server) {
+				throw new Error(`Server ${serverId} not found`);
 			}
-			deploymentIds.push(deploymentId);
-			continue;
-		}
+			const serverPlans = plansByServer.get(serverId) ?? [];
+			for (const plannedDeployment of serverPlans) {
+				const deploymentId = plannedDeployment.id;
+				const existingDeployment = await tx
+					.select({
+						id: deployments.id,
+						serviceId: deployments.serviceId,
+						rolloutId: deployments.rolloutId,
+						serverId: deployments.serverId,
+					})
+					.from(deployments)
+					.where(eq(deployments.id, deploymentId))
+					.then((rows) => rows[0]);
+				if (existingDeployment) {
+					if (
+						existingDeployment.serviceId !== serviceId ||
+						existingDeployment.rolloutId !== rolloutId ||
+						existingDeployment.serverId !== server.id
+					) {
+						throw new Error(`Deployment plan conflict for ${deploymentId}`);
+					}
+					deploymentIds.add(deploymentId);
+					continue;
+				}
 
-		const hostPorts = await allocateHostPorts(
-			server.id,
-			specification.ports.length,
-		);
-		const ipAddress = await assignContainerIp(server.id);
-
-		await db.transaction(async (tx) => {
-			await tx.insert(deployments).values({
-				id: deploymentId,
-				serviceId,
-				serviceRevisionId: revisionId,
-				serverId: server.id,
-				ipAddress,
-				runtimeDesiredState: "running",
-				trafficState: "candidate",
-				observedPhase: "pending",
-				rolloutId,
-			});
-
-			if (specification.ports.length > 0) {
-				await tx.insert(deploymentPorts).values(
-					specification.ports.map((port, index) => ({
-						id: randomUUID(),
-						deploymentId,
-						containerPort: port.containerPort,
-						hostPort: hostPorts[index],
-					})),
+				const hostPorts = await allocateHostPorts(
+					tx,
+					server.id,
+					specification.ports.length,
 				);
+				const ipAddress = await allocateContainerIp(tx, server.id);
+
+				await tx.insert(deployments).values({
+					id: deploymentId,
+					serviceId,
+					serviceRevisionId: revisionId,
+					serverId: server.id,
+					ipAddress,
+					runtimeDesiredState: "running",
+					trafficState: "candidate",
+					observedPhase: "pending",
+					rolloutId,
+				});
+
+				if (specification.ports.length > 0) {
+					await tx.insert(deploymentPorts).values(
+						specification.ports.map((port, index) => ({
+							id: randomUUID(),
+							deploymentId,
+							serverId: server.id,
+							containerPort: port.containerPort,
+							hostPort: hostPorts[index],
+						})),
+					);
+				}
+				deploymentIds.add(deploymentId);
+				changedServerIds.add(serverId);
 			}
+		}
+		for (const serverId of changedServerIds) {
+			await bumpAgentGeneration(tx, serverId);
+		}
+
+		await recordRolloutStageBoundary(tx, {
+			rolloutId,
+			stage: "deployments_committed",
 		});
+	});
 
-		deploymentIds.push(deploymentId);
-	}
-
-	return { deploymentIds };
+	return {
+		deploymentIds: deploymentPlan
+			.map((deployment) => deployment.id)
+			.filter((id) => deploymentIds.has(id)),
+	};
 }
 
 export async function completeRollout(
@@ -447,6 +509,9 @@ export async function completeRollout(
 			...new Set(stoppedDeployments.map((deployment) => deployment.serverId)),
 		];
 		if (affectedServerIds.length > 0) {
+			for (const serverId of affectedServerIds) {
+				await bumpAgentGeneration(tx, serverId);
+			}
 			await tx
 				.insert(workQueue)
 				.values(
@@ -482,6 +547,10 @@ export async function completeRollout(
 				completedAt: new Date(),
 			})
 			.where(eq(rollouts.id, rolloutId));
+		await recordRolloutStageBoundary(tx, {
+			rolloutId,
+			stage: "completed",
+		});
 		return {
 			completed: true,
 			stoppedCount: stoppedDeployments.length,
