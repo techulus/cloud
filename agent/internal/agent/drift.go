@@ -338,6 +338,15 @@ func (a *Agent) resolveExpectedImages(expected *agenthttp.ExpectedState) (map[st
 }
 
 func (a *Agent) applyLifecycleActions(actions []reconcileAction, images map[string]container.ResolvedImage) error {
+	for _, action := range actions {
+		if action.Expected == nil {
+			return fmt.Errorf("missing expected container for %s", action.Kind)
+		}
+		if action.Kind != actionDeployMissingContainer && action.Actual == nil {
+			return fmt.Errorf("missing actual container for %s", action.Kind)
+		}
+	}
+
 	sem := make(chan struct{}, 2)
 	var wg sync.WaitGroup
 	var firstErr error
