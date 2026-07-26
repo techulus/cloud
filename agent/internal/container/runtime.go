@@ -346,7 +346,11 @@ func startOrRestart(containerID, operation string) error {
 }
 
 func GetHealthStatus(containerID string) string {
-	cmd := exec.Command("podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
+	return GetHealthStatusContext(context.Background(), containerID)
+}
+
+func GetHealthStatusContext(ctx context.Context, containerID string) string {
+	cmd := exec.CommandContext(ctx, "podman", "inspect", "-f", "{{.State.Health.Status}}", containerID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "none"

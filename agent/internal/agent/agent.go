@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,9 @@ type Agent struct {
 	pendingDeploymentErrors      []agenthttp.DeploymentError
 	deployLockMutex              sync.Mutex
 	deploymentDeployLocks        map[string]*sync.Mutex
+	healthMonitorMutex           sync.Mutex
+	healthMonitors               map[string]struct{}
+	runContext                   context.Context
 	serverlessMutex              sync.Mutex
 	pendingServerlessTransitions []agenthttp.ServerlessTransition
 	pendingServerlessSleep       map[string]serverlessTransitionGuard
@@ -126,6 +130,7 @@ func NewAgent(
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,
 		deploymentDeployLocks:  map[string]*sync.Mutex{},
+		healthMonitors:         map[string]struct{}{},
 		pendingServerlessSleep: map[string]serverlessTransitionGuard{},
 		pendingServerlessWake:  map[string]serverlessTransitionGuard{},
 	}

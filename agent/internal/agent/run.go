@@ -19,6 +19,10 @@ const (
 )
 
 func (a *Agent) Run(ctx context.Context) {
+	a.healthMonitorMutex.Lock()
+	a.runContext = ctx
+	a.healthMonitorMutex.Unlock()
+
 	if a.Config.RegistryURL != "" && a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
 		if err := container.Login(a.Config.RegistryURL, a.Config.RegistryUsername, a.Config.RegistryPassword, a.Config.RegistryInsecure); err != nil {
 			log.Printf("[registry] login failed: %v", err)

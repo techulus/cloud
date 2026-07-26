@@ -81,7 +81,10 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 	healthCollectMu.Unlock()
 
 	containers, err := container.List()
-	if err == nil {
+	if err != nil {
+		log.Printf("[status] failed to list containers; reporting incomplete snapshot: %v", err)
+	} else {
+		report.ContainersComplete = true
 		for _, c := range containers {
 			if c.DeploymentID == "" {
 				continue

@@ -66,6 +66,18 @@ export function shouldAttachReportedContainer(observedPhase: ObservedPhase) {
 	);
 }
 
+export function getReportedContainerAttachmentPhase({
+	hasHealthCheck,
+	healthStatus,
+}: {
+	hasHealthCheck: boolean;
+	healthStatus: ContainerStatus["healthStatus"];
+}) {
+	if (!hasHealthCheck || healthStatus === "healthy") return "healthy" as const;
+	if (healthStatus === "unhealthy") return "unhealthy" as const;
+	return "starting" as const;
+}
+
 export function getStoppedContainerReportUpdate(deployment: {
 	runtimeDesiredState: string;
 	observedPhase?: string;
@@ -97,14 +109,14 @@ export function getStaleStoppedReportUpdate({
 	hasHealthCheck: boolean;
 	healthStatus: ContainerStatus["healthStatus"];
 }) {
-	const recovered = healthStatus === "healthy" || healthStatus === "none";
+	const recovered = !hasHealthCheck || healthStatus === "healthy";
 
 	return {
 		observedPhase: recovered ? ("healthy" as const) : ("starting" as const),
 		healthStatus: hasHealthCheck
 			? recovered
-				? healthStatus
-				: ("starting" as const)
+				? ("healthy" as const)
+				: healthStatus
 			: ("none" as const),
 		serverlessWakeFailureCount: 0,
 	};
@@ -139,6 +151,94 @@ async function completeTargetMigration(serviceId: string) {
 				inArray(services.migrationStatus, ["deploying_target", "starting"]),
 			),
 		);
+}
+
+async function applyStartingHealthCheckFailure({
+	serverId,
+	deployment,
+	container,
+	eligiblePhases,
+}: {
+	serverId: string;
+	deployment: {
+		id: string;
+		serviceId: string;
+		rolloutId: string | null;
+		containerId: string | null;
+		autohealRecreateCount: number | null;
+	};
+	container: ContainerStatus;
+	eligiblePhases: readonly ObservedPhase[];
+}) {
+	const rollout = deployment.rolloutId
+		? await db
+				.select({ status: rollouts.status })
+				.from(rollouts)
+				.where(eq(rollouts.id, deployment.rolloutId))
+				.then((rows) => rows[0])
+		: null;
+	const isRolloutDeployment = rollout?.status === "in_progress";
+	const recreateCount = deployment.autohealRecreateCount ?? 0;
+	const { update, recreateLimitReached } = getStartingHealthCheckFailureUpdate({
+		isRolloutDeployment,
+		recreateCount,
+	});
+	const unchangedContainer =
+		deployment.containerId === null
+			? isNull(deployments.containerId)
+			: eq(deployments.containerId, deployment.containerId);
+
+	const updated = await db
+		.update(deployments)
+		.set({
+			containerId: container.containerId,
+			healthStatus: "unhealthy",
+			...update,
+		})
+		.where(
+			and(
+				eq(deployments.id, deployment.id),
+				eq(deployments.serverId, serverId),
+				eq(deployments.runtimeDesiredState, "running"),
+				inArray(deployments.observedPhase, [...eligiblePhases]),
+				unchangedContainer,
+			),
+		)
+		.returning({ id: deployments.id });
+
+	if (updated.length === 0) return false;
+
+	console.log(`[health] deployment ${deployment.id} failed health check`);
+	if (isRolloutDeployment && deployment.rolloutId) {
+		const currentServerName = await getServerLogName(serverId);
+		await ingestRolloutLog(
+			deployment.rolloutId,
+			deployment.serviceId,
+			"health_check",
+			`Container failed health check on server ${currentServerName}`,
+		);
+		await inngest.send(
+			inngestEvents.resourceStatusChanged.create({
+				type: "deployment",
+				id: deployment.id,
+				parentType: "rollout",
+				parentId: deployment.rolloutId,
+			}),
+		);
+	} else if (!recreateLimitReached) {
+		await enqueueWork(serverId, "force_cleanup", {
+			reason: "autoheal_recreate",
+			deploymentId: deployment.id,
+			serviceId: deployment.serviceId,
+			containerIds: [container.containerId],
+		});
+	} else {
+		console.log(
+			`[autoheal] deployment ${deployment.id} exceeded recreate limit`,
+		);
+	}
+
+	return true;
 }
 
 async function applyDeploymentErrors(
@@ -637,6 +737,7 @@ export type StatusReport = {
 	privateIp?: string;
 	meta?: Record<string, string>;
 	containers: ContainerStatus[];
+	containersComplete: boolean;
 	routingSyncedRolloutIds?: string[];
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
@@ -758,7 +859,7 @@ export async function applyStatusReport(
 		);
 
 	for (const dep of trackedDeployments) {
-		if (!reportedDeploymentIds.includes(dep.id)) {
+		if (report.containersComplete && !reportedDeploymentIds.includes(dep.id)) {
 			if (dep.runtimeDesiredState === "removed") {
 				console.log(
 					`[status:${serverId.slice(0, 8)}] deployment ${dep.id.slice(0, 8)} was removed and container gone, deleting`,
@@ -820,59 +921,7 @@ export async function applyStatusReport(
 				console.log(
 					`[health:recover] found stuck deployment ${stuckDeployment.id}, attaching container ${container.containerId}`,
 				);
-
-				const [service, revision] = await Promise.all([
-					db
-						.select()
-						.from(services)
-						.where(eq(services.id, stuckDeployment.serviceId))
-						.then((r) => r[0]),
-					db
-						.select({ specification: serviceRevisions.specification })
-						.from(serviceRevisions)
-						.where(eq(serviceRevisions.id, stuckDeployment.serviceRevisionId))
-						.then((r) => r[0]),
-				]);
-
-				const hasHealthCheck = revision?.specification.healthCheck != null;
-				const newStatus = hasHealthCheck ? "starting" : "healthy";
-
-				await db
-					.update(deployments)
-					.set({
-						containerId: container.containerId,
-						observedPhase: newStatus,
-						healthStatus: hasHealthCheck ? "starting" : "none",
-						serverlessWakeFailureCount: 0,
-					})
-					.where(eq(deployments.id, stuckDeployment.id));
-
-				deployment = {
-					...stuckDeployment,
-					observedPhase: newStatus,
-					containerId: container.containerId,
-					healthStatus: hasHealthCheck ? "starting" : "none",
-				};
-
-				if (!hasHealthCheck) {
-					if (deployment.rolloutId) {
-						await inngest.send(
-							inngestEvents.resourceStatusChanged.create({
-								type: "deployment",
-								id: deployment.id,
-								parentType: "rollout",
-								parentId: deployment.rolloutId,
-							}),
-						);
-					}
-
-					if (isMigrationTargetStarting(service?.migrationStatus)) {
-						console.log(
-							`[migration] target service ${service.id} healthy, promoting`,
-						);
-						await completeTargetMigration(service.id);
-					}
-				}
+				deployment = stuckDeployment;
 			}
 		}
 
@@ -949,35 +998,70 @@ export async function applyStatusReport(
 			}
 		}
 
-		if (shouldAttachReportedContainer(deployment.observedPhase)) {
+		if (
+			shouldAttachReportedContainer(deployment.observedPhase) &&
+			(deployment.observedPhase !== "starting" ||
+				deployment.containerId !== container.containerId)
+		) {
 			if (container.status !== "running") {
 				continue;
 			}
 
-			const [revision, service] = await Promise.all([
-				db
-					.select({ specification: serviceRevisions.specification })
-					.from(serviceRevisions)
-					.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
-					.then((r) => r[0]),
-				db
-					.select({ migrationStatus: services.migrationStatus })
-					.from(services)
-					.where(eq(services.id, deployment.serviceId))
-					.then((r) => r[0]),
-			]);
+			const revision = await db
+				.select({ specification: serviceRevisions.specification })
+				.from(serviceRevisions)
+				.where(eq(serviceRevisions.id, deployment.serviceRevisionId))
+				.then((rows) => rows[0]);
 
 			const hasHealthCheck = revision?.specification.healthCheck != null;
-			const newStatus = hasHealthCheck ? "starting" : "healthy";
-			updateFields.observedPhase = newStatus;
-			if (deployment.observedPhase === "waking") {
-				updateFields.serverlessWakeFailureCount = 0;
+			const attachmentPhase = getReportedContainerAttachmentPhase({
+				hasHealthCheck,
+				healthStatus,
+			});
+			const unchangedContainer =
+				deployment.containerId === null
+					? isNull(deployments.containerId)
+					: eq(deployments.containerId, deployment.containerId);
+
+			if (attachmentPhase === "unhealthy") {
+				await applyStartingHealthCheckFailure({
+					serverId,
+					deployment,
+					container,
+					eligiblePhases: observedStartingPhases,
+				});
+				continue;
 			}
-			if (hasHealthCheck) {
-				updateFields.healthStatus = "starting";
-			}
+
+			const updated = await db
+				.update(deployments)
+				.set({
+					containerId: container.containerId,
+					observedPhase: attachmentPhase,
+					healthStatus: hasHealthCheck ? healthStatus : "none",
+					serverlessWakeFailureCount: 0,
+					...(attachmentPhase === "healthy"
+						? {
+								autohealRestartCount: 0,
+								autohealRecreateCount: 0,
+							}
+						: {}),
+				})
+				.where(
+					and(
+						eq(deployments.id, deployment.id),
+						eq(deployments.serverId, serverId),
+						eq(deployments.runtimeDesiredState, "running"),
+						inArray(deployments.observedPhase, observedStartingPhases),
+						unchangedContainer,
+					),
+				)
+				.returning({ id: deployments.id });
+
+			if (updated.length === 0) continue;
+
 			console.log(
-				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.observedPhase} to ${newStatus}`,
+				`[health:attach] deployment ${deployment.id} transitioning from ${deployment.observedPhase} to ${attachmentPhase}`,
 			);
 
 			if (deployment.rolloutId) {
@@ -990,12 +1074,7 @@ export async function applyStatusReport(
 				);
 			}
 
-			if (!hasHealthCheck) {
-				await db
-					.update(deployments)
-					.set(updateFields)
-					.where(eq(deployments.id, deployment.id));
-
+			if (attachmentPhase === "healthy") {
 				if (deployment.rolloutId) {
 					await inngest.send(
 						inngestEvents.resourceStatusChanged.create({
@@ -1007,14 +1086,19 @@ export async function applyStatusReport(
 					);
 				}
 
+				const service = await db
+					.select({ migrationStatus: services.migrationStatus })
+					.from(services)
+					.where(eq(services.id, deployment.serviceId))
+					.then((rows) => rows[0]);
 				if (isMigrationTargetStarting(service?.migrationStatus)) {
 					console.log(
-						`[migration] deployment ${deployment.id} healthy (no health check), promoting`,
+						`[migration] deployment ${deployment.id} healthy, promoting`,
 					);
 					await completeTargetMigration(deployment.serviceId);
 				}
-				continue;
 			}
+			continue;
 		}
 
 		if (deployment.observedPhase === "unknown") {
@@ -1089,10 +1173,16 @@ export async function applyStatusReport(
 			updateFields.autohealRecreateCount = 0;
 		}
 
-		await db
-			.update(deployments)
-			.set(updateFields)
-			.where(eq(deployments.id, deployment.id));
+		const isStartingTerminalHealthReport =
+			deployment.observedPhase === "starting" &&
+			container.status === "running" &&
+			(healthStatus === "healthy" || healthStatus === "unhealthy");
+		if (!isStartingTerminalHealthReport) {
+			await db
+				.update(deployments)
+				.set(updateFields)
+				.where(eq(deployments.id, deployment.id));
+		}
 
 		if (restoredToReady && deployment.rolloutId) {
 			const currentServerName = await getCurrentServerLogName();
@@ -1140,21 +1230,31 @@ export async function applyStatusReport(
 		if (
 			deployment.observedPhase === "starting" &&
 			container.status === "running" &&
-			(healthStatus === "healthy" || healthStatus === "none")
+			healthStatus === "healthy"
 		) {
-			console.log(
-				`[health] deployment ${deployment.id} is now healthy (healthStatus=${healthStatus})`,
-			);
-
-			await db
+			const updated = await db
 				.update(deployments)
 				.set({
 					observedPhase: "healthy",
+					healthStatus: "healthy",
 					autohealRestartCount: 0,
 					autohealRecreateCount: 0,
 					serverlessWakeFailureCount: 0,
 				})
-				.where(eq(deployments.id, deployment.id));
+				.where(
+					and(
+						eq(deployments.id, deployment.id),
+						eq(deployments.serverId, serverId),
+						eq(deployments.runtimeDesiredState, "running"),
+						eq(deployments.observedPhase, "starting"),
+						eq(deployments.containerId, container.containerId),
+					),
+				)
+				.returning({ id: deployments.id });
+
+			if (updated.length === 0) continue;
+
+			console.log(`[health] deployment ${deployment.id} is now healthy`);
 
 			if (deployment.rolloutId) {
 				const currentServerName = await getCurrentServerLogName();
@@ -1192,57 +1292,12 @@ export async function applyStatusReport(
 			deployment.observedPhase === "starting" &&
 			healthStatus === "unhealthy"
 		) {
-			console.log(`[health] deployment ${deployment.id} failed health check`);
-			const rollout = deployment.rolloutId
-				? await db
-						.select({ status: rollouts.status })
-						.from(rollouts)
-						.where(eq(rollouts.id, deployment.rolloutId))
-						.then((r) => r[0])
-				: null;
-			const isRolloutDeployment = rollout?.status === "in_progress";
-			const recreateCount = deployment.autohealRecreateCount ?? 0;
-			const { update, recreateLimitReached } =
-				getStartingHealthCheckFailureUpdate({
-					isRolloutDeployment,
-					recreateCount,
-				});
-
-			await db
-				.update(deployments)
-				.set(update)
-				.where(eq(deployments.id, deployment.id));
-
-			if (isRolloutDeployment && deployment.rolloutId) {
-				const currentServerName = await getCurrentServerLogName();
-				await ingestRolloutLog(
-					deployment.rolloutId,
-					deployment.serviceId,
-					"health_check",
-					`Container failed health check on server ${currentServerName}`,
-				);
-				await inngest.send(
-					inngestEvents.resourceStatusChanged.create({
-						type: "deployment",
-						id: deployment.id,
-						parentType: "rollout",
-						parentId: deployment.rolloutId,
-					}),
-				);
-			}
-
-			if (!isRolloutDeployment && !recreateLimitReached) {
-				await enqueueWork(serverId, "force_cleanup", {
-					reason: "autoheal_recreate",
-					deploymentId: deployment.id,
-					serviceId: deployment.serviceId,
-					containerIds: [container.containerId],
-				});
-			} else if (recreateLimitReached) {
-				console.log(
-					`[autoheal] deployment ${deployment.id} exceeded recreate limit`,
-				);
-			}
+			await applyStartingHealthCheckFailure({
+				serverId,
+				deployment,
+				container,
+				eligiblePhases: ["starting"],
+			});
 		}
 	}
 

@@ -24,6 +24,25 @@ type ReconcileWorkPayload = {
 	deploymentId?: string;
 };
 
+export type RolloutReconcileStage = "deploy" | "routing" | "cleanup";
+
+export function buildRolloutReconcileWorkItem({
+	rolloutId,
+	stage,
+	serverId,
+}: {
+	rolloutId: string;
+	stage: RolloutReconcileStage;
+	serverId: string;
+}) {
+	return {
+		id: `reconcile:${rolloutId}:${stage}:${serverId}`,
+		serverId,
+		type: "reconcile" as const,
+		payload: JSON.stringify({ reason: `rollout_${stage}` }),
+	};
+}
+
 export type WorkPayloadByType = {
 	deploy: ReconcileWorkPayload;
 	reconcile: ReconcileWorkPayload;
@@ -112,6 +131,22 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 			type,
 			payload: JSON.stringify(payload),
 		})
+		.onConflictDoNothing({ target: workQueue.id });
+}
+
+export async function enqueueRolloutReconcile(
+	rolloutId: string,
+	stage: RolloutReconcileStage,
+	serverIds: Iterable<string>,
+) {
+	const items = [...new Set(serverIds)].map((serverId) =>
+		buildRolloutReconcileWorkItem({ rolloutId, stage, serverId }),
+	);
+	if (items.length === 0) return;
+
+	await db
+		.insert(workQueue)
+		.values(items)
 		.onConflictDoNothing({ target: workQueue.id });
 }
 

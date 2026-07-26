@@ -48,6 +48,7 @@ vi.mock("@/lib/work-queue", () => ({
 
 import {
 	applyStatusReport,
+	getReportedContainerAttachmentPhase,
 	getSleepTransitionDeploymentIds,
 	getStaleStoppedReportUpdate,
 	getStoppedContainerReportUpdate,
@@ -63,6 +64,33 @@ beforeEach(() => {
 });
 
 describe("agent status serverless attachment", () => {
+	it("uses the first running report as the authoritative attachment phase", () => {
+		expect(
+			getReportedContainerAttachmentPhase({
+				hasHealthCheck: false,
+				healthStatus: "none",
+			}),
+		).toBe("healthy");
+		expect(
+			getReportedContainerAttachmentPhase({
+				hasHealthCheck: true,
+				healthStatus: "healthy",
+			}),
+		).toBe("healthy");
+		expect(
+			getReportedContainerAttachmentPhase({
+				hasHealthCheck: true,
+				healthStatus: "starting",
+			}),
+		).toBe("starting");
+		expect(
+			getReportedContainerAttachmentPhase({
+				hasHealthCheck: true,
+				healthStatus: "unhealthy",
+			}),
+		).toBe("unhealthy");
+	});
+
 	it("does not attach reported containers to sleeping deployments", () => {
 		expect(shouldAttachReportedContainer("pending")).toBe(true);
 		expect(shouldAttachReportedContainer("pulling")).toBe(true);
@@ -124,6 +152,17 @@ describe("agent status serverless attachment", () => {
 		expect(
 			getStaleStoppedReportUpdate({
 				hasHealthCheck: true,
+				healthStatus: "none",
+			}),
+		).toEqual({
+			observedPhase: "starting",
+			healthStatus: "none",
+			serverlessWakeFailureCount: 0,
+		});
+
+		expect(
+			getStaleStoppedReportUpdate({
+				hasHealthCheck: true,
 				healthStatus: "healthy",
 			}),
 		).toEqual({
@@ -164,9 +203,30 @@ describe("agent status deployment cleanup", () => {
 			},
 		]);
 
-		await applyStatusReport("server_1", { containers: [] });
+		await applyStatusReport("server_1", {
+			containers: [],
+			containersComplete: true,
+		});
 
 		expect(mocks.db.delete).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not infer missing containers from an incomplete snapshot", async () => {
+		mocks.selectResults.push([
+			{
+				id: "deployment_removed",
+				containerId: null,
+				runtimeDesiredState: "removed",
+				observedPhase: "sleeping",
+			},
+		]);
+
+		await applyStatusReport("server_1", {
+			containers: [],
+			containersComplete: false,
+		});
+
+		expect(mocks.db.delete).not.toHaveBeenCalled();
 	});
 
 	it("retains a removed deployment whose container is reported in a transient state", async () => {
@@ -184,6 +244,7 @@ describe("agent status deployment cleanup", () => {
 		mocks.selectResults.push([deployment]);
 
 		await applyStatusReport("server_1", {
+			containersComplete: true,
 			containers: [
 				{
 					deploymentId: deployment.id,
@@ -212,6 +273,7 @@ describe("agent status deployment cleanup", () => {
 		mocks.selectResults.push([deployment], [deployment]);
 
 		await applyStatusReport("server_1", {
+			containersComplete: true,
 			containers: [
 				{
 					deploymentId: deployment.id,
@@ -250,6 +312,7 @@ describe("agent status stopped-phase recovery", () => {
 		);
 
 		await applyStatusReport("server_1", {
+			containersComplete: true,
 			containers: [
 				{
 					deploymentId: deployment.id,
@@ -285,6 +348,7 @@ describe("agent status stopped-phase recovery", () => {
 		mocks.selectResults.push([deployment], [deployment]);
 
 		await applyStatusReport("server_1", {
+			containersComplete: true,
 			containers: [
 				{
 					deploymentId: deployment.id,

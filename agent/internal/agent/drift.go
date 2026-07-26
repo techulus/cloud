@@ -498,6 +498,8 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 			if err := a.DeployExpectedContainer(*action.Expected); err != nil {
 				return fmt.Errorf("failed to redeploy container: %w", err)
 			}
+		} else {
+			a.monitorContainerHealth(action.Actual.ID, *action.Expected)
 		}
 		return nil
 

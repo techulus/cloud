@@ -1,12 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import { deployments, rollouts, servers } from "@/db/schema";
+import { deployments, rollouts, servers, workQueue } from "@/db/schema";
 import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
+import { summarizePlannedDeploymentHealth } from "@/lib/rollout-health";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
+import {
+	buildRolloutReconcileWorkItem,
+	enqueueRolloutReconcile,
+} from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import {
@@ -34,6 +40,8 @@ const PREFLIGHT_FAILURE_PREFIXES = ["Server "];
 
 const ROLLOUT_TURN_WAIT_ATTEMPTS = 360;
 const ROLLOUT_TURN_WAIT_INTERVAL = "10s";
+const HEALTH_WAIT_RECHECK_ATTEMPTS = 40;
+const HEALTH_WAIT_RECHECK_INTERVAL = "15s";
 
 type RolloutTurnState = "acquired" | "waiting" | "terminal";
 
@@ -392,6 +400,15 @@ export const rolloutWorkflow = inngest.createFunction(
 			};
 		}
 
+		const deploymentPlan = await step.run("plan-deployments", async () =>
+			placements.flatMap((placement) =>
+				Array.from({ length: placement.replicas }, () => ({
+					id: randomUUID(),
+					serverId: placement.serverId,
+				})),
+			),
+		);
+
 		const { deploymentIds } = await step.run("create-deployments", async () => {
 			await db
 				.update(rollouts)
@@ -400,14 +417,19 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			const serverMap = await validateServers(placements);
 
-			const result = await createDeploymentRecords(rolloutId, serviceId, {
-				revisionId: revision.id,
-				specification,
-				placements,
-				serverMap,
-				totalReplicas,
-				isRollingUpdate,
-			});
+			const result = await createDeploymentRecords(
+				rolloutId,
+				serviceId,
+				{
+					revisionId: revision.id,
+					specification,
+					placements,
+					serverMap,
+					totalReplicas,
+					isRollingUpdate,
+				},
+				deploymentPlan,
+			);
 
 			await ingestRolloutLog(
 				rolloutId,
@@ -417,6 +439,14 @@ export const rolloutWorkflow = inngest.createFunction(
 			);
 
 			return result;
+		});
+
+		await step.run("enqueue-deployment-reconcile", async () => {
+			await enqueueRolloutReconcile(
+				rolloutId,
+				"deploy",
+				deploymentPlan.map((deployment) => deployment.serverId),
+			);
 		});
 
 		await step.run("start-health-check", async () => {
@@ -456,20 +486,55 @@ export const rolloutWorkflow = inngest.createFunction(
 			},
 		);
 
-		const healthResults = await Promise.all(
-			pendingHealthDeploymentIds.map((deploymentId) =>
-				step.waitForEvent(`wait-healthy-${deploymentId}`, {
-					event: inngestEvents.resourceStatusChanged,
-					timeout: "10m",
-					if: `async.data.type == "deployment" && async.data.id == "${deploymentId}"`,
-				}),
-			),
-		);
+		let unresolvedHealthDeploymentIds = pendingHealthDeploymentIds;
+		let healthWaitTimedOut = false;
+		for (
+			let attempt = 0;
+			attempt < HEALTH_WAIT_RECHECK_ATTEMPTS &&
+			unresolvedHealthDeploymentIds.length > 0;
+			attempt++
+		) {
+			await Promise.all(
+				unresolvedHealthDeploymentIds.map((deploymentId) =>
+					step.waitForEvent(`wait-healthy-${attempt}-${deploymentId}`, {
+						event: inngestEvents.resourceStatusChanged,
+						timeout: HEALTH_WAIT_RECHECK_INTERVAL,
+						if: `async.data.type == "deployment" && async.data.id == "${deploymentId}"`,
+					}),
+				),
+			);
+
+			const healthStates = await step.run(
+				`recheck-health-${attempt}`,
+				async () =>
+					db
+						.select({
+							id: deployments.id,
+							observedPhase: deployments.observedPhase,
+						})
+						.from(deployments)
+						.where(inArray(deployments.id, deploymentIds)),
+			);
+
+			const healthSummary = summarizePlannedDeploymentHealth(
+				deploymentIds,
+				healthStates,
+			);
+			unresolvedHealthDeploymentIds = healthSummary.unresolvedDeploymentIds;
+
+			if (healthSummary.hasTerminalFailure) break;
+			if (
+				attempt === HEALTH_WAIT_RECHECK_ATTEMPTS - 1 &&
+				unresolvedHealthDeploymentIds.length > 0
+			) {
+				healthWaitTimedOut = true;
+			}
+		}
 
 		const unhealthyDeployments = await step.run(
 			"check-health-after-wait",
 			async () => {
-				if (pendingHealthDeploymentIds.length === 0) {
+				if (deploymentIds.length === 0) {
 					return [];
 				}
 
@@ -481,17 +546,31 @@ export const rolloutWorkflow = inngest.createFunction(
 					})
 					.from(deployments)
 					.innerJoin(servers, eq(deployments.serverId, servers.id))
-					.where(inArray(deployments.id, pendingHealthDeploymentIds));
+					.where(inArray(deployments.id, deploymentIds));
 
-				return deploymentStates.filter(
-					(deployment) => !isObservedReady(deployment.observedPhase),
+				const deploymentStateIds = new Set(
+					deploymentStates.map((deployment) => deployment.id),
 				);
+				const missingDeploymentStates = deploymentIds
+					.filter((deploymentId) => !deploymentStateIds.has(deploymentId))
+					.map((deploymentId) => ({
+						id: deploymentId,
+						observedPhase: "failed" as const,
+						serverName: "unknown server",
+					}));
+
+				return [
+					...deploymentStates.filter(
+						(deployment) => !isObservedReady(deployment.observedPhase),
+					),
+					...missingDeploymentStates,
+				];
 			},
 		);
 
 		if (unhealthyDeployments.length > 0) {
 			const failedDeployment = unhealthyDeployments[0];
-			const failedReason = healthResults.includes(null)
+			const failedReason = healthWaitTimedOut
 				? "health_check_timeout"
 				: "health_check_failed";
 			await step.run("log-health-timeout", async () => {
@@ -578,6 +657,21 @@ export const rolloutWorkflow = inngest.createFunction(
 							),
 						),
 					);
+
+				if (routingTargetIds.length > 0) {
+					await tx
+						.insert(workQueue)
+						.values(
+							routingTargetIds.map((serverId) =>
+								buildRolloutReconcileWorkItem({
+									rolloutId,
+									stage: "routing",
+									serverId,
+								}),
+							),
+						)
+						.onConflictDoNothing({ target: workQueue.id });
+				}
 			});
 
 			await ingestRolloutLog(

@@ -7,11 +7,12 @@ import {
 	rollouts,
 	servers,
 	services,
+	workQueue,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { assignContainerIp } from "@/lib/wireguard";
-import { enqueueWork } from "@/lib/work-queue";
+import { buildRolloutReconcileWorkItem } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
@@ -60,6 +61,11 @@ export type DeploymentContext = {
 	>;
 	totalReplicas: number;
 	isRollingUpdate: boolean;
+};
+
+export type PlannedDeployment = {
+	id: string;
+	serverId: string;
 };
 
 async function getUsedPorts(serverId: string): Promise<Set<number>> {
@@ -322,59 +328,72 @@ export async function createDeploymentRecords(
 	rolloutId: string,
 	serviceId: string,
 	context: DeploymentContext,
+	deploymentPlan: PlannedDeployment[],
 ): Promise<{ deploymentIds: string[] }> {
-	const { revisionId, specification, placements, serverMap } = context;
+	const { revisionId, specification, serverMap } = context;
 
 	const deploymentIds: string[] = [];
 
-	for (const placement of placements) {
-		if (placement.replicas <= 0) continue;
-
-		const server = serverMap.get(placement.serverId);
+	for (const plannedDeployment of deploymentPlan) {
+		const server = serverMap.get(plannedDeployment.serverId);
 		if (!server) {
-			throw new Error(`Server ${placement.serverId} not found`);
+			throw new Error(`Server ${plannedDeployment.serverId} not found`);
 		}
-
-		for (let i = 0; i < placement.replicas; i++) {
-			const deploymentId = randomUUID();
-			const hostPorts = await allocateHostPorts(
-				server.id,
-				specification.ports.length,
-			);
-			const ipAddress = await assignContainerIp(server.id);
-
-			await db.transaction(async (tx) => {
-				await tx.insert(deployments).values({
-					id: deploymentId,
-					serviceId,
-					serviceRevisionId: revisionId,
-					serverId: server.id,
-					ipAddress,
-					runtimeDesiredState: "running",
-					trafficState: "candidate",
-					observedPhase: "pending",
-					rolloutId,
-				});
-
-				if (specification.ports.length > 0) {
-					await tx.insert(deploymentPorts).values(
-						specification.ports.map((port, index) => ({
-							id: randomUUID(),
-							deploymentId,
-							containerPort: port.containerPort,
-							hostPort: hostPorts[index],
-						})),
-					);
-				}
-			});
-
+		const deploymentId = plannedDeployment.id;
+		const existingDeployment = await db
+			.select({
+				id: deployments.id,
+				serviceId: deployments.serviceId,
+				rolloutId: deployments.rolloutId,
+				serverId: deployments.serverId,
+			})
+			.from(deployments)
+			.where(eq(deployments.id, deploymentId))
+			.then((rows) => rows[0]);
+		if (existingDeployment) {
+			if (
+				existingDeployment.serviceId !== serviceId ||
+				existingDeployment.rolloutId !== rolloutId ||
+				existingDeployment.serverId !== server.id
+			) {
+				throw new Error(`Deployment plan conflict for ${deploymentId}`);
+			}
 			deploymentIds.push(deploymentId);
-
-			await enqueueWork(server.id, "reconcile", {
-				reason: "rollout_deployment_created",
-				deploymentId,
-			});
+			continue;
 		}
+
+		const hostPorts = await allocateHostPorts(
+			server.id,
+			specification.ports.length,
+		);
+		const ipAddress = await assignContainerIp(server.id);
+
+		await db.transaction(async (tx) => {
+			await tx.insert(deployments).values({
+				id: deploymentId,
+				serviceId,
+				serviceRevisionId: revisionId,
+				serverId: server.id,
+				ipAddress,
+				runtimeDesiredState: "running",
+				trafficState: "candidate",
+				observedPhase: "pending",
+				rolloutId,
+			});
+
+			if (specification.ports.length > 0) {
+				await tx.insert(deploymentPorts).values(
+					specification.ports.map((port, index) => ({
+						id: randomUUID(),
+						deploymentId,
+						containerPort: port.containerPort,
+						hostPort: hostPorts[index],
+					})),
+				);
+			}
+		});
+
+		deploymentIds.push(deploymentId);
 	}
 
 	return { deploymentIds };
@@ -384,7 +403,11 @@ export async function completeRollout(
 	rolloutId: string,
 	serviceId: string,
 	context: Omit<DeploymentContext, "serverMap" | "revisionId">,
-): Promise<{ completed: boolean; stoppedCount: number }> {
+): Promise<{
+	completed: boolean;
+	stoppedCount: number;
+	affectedServerIds: string[];
+}> {
 	const { placements, specification, isRollingUpdate } = context;
 	const lockedServerId = specification.stateful
 		? placements[0]?.serverId
@@ -398,7 +421,7 @@ export async function completeRollout(
 			.for("update")
 			.then((rows) => rows[0]);
 		if (rollout?.status !== "in_progress") {
-			return { completed: false, stoppedCount: 0 };
+			return { completed: false, stoppedCount: 0, affectedServerIds: [] };
 		}
 
 		const stoppedDeployments = isRollingUpdate
@@ -414,8 +437,29 @@ export async function completeRollout(
 							eq(deployments.trafficState, "draining"),
 						),
 					)
-					.returning({ id: deployments.id })
+					.returning({
+						id: deployments.id,
+						serverId: deployments.serverId,
+					})
 			: [];
+
+		const affectedServerIds = [
+			...new Set(stoppedDeployments.map((deployment) => deployment.serverId)),
+		];
+		if (affectedServerIds.length > 0) {
+			await tx
+				.insert(workQueue)
+				.values(
+					affectedServerIds.map((serverId) =>
+						buildRolloutReconcileWorkItem({
+							rolloutId,
+							stage: "cleanup",
+							serverId,
+						}),
+					),
+				)
+				.onConflictDoNothing({ target: workQueue.id });
+		}
 
 		const serviceUpdate =
 			specification.placement.mode === "automatic"
@@ -438,7 +482,11 @@ export async function completeRollout(
 				completedAt: new Date(),
 			})
 			.where(eq(rollouts.id, rolloutId));
-		return { completed: true, stoppedCount: stoppedDeployments.length };
+		return {
+			completed: true,
+			stoppedCount: stoppedDeployments.length,
+			affectedServerIds,
+		};
 	});
 }
 

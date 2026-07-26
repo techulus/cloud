@@ -22,7 +22,7 @@ func NewReconciler(encryptionKey, dataDir string) *Reconciler {
 	}
 }
 
-func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
+func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) (*container.DeployResult, error) {
 	portMappings := make([]container.PortMapping, len(exp.Ports))
 	for i, p := range exp.Ports {
 		portMappings[i] = container.PortMapping{
@@ -45,11 +45,11 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	decryptedEnv := make(map[string]string)
 	for key, encryptedValue := range exp.Env {
 		if r.encryptionKey == "" {
-			return fmt.Errorf("encryption key not configured, cannot decrypt secret %s", key)
+			return nil, fmt.Errorf("encryption key not configured, cannot decrypt secret %s", key)
 		}
 		decrypted, err := crypto.DecryptSecret(encryptedValue, r.encryptionKey)
 		if err != nil {
-			return fmt.Errorf("failed to decrypt secret %s: %w", key, err)
+			return nil, fmt.Errorf("failed to decrypt secret %s: %w", key, err)
 		}
 		decryptedEnv[key] = decrypted
 	}
@@ -63,7 +63,7 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		}
 	}
 
-	_, err := container.Deploy(&container.DeployConfig{
+	return container.Deploy(&container.DeployConfig{
 		Name:              exp.Name,
 		Image:             exp.Image,
 		ServiceID:         exp.ServiceID,
@@ -80,6 +80,4 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		MemoryLimitMb:     exp.ResourceMemoryLimitMb,
 		LogFunc:           func(stream, message string) { log.Printf("[deploy:%s] %s", stream, message) },
 	})
-
-	return err
 }

@@ -1,9 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import {
-	applyStatusReport,
-	type StatusReport,
-} from "@/lib/agent-status";
+import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimNextWorkItem,
@@ -33,7 +30,11 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
 
-	if (!data.statusReport || !Array.isArray(data.statusReport.containers)) {
+	if (
+		!data.statusReport ||
+		!Array.isArray(data.statusReport.containers) ||
+		typeof data.statusReport.containersComplete !== "boolean"
+	) {
 		return NextResponse.json(
 			{ error: "Invalid statusReport payload" },
 			{ status: 400 },

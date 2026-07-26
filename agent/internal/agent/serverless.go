@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -16,6 +17,11 @@ import (
 var serverlessTransitionCounter atomic.Uint64
 
 const serverlessTransitionGuardTTL = 2 * time.Minute
+
+const (
+	healthMonitorPollInterval = time.Second
+	healthMonitorTimeout      = 5 * time.Minute
+)
 
 type serverlessTransitionGuard struct {
 	createdAt time.Time
@@ -48,7 +54,7 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 						actual.Image,
 						expected.Image,
 					)
-					return a.Reconciler.Deploy(expected)
+					return a.deployAndMonitor(expected)
 				}
 				if actual.State == "running" {
 					return nil
@@ -64,12 +70,13 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 						Truncate(expected.DeploymentID, 8),
 						err,
 					)
-					return a.Reconciler.Deploy(expected)
+					return a.deployAndMonitor(expected)
 				}
+				a.monitorContainerHealth(actual.ID, expected)
 				return nil
 			}
 		}
-		return a.Reconciler.Deploy(expected)
+		return a.deployAndMonitor(expected)
 	})
 }
 
@@ -86,8 +93,82 @@ func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) er
 				}
 			}
 		}
-		return a.Reconciler.Deploy(expected)
+		return a.deployAndMonitor(expected)
 	})
+}
+
+func (a *Agent) deployAndMonitor(expected agenthttp.ExpectedContainer) error {
+	result, err := a.Reconciler.Deploy(expected)
+	if err != nil {
+		return err
+	}
+	a.monitorContainerHealth(result.ContainerID, expected)
+	return nil
+}
+
+func hasConfiguredHealthCheck(expected agenthttp.ExpectedContainer) bool {
+	return expected.HealthCheck != nil && expected.HealthCheck.Cmd != ""
+}
+
+func (a *Agent) monitorContainerHealth(containerID string, expected agenthttp.ExpectedContainer) {
+	if containerID == "" || !hasConfiguredHealthCheck(expected) {
+		return
+	}
+
+	ctx, claimed := a.claimHealthMonitor(containerID)
+	if !claimed {
+		return
+	}
+
+	go func() {
+		defer func() {
+			a.healthMonitorMutex.Lock()
+			delete(a.healthMonitors, containerID)
+			a.healthMonitorMutex.Unlock()
+		}()
+		terminal := pollContainerHealth(ctx, containerID, healthMonitorPollInterval, healthMonitorTimeout, container.GetHealthStatusContext)
+		if terminal != "" {
+			// Request a full snapshot rather than reporting the monitored ID, so a
+			// container replaced while this goroutine was polling cannot leak stale identity.
+			a.RequestStatusReport("container health became " + terminal)
+		}
+	}()
+}
+
+func (a *Agent) claimHealthMonitor(containerID string) (context.Context, bool) {
+	a.healthMonitorMutex.Lock()
+	defer a.healthMonitorMutex.Unlock()
+	ctx := a.runContext
+	if ctx == nil || ctx.Err() != nil {
+		return nil, false
+	}
+	if _, exists := a.healthMonitors[containerID]; exists {
+		return nil, false
+	}
+	if a.healthMonitors == nil {
+		a.healthMonitors = map[string]struct{}{}
+	}
+	a.healthMonitors[containerID] = struct{}{}
+	return ctx, true
+}
+
+func pollContainerHealth(ctx context.Context, containerID string, interval, timeout time.Duration, getHealth func(context.Context, string) string) string {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		status := getHealth(ctx, containerID)
+		if status == "healthy" || status == "unhealthy" {
+			return status
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-ticker.C:
+		}
+	}
 }
 
 func (a *Agent) withDeploymentDeployLock(deploymentID string, fn func() error) error {

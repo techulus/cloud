@@ -297,6 +297,7 @@ type StatusReport struct {
 	PrivateIP               string                  `json:"privateIp,omitempty"`
 	Meta                    map[string]string       `json:"meta,omitempty"`
 	Containers              []ContainerStatus       `json:"containers"`
+	ContainersComplete      bool                    `json:"containersComplete"`
 	DeploymentErrors        []DeploymentError       `json:"deploymentErrors,omitempty"`
 	RoutingSyncedRolloutIds []string                `json:"routingSyncedRolloutIds,omitempty"`
 	NetworkHealth           *health.NetworkHealth   `json:"networkHealth,omitempty"`
