@@ -28,21 +28,21 @@ type ReconcileWorkPayload = {
 
 export type RolloutReconcileStage = "deploy" | "routing" | "cleanup";
 
-export function buildRolloutReconcileWorkItem({
+export function buildRolloutReconcileWorkItems({
 	rolloutId,
 	stage,
-	serverId,
+	serverIds,
 }: {
 	rolloutId: string;
 	stage: RolloutReconcileStage;
-	serverId: string;
+	serverIds: Iterable<string>;
 }) {
-	return {
+	return [...new Set(serverIds)].sort().map((serverId) => ({
 		id: `reconcile:${rolloutId}:${stage}:${serverId}`,
 		serverId,
 		type: "reconcile" as const,
 		payload: JSON.stringify({ reason: `rollout_${stage}` }),
-	};
+	}));
 }
 
 export type WorkPayloadByType = {
@@ -145,6 +145,30 @@ export type RejectedActiveWorkItem = {
 	reason: string;
 };
 
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function lockOwnedBuildWork(
+	tx: Transaction,
+	buildId: string,
+	serverId: string,
+	attempt: number,
+) {
+	return tx
+		.select({ id: workQueue.id })
+		.from(workQueue)
+		.where(
+			and(
+				eq(workQueue.id, `build-work-${buildId}`),
+				eq(workQueue.serverId, serverId),
+				eq(workQueue.type, "build"),
+				eq(workQueue.status, "processing"),
+				eq(workQueue.attempts, attempt),
+			),
+		)
+		.for("update")
+		.then((rows) => rows[0]);
+}
+
 export async function enqueueWork<T extends WorkQueue["type"]>(
 	serverId: string,
 	type: T,
@@ -171,9 +195,7 @@ export async function enqueueRolloutReconcile(
 	stage: RolloutReconcileStage,
 	serverIds: Iterable<string>,
 ) {
-	const items = [...new Set(serverIds)].map((serverId) =>
-		buildRolloutReconcileWorkItem({ rolloutId, stage, serverId }),
-	);
+	const items = buildRolloutReconcileWorkItems({ rolloutId, stage, serverIds });
 	if (items.length === 0) return;
 
 	await db.transaction(async (tx) => {

@@ -17,7 +17,7 @@ import {
 import { CONTAINER_SUBNET_PREFIX } from "@/lib/constants";
 import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
-import { buildRolloutReconcileWorkItem } from "@/lib/work-queue";
+import { buildRolloutReconcileWorkItems } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
@@ -468,7 +468,6 @@ export async function completeRollout(
 ): Promise<{
 	completed: boolean;
 	stoppedCount: number;
-	affectedServerIds: string[];
 }> {
 	const { placements, specification, isRollingUpdate } = context;
 	const lockedServerId = specification.stateful
@@ -483,7 +482,7 @@ export async function completeRollout(
 			.for("update")
 			.then((rows) => rows[0]);
 		if (rollout?.status !== "in_progress") {
-			return { completed: false, stoppedCount: 0, affectedServerIds: [] };
+			return { completed: false, stoppedCount: 0 };
 		}
 
 		const stoppedDeployments = isRollingUpdate
@@ -515,13 +514,11 @@ export async function completeRollout(
 			await tx
 				.insert(workQueue)
 				.values(
-					affectedServerIds.map((serverId) =>
-						buildRolloutReconcileWorkItem({
-							rolloutId,
-							stage: "cleanup",
-							serverId,
-						}),
-					),
+					buildRolloutReconcileWorkItems({
+						rolloutId,
+						stage: "cleanup",
+						serverIds: affectedServerIds,
+					}),
 				)
 				.onConflictDoNothing({ target: workQueue.id });
 		}
@@ -554,7 +551,6 @@ export async function completeRollout(
 		return {
 			completed: true,
 			stoppedCount: stoppedDeployments.length,
-			affectedServerIds,
 		};
 	});
 }

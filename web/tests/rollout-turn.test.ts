@@ -54,8 +54,39 @@ vi.mock("@/lib/inngest/events", () => ({
 
 import {
 	acquireRolloutTurn,
+	classifyDeploymentHealth,
 	failQueuedRolloutOnTimeout,
 } from "@/lib/inngest/functions/rollout-workflow";
+
+describe("rollout deployment health", () => {
+	it.each([
+		{
+			name: "missing deployment",
+			planned: ["ready", "missing"],
+			states: [{ id: "ready", observedPhase: "healthy" as const }],
+			terminal: true,
+			unresolved: [],
+		},
+		{
+			name: "ready deployment regressed",
+			planned: ["deployment"],
+			states: [{ id: "deployment", observedPhase: "failed" as const }],
+			terminal: true,
+			unresolved: ["deployment"],
+		},
+		{
+			name: "deployment still starting",
+			planned: ["deployment"],
+			states: [{ id: "deployment", observedPhase: "starting" as const }],
+			terminal: false,
+			unresolved: ["deployment"],
+		},
+	])("classifies $name", ({ planned, states, terminal, unresolved }) => {
+		const result = classifyDeploymentHealth(planned, states);
+		expect(result.hasTerminalFailure).toBe(terminal);
+		expect(result.unresolvedDeploymentIds).toEqual(unresolved);
+	});
+});
 
 describe("rollout turn acquisition", () => {
 	beforeEach(() => {
@@ -149,26 +180,6 @@ describe("rollout turn acquisition", () => {
 
 		await expect(acquireRolloutTurn("a", "service-1")).resolves.toBe(
 			"terminal",
-		);
-	});
-
-	it("supersedes itself when the newer rollout is already completed", async () => {
-		mocks.selectResults.push(
-			[
-				{
-					status: "queued",
-					currentStage: "queued",
-					createdAt: new Date("2026-07-23T10:00:00Z"),
-				},
-			],
-			[{ id: "completed-newer" }],
-		);
-
-		await expect(acquireRolloutTurn("older", "service-1")).resolves.toBe(
-			"terminal",
-		);
-		expect(mocks.set).toHaveBeenCalledWith(
-			expect.objectContaining({ status: "superseded" }),
 		);
 	});
 

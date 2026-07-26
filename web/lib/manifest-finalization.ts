@@ -27,7 +27,10 @@ type ManifestState =
 	| { status: "failed" }
 	| null;
 
-function platformImageForTarget(finalImage: string, targetPlatform: string) {
+export function platformImageForTarget(
+	finalImage: string,
+	targetPlatform: string,
+) {
 	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
 	if (
 		operatingSystem !== "linux" ||

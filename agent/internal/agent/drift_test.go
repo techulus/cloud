@@ -98,3 +98,15 @@ func TestPlanReconcileRedeploysImageIdentityDrift(t *testing.T) {
 		}
 	}
 }
+
+func TestTransitionToIdleClearsProcessingImages(t *testing.T) {
+	a := NewAgent(nil, nil, nil, "", "", "", nil, nil, nil, nil, false, false)
+	a.SetState(StateProcessing)
+	a.processingImages = map[string]container.ResolvedImage{"example/app:latest": "sha256:image"}
+
+	a.transitionToIdle()
+
+	if a.processingImages != nil {
+		t.Fatalf("processing images retained after idle transition: %v", a.processingImages)
+	}
+}

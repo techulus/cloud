@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
-import { builds, serviceRevisions, services, workQueue } from "@/db/schema";
+import { builds, serviceRevisions, services } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { cloneUrlForRevisionSource } from "@/lib/build-revision-source";
 import { inngest } from "@/lib/inngest/client";
@@ -12,36 +12,13 @@ import {
 	DEFAULT_BUILD_TIMEOUT_MINUTES,
 	SETTING_KEYS,
 } from "@/lib/settings-keys";
+import { lockOwnedBuildWork } from "@/lib/work-queue";
 
 function imageRepository(image: string): string {
 	const digestIndex = image.indexOf("@");
 	if (digestIndex > 0) return image.slice(0, digestIndex);
 	const lastColon = image.lastIndexOf(":");
 	return lastColon > image.lastIndexOf("/") ? image.slice(0, lastColon) : image;
-}
-
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-async function lockOwnedBuildWork(
-	tx: Transaction,
-	buildId: string,
-	serverId: string,
-	attempt: number,
-) {
-	return tx
-		.select({ id: workQueue.id })
-		.from(workQueue)
-		.where(
-			and(
-				eq(workQueue.id, `build-work-${buildId}`),
-				eq(workQueue.serverId, serverId),
-				eq(workQueue.type, "build"),
-				eq(workQueue.status, "processing"),
-				eq(workQueue.attempts, attempt),
-			),
-		)
-		.for("update")
-		.then((rows) => rows[0]);
 }
 
 export async function POST(

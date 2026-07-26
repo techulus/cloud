@@ -85,27 +85,6 @@ func (a *Agent) DeployServerlessContainer(expected agenthttp.ExpectedContainer) 
 	})
 }
 
-func (a *Agent) DeployExpectedContainer(expected agenthttp.ExpectedContainer) error {
-	return a.withDeploymentOperationLock(expected.DeploymentID, func() error {
-		containers, err := container.List()
-		if err == nil {
-			for _, actual := range containers {
-				if actual.DeploymentID != expected.DeploymentID || actual.State != "running" {
-					continue
-				}
-				if normalizeImage(actual.Image) == normalizeImage(expected.Image) {
-					return nil
-				}
-			}
-		}
-		resolved, err := a.Reconciler.PullImage(context.Background(), expected.Image)
-		if err != nil {
-			return err
-		}
-		return a.deployResolvedAndMonitor(expected, resolved)
-	})
-}
-
 func (a *Agent) deployResolvedAndMonitor(expected agenthttp.ExpectedContainer, resolved container.ResolvedImage) error {
 	result, err := a.Reconciler.DeployResolved(context.Background(), expected, resolved)
 	if err != nil {
@@ -115,19 +94,23 @@ func (a *Agent) deployResolvedAndMonitor(expected agenthttp.ExpectedContainer, r
 	return nil
 }
 
-func hasConfiguredHealthCheck(expected agenthttp.ExpectedContainer) bool {
-	return expected.HealthCheck != nil && expected.HealthCheck.Cmd != ""
-}
-
 func (a *Agent) monitorContainerHealth(containerID string, expected agenthttp.ExpectedContainer) {
-	if containerID == "" || !hasConfiguredHealthCheck(expected) {
+	if containerID == "" || expected.HealthCheck == nil || expected.HealthCheck.Cmd == "" {
 		return
 	}
 
-	ctx, claimed := a.claimHealthMonitor(containerID)
-	if !claimed {
+	a.healthMonitorMutex.Lock()
+	ctx := a.runContext
+	if ctx == nil || ctx.Err() != nil {
+		a.healthMonitorMutex.Unlock()
 		return
 	}
+	if _, exists := a.healthMonitors[containerID]; exists {
+		a.healthMonitorMutex.Unlock()
+		return
+	}
+	a.healthMonitors[containerID] = struct{}{}
+	a.healthMonitorMutex.Unlock()
 
 	go func() {
 		defer func() {
@@ -142,23 +125,6 @@ func (a *Agent) monitorContainerHealth(containerID string, expected agenthttp.Ex
 			a.RequestStatusReport("container health became " + terminal)
 		}
 	}()
-}
-
-func (a *Agent) claimHealthMonitor(containerID string) (context.Context, bool) {
-	a.healthMonitorMutex.Lock()
-	defer a.healthMonitorMutex.Unlock()
-	ctx := a.runContext
-	if ctx == nil || ctx.Err() != nil {
-		return nil, false
-	}
-	if _, exists := a.healthMonitors[containerID]; exists {
-		return nil, false
-	}
-	if a.healthMonitors == nil {
-		a.healthMonitors = map[string]struct{}{}
-	}
-	a.healthMonitors[containerID] = struct{}{}
-	return ctx, true
 }
 
 func pollContainerHealth(ctx context.Context, containerID string, interval, timeout time.Duration, getHealth func(context.Context, string) string) string {

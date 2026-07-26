@@ -74,7 +74,10 @@ vi.mock("@/lib/agent-auth", () => ({
 }));
 vi.mock("@/lib/email", () => ({ sendBuildFailureAlert: vi.fn() }));
 vi.mock("@/lib/github", () => ({ updateGitHubDeploymentStatus: vi.fn() }));
-vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
+vi.mock("@/lib/work-queue", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/work-queue")>()),
+	enqueueWork: mocks.enqueueWork,
+}));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {

@@ -826,7 +826,6 @@ export const rolloutStageTransitions = pgTable(
 		enteredAt: timestamp("entered_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
-		completedAt: timestamp("completed_at", { withTimezone: true }),
 	},
 	(table) => [
 		primaryKey({ columns: [table.rolloutId, table.stage, table.scope] }),

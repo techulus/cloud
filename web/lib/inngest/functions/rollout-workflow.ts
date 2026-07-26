@@ -10,15 +10,19 @@ import {
 	workQueue,
 } from "@/db/schema";
 import { bumpAgentGeneration } from "@/lib/agent-generation";
-import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
-import { summarizePlannedDeploymentHealth } from "@/lib/rollout-health";
+import {
+	isObservedReady,
+	isObservedStarting,
+	type ObservedPhase,
+	observedReadyPhases,
+} from "@/lib/deployment-status";
 import { recordRolloutStageBoundary } from "@/lib/rollout-timeline";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import {
-	buildRolloutReconcileWorkItem,
+	buildRolloutReconcileWorkItems,
 	enqueueRolloutReconcile,
 } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -68,6 +72,33 @@ function getPreflightFailureReason(error: unknown) {
 	}
 
 	return null;
+}
+
+export function classifyDeploymentHealth(
+	plannedDeploymentIds: string[],
+	healthStates: ReadonlyArray<{
+		id: string;
+		observedPhase: ObservedPhase;
+	}>,
+) {
+	const reportedIds = new Set(healthStates.map((deployment) => deployment.id));
+	const missingDeploymentIds = plannedDeploymentIds.filter(
+		(deploymentId) => !reportedIds.has(deploymentId),
+	);
+	const unresolvedDeploymentIds = healthStates
+		.filter((deployment) => !isObservedReady(deployment.observedPhase))
+		.map((deployment) => deployment.id);
+	return {
+		hasTerminalFailure:
+			missingDeploymentIds.length > 0 ||
+			healthStates.some(
+				(deployment) =>
+					!isObservedReady(deployment.observedPhase) &&
+					!isObservedStarting(deployment.observedPhase),
+			),
+		missingDeploymentIds,
+		unresolvedDeploymentIds,
+	};
 }
 
 export async function acquireRolloutTurn(
@@ -608,7 +639,7 @@ export const rolloutWorkflow = inngest.createFunction(
 						.where(inArray(deployments.id, deploymentIds)),
 			);
 
-			const healthSummary = summarizePlannedDeploymentHealth(
+			const healthSummary = classifyDeploymentHealth(
 				deploymentIds,
 				healthStates,
 			);
@@ -640,20 +671,24 @@ export const rolloutWorkflow = inngest.createFunction(
 					.innerJoin(servers, eq(deployments.serverId, servers.id))
 					.where(inArray(deployments.id, deploymentIds));
 
-				const deploymentStateIds = new Set(
-					deploymentStates.map((deployment) => deployment.id),
+				const healthSummary = classifyDeploymentHealth(
+					deploymentIds,
+					deploymentStates,
 				);
-				const missingDeploymentStates = deploymentIds
-					.filter((deploymentId) => !deploymentStateIds.has(deploymentId))
-					.map((deploymentId) => ({
+				const missingDeploymentStates = healthSummary.missingDeploymentIds.map(
+					(deploymentId) => ({
 						id: deploymentId,
 						observedPhase: "failed" as const,
 						serverName: "unknown server",
-					}));
+					}),
+				);
+				const unresolvedDeploymentIds = new Set(
+					healthSummary.unresolvedDeploymentIds,
+				);
 
 				return [
-					...deploymentStates.filter(
-						(deployment) => !isObservedReady(deployment.observedPhase),
+					...deploymentStates.filter((deployment) =>
+						unresolvedDeploymentIds.has(deployment.id),
 					),
 					...missingDeploymentStates,
 				];
@@ -800,13 +835,11 @@ export const rolloutWorkflow = inngest.createFunction(
 					await tx
 						.insert(workQueue)
 						.values(
-							routingTargetIds.map((serverId) =>
-								buildRolloutReconcileWorkItem({
-									rolloutId,
-									stage: "routing",
-									serverId,
-								}),
-							),
+							buildRolloutReconcileWorkItems({
+								rolloutId,
+								stage: "routing",
+								serverIds: routingTargetIds,
+							}),
 						)
 						.onConflictDoNothing({ target: workQueue.id });
 				}

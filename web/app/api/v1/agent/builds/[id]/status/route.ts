@@ -1,15 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds, serviceRevisions, workQueue } from "@/db/schema";
+import { builds, serviceRevisions } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { revisionRepositoryFullName } from "@/lib/build-revision-source";
 import { sendBuildFailureAlert } from "@/lib/email";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { platformImageForTarget } from "@/lib/manifest-finalization";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { enqueueWork } from "@/lib/work-queue";
+import { enqueueWork, lockOwnedBuildWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
 	attempt: number;
@@ -54,43 +55,6 @@ const transitionSources: Record<StatusUpdate["status"], BuildStatus[]> = {
 	completed: ["pending", "claimed", "cloning", "building", "pushing"],
 	failed: ["pending", "claimed", "cloning", "building", "pushing"],
 };
-
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-async function lockOwnedBuildWork(
-	tx: Transaction,
-	buildId: string,
-	serverId: string,
-	attempt: number,
-) {
-	return tx
-		.select({ id: workQueue.id })
-		.from(workQueue)
-		.where(
-			and(
-				eq(workQueue.id, `build-work-${buildId}`),
-				eq(workQueue.serverId, serverId),
-				eq(workQueue.type, "build"),
-				eq(workQueue.status, "processing"),
-				eq(workQueue.attempts, attempt),
-			),
-		)
-		.for("update")
-		.then((rows) => rows[0]);
-}
-
-function platformImageForTarget(finalImage: string, targetPlatform: string) {
-	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
-	if (
-		operatingSystem !== "linux" ||
-		!architecture ||
-		extra.length > 0 ||
-		!["amd64", "arm64"].includes(architecture)
-	) {
-		throw new Error(`Invalid build target platform: ${targetPlatform}`);
-	}
-	return `${finalImage}-${architecture}`;
-}
 
 async function sendBuildCompletedEvent(data: {
 	buildId: string;

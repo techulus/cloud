@@ -151,6 +151,7 @@ func (a *Agent) transitionToIdle() {
 	case <-a.continueProcessing:
 	default:
 	}
+	a.processingImages = nil
 	a.SetState(StateIdle)
 	if a.consumeExpectedStateRefresh() {
 		log.Printf("[processing] fetching latest expected state after pending refresh")
@@ -192,6 +193,7 @@ func (a *Agent) handleIdle() {
 		}
 		log.Printf("[idle] transitioning to PROCESSING")
 		a.expectedState = expected
+		a.processingImages = images
 		a.processingStart = time.Now()
 		a.lastAppliedActionKey = ""
 		a.SetState(StateProcessing)
@@ -221,12 +223,7 @@ func (a *Agent) handleProcessing() {
 		return
 	}
 
-	images, err := a.resolveExpectedImages(a.expectedState)
-	if err != nil {
-		log.Printf("[processing] failed to resolve expected images: %v", err)
-		a.transitionToIdle()
-		return
-	}
+	images := a.processingImages
 	actions := a.planReconcile(a.expectedState, actual, images)
 
 	if len(actions) == 0 {
@@ -673,44 +670,6 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 		}
 		if err := a.withDeploymentOperationLock(action.DeploymentID, func() error { return container.ForceRemove(action.Actual.ID) }); err != nil {
 			return fmt.Errorf("failed to remove orphan container: %w", err)
-		}
-		return nil
-
-	case actionDeployMissingContainer:
-		if action.Expected == nil {
-			return fmt.Errorf("missing expected container for %s", action.Kind)
-		}
-		if err := a.DeployExpectedContainer(*action.Expected); err != nil {
-			return fmt.Errorf("failed to deploy container: %w", err)
-		}
-		return nil
-
-	case actionStartContainer:
-		if action.Actual == nil || action.Expected == nil {
-			return fmt.Errorf("missing container state for %s", action.Kind)
-		}
-		if err := container.Start(action.Actual.ID); err != nil {
-			log.Printf("[reconcile] start failed, will redeploy: %v", err)
-			if err := container.Stop(action.Actual.ID); err != nil {
-				log.Printf("[reconcile] warning: failed to stop old container: %v", err)
-			}
-			if err := a.DeployExpectedContainer(*action.Expected); err != nil {
-				return fmt.Errorf("failed to redeploy container: %w", err)
-			}
-		} else {
-			a.monitorContainerHealth(action.Actual.ID, *action.Expected)
-		}
-		return nil
-
-	case actionRedeployContainer:
-		if action.Actual == nil || action.Expected == nil {
-			return fmt.Errorf("missing container state for %s", action.Kind)
-		}
-		if err := container.Stop(action.Actual.ID); err != nil {
-			log.Printf("[reconcile] warning: failed to stop old container: %v", err)
-		}
-		if err := a.DeployExpectedContainer(*action.Expected); err != nil {
-			return fmt.Errorf("failed to redeploy container: %w", err)
 		}
 		return nil
 

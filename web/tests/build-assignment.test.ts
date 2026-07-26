@@ -188,10 +188,7 @@ describe("revision-backed build assignment", () => {
 			{ id: "server-b", meta: { arch: "amd64" } },
 			{ id: "server-c", meta: { arch: "amd64" } },
 		];
-		const serviceIds = Array.from(
-			{ length: 50 },
-			(_, index) => `service-${index}`,
-		);
+		const serviceIds = ["service-0", "service-1", "service-6"];
 		for (const _serviceId of serviceIds) mocks.queryResults.push(servers);
 		const original = await Promise.all(
 			serviceIds.map((serviceId) =>

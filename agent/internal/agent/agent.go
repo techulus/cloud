@@ -94,6 +94,7 @@ type Agent struct {
 	PrivateIP                    string
 	DataDir                      string
 	expectedState                *agenthttp.ExpectedState
+	processingImages             map[string]container.ResolvedImage
 	processingStart              time.Time
 	lastAppliedActionKey         string
 	LogCollector                 *logs.Collector

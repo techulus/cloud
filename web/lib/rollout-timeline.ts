@@ -36,7 +36,6 @@ export async function recordRolloutStageBoundary(
 			serverId: input.serverId,
 			generation: input.generation,
 			enteredAt: at,
-			completedAt: at,
 		})
 		.onConflictDoNothing();
 }

@@ -40,8 +40,7 @@ vi.mock("@/lib/inngest/events", () => ({
 }));
 
 import {
-	buildRolloutReconcileWorkItem,
-	classifyWorkType,
+	buildRolloutReconcileWorkItems,
 	completeWorkItemResults,
 } from "@/lib/work-queue";
 
@@ -116,57 +115,27 @@ describe("manifest completion", () => {
 	});
 });
 
-describe("work lanes", () => {
-	it("classifies every work type into its agent execution lane", () => {
-		expect(
-			(["deploy", "reconcile", "stop", "restart"] as const).map(
-				classifyWorkType,
-			),
-		).toEqual(["runtime", "runtime", "runtime", "runtime"]);
-		expect(
-			(["build", "create_manifest"] as const).map(classifyWorkType),
-		).toEqual(["build", "build"]);
-		expect(
-			(
-				[
-					"force_cleanup",
-					"cleanup_volumes",
-					"backup_volume",
-					"restore_volume",
-					"upgrade_agent",
-				] as const
-			).map(classifyWorkType),
-		).toEqual(Array(5).fill("exclusive"));
-	});
-});
-
 describe("rollout reconcile work", () => {
-	it("uses a deterministic identity per rollout, stage, and server", () => {
-		const deploy = buildRolloutReconcileWorkItem({
-			rolloutId: "rollout_1",
-			stage: "deploy",
-			serverId: "server_1",
-		});
-
-		expect(deploy).toEqual({
-			id: "reconcile:rollout_1:deploy:server_1",
-			serverId: "server_1",
-			type: "reconcile",
-			payload: JSON.stringify({ reason: "rollout_deploy" }),
-		});
+	it("builds one deterministic wire item per server", () => {
 		expect(
-			buildRolloutReconcileWorkItem({
-				rolloutId: "rollout_1",
-				stage: "routing",
-				serverId: "server_1",
-			}).id,
-		).not.toBe(deploy.id);
-		expect(
-			buildRolloutReconcileWorkItem({
+			buildRolloutReconcileWorkItems({
 				rolloutId: "rollout_1",
 				stage: "deploy",
+				serverIds: ["server_2", "server_1", "server_2"],
+			}),
+		).toEqual([
+			{
+				id: "reconcile:rollout_1:deploy:server_1",
+				serverId: "server_1",
+				type: "reconcile",
+				payload: '{"reason":"rollout_deploy"}',
+			},
+			{
+				id: "reconcile:rollout_1:deploy:server_2",
 				serverId: "server_2",
-			}).id,
-		).not.toBe(deploy.id);
+				type: "reconcile",
+				payload: '{"reason":"rollout_deploy"}',
+			},
+		]);
 	});
 });

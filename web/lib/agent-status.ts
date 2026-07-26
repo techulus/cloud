@@ -80,9 +80,9 @@ export function getReportedContainerAttachmentPhase({
 	hasHealthCheck: boolean;
 	healthStatus: ContainerStatus["healthStatus"];
 }) {
-	if (!hasHealthCheck || healthStatus === "healthy") return "healthy" as const;
-	if (healthStatus === "unhealthy") return "unhealthy" as const;
-	return "starting" as const;
+	if (!hasHealthCheck || healthStatus === "healthy") return "healthy";
+	if (healthStatus === "unhealthy") return "unhealthy";
+	return "starting";
 }
 
 export function getStoppedContainerReportUpdate(deployment: {
@@ -221,15 +221,12 @@ async function applyStartingHealthCheckFailure({
 			)
 			.returning({ id: deployments.id });
 		if (rows.length) {
-			const recipients = await tx.select({ id: servers.id }).from(servers);
-			for (const recipient of recipients) {
-				await bumpAgentGeneration(tx, recipient.id);
-			}
+			await bumpExpectedStateRecipients(tx);
 		}
 		return rows;
 	});
 
-	if (updated.length === 0) return false;
+	if (updated.length === 0) return;
 
 	console.log(`[health] deployment ${deployment.id} failed health check`);
 	if (isRolloutDeployment && deployment.rolloutId) {
@@ -260,8 +257,6 @@ async function applyStartingHealthCheckFailure({
 			`[autoheal] deployment ${deployment.id} exceeded recreate limit`,
 		);
 	}
-
-	return true;
 }
 
 async function applyDeploymentErrors(
@@ -336,10 +331,7 @@ async function applyDeploymentErrors(
 				)
 				.returning({ id: deployments.id });
 			if (rows.length) {
-				const recipients = await tx.select({ id: servers.id }).from(servers);
-				for (const recipient of recipients) {
-					await bumpAgentGeneration(tx, recipient.id);
-				}
+				await bumpExpectedStateRecipients(tx);
 			}
 			return rows;
 		});
@@ -470,10 +462,7 @@ async function applyServerlessTransitions(
 					)
 					.returning({ id: deployments.id });
 				if (rows.length) {
-					const recipients = await tx.select({ id: servers.id }).from(servers);
-					for (const recipient of recipients) {
-						await bumpAgentGeneration(tx, recipient.id);
-					}
+					await bumpExpectedStateRecipients(tx);
 				}
 				return rows;
 			});
@@ -527,10 +516,7 @@ async function applyServerlessTransitions(
 					)
 					.returning({ id: deployments.id });
 				if (rows.length) {
-					const recipients = await tx.select({ id: servers.id }).from(servers);
-					for (const recipient of recipients) {
-						await bumpAgentGeneration(tx, recipient.id);
-					}
+					await bumpExpectedStateRecipients(tx);
 				}
 				return rows;
 			});
@@ -583,10 +569,7 @@ async function applyServerlessTransitions(
 				)
 				.returning({ id: deployments.id });
 			if (rows.length) {
-				const recipients = await tx.select({ id: servers.id }).from(servers);
-				for (const recipient of recipients) {
-					await bumpAgentGeneration(tx, recipient.id);
-				}
+				await bumpExpectedStateRecipients(tx);
 			}
 			return rows;
 		});
@@ -943,10 +926,7 @@ export async function applyStatusReport(
 						)
 						.returning({ id: deployments.id });
 					if (updated.length === 0) return;
-					const recipients = await tx.select({ id: servers.id }).from(servers);
-					for (const recipient of recipients) {
-						await bumpAgentGeneration(tx, recipient.id);
-					}
+					await bumpExpectedStateRecipients(tx);
 				});
 			}
 		}
@@ -1021,10 +1001,7 @@ export async function applyStatusReport(
 					.where(eq(deployments.id, deployment.id))
 					.returning({ id: deployments.id });
 				if (updated.length && isDeploymentRoutable(deployment)) {
-					const recipients = await tx.select({ id: servers.id }).from(servers);
-					for (const recipient of recipients) {
-						await bumpAgentGeneration(tx, recipient.id);
-					}
+					await bumpExpectedStateRecipients(tx);
 				}
 			});
 			continue;
@@ -1035,15 +1012,13 @@ export async function applyStatusReport(
 			updateFields.healthStatus = null;
 			updateFields.failedStage ??= "container_failed";
 			await db.transaction(async (tx) => {
-				await tx
+				const updated = await tx
 					.update(deployments)
 					.set(updateFields)
-					.where(eq(deployments.id, deployment.id));
-				if (isDeploymentRoutable(deployment)) {
-					const recipients = await tx.select({ id: servers.id }).from(servers);
-					for (const recipient of recipients) {
-						await bumpAgentGeneration(tx, recipient.id);
-					}
+					.where(eq(deployments.id, deployment.id))
+					.returning({ id: deployments.id });
+				if (updated.length && isDeploymentRoutable(deployment)) {
+					await bumpExpectedStateRecipients(tx);
 				}
 			});
 			if (deployment.rolloutId) {

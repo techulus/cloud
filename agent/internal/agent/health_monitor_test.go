@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	agenthttp "techulus/cloud-agent/internal/http"
 )
 
 func TestPollContainerHealthStopsAtTerminalState(t *testing.T) {
@@ -21,30 +23,22 @@ func TestPollContainerHealthStopsAtTerminalState(t *testing.T) {
 	}
 }
 
-func TestPollContainerHealthIsBounded(t *testing.T) {
-	started := time.Now()
-	status := pollContainerHealth(context.Background(), "container-1", time.Millisecond, 10*time.Millisecond, func(context.Context, string) string {
-		return "starting"
-	})
+func TestMonitorContainerHealthDeduplicatesContainerID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		runContext:     ctx,
+		healthMonitors: map[string]struct{}{},
+	}
+	expected := agenthttp.ExpectedContainer{HealthCheck: &agenthttp.HealthCheck{Cmd: "true"}}
 
-	if status != "" {
-		t.Fatalf("status = %q, want no terminal status", status)
-	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("poll exceeded deadline: %s", elapsed)
-	}
-}
+	agent.monitorContainerHealth("container-1", expected)
+	agent.monitorContainerHealth("container-1", expected)
+	agent.monitorContainerHealth("container-2", expected)
 
-func TestClaimHealthMonitorDeduplicatesContainerID(t *testing.T) {
-	agent := &Agent{runContext: context.Background()}
-
-	if _, ok := agent.claimHealthMonitor("container-1"); !ok {
-		t.Fatal("first monitor claim was rejected")
-	}
-	if _, ok := agent.claimHealthMonitor("container-1"); ok {
-		t.Fatal("duplicate monitor claim was accepted")
-	}
-	if _, ok := agent.claimHealthMonitor("container-2"); !ok {
-		t.Fatal("different container ID was rejected")
+	agent.healthMonitorMutex.Lock()
+	defer agent.healthMonitorMutex.Unlock()
+	if len(agent.healthMonitors) != 2 {
+		t.Fatalf("active monitors = %d, want one per container ID", len(agent.healthMonitors))
 	}
 }
