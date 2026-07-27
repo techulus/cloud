@@ -199,7 +199,7 @@ describe("GitHub push webhook", () => {
 			123,
 			"techulus/cloud",
 			COMMIT_SHA,
-			"Cloud / production / web",
+			"cloud / production / web",
 			expect.any(String),
 		);
 		expect(mocks.createGitHubDeployment).toHaveBeenNthCalledWith(
@@ -207,7 +207,7 @@ describe("GitHub push webhook", () => {
 			123,
 			"techulus/cloud",
 			COMMIT_SHA,
-			"Cloud / production / web",
+			"cloud / production / web",
 			expect.any(String),
 		);
 		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenNthCalledWith(

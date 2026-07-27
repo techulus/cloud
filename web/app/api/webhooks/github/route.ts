@@ -198,7 +198,7 @@ async function handlePushEvent(payload: PushPayload) {
 					githubRepo.installationId,
 					repository.full_name,
 					head_commit.id,
-					`${project.name} / ${environment.name} / ${service.name}`,
+					`${project.slug} / ${environment.name} / ${service.name}`,
 					`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`,
 				);
 

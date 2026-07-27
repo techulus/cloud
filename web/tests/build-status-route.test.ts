@@ -250,7 +250,6 @@ describe("agent build status transitions", () => {
 				logUrl: "https://cloud.techulus.com/builds/build-amd64/logs",
 				environmentUrl:
 					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
-				autoInactive: false,
 			},
 		);
 	});
