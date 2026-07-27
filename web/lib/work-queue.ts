@@ -11,6 +11,8 @@ import { notifyWorkAvailable } from "@/lib/work-queue-notifications";
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
 
+type WorkQueueTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 type WorkQueueStorageConfig = {
 	provider: string;
 	bucket: string;
@@ -103,9 +105,10 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 	serverId: string,
 	type: T,
 	payload: WorkPayloadByType[T],
-	options: { id?: string } = {},
+	options: { id?: string; tx?: WorkQueueTransaction } = {},
 ) {
-	await db
+	const executor = options.tx ?? db;
+	await executor
 		.insert(workQueue)
 		.values({
 			id: options.id ?? randomUUID(),
@@ -115,10 +118,30 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 		})
 		.onConflictDoNothing({ target: workQueue.id });
 
+	if (options.tx) {
+		// PostgreSQL delivers transactional notifications only after commit, so the
+		// agent cannot wake before the expected-state mutation is durable.
+		await notifyWorkAvailable(serverId, options.tx);
+		return;
+	}
+
 	try {
 		await notifyWorkAvailable(serverId);
 	} catch (error) {
 		console.error("[work-queue] failed to publish notification:", error);
+	}
+}
+
+export async function enqueueReconcileForAllOnlineServers(
+	reason: string,
+	tx: WorkQueueTransaction,
+) {
+	const onlineServers = await tx
+		.select({ id: servers.id })
+		.from(servers)
+		.where(eq(servers.status, "online"));
+	for (const server of onlineServers) {
+		await enqueueWork(server.id, "reconcile", { reason }, { tx });
 	}
 }
 

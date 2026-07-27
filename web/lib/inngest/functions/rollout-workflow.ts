@@ -7,6 +7,7 @@ import { buildRoutingTargets } from "@/lib/routing-sync";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
+import { enqueueReconcileForAllOnlineServers } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 import {
@@ -135,16 +136,27 @@ export async function acquireRolloutTurn(
 			return "waiting";
 		}
 
-		await tx
+		const acquired = await tx
 			.update(rollouts)
 			.set({
 				status: "in_progress",
 				currentStage: "preparing",
 				completedAt: null,
 			})
-			.where(eq(rollouts.id, rolloutId));
+			.where(
+				and(
+					eq(rollouts.id, rolloutId),
+					recoverableEnqueueFailure
+						? and(
+								eq(rollouts.status, "failed"),
+								eq(rollouts.currentStage, "enqueue_failed"),
+							)
+						: eq(rollouts.status, "queued"),
+				),
+			)
+			.returning({ id: rollouts.id });
 
-		return "acquired";
+		return acquired.length > 0 ? "acquired" : "terminal";
 	});
 }
 
@@ -157,11 +169,20 @@ export const rolloutWorkflow = inngest.createFunction(
 			{ event: inngestEvents.rolloutCancelled, match: "data.rolloutId" },
 		],
 		onFailure: async ({ event }) => {
-			const { rolloutId } = event.data.event.data as {
+			const { rolloutId, serviceId } = event.data.event.data as {
 				rolloutId?: string;
+				serviceId?: string;
 			};
 
 			if (!rolloutId) return;
+			if (serviceId) {
+				await handleRolloutFailure(
+					rolloutId,
+					serviceId,
+					"workflow_failed",
+					true,
+				);
+			}
 
 			await db
 				.update(rollouts)
@@ -339,7 +360,10 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (!isRollingUpdate) {
 			await step.run("cleanup-existing", async () => {
-				const { deletedCount } = await cleanupExistingDeployments(serviceId);
+				const { deletedCount } = await cleanupExistingDeployments(
+					rolloutId,
+					serviceId,
+				);
 				if (deletedCount > 0) {
 					await ingestRolloutLog(
 						rolloutId,
@@ -547,56 +571,75 @@ export const rolloutWorkflow = inngest.createFunction(
 		);
 		const routingTargetIds = routingTargetResult.targetIds;
 
-		await step.run("start-dns-sync", async () => {
-			await db.transaction(async (tx) => {
-				await tx
-					.update(rollouts)
-					.set({ currentStage: "dns_sync" })
-					.where(eq(rollouts.id, rolloutId));
-
-				await tx
-					.update(deployments)
-					.set({ trafficState: "active" })
-					.where(
-						and(
-							eq(deployments.rolloutId, rolloutId),
-							eq(deployments.trafficState, "candidate"),
-							inArray(deployments.observedPhase, observedReadyPhases),
-						),
-					);
-
-				await tx
-					.update(deployments)
-					.set({ trafficState: "draining" })
-					.where(
-						and(
-							eq(deployments.serviceId, serviceId),
-							eq(deployments.trafficState, "active"),
-							or(
-								ne(deployments.rolloutId, rolloutId),
-								isNull(deployments.rolloutId),
-							),
-						),
-					);
-			});
-
-			await ingestRolloutLog(
-				rolloutId,
-				serviceId,
-				"dns_sync",
-				"Routing traffic to new deployments",
-			);
-		});
-
-		const dnsResults = await Promise.all(
-			routingTargetIds.map((serverId) =>
-				step.waitForEvent(`wait-dns-${serverId}`, {
-					event: inngestEvents.serverDnsSynced,
-					timeout: "5m",
-					if: `async.data.serverId == "${serverId}" && async.data.rolloutId == "${rolloutId}"`,
-				}),
-			),
+		const dnsWaits = routingTargetIds.map((serverId) =>
+			step.waitForEvent(`wait-dns-${serverId}`, {
+				event: inngestEvents.serverDnsSynced,
+				timeout: "5m",
+				if: `async.data.serverId == "${serverId}" && async.data.rolloutId == "${rolloutId}"`,
+			}),
 		);
+		const dnsResultsWithTrigger = await Promise.all([
+			...dnsWaits,
+			step.run("start-dns-sync", async () => {
+				await db.transaction(async (tx) => {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+					);
+					const rollout = await tx
+						.select({ status: rollouts.status })
+						.from(rollouts)
+						.where(eq(rollouts.id, rolloutId))
+						.for("update")
+						.then((rows) => rows[0]);
+					if (rollout?.status !== "in_progress") {
+						throw new Error("Rollout is no longer in progress");
+					}
+
+					await tx
+						.update(rollouts)
+						.set({ currentStage: "dns_sync" })
+						.where(eq(rollouts.id, rolloutId));
+
+					await tx
+						.update(deployments)
+						.set({ trafficState: "active" })
+						.where(
+							and(
+								eq(deployments.rolloutId, rolloutId),
+								eq(deployments.trafficState, "candidate"),
+								inArray(deployments.observedPhase, observedReadyPhases),
+							),
+						);
+
+					await tx
+						.update(deployments)
+						.set({ trafficState: "draining" })
+						.where(
+							and(
+								eq(deployments.serviceId, serviceId),
+								eq(deployments.trafficState, "active"),
+								or(
+									ne(deployments.rolloutId, rolloutId),
+									isNull(deployments.rolloutId),
+								),
+							),
+						);
+
+					await enqueueReconcileForAllOnlineServers(
+						"rollout_routing_changed",
+						tx,
+					);
+				});
+
+				await ingestRolloutLog(
+					rolloutId,
+					serviceId,
+					"dns_sync",
+					"Routing traffic to new deployments",
+				);
+			}),
+		]);
+		const dnsResults = dnsResultsWithTrigger.slice(0, routingTargetIds.length);
 
 		const dnsTimedOut = dnsResults.some((r) => r === null);
 		const dnsServerNames = await step.run("load-dns-server-names", async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -251,14 +251,39 @@ export async function cleanupTerminalDeployments(
 }
 
 export async function cleanupExistingDeployments(
+	rolloutId: string,
 	serviceId: string,
 ): Promise<{ deletedCount: number }> {
-	const deletedDeployments = await db
-		.delete(deployments)
-		.where(eq(deployments.serviceId, serviceId))
-		.returning({ id: deployments.id });
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const rollout = await tx
+			.select({ status: rollouts.status })
+			.from(rollouts)
+			.where(eq(rollouts.id, rolloutId))
+			.for("update")
+			.then((rows) => rows[0]);
+		if (rollout?.status !== "in_progress") {
+			throw new Error("Rollout is no longer in progress");
+		}
 
-	return { deletedCount: deletedDeployments.length };
+		const deletedDeployments = await tx
+			.delete(deployments)
+			.where(eq(deployments.serviceId, serviceId))
+			.returning({ id: deployments.id, serverId: deployments.serverId });
+
+		for (const serverId of new Set(
+			deletedDeployments.map((deployment) => deployment.serverId),
+		)) {
+			await enqueueWork(
+				serverId,
+				"reconcile",
+				{ reason: "rollout_existing_deployments_removed" },
+				{ tx },
+			);
+		}
+
+		return { deletedCount: deletedDeployments.length };
+	});
 }
 
 export type CertificateProvisioningResult = {
@@ -325,7 +350,38 @@ export async function createDeploymentRecords(
 ): Promise<{ deploymentIds: string[] }> {
 	const { revisionId, specification, placements, serverMap } = context;
 
-	const deploymentIds: string[] = [];
+	const existingDeployments = await db
+		.select({
+			id: deployments.id,
+			serviceId: deployments.serviceId,
+			serviceRevisionId: deployments.serviceRevisionId,
+			serverId: deployments.serverId,
+		})
+		.from(deployments)
+		.where(eq(deployments.rolloutId, rolloutId));
+	const requestedReplicasByServer = new Map(
+		placements.map((placement) => [placement.serverId, placement.replicas]),
+	);
+	const existingDeploymentsByServer = Map.groupBy(
+		existingDeployments,
+		(deployment) => deployment.serverId,
+	);
+	for (const deployment of existingDeployments) {
+		if (
+			deployment.serviceId !== serviceId ||
+			deployment.serviceRevisionId !== revisionId ||
+			!requestedReplicasByServer.has(deployment.serverId)
+		) {
+			throw new Error("Rollout deployment idempotency conflict");
+		}
+	}
+	for (const [serverId, existing] of existingDeploymentsByServer) {
+		if (existing.length > (requestedReplicasByServer.get(serverId) ?? 0)) {
+			throw new Error("Rollout deployment idempotency conflict");
+		}
+	}
+
+	const deploymentIds = existingDeployments.map((deployment) => deployment.id);
 
 	for (const placement of placements) {
 		if (placement.replicas <= 0) continue;
@@ -335,7 +391,9 @@ export async function createDeploymentRecords(
 			throw new Error(`Server ${placement.serverId} not found`);
 		}
 
-		for (let i = 0; i < placement.replicas; i++) {
+		const existingReplicaCount =
+			existingDeploymentsByServer.get(placement.serverId)?.length ?? 0;
+		for (let i = existingReplicaCount; i < placement.replicas; i++) {
 			const deploymentId = randomUUID();
 			const hostPorts = await allocateHostPorts(
 				server.id,
@@ -344,6 +402,19 @@ export async function createDeploymentRecords(
 			const ipAddress = await assignContainerIp(server.id);
 
 			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+				);
+				const rollout = await tx
+					.select({ status: rollouts.status })
+					.from(rollouts)
+					.where(eq(rollouts.id, rolloutId))
+					.for("update")
+					.then((rows) => rows[0]);
+				if (rollout?.status !== "in_progress") {
+					throw new Error("Rollout is no longer in progress");
+				}
+
 				await tx.insert(deployments).values({
 					id: deploymentId,
 					serviceId,
@@ -366,14 +437,19 @@ export async function createDeploymentRecords(
 						})),
 					);
 				}
+
+				await enqueueWork(
+					server.id,
+					"reconcile",
+					{
+						reason: "rollout_deployment_created",
+						deploymentId,
+					},
+					{ tx },
+				);
 			});
 
 			deploymentIds.push(deploymentId);
-
-			await enqueueWork(server.id, "reconcile", {
-				reason: "rollout_deployment_created",
-				deploymentId,
-			});
 		}
 	}
 
@@ -414,8 +490,22 @@ export async function completeRollout(
 							eq(deployments.trafficState, "draining"),
 						),
 					)
-					.returning({ id: deployments.id })
+					.returning({
+						id: deployments.id,
+						serverId: deployments.serverId,
+					})
 			: [];
+
+		for (const serverId of new Set(
+			stoppedDeployments.map((deployment) => deployment.serverId),
+		)) {
+			await enqueueWork(
+				serverId,
+				"reconcile",
+				{ reason: "rollout_old_deployments_removed" },
+				{ tx },
+			);
+		}
 
 		const serviceUpdate =
 			specification.placement.mode === "automatic"

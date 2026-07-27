@@ -40,7 +40,6 @@ import {
 import { validateDockerImageInternal } from "@/lib/docker-image";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { restoreDrainingDeploymentsForRollback } from "@/lib/inngest/functions/rollout-utils";
 import { allocatePort } from "@/lib/port-allocation";
 import {
 	containerPathSchema,
@@ -55,7 +54,10 @@ import type {
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
-import { enqueueWork } from "@/lib/work-queue";
+import {
+	enqueueReconcileForAllOnlineServers,
+	enqueueWork,
+} from "@/lib/work-queue";
 import { deleteBackup } from "./backups";
 
 export async function validateDockerImage(
@@ -1320,109 +1322,115 @@ export async function restartService(serviceId: string) {
 
 export async function abortRollout(serviceId: string) {
 	await requireDeveloperRole();
-	const activeRollouts = await db
-		.select({ id: rollouts.id, status: rollouts.status })
-		.from(rollouts)
-		.where(
-			and(
-				eq(rollouts.serviceId, serviceId),
-				inArray(rollouts.status, ["queued", "in_progress"]),
-			),
-		);
+	const activeRolloutIds = await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const activeRollouts = await tx
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				and(
+					eq(rollouts.serviceId, serviceId),
+					inArray(rollouts.status, ["queued", "in_progress"]),
+				),
+			)
+			.for("update");
+		if (activeRollouts.length === 0) return [];
 
-	if (activeRollouts.length === 0) {
+		const rolloutIds = activeRollouts.map((rollout) => rollout.id);
+		await tx
+			.update(rollouts)
+			.set({
+				status: "failed",
+				currentStage: "aborted",
+				completedAt: new Date(),
+			})
+			.where(inArray(rollouts.id, rolloutIds));
+		await tx
+			.update(deployments)
+			.set({ trafficState: "active" })
+			.where(
+				and(
+					eq(deployments.serviceId, serviceId),
+					eq(deployments.trafficState, "draining"),
+				),
+			);
+
+		const rolloutDeployments = await tx
+			.select()
+			.from(deployments)
+			.where(inArray(deployments.rolloutId, rolloutIds));
+		const affectedServerIds = new Set(
+			rolloutDeployments.map((deployment) => deployment.serverId),
+		);
+		const serverContainers = new Map<string, string[]>();
+		for (const deployment of rolloutDeployments) {
+			if (!deployment.containerId) continue;
+			const containers = serverContainers.get(deployment.serverId) ?? [];
+			containers.push(deployment.containerId);
+			serverContainers.set(deployment.serverId, containers);
+		}
+
+		if (affectedServerIds.size > 0) {
+			const pendingWork = await tx
+				.select({ id: workQueue.id, payload: workQueue.payload })
+				.from(workQueue)
+				.where(
+					and(
+						eq(workQueue.status, "pending"),
+						inArray(workQueue.type, ["deploy", "reconcile"]),
+						inArray(workQueue.serverId, [...affectedServerIds]),
+					),
+				);
+			const deploymentIds = new Set(
+				rolloutDeployments.map((deployment) => deployment.id),
+			);
+			const workIds = pendingWork
+				.filter((work) => {
+					try {
+						return deploymentIds.has(JSON.parse(work.payload).deploymentId);
+					} catch {
+						return false;
+					}
+				})
+				.map((work) => work.id);
+			if (workIds.length > 0) {
+				await tx.delete(workQueue).where(inArray(workQueue.id, workIds));
+			}
+		}
+
+		for (const [serverId, containerIds] of serverContainers) {
+			await enqueueWork(
+				serverId,
+				"force_cleanup",
+				{ serviceId, containerIds },
+				{ tx },
+			);
+		}
+		for (const deployment of rolloutDeployments) {
+			await tx
+				.delete(deploymentPorts)
+				.where(eq(deploymentPorts.deploymentId, deployment.id));
+		}
+		await tx
+			.delete(deployments)
+			.where(inArray(deployments.rolloutId, rolloutIds));
+		await enqueueReconcileForAllOnlineServers("rollout_aborted", tx);
+		return rolloutIds;
+	});
+
+	if (activeRolloutIds.length === 0) {
 		return { success: false, error: "No in-progress rollout found" };
 	}
 
-	const activeRolloutIds = activeRollouts.map((rollout) => rollout.id);
-
-	await db
-		.update(rollouts)
-		.set({
-			status: "failed",
-			currentStage: "aborted",
-			completedAt: new Date(),
-		})
-		.where(inArray(rollouts.id, activeRolloutIds));
-
 	for (const rolloutId of activeRolloutIds) {
-		await inngest.send(
-			inngestEvents.rolloutCancelled.create({
-				rolloutId,
-			}),
-		);
-	}
-
-	await restoreDrainingDeploymentsForRollback(serviceId);
-
-	const rolloutDeployments =
-		activeRolloutIds.length > 0
-			? await db
-					.select()
-					.from(deployments)
-					.where(inArray(deployments.rolloutId, activeRolloutIds))
-			: [];
-
-	const serverContainers = new Map<string, string[]>();
-
-	for (const dep of rolloutDeployments) {
-		if (dep.containerId) {
-			const containers = serverContainers.get(dep.serverId) || [];
-			containers.push(dep.containerId);
-			serverContainers.set(dep.serverId, containers);
-		}
-	}
-
-	for (const [serverId, containerIds] of serverContainers) {
-		await enqueueWork(serverId, "force_cleanup", {
-			serviceId,
-			containerIds,
-		});
-	}
-
-	for (const dep of rolloutDeployments) {
-		await db
-			.delete(deploymentPorts)
-			.where(eq(deploymentPorts.deploymentId, dep.id));
-	}
-
-	if (activeRolloutIds.length > 0) {
-		await db
-			.delete(deployments)
-			.where(inArray(deployments.rolloutId, activeRolloutIds));
-	}
-
-	const pendingWork =
-		serverContainers.size > 0
-			? await db
-					.select({ id: workQueue.id, payload: workQueue.payload })
-					.from(workQueue)
-					.where(
-						and(
-							eq(workQueue.status, "pending"),
-							inArray(workQueue.type, ["deploy", "reconcile"]),
-							inArray(workQueue.serverId, [...serverContainers.keys()]),
-						),
-					)
-			: [];
-
-	const rolloutDeploymentIds = new Set(rolloutDeployments.map((d) => d.id));
-	const workToDelete = pendingWork.filter((w) => {
 		try {
-			const parsed = JSON.parse(w.payload);
-			return rolloutDeploymentIds.has(parsed.deploymentId);
-		} catch {
-			return false;
+			await inngest.send(inngestEvents.rolloutCancelled.create({ rolloutId }));
+		} catch (error) {
+			console.error(
+				`[rollout:${rolloutId}] failed to send cancellation:`,
+				error,
+			);
 		}
-	});
-
-	if (workToDelete.length > 0) {
-		await db.delete(workQueue).where(
-			inArray(
-				workQueue.id,
-				workToDelete.map((w) => w.id),
-			),
-		);
 	}
 
 	return { success: true };
