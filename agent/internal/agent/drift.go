@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -514,7 +513,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 
 			resolved := string(images[exp.Image])
 			identityMismatch := resolved == "" || act.ImageID == "" || act.ImageID != resolved
-			if normalizeImage(exp.Image) != normalizeImage(act.Image) || identityMismatch {
+			if identityMismatch {
 				actions = append(actions, reconcileAction{
 					Kind:         actionRedeployContainer,
 					Description:  fmt.Sprintf("REDEPLOY %s (image identity: %s → %s)", exp.Name, act.ImageID, resolved),
@@ -606,24 +605,6 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 	sort.SliceStable(actions, func(i, j int) bool { return reconcileActionKey(actions[i]) < reconcileActionKey(actions[j]) })
 
 	return actions
-}
-
-func normalizeImage(image string) string {
-	digest := ""
-	if digestIndex := strings.Index(image, "@"); digestIndex != -1 {
-		digest = image[digestIndex:]
-		image = image[:digestIndex]
-	}
-
-	image = strings.TrimPrefix(image, "docker.io/library/")
-	image = strings.TrimPrefix(image, "docker.io/")
-
-	lastSlash := strings.LastIndex(image, "/")
-	lastColon := strings.LastIndex(image, ":")
-	if digest == "" && lastColon <= lastSlash {
-		image = image + ":latest"
-	}
-	return image + digest
 }
 
 func desiredContainerState(container agenthttp.ExpectedContainer) string {

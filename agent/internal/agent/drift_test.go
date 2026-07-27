@@ -82,7 +82,7 @@ func TestVerifyExpectedContainerIdentitiesRejectsDuplicateDeployment(t *testing.
 	}
 }
 
-func TestPlanReconcileRedeploysImageDrift(t *testing.T) {
+func TestPlanReconcileUsesResolvedImageIdentity(t *testing.T) {
 	a := NewAgent(nil, nil, nil, "", "", "", nil, nil, nil, nil, false, false)
 	expected := &agenthttp.ExpectedState{Containers: []agenthttp.ExpectedContainer{{DeploymentID: "dep_1", Name: "service", Image: "example/app:latest"}}}
 	resolved := map[string]container.ResolvedImage{"example/app:latest": "sha256:new"}
@@ -94,6 +94,15 @@ func TestPlanReconcileRedeploysImageDrift(t *testing.T) {
 		actions := a.planReconcile(expected, &ActualState{Containers: []container.Container{actual}}, resolved)
 		if len(actions) == 0 || actions[0].Kind != actionRedeployContainer {
 			t.Fatalf("identity drift did not plan redeploy for %+v: %+v", actual, actions)
+		}
+	}
+
+	actual := &ActualState{Containers: []container.Container{{
+		DeploymentID: "dep_1", State: "running", Image: "sha256:new", ImageID: "sha256:new",
+	}}}
+	for _, action := range a.planReconcile(expected, actual, resolved) {
+		if action.Kind == actionRedeployContainer {
+			t.Fatalf("matching immutable image identity planned redeploy: %+v", action)
 		}
 	}
 }
