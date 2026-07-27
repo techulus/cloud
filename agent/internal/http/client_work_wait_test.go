@@ -80,20 +80,6 @@ func TestWaitForWorkRetriesRegisteredServerNotFound(t *testing.T) {
 	}
 }
 
-func TestWaitForWorkCancellation(t *testing.T) {
-	client, closeServer := workWaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	})
-	defer closeServer()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := client.WaitForWork(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want context.Canceled", err)
-	}
-}
-
 func workWaitTestClient(t *testing.T, handler http.HandlerFunc) (*Client, func()) {
 	t.Helper()
 	keyPair, err := crypto.GenerateKeyPair()

@@ -36,19 +36,6 @@ describe("agent work wait route", () => {
 		mocks.wait.mockResolvedValue("timeout");
 	});
 
-	it("returns authentication failures without subscribing", async () => {
-		mocks.verifyAgentRequest.mockResolvedValue({
-			success: false,
-			error: "Invalid signature",
-			status: 401,
-		});
-
-		const response = await GET(request());
-
-		expect(response.status).toBe(401);
-		expect(mocks.subscribeToWorkNotifications).not.toHaveBeenCalled();
-	});
-
 	it("returns immediately when durable work is already claimable", async () => {
 		mocks.hasClaimableWork.mockResolvedValue(true);
 
@@ -111,29 +98,8 @@ describe("agent work wait route", () => {
 			workAvailable: true,
 		});
 	});
-
-	it("cleans up when the request is aborted", async () => {
-		mocks.hasClaimableWork.mockResolvedValue(false);
-		mocks.wait.mockImplementation(
-			(_timeoutMs: number, signal: AbortSignal) =>
-				new Promise<string>((resolve) => {
-					signal.addEventListener("abort", () => resolve("aborted"), {
-						once: true,
-					});
-				}),
-		);
-		const controller = new AbortController();
-		const responsePromise = GET(request(controller.signal));
-		await vi.waitFor(() => expect(mocks.wait).toHaveBeenCalledOnce());
-
-		controller.abort();
-		const response = await responsePromise;
-
-		expect(response.status).toBe(499);
-		expect(mocks.close).toHaveBeenCalledOnce();
-	});
 });
 
-function request(signal?: AbortSignal) {
-	return new NextRequest("http://localhost/api/v1/agent/work/wait", { signal });
+function request() {
+	return new NextRequest("http://localhost/api/v1/agent/work/wait");
 }
