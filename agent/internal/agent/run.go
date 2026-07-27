@@ -208,6 +208,9 @@ func (a *Agent) WorkQueueWakeLoop(ctx context.Context) {
 		}
 		if !workAvailable {
 			delay = workWakeMinDelay
+			if !waitForWorkWakeDelay(ctx, delay) {
+				return
+			}
 			continue
 		}
 
