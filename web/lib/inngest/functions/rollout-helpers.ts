@@ -79,7 +79,8 @@ async function getUsedPorts(
 	const existingPorts = await tx
 		.select({ hostPort: deploymentPorts.hostPort })
 		.from(deploymentPorts)
-		.where(eq(deploymentPorts.serverId, serverId));
+		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
+		.where(eq(deployments.serverId, serverId));
 
 	return new Set(existingPorts.map((port) => port.hostPort));
 }
@@ -433,7 +434,6 @@ export async function createDeploymentRecords(
 						specification.ports.map((port, index) => ({
 							id: randomUUID(),
 							deploymentId,
-							serverId: server.id,
 							containerPort: port.containerPort,
 							hostPort: hostPorts[index],
 						})),

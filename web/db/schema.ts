@@ -695,10 +695,6 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
-		unique("deployments_id_server_id_unique").on(table.id, table.serverId),
-		uniqueIndex("deployments_server_ip_address_unique_idx")
-			.on(table.serverId, table.ipAddress)
-			.where(sql`${table.ipAddress} IS NOT NULL`),
 		foreignKey({
 			name: "deployments_service_revision_service_fk",
 			columns: [table.serviceRevisionId, table.serviceId],
@@ -757,10 +753,9 @@ export const deploymentPorts = pgTable(
 	"deployment_ports",
 	{
 		id: text("id").primaryKey(),
-		deploymentId: text("deployment_id").notNull(),
-		serverId: text("server_id")
+		deploymentId: text("deployment_id")
 			.notNull()
-			.references(() => servers.id, { onDelete: "cascade" }),
+			.references(() => deployments.id, { onDelete: "cascade" }),
 		containerPort: integer("container_port").notNull(),
 		hostPort: integer("host_port").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true })
@@ -769,19 +764,6 @@ export const deploymentPorts = pgTable(
 	},
 	(table) => [
 		index("deployment_ports_deployment_id_idx").on(table.deploymentId),
-		uniqueIndex("deployment_ports_server_host_port_unique_idx").on(
-			table.serverId,
-			table.hostPort,
-		),
-		uniqueIndex("deployment_ports_deployment_container_port_unique_idx").on(
-			table.deploymentId,
-			table.containerPort,
-		),
-		foreignKey({
-			name: "deployment_ports_deployment_server_fk",
-			columns: [table.deploymentId, table.serverId],
-			foreignColumns: [deployments.id, deployments.serverId],
-		}).onDelete("cascade"),
 	],
 );
 
