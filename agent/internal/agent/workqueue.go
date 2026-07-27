@@ -14,6 +14,12 @@ const (
 	StatusReportInterval = 15 * time.Second
 )
 
+func (a *Agent) HasActiveWorkItem() bool {
+	a.workMutex.Lock()
+	defer a.workMutex.Unlock()
+	return a.activeWorkItem != nil
+}
+
 func (a *Agent) SnapshotWorkStatus() ([]agenthttp.CompletedWorkItem, []agenthttp.ActiveWorkItem) {
 	a.workMutex.Lock()
 	defer a.workMutex.Unlock()

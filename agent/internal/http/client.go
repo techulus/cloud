@@ -2,7 +2,9 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -407,6 +409,12 @@ type StatusResponse struct {
 	WorkItems                   []WorkQueueItem              `json:"workItems"`
 }
 
+var ErrWorkWaitUnsupported = errors.New("work wait endpoint unsupported")
+
+type WorkWaitResponse struct {
+	WorkAvailable bool `json:"workAvailable"`
+}
+
 type ServerlessTransitionResult struct {
 	ID           string `json:"id,omitempty"`
 	Type         string `json:"type,omitempty"`
@@ -459,6 +467,52 @@ func (c *Client) ReportStatus(report *StatusReport, completed []CompletedWorkIte
 	}
 
 	return &statusResponse, nil
+}
+
+func (c *Client) WaitForWork(ctx context.Context) (bool, error) {
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.baseURL+"/api/v1/agent/work/wait",
+		nil,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to create work wait request: %w", err)
+	}
+	c.signRequest(req, "")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to wait for work: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		return false, ErrWorkWaitUnsupported
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if readErr != nil {
+			return false, fmt.Errorf("failed to read work wait response: %w", readErr)
+		}
+		var errorResponse struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &errorResponse) != nil || errorResponse.Error == "" {
+			return false, ErrWorkWaitUnsupported
+		}
+		return false, fmt.Errorf("work wait failed with status %d: %s", resp.StatusCode, string(body))
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return false, fmt.Errorf("work wait failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var workWaitResponse WorkWaitResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workWaitResponse); err != nil {
+		return false, fmt.Errorf("failed to decode work wait response: %w", err)
+	}
+	return workWaitResponse.WorkAvailable, nil
 }
 
 func (c *Client) GetBuildStatus(buildID string) (string, error) {

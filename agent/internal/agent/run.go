@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/serverless"
 )
 
@@ -16,6 +18,8 @@ const (
 	traefikMetricsURL      = "http://127.0.0.1:9100/metrics"
 	traefikMetricsInterval = 15 * time.Second
 	traefikMetricsMaxBytes = 8 * 1024 * 1024
+	workWakeMinDelay       = 1 * time.Second
+	workWakeMaxDelay       = 15 * time.Second
 )
 
 func (a *Agent) Run(ctx context.Context) {
@@ -64,6 +68,7 @@ func (a *Agent) Run(ctx context.Context) {
 	}
 
 	go a.StatusReportLoop(ctx)
+	go a.WorkQueueWakeLoop(ctx)
 
 	a.Tick()
 
@@ -171,6 +176,61 @@ func (a *Agent) StatusReportLoop(ctx context.Context) {
 			}
 			timer.Reset(nextStatusReportDelay())
 		}
+	}
+}
+
+func (a *Agent) WorkQueueWakeLoop(ctx context.Context) {
+	delay := workWakeMinDelay
+	for {
+		if a.HasActiveWorkItem() {
+			delay = workWakeMinDelay
+			if !waitForWorkWakeDelay(ctx, workWakeMinDelay) {
+				return
+			}
+			continue
+		}
+
+		workAvailable, err := a.Client.WaitForWork(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, agenthttp.ErrWorkWaitUnsupported) {
+			log.Printf("[work-queue] long polling unsupported by control plane; using periodic status polling")
+			return
+		}
+		if err != nil {
+			log.Printf("[work-queue] long poll failed: %v", err)
+			if !waitForWorkWakeDelay(ctx, delay) {
+				return
+			}
+			delay = min(delay*2, workWakeMaxDelay)
+			continue
+		}
+		if !workAvailable {
+			delay = workWakeMinDelay
+			continue
+		}
+
+		a.RequestStatusReport("work available")
+		if !waitForWorkWakeDelay(ctx, delay) {
+			return
+		}
+		if a.HasActiveWorkItem() {
+			delay = workWakeMinDelay
+		} else {
+			delay = min(delay*2, workWakeMaxDelay)
+		}
+	}
+}
+
+func waitForWorkWakeDelay(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

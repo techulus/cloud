@@ -9,7 +9,7 @@ The agent uses a two-state reconciliation model:
 
 ```mermaid
 stateDiagram-v2
-    IDLE: IDLE (poll every 10s)
+    IDLE: IDLE (poll every 15s)
     PROCESSING: PROCESSING (no poll)
 
     IDLE --> PROCESSING: Drift detected
@@ -18,7 +18,7 @@ stateDiagram-v2
 
 ### IDLE State
 
-- Polls the control plane every 10 seconds for expected state.
+- Polls the control plane every 15 seconds for expected state.
 - Compares expected state against actual state.
 - Transitions to `PROCESSING` when drift is detected.
 
@@ -67,6 +67,16 @@ state. The command's attempt number acts as a generation guard: the agent report
 the result with that attempt, and stale completions from older attempts are
 ignored. If an agent crashes or stops renewing the command through status
 reports, the command can be retried up to the fixed attempt limit.
+
+When an agent is idle, it also makes a bounded long-poll request for queued-work
+wakeups. The control plane uses PostgreSQL `LISTEN/NOTIFY` to end that request as
+soon as work is enqueued. The notification is only a wake hint. The durable work
+queue remains authoritative, and the existing status request performs the atomic
+lease before the agent starts work.
+
+The agent continues periodic status reports while long polling. If the wait
+endpoint or PostgreSQL notification listener is unavailable, the agent backs off
+and queued work is still discovered through the next status report.
 
 | Type | Description |
 | --- | --- |

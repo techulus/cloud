@@ -6,6 +6,7 @@ import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { notifyWorkAvailable } from "@/lib/work-queue-notifications";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
@@ -113,6 +114,12 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 			payload: JSON.stringify(payload),
 		})
 		.onConflictDoNothing({ target: workQueue.id });
+
+	try {
+		await notifyWorkAvailable(serverId);
+	} catch (error) {
+		console.error("[work-queue] failed to publish notification:", error);
+	}
 }
 
 export async function completeWorkItemResults(
@@ -194,6 +201,7 @@ export async function claimNextWorkItem(
 		new Date(),
 		WORK_QUEUE_LEASE_DURATION_MS,
 	);
+	const claimable = claimableWorkCondition(serverId, staleThreshold);
 
 	const result = await db.execute(sql`
 		UPDATE work_queue
@@ -204,15 +212,7 @@ export async function claimNextWorkItem(
 		WHERE id = (
 			SELECT id
 			FROM work_queue
-			WHERE server_id = ${serverId}
-				AND (
-					status = 'pending'
-					OR (
-						status = 'processing'
-						AND started_at < ${staleThreshold}
-						AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
-					)
-				)
+			WHERE ${claimable}
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
@@ -239,6 +239,35 @@ export async function claimNextWorkItem(
 		payload: row.payload,
 		attempt: row.attempts,
 	};
+}
+
+export async function hasClaimableWork(serverId: string): Promise<boolean> {
+	const staleThreshold = subtractMilliseconds(
+		new Date(),
+		WORK_QUEUE_LEASE_DURATION_MS,
+	);
+	const result = await db.execute(sql`
+		SELECT EXISTS (
+			SELECT 1
+			FROM work_queue
+			WHERE ${claimableWorkCondition(serverId, staleThreshold)}
+		) AS available
+	`);
+	return result.rows[0]?.available === true;
+}
+
+function claimableWorkCondition(serverId: string, staleThreshold: Date) {
+	return sql`
+		server_id = ${serverId}
+		AND (
+			status = 'pending'
+			OR (
+				status = 'processing'
+				AND started_at < ${staleThreshold}
+				AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
+			)
+		)
+	`;
 }
 
 async function markAgentUpgradeStarted(serverId: string, payloadText: string) {
