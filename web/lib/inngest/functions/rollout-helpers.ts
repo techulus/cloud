@@ -256,12 +256,11 @@ export async function cleanupExistingDeployments(
 ): Promise<{ deletedCount: number }> {
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
-		const rollout = await tx
+		const [rollout] = await tx
 			.select({ status: rollouts.status })
 			.from(rollouts)
 			.where(eq(rollouts.id, rolloutId))
-			.for("update")
-			.then((rows) => rows[0]);
+			.for("update");
 		if (rollout?.status !== "in_progress") {
 			throw new Error("Rollout is no longer in progress");
 		}
@@ -405,12 +404,11 @@ export async function createDeploymentRecords(
 				await tx.execute(
 					sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 				);
-				const rollout = await tx
+				const [rollout] = await tx
 					.select({ status: rollouts.status })
 					.from(rollouts)
 					.where(eq(rollouts.id, rolloutId))
-					.for("update")
-					.then((rows) => rows[0]);
+					.for("update");
 				if (rollout?.status !== "in_progress") {
 					throw new Error("Rollout is no longer in progress");
 				}
@@ -490,10 +488,7 @@ export async function completeRollout(
 							eq(deployments.trafficState, "draining"),
 						),
 					)
-					.returning({
-						id: deployments.id,
-						serverId: deployments.serverId,
-					})
+					.returning({ serverId: deployments.serverId })
 			: [];
 
 		for (const serverId of new Set(

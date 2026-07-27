@@ -8,24 +8,6 @@ import {
 	enqueueWork,
 } from "@/lib/work-queue";
 
-type RolloutTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-async function restoreDrainingDeployments(
-	tx: RolloutTransaction,
-	serviceId: string,
-) {
-	return tx
-		.update(deployments)
-		.set({ trafficState: "active" })
-		.where(
-			and(
-				eq(deployments.serviceId, serviceId),
-				eq(deployments.trafficState, "draining"),
-			),
-		)
-		.returning({ serverId: deployments.serverId });
-}
-
 export async function handleRolloutFailure(
 	rolloutId: string,
 	serviceId: string,
@@ -33,12 +15,11 @@ export async function handleRolloutFailure(
 	isRollingUpdate: boolean,
 ): Promise<void> {
 	const { applied, rolloutDeployments } = await db.transaction(async (tx) => {
-		const rollout = await tx
+		const [rollout] = await tx
 			.select({ status: rollouts.status })
 			.from(rollouts)
 			.where(eq(rollouts.id, rolloutId))
-			.for("update")
-			.then((rows) => rows[0]);
+			.for("update");
 		if (rollout?.status !== "in_progress") {
 			return { applied: false, rolloutDeployments: [] };
 		}
@@ -61,7 +42,15 @@ export async function handleRolloutFailure(
 		}
 
 		if (isRollingUpdate) {
-			await restoreDrainingDeployments(tx, serviceId);
+			await tx
+				.update(deployments)
+				.set({ trafficState: "active" })
+				.where(
+					and(
+						eq(deployments.serviceId, serviceId),
+						eq(deployments.trafficState, "draining"),
+					),
+				);
 		}
 
 		const removedDeployments = await tx

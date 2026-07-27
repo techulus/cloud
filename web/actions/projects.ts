@@ -26,7 +26,6 @@ import {
 	services,
 	serviceVolumes,
 	volumeBackups,
-	workQueue,
 } from "@/db/schema";
 import { requireDeveloperRole, verifyDeleteConfirmation } from "@/lib/auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
@@ -1359,43 +1358,12 @@ export async function abortRollout(serviceId: string) {
 			.select()
 			.from(deployments)
 			.where(inArray(deployments.rolloutId, rolloutIds));
-		const affectedServerIds = new Set(
-			rolloutDeployments.map((deployment) => deployment.serverId),
-		);
 		const serverContainers = new Map<string, string[]>();
 		for (const deployment of rolloutDeployments) {
 			if (!deployment.containerId) continue;
 			const containers = serverContainers.get(deployment.serverId) ?? [];
 			containers.push(deployment.containerId);
 			serverContainers.set(deployment.serverId, containers);
-		}
-
-		if (affectedServerIds.size > 0) {
-			const pendingWork = await tx
-				.select({ id: workQueue.id, payload: workQueue.payload })
-				.from(workQueue)
-				.where(
-					and(
-						eq(workQueue.status, "pending"),
-						inArray(workQueue.type, ["deploy", "reconcile"]),
-						inArray(workQueue.serverId, [...affectedServerIds]),
-					),
-				);
-			const deploymentIds = new Set(
-				rolloutDeployments.map((deployment) => deployment.id),
-			);
-			const workIds = pendingWork
-				.filter((work) => {
-					try {
-						return deploymentIds.has(JSON.parse(work.payload).deploymentId);
-					} catch {
-						return false;
-					}
-				})
-				.map((work) => work.id);
-			if (workIds.length > 0) {
-				await tx.delete(workQueue).where(inArray(workQueue.id, workIds));
-			}
 		}
 
 		for (const [serverId, containerIds] of serverContainers) {
@@ -1405,11 +1373,6 @@ export async function abortRollout(serviceId: string) {
 				{ serviceId, containerIds },
 				{ tx },
 			);
-		}
-		for (const deployment of rolloutDeployments) {
-			await tx
-				.delete(deploymentPorts)
-				.where(eq(deploymentPorts.deploymentId, deployment.id));
 		}
 		await tx
 			.delete(deployments)

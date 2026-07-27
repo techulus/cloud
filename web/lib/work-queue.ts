@@ -118,16 +118,12 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 		})
 		.onConflictDoNothing({ target: workQueue.id });
 
-	if (options.tx) {
+	try {
 		// PostgreSQL delivers transactional notifications only after commit, so the
 		// agent cannot wake before the expected-state mutation is durable.
-		await notifyWorkAvailable(serverId, options.tx);
-		return;
-	}
-
-	try {
-		await notifyWorkAvailable(serverId);
+		await notifyWorkAvailable(serverId, executor);
 	} catch (error) {
+		if (options.tx) throw error;
 		console.error("[work-queue] failed to publish notification:", error);
 	}
 }
