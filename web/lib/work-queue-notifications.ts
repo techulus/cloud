@@ -4,6 +4,8 @@ import { db } from "@/db";
 
 const WORK_QUEUE_NOTIFICATION_CHANNEL = "agent_work";
 
+type WorkQueueTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 type Waiter = {
 	notify: () => void;
 	disconnect: () => void;
@@ -155,8 +157,11 @@ export async function subscribeToWorkNotifications(serverId: string) {
 	return dispatcher.subscribe(serverId);
 }
 
-export async function notifyWorkAvailable(serverId: string) {
-	await db.execute(
+export async function notifyWorkAvailable(
+	serverId: string,
+	executor: typeof db | WorkQueueTransaction = db,
+) {
+	await executor.execute(
 		sql`SELECT pg_notify(${WORK_QUEUE_NOTIFICATION_CHANNEL}, ${serverId})`,
 	);
 }

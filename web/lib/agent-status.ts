@@ -33,7 +33,11 @@ import { isRoutingSyncAcknowledgementEligible } from "@/lib/routing-sync";
 import { getServerlessWakeFailureUpdate } from "@/lib/serverless-wake-failures";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
-import { enqueueWork, type WorkPayloadByType } from "@/lib/work-queue";
+import {
+	enqueueReconcileForAllOnlineServers,
+	enqueueWork,
+	type WorkPayloadByType,
+} from "@/lib/work-queue";
 
 type ContainerStatus = {
 	deploymentId: string;
@@ -188,29 +192,38 @@ async function applyDeploymentErrors(
 			continue;
 		}
 
-		const updated = await db
-			.update(deployments)
-			.set(
-				isServerlessWakeDeployment
-					? getServerlessWakeFailureUpdate({
-							serverlessEnabled: deployment.revisionSpec.serverless.enabled,
-							currentFailureCount: deployment.serverlessWakeFailureCount,
-							failedStage: "serverless_wake",
-						})
-					: markDeploymentFailedRemoved("deploying"),
-			)
-			.where(
-				and(
-					eq(deployments.id, deployment.id),
-					inArray(
-						deployments.observedPhase,
-						isServerlessWakeDeployment
-							? ["waking"]
-							: ["pending", "pulling", "starting"],
+		const updated = await db.transaction(async (tx) => {
+			const rows = await tx
+				.update(deployments)
+				.set(
+					isServerlessWakeDeployment
+						? getServerlessWakeFailureUpdate({
+								serverlessEnabled: deployment.revisionSpec.serverless.enabled,
+								currentFailureCount: deployment.serverlessWakeFailureCount,
+								failedStage: "serverless_wake",
+							})
+						: markDeploymentFailedRemoved("deploying"),
+				)
+				.where(
+					and(
+						eq(deployments.id, deployment.id),
+						inArray(
+							deployments.observedPhase,
+							isServerlessWakeDeployment
+								? ["waking"]
+								: ["pending", "pulling", "starting"],
+						),
 					),
-				),
-			)
-			.returning({ id: deployments.id });
+				)
+				.returning({ id: deployments.id });
+			if (rows.length > 0 && isActiveRolloutDeployment) {
+				await enqueueReconcileForAllOnlineServers(
+					"rollout_deployment_failed",
+					tx,
+				);
+			}
+			return rows;
+		});
 
 		if (updated.length === 0) continue;
 
@@ -1089,10 +1102,23 @@ export async function applyStatusReport(
 			updateFields.autohealRecreateCount = 0;
 		}
 
-		await db
-			.update(deployments)
-			.set(updateFields)
-			.where(eq(deployments.id, deployment.id));
+		if (autohealFailed) {
+			await db.transaction(async (tx) => {
+				await tx
+					.update(deployments)
+					.set(updateFields)
+					.where(eq(deployments.id, deployment.id));
+				await enqueueReconcileForAllOnlineServers(
+					"rollout_autoheal_failed",
+					tx,
+				);
+			});
+		} else {
+			await db
+				.update(deployments)
+				.set(updateFields)
+				.where(eq(deployments.id, deployment.id));
+		}
 
 		if (restoredToReady && deployment.rolloutId) {
 			const currentServerName = await getCurrentServerLogName();
@@ -1208,10 +1234,23 @@ export async function applyStatusReport(
 					recreateCount,
 				});
 
-			await db
-				.update(deployments)
-				.set(update)
-				.where(eq(deployments.id, deployment.id));
+			if (isRolloutDeployment) {
+				await db.transaction(async (tx) => {
+					await tx
+						.update(deployments)
+						.set(update)
+						.where(eq(deployments.id, deployment.id));
+					await enqueueReconcileForAllOnlineServers(
+						"rollout_health_check_failed",
+						tx,
+					);
+				});
+			} else {
+				await db
+					.update(deployments)
+					.set(update)
+					.where(eq(deployments.id, deployment.id));
+			}
 
 			if (isRolloutDeployment && deployment.rolloutId) {
 				const currentServerName = await getCurrentServerLogName();
