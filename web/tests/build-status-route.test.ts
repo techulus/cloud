@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
 	function selectQuery(result: unknown[]) {
 		const query = {
 			from: vi.fn(() => query),
+			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
@@ -44,6 +45,7 @@ const mocks = vi.hoisted(() => {
 		verifyAgentRequest: vi.fn(),
 		enqueueWork: vi.fn(),
 		send: vi.fn(),
+		updateGitHubDeploymentStatus: vi.fn(),
 		createBuildCompleted: vi.fn((data, options) => ({
 			name: "build/completed",
 			data,
@@ -57,7 +59,9 @@ vi.mock("@/lib/agent-auth", () => ({
 	verifyAgentRequest: mocks.verifyAgentRequest,
 }));
 vi.mock("@/lib/email", () => ({ sendBuildFailureAlert: vi.fn() }));
-vi.mock("@/lib/github", () => ({ updateGitHubDeploymentStatus: vi.fn() }));
+vi.mock("@/lib/github", () => ({
+	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
+}));
 vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
 vi.mock("@/lib/inngest/events", () => ({
@@ -139,6 +143,45 @@ describe("agent build status transitions", () => {
 		});
 		mocks.enqueueWork.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
+		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
+	});
+
+	it("keeps the service details link on GitHub deployment statuses", async () => {
+		const githubSpecification = {
+			...specification,
+			source: {
+				...specification.source,
+				authentication: { type: "github_app" as const, installationId: 123 },
+			},
+		};
+		const cloningBuild = build("cloning", { githubDeploymentId: 456 });
+		mocks.selectResults.push(
+			[build("claimed", { githubDeploymentId: 456, startedAt: null })],
+			[
+				{
+					specification: githubSpecification,
+					projectSlug: "cloud",
+					environmentName: "production",
+				},
+			],
+		);
+		mocks.updateResults.push([cloningBuild]);
+
+		const response = await post("cloning");
+
+		expect(response.status).toBe(200);
+		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
+			123,
+			"acme/app",
+			456,
+			"in_progress",
+			{
+				description: "Build cloning...",
+				logUrl: "https://cloud.techulus.com/builds/build-amd64/logs",
+				environmentUrl:
+					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
+			},
+		);
 	});
 
 	it("stores completion and the platform artifact atomically", async () => {

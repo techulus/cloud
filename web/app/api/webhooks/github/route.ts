@@ -3,8 +3,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
 	builds,
+	environments,
 	githubInstallations,
 	githubRepos,
+	projects,
 	services,
 } from "@/db/schema";
 import {
@@ -106,9 +108,16 @@ async function handlePushEvent(payload: PushPayload) {
 	const branch = ref.replace("refs/heads/", "");
 
 	const linkedServices = await db
-		.select({ githubRepo: githubRepos, service: services })
+		.select({
+			githubRepo: githubRepos,
+			service: services,
+			project: projects,
+			environment: environments,
+		})
 		.from(githubRepos)
 		.innerJoin(services, eq(githubRepos.serviceId, services.id))
+		.innerJoin(projects, eq(services.projectId, projects.id))
+		.innerJoin(environments, eq(services.environmentId, environments.id))
 		.where(eq(githubRepos.repoId, repository.id));
 
 	if (linkedServices.length === 0) {
@@ -121,7 +130,7 @@ async function handlePushEvent(payload: PushPayload) {
 
 	const results: PushResult[] = [];
 
-	for (const { githubRepo, service } of linkedServices) {
+	for (const { githubRepo, service, project, environment } of linkedServices) {
 		if (service.deletedAt) {
 			results.push({
 				serviceId: service.id,
@@ -183,11 +192,13 @@ async function handlePushEvent(payload: PushPayload) {
 
 			let githubDeploymentId: number | undefined;
 			try {
+				const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
+				const serviceUrl = `${baseUrl}/dashboard/projects/${project.slug}/${environment.name}/services/${service.id}`;
 				githubDeploymentId = await createGitHubDeployment(
 					githubRepo.installationId,
 					repository.full_name,
 					head_commit.id,
-					`${service.name}-${service.id}`,
+					`${project.name} / ${environment.name} / ${service.name}`,
 					`Build ${head_commit.id.slice(0, 7)}: ${head_commit.message.substring(0, 100)}`,
 				);
 
@@ -196,7 +207,7 @@ async function handlePushEvent(payload: PushPayload) {
 					repository.full_name,
 					githubDeploymentId,
 					"pending",
-					{ description: "Build queued" },
+					{ description: "Build queued", environmentUrl: serviceUrl },
 				);
 			} catch (error) {
 				console.error(
