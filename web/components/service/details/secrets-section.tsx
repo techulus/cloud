@@ -1,14 +1,7 @@
 "use client";
 
 import { Eye, EyeOff, Plus, Save, X } from "lucide-react";
-import {
-	type ClipboardEvent,
-	memo,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type ClipboardEvent, memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { createSecretsBatch, deleteSecretsBatch } from "@/actions/secrets";
@@ -77,51 +70,44 @@ export const SecretsSection = memo(function SecretsSection({
 	const [revealingSecretId, setRevealingSecretId] = useState<string | null>(
 		null,
 	);
-	const revealedSecretsRef = useRef(revealedSecrets);
-	revealedSecretsRef.current = revealedSecrets;
-	const revealingSecretIdRef = useRef(revealingSecretId);
-	revealingSecretIdRef.current = revealingSecretId;
 
 	const isValidKey = newKey.trim() && KEY_REGEX.test(newKey.trim());
 	const canAdd = isValidKey && newValue.trim();
 
 	const hasChanges = pendingVars.length > 0 || pendingDeletes.length > 0;
 
-	const handleReveal = useCallback(
-		async (secretId: string) => {
-			if (revealingSecretIdRef.current === secretId) return;
+	const handleReveal = async (secretId: string) => {
+		if (revealingSecretId === secretId) return;
 
-			if (revealedSecretsRef.current[secretId]) {
-				setRevealedSecrets((prev) => {
-					const next = { ...prev };
-					delete next[secretId];
-					return next;
-				});
-				return;
-			}
+		if (revealedSecrets[secretId]) {
+			setRevealedSecrets((prev) => {
+				const next = { ...prev };
+				delete next[secretId];
+				return next;
+			});
+			return;
+		}
 
-			setRevealingSecretId(secretId);
-			try {
-				const response = await fetch(
-					`/api/services/${service.id}/secrets/${secretId}/reveal`,
-					{ method: "POST" },
-				);
-				if (!response.ok) {
-					const data = await response.json().catch(() => ({}));
-					throw new Error(data.error || "Failed to reveal secret");
-				}
-				const data = await response.json();
-				setRevealedSecrets((prev) => ({ ...prev, [secretId]: data.value }));
-			} catch (err) {
-				toast.error(
-					err instanceof Error ? err.message : "Failed to reveal secret",
-				);
-			} finally {
-				setRevealingSecretId(null);
+		setRevealingSecretId(secretId);
+		try {
+			const response = await fetch(
+				`/api/services/${service.id}/secrets/${secretId}/reveal`,
+				{ method: "POST" },
+			);
+			if (!response.ok) {
+				const data = await response.json().catch(() => ({}));
+				throw new Error(data.error || "Failed to reveal secret");
 			}
-		},
-		[service.id],
-	);
+			const data = await response.json();
+			setRevealedSecrets((prev) => ({ ...prev, [secretId]: data.value }));
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : "Failed to reveal secret",
+			);
+		} finally {
+			setRevealingSecretId(null);
+		}
+	};
 
 	useEffect(() => {
 		const revealedIds = Object.keys(revealedSecrets);

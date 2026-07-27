@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
-import { and, asc, desc, eq, gt, isNull, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lte, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import isEmail from "validator/es/lib/isEmail";
@@ -10,7 +10,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { account, memberInvitations, user } from "@/db/schema";
 import type { InvitableMemberRole } from "@/db/types";
-import { auth, requireAdminRole } from "@/lib/auth";
+import { requireAdminRole } from "@/lib/auth";
 import { addMilliseconds, DAY_IN_MILLISECONDS, isExpired } from "@/lib/date";
 import { sendMemberInviteEmail } from "@/lib/email";
 import {
@@ -31,25 +31,6 @@ const acceptInviteSchema = z.object({
 	name: z.string().trim().min(1, "Name is required"),
 	password: z.string().min(8, "Password must be at least 8 characters"),
 });
-
-type CreateUserResult = {
-	user: {
-		id: string;
-	};
-};
-
-type CreateUserInput = {
-	body: {
-		email: string;
-		name: string;
-		password: string;
-		role: InvitableMemberRole;
-	};
-};
-
-const createAuthUser = auth.api.createUser as (
-	data: CreateUserInput,
-) => Promise<CreateUserResult>;
 
 async function requireAdminSession() {
 	const session = await requireAdminRole();
@@ -101,6 +82,7 @@ export async function listMembers() {
 	return { members, invitations };
 }
 
+// react-doctor-disable-next-line react-doctor/server-auth-actions -- intentionally public; possession of the opaque invite token authorizes this lookup
 export async function getInviteByToken(token: string) {
 	const tokenHash = hashInviteToken(token);
 	const [invite] = await db
@@ -120,10 +102,6 @@ export async function getInviteByToken(token: string) {
 	}
 
 	if (invite.status === "pending" && isExpired(invite.expiresAt)) {
-		await db
-			.update(memberInvitations)
-			.set({ status: "expired" })
-			.where(eq(memberInvitations.id, invite.id));
 		return { ...invite, status: "expired" as const };
 	}
 
@@ -256,6 +234,7 @@ export async function removeMember(userId: string) {
 	return { success: true };
 }
 
+// react-doctor-disable-next-line react-doctor/server-auth-actions -- intentionally public; the opaque invite token is validated and atomically consumed below
 export async function acceptInvite(input: {
 	token: string;
 	name: string;
@@ -286,110 +265,69 @@ export async function acceptInvite(input: {
 		throw new Error("A member with this email already exists");
 	}
 
-	const now = new Date();
-	const [claimedInvite] = await db
-		.update(memberInvitations)
-		.set({
-			status: "accepted",
-			acceptedAt: now,
-		})
-		.where(
-			and(
-				eq(memberInvitations.id, invite.id),
-				eq(memberInvitations.status, "pending"),
-				gt(memberInvitations.expiresAt, now),
-			),
-		)
-		.returning({
-			id: memberInvitations.id,
-			email: memberInvitations.email,
-			role: memberInvitations.role,
-		});
-
-	if (!claimedInvite) {
-		throw new Error("Invitation is invalid or no longer available");
-	}
-
-	let created: CreateUserResult;
+	const passwordHash = await hashPassword(parsed.password);
 	try {
-		created = await createAuthUser({
-			body: {
-				email: claimedInvite.email,
-				name: parsed.name,
-				password: parsed.password,
-				role: claimedInvite.role,
-			},
-		});
-	} catch (error) {
-		const [createdUser] = await db
-			.select({ id: user.id })
-			.from(user)
-			.where(eq(user.email, claimedInvite.email))
-			.limit(1);
-
-		if (createdUser) {
+		await db.transaction(async (tx) => {
 			const now = new Date();
-			const passwordHash = await hashPassword(parsed.password);
-			const [credentialAccount] = await db
-				.select({ id: account.id })
-				.from(account)
-				.where(
-					and(
-						eq(account.userId, createdUser.id),
-						eq(account.providerId, "credential"),
-					),
-				)
-				.limit(1);
-
-			if (credentialAccount) {
-				await db
-					.update(account)
-					.set({ password: passwordHash, updatedAt: now })
-					.where(eq(account.id, credentialAccount.id));
-			} else {
-				await db.insert(account).values({
-					id: randomUUID(),
-					accountId: createdUser.id,
-					providerId: "credential",
-					userId: createdUser.id,
-					password: passwordHash,
-					createdAt: now,
-					updatedAt: now,
-				});
-			}
-
-			await db
+			const [claimedInvite] = await tx
 				.update(memberInvitations)
 				.set({
-					acceptedByUserId: createdUser.id,
+					status: "accepted",
+					acceptedAt: now,
 				})
+				.where(
+					and(
+						eq(memberInvitations.id, invite.id),
+						eq(memberInvitations.status, "pending"),
+						gt(memberInvitations.expiresAt, now),
+					),
+				)
+				.returning({
+					id: memberInvitations.id,
+					email: memberInvitations.email,
+					role: memberInvitations.role,
+				});
+
+			if (!claimedInvite) {
+				throw new Error("Invitation is invalid or no longer available");
+			}
+
+			const userId = randomUUID();
+			await tx.insert(user).values({
+				id: userId,
+				email: claimedInvite.email,
+				name: parsed.name,
+				emailVerified: false,
+				role: claimedInvite.role,
+				createdAt: now,
+				updatedAt: now,
+			});
+
+			await tx.insert(account).values({
+				id: randomUUID(),
+				accountId: userId,
+				providerId: "credential",
+				userId,
+				password: passwordHash,
+				createdAt: now,
+				updatedAt: now,
+			});
+
+			await tx
+				.update(memberInvitations)
+				.set({ acceptedByUserId: userId })
 				.where(eq(memberInvitations.id, claimedInvite.id));
-
-			return { success: true };
+		});
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			"code" in error &&
+			(error as Error & { code?: string }).code === "23505"
+		) {
+			throw new Error("A member with this email already exists");
 		}
-
-		await db
-			.update(memberInvitations)
-			.set({
-				status: "pending",
-				acceptedAt: null,
-			})
-			.where(
-				and(
-					eq(memberInvitations.id, claimedInvite.id),
-					eq(memberInvitations.status, "accepted"),
-					isNull(memberInvitations.acceptedByUserId),
-				),
-			);
 		throw error;
 	}
-
-	await db
-		.update(memberInvitations)
-		.set({
-			acceptedByUserId: created.user.id,
-		})
-		.where(eq(memberInvitations.id, claimedInvite.id));
 
 	return { success: true };
 }
