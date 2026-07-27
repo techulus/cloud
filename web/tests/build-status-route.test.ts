@@ -188,9 +188,22 @@ describe("agent build status transitions", () => {
 		const completedBuild = build("completed", {
 			imageUri: `${finalImage}-amd64`,
 		});
+		const githubSpecification = {
+			...specification,
+			source: {
+				...specification.source,
+				authentication: { type: "github_app" as const, installationId: 123 },
+			},
+		};
 		mocks.selectResults.push(
-			[build("pushing")],
-			[{ specification }],
+			[build("pushing", { githubDeploymentId: 456 })],
+			[
+				{
+					specification: githubSpecification,
+					projectSlug: "cloud",
+					environmentName: "production",
+				},
+			],
 			[
 				completedBuild,
 				build("completed", {
@@ -226,6 +239,19 @@ describe("agent build status transitions", () => {
 		expect(mocks.createBuildCompleted).toHaveBeenCalledWith(
 			expect.objectContaining({ status: "success" }),
 			{ id: "build-completed-build-amd64" },
+		);
+		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
+			123,
+			"acme/app",
+			456,
+			"success",
+			{
+				description: "Build completed successfully",
+				logUrl: "https://cloud.techulus.com/builds/build-amd64/logs",
+				environmentUrl:
+					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
+				autoInactive: false,
+			},
 		);
 	});
 

@@ -283,6 +283,7 @@ export async function POST(
 						description: "Build completed successfully",
 						logUrl,
 						environmentUrl,
+						autoInactive: false,
 					},
 				);
 			} else {

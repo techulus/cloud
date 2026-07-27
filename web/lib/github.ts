@@ -304,6 +304,7 @@ export async function updateGitHubDeploymentStatus(
 		description?: string;
 		logUrl?: string;
 		environmentUrl?: string;
+		autoInactive?: boolean;
 	},
 ): Promise<void> {
 	validateRepoFullName(repoFullName);
@@ -323,6 +324,10 @@ export async function updateGitHubDeploymentStatus(
 
 	if (options?.environmentUrl) {
 		body.environment_url = options.environmentUrl;
+	}
+
+	if (options?.autoInactive !== undefined) {
+		body.auto_inactive = options.autoInactive;
 	}
 
 	const response = await fetch(
