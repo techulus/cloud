@@ -6,9 +6,12 @@ import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { notifyWorkAvailable } from "@/lib/work-queue-notifications";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
 export const WORK_QUEUE_LEASE_DURATION_MS = 2 * MINUTE_IN_MILLISECONDS;
+
+type WorkQueueTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type WorkQueueStorageConfig = {
 	provider: string;
@@ -102,9 +105,10 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 	serverId: string,
 	type: T,
 	payload: WorkPayloadByType[T],
-	options: { id?: string } = {},
+	options: { id?: string; tx?: WorkQueueTransaction } = {},
 ) {
-	await db
+	const executor = options.tx ?? db;
+	await executor
 		.insert(workQueue)
 		.values({
 			id: options.id ?? randomUUID(),
@@ -113,6 +117,28 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 			payload: JSON.stringify(payload),
 		})
 		.onConflictDoNothing({ target: workQueue.id });
+
+	try {
+		// PostgreSQL delivers transactional notifications only after commit, so the
+		// agent cannot wake before the expected-state mutation is durable.
+		await notifyWorkAvailable(serverId, executor);
+	} catch (error) {
+		if (options.tx) throw error;
+		console.error("[work-queue] failed to publish notification:", error);
+	}
+}
+
+export async function enqueueReconcileForAllOnlineServers(
+	reason: string,
+	tx: WorkQueueTransaction,
+) {
+	const onlineServers = await tx
+		.select({ id: servers.id })
+		.from(servers)
+		.where(eq(servers.status, "online"));
+	for (const server of onlineServers) {
+		await enqueueWork(server.id, "reconcile", { reason }, { tx });
+	}
 }
 
 export async function completeWorkItemResults(
@@ -194,6 +220,7 @@ export async function claimNextWorkItem(
 		new Date(),
 		WORK_QUEUE_LEASE_DURATION_MS,
 	);
+	const claimable = claimableWorkCondition(serverId, staleThreshold);
 
 	const result = await db.execute(sql`
 		UPDATE work_queue
@@ -204,15 +231,7 @@ export async function claimNextWorkItem(
 		WHERE id = (
 			SELECT id
 			FROM work_queue
-			WHERE server_id = ${serverId}
-				AND (
-					status = 'pending'
-					OR (
-						status = 'processing'
-						AND started_at < ${staleThreshold}
-						AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
-					)
-				)
+			WHERE ${claimable}
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
@@ -239,6 +258,35 @@ export async function claimNextWorkItem(
 		payload: row.payload,
 		attempt: row.attempts,
 	};
+}
+
+export async function hasClaimableWork(serverId: string): Promise<boolean> {
+	const staleThreshold = subtractMilliseconds(
+		new Date(),
+		WORK_QUEUE_LEASE_DURATION_MS,
+	);
+	const result = await db.execute(sql`
+		SELECT EXISTS (
+			SELECT 1
+			FROM work_queue
+			WHERE ${claimableWorkCondition(serverId, staleThreshold)}
+		) AS available
+	`);
+	return result.rows[0]?.available === true;
+}
+
+function claimableWorkCondition(serverId: string, staleThreshold: Date) {
+	return sql`
+		server_id = ${serverId}
+		AND (
+			status = 'pending'
+			OR (
+				status = 'processing'
+				AND started_at < ${staleThreshold}
+				AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
+			)
+		)
+	`;
 }
 
 async function markAgentUpgradeStarted(serverId: string, payloadText: string) {

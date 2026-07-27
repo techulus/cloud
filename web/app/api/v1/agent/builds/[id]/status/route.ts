@@ -1,7 +1,13 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds, serviceRevisions } from "@/db/schema";
+import {
+	builds,
+	environments,
+	projects,
+	serviceRevisions,
+	services,
+} from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { revisionRepositoryFullName } from "@/lib/build-revision-source";
 import { sendBuildFailureAlert } from "@/lib/email";
@@ -108,8 +114,15 @@ export async function POST(
 	}
 
 	const revision = await db
-		.select({ specification: serviceRevisions.specification })
+		.select({
+			specification: serviceRevisions.specification,
+			projectSlug: projects.slug,
+			environmentName: environments.name,
+		})
 		.from(serviceRevisions)
+		.innerJoin(services, eq(serviceRevisions.serviceId, services.id))
+		.innerJoin(projects, eq(services.projectId, projects.id))
+		.innerJoin(environments, eq(services.environmentId, environments.id))
 		.where(
 			and(
 				eq(serviceRevisions.id, build.serviceRevisionId),
@@ -243,6 +256,7 @@ export async function POST(
 		try {
 			const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
 			const logUrl = `${baseUrl}/builds/${buildId}/logs`;
+			const environmentUrl = `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}`;
 			const repository = revisionRepositoryFullName(
 				specification.source.repository,
 			);
@@ -253,7 +267,11 @@ export async function POST(
 					repository,
 					build.githubDeploymentId,
 					"in_progress",
-					{ description: `Build ${update.status}...`, logUrl },
+					{
+						description: `Build ${update.status}...`,
+						logUrl,
+						environmentUrl,
+					},
 				);
 			} else if (update.status === "completed") {
 				await updateGitHubDeploymentStatus(
@@ -261,7 +279,11 @@ export async function POST(
 					repository,
 					build.githubDeploymentId,
 					"success",
-					{ description: "Build completed successfully", logUrl },
+					{
+						description: "Build completed successfully",
+						logUrl,
+						environmentUrl,
+					},
 				);
 			} else {
 				await updateGitHubDeploymentStatus(
@@ -269,7 +291,11 @@ export async function POST(
 					repository,
 					build.githubDeploymentId,
 					"failure",
-					{ description: update.error || "Build failed", logUrl },
+					{
+						description: update.error || "Build failed",
+						logUrl,
+						environmentUrl,
+					},
 				);
 			}
 		} catch (error) {

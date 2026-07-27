@@ -62,6 +62,9 @@ function linkedService({
 	sourceType = "github",
 	deletedAt = null,
 	rootDir = "",
+	projectName = "Cloud",
+	projectSlug = "cloud",
+	environmentName = "production",
 }: {
 	serviceId: string;
 	name?: string;
@@ -70,6 +73,9 @@ function linkedService({
 	sourceType?: "github" | "image";
 	deletedAt?: Date | null;
 	rootDir?: string;
+	projectName?: string;
+	projectSlug?: string;
+	environmentName?: string;
 }) {
 	return {
 		githubRepo: {
@@ -90,6 +96,8 @@ function linkedService({
 			deletedAt,
 			githubRootDir: rootDir,
 		},
+		project: { id: "project-1", name: projectName, slug: projectSlug },
+		environment: { id: "environment-1", name: environmentName },
 	};
 }
 
@@ -191,7 +199,7 @@ describe("GitHub push webhook", () => {
 			123,
 			"techulus/cloud",
 			COMMIT_SHA,
-			"web-service-a",
+			"cloud / production / web",
 			expect.any(String),
 		);
 		expect(mocks.createGitHubDeployment).toHaveBeenNthCalledWith(
@@ -199,8 +207,20 @@ describe("GitHub push webhook", () => {
 			123,
 			"techulus/cloud",
 			COMMIT_SHA,
-			"web-service-b",
+			"cloud / production / web",
 			expect.any(String),
+		);
+		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenNthCalledWith(
+			1,
+			123,
+			"techulus/cloud",
+			1001,
+			"pending",
+			{
+				description: "Build queued",
+				environmentUrl:
+					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-a",
+			},
 		);
 	});
 

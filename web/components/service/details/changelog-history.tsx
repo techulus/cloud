@@ -73,7 +73,7 @@ function RolloutBadge({
 			icon={config.icon}
 			label={config.label}
 			isAnimated={rollout.status === "in_progress"}
-			className={config.className}
+			className={`${config.className} sm:w-28`}
 			render={
 				<Link
 					href={`/dashboard/projects/${projectSlug}/${envName}/services/${serviceId}/rollouts/${rollout.id}`}
