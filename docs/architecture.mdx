@@ -25,7 +25,7 @@ Techulus Cloud is a stateless container deployment platform built around three c
 | Reverse Proxy | Traefik | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only |
 | Private Network | WireGuard | Full mesh coordinated by the control plane |
 | Service Discovery | Built-in DNS | Agent serves `.internal` domains |
-| Agent Communication | Pull-based HTTP | Agent polls expected state and receives leased commands through status reports |
+| Agent Communication | Pull-based HTTP | Agent polls expected state, reports status, and long polls for queued-work wakeups |
 
 ## Node Types
 
@@ -44,9 +44,9 @@ graph TD
     Internet["Internet"] -->|"DNS"| P1
 
     CP["Control Plane<br/>Next.js + API Routes + Postgres"]
-    CP -- "HTTPS status + state poll" --> P1
-    CP -- "HTTPS status + state poll" --> W1
-    CP -- "HTTPS status + state poll" --> W2
+    P1 -->|"HTTPS state, status, and work wait"| CP
+    W1 -->|"HTTPS state, status, and work wait"| CP
+    W2 -->|"HTTPS state, status, and work wait"| CP
 
     subgraph Servers
         P1["Proxy Node<br/>Agent · Podman · Traefik · DNS · WireGuard<br/>WG: 10.100.1.1 · Containers: 10.200.1.2-254"]
@@ -64,7 +64,7 @@ The agent uses a two-state machine to prevent race conditions during reconciliat
 
 ```mermaid
 stateDiagram-v2
-    IDLE: IDLE (poll every 10s)
+    IDLE: IDLE (poll every 15s)
     PROCESSING: PROCESSING (no poll)
 
     IDLE --> PROCESSING: Drift detected
@@ -73,9 +73,9 @@ stateDiagram-v2
 
 ### IDLE State
 
-- Poll the control plane every 10 seconds for expected state.
+- Poll the control plane every 15 seconds for expected state.
 - Compare expected state versus actual state for containers, DNS, Traefik, and WireGuard.
-- If no drift exists, send a status report and remain in `IDLE`.
+- Report status on a separate short interval and remain in `IDLE` if no drift exists.
 - If drift is detected, snapshot expected state and transition to `PROCESSING`.
 
 Traefik drift detection only applies on proxy nodes.
