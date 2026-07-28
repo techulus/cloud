@@ -124,7 +124,7 @@ export const NetworkingSection = memo(function NetworkingSection({
 		port <= 65535;
 	const canAdd =
 		isValidPort &&
-		!httpPorts.some((p) => p.port === port) &&
+		!httpPorts.some((p) => p.port === port && !p.isPublic) &&
 		isValidDomain &&
 		!httpPorts.some((p) => p.domain === normalizedDomain) &&
 		!isSaving;

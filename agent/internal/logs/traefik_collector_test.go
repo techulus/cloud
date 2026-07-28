@@ -39,3 +39,14 @@ func TestTraefikCollectorProcessLineQueuesRetainedFields(t *testing.T) {
 		t.Fatalf("queued entries = %#v, want %#v", collector.queue, want)
 	}
 }
+
+func TestExtractServiceIdFromRouteSpecificRouterName(t *testing.T) {
+	for input, want := range map[string]string{
+		"service-42--app.example.com@file": "service-42",
+		"service-42@docker":                "service-42",
+	} {
+		if got := extractServiceId(input); got != want {
+			t.Fatalf("extractServiceId(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

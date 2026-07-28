@@ -17,9 +17,10 @@ import {
 } from "@/lib/deployment-status";
 import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import type {
-	ServiceRevisionSecret,
-	ServiceRevisionSpec,
+import {
+	getPublishedContainerPorts,
+	type ServiceRevisionSecret,
+	type ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
 import { getWireGuardPeers } from "@/lib/wireguard";
 
@@ -269,7 +270,9 @@ async function buildExpectedContainers(
 			),
 		);
 
-	const serviceIds = [...new Set(serverDeployments.map((dep) => dep.serviceId))];
+	const serviceIds = [
+		...new Set(serverDeployments.map((dep) => dep.serviceId)),
+	];
 	const revisionIds = [
 		...new Set(serverDeployments.map((dep) => dep.serviceRevisionId)),
 	];
@@ -357,13 +360,18 @@ export function buildExpectedContainersFromRows({
 					(a, b) =>
 						a.containerPort - b.containerPort || a.hostPort - b.hostPort,
 				)
+				.filter(
+					(port, index, sortedPorts) =>
+						index === 0 ||
+						sortedPorts[index - 1].containerPort !== port.containerPort,
+				)
 				.map((port) => ({
 					containerPort: port.containerPort,
 					hostPort: port.hostPort,
 				}));
-			const expectedContainerPorts = specification.ports
-				.map((port) => port.containerPort)
-				.sort((a, b) => a - b);
+			const expectedContainerPorts = getPublishedContainerPorts(
+				specification.ports,
+			);
 			const allocatedContainerPorts = ports.map((port) => port.containerPort);
 			if (
 				JSON.stringify(expectedContainerPorts) !==
@@ -855,6 +863,8 @@ function compareServicePorts(a: RouteServicePort, b: RouteServicePort) {
 	return (
 		a.serviceId.localeCompare(b.serviceId) ||
 		a.protocol.localeCompare(b.protocol) ||
-		a.port - b.port
+		a.port - b.port ||
+		(a.domain ?? "").localeCompare(b.domain ?? "") ||
+		a.id.localeCompare(b.id)
 	);
 }

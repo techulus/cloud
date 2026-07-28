@@ -1,13 +1,16 @@
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servicePorts } from "@/db/schema";
-import { asc, eq } from "drizzle-orm";
 
 const TCP_PORT_START = 10000;
 const TCP_PORT_END = 10999;
 const UDP_PORT_START = 11000;
 const UDP_PORT_END = 11999;
 
-export async function allocatePort(protocol: "tcp" | "udp"): Promise<number> {
+export async function allocatePort(
+	protocol: "tcp" | "udp",
+	reserved: ReadonlySet<number> = new Set(),
+): Promise<number> {
 	const portStart = protocol === "tcp" ? TCP_PORT_START : UDP_PORT_START;
 	const portEnd = protocol === "tcp" ? TCP_PORT_END : UDP_PORT_END;
 
@@ -22,7 +25,7 @@ export async function allocatePort(protocol: "tcp" | "udp"): Promise<number> {
 	);
 
 	for (let port = portStart; port <= portEnd; port++) {
-		if (!usedSet.has(port)) {
+		if (!usedSet.has(port) && !reserved.has(port)) {
 			return port;
 		}
 	}

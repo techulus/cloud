@@ -210,11 +210,8 @@ func (c *TraefikCollector) processLine(line []byte) {
 }
 
 func extractServiceId(routerName string) string {
-	parts := strings.Split(routerName, "@")
-	if len(parts) > 0 && parts[0] != "" {
-		return parts[0]
-	}
-	return ""
+	name := strings.SplitN(routerName, "@", 2)[0]
+	return strings.SplitN(name, "--", 2)[0]
 }
 
 func (c *TraefikCollector) enqueue(entry HTTPLogEntry) {

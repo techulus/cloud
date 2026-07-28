@@ -264,15 +264,12 @@ func Validate(m Manifest) error {
 			return errors.New("service.placement.mode must be automatic or manual")
 		}
 	}
-	seenPorts := make(map[int]struct{}, len(m.Service.Ports))
+	portsByNumber := make(map[int][]Port, len(m.Service.Ports))
+	seenDomains := make(map[string]struct{}, len(m.Service.Ports))
 	for i, p := range m.Service.Ports {
 		if p.ContainerPort < 1 || p.ContainerPort > 65535 {
 			return fmt.Errorf("service.ports[%d].containerPort must be between 1 and 65535", i)
 		}
-		if _, exists := seenPorts[p.ContainerPort]; exists {
-			return fmt.Errorf("service.ports[%d].containerPort must be unique", i)
-		}
-		seenPorts[p.ContainerPort] = struct{}{}
 		if p.Domain != nil && strings.TrimSpace(*p.Domain) == "" {
 			return fmt.Errorf("service.ports[%d].domain cannot be blank", i)
 		}
@@ -281,6 +278,24 @@ func Validate(m Manifest) error {
 		}
 		if !p.Public && p.Domain != nil {
 			return fmt.Errorf("service.ports[%d].domain cannot be set for internal ports", i)
+		}
+		if p.Domain != nil {
+			domain := strings.ToLower(strings.TrimSpace(*p.Domain))
+			if _, exists := seenDomains[domain]; exists {
+				return fmt.Errorf("service.ports[%d].domain must be unique", i)
+			}
+			seenDomains[domain] = struct{}{}
+		}
+		portsByNumber[p.ContainerPort] = append(portsByNumber[p.ContainerPort], p)
+	}
+	for containerPort, ports := range portsByNumber {
+		if len(ports) < 2 {
+			continue
+		}
+		for _, port := range ports {
+			if !port.Public || port.Domain == nil {
+				return fmt.Errorf("service port %d can only be repeated for public domains", containerPort)
+			}
 		}
 	}
 	if h := m.Service.HealthCheck; h != nil && (h.Cmd == "" || h.Interval < 1 || h.Timeout < 1 || h.Retries < 1 || h.StartPeriod < 0) {

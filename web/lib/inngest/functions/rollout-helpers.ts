@@ -9,7 +9,10 @@ import {
 	services,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
-import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
+import {
+	getPublishedContainerPorts,
+	type ServiceRevisionSpec,
+} from "@/lib/service-revision-spec";
 import { assignContainerIp } from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -381,6 +384,9 @@ export async function createDeploymentRecords(
 	}
 
 	const deploymentIds = existingDeployments.map((deployment) => deployment.id);
+	const publishedContainerPorts = getPublishedContainerPorts(
+		specification.ports,
+	);
 
 	for (const placement of placements) {
 		if (placement.replicas <= 0) continue;
@@ -396,7 +402,7 @@ export async function createDeploymentRecords(
 			const deploymentId = randomUUID();
 			const hostPorts = await allocateHostPorts(
 				server.id,
-				specification.ports.length,
+				publishedContainerPorts.length,
 			);
 			const ipAddress = await assignContainerIp(server.id);
 
@@ -425,12 +431,12 @@ export async function createDeploymentRecords(
 					rolloutId,
 				});
 
-				if (specification.ports.length > 0) {
+				if (publishedContainerPorts.length > 0) {
 					await tx.insert(deploymentPorts).values(
-						specification.ports.map((port, index) => ({
+						publishedContainerPorts.map((containerPort, index) => ({
 							id: randomUUID(),
 							deploymentId,
-							containerPort: port.containerPort,
+							containerPort,
 							hostPort: hostPorts[index],
 						})),
 					);

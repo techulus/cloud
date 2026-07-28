@@ -643,7 +643,7 @@ export function getMetricWindow(
 }
 
 export function buildTraefikServiceMatcher(serviceId: string): string {
-	return `^${escapePromRegex(serviceId)}(@file)?$`;
+	return `^${escapePromRegex(serviceId)}(?:--[^@]+)?(@file)?$`;
 }
 
 export function formatPromDuration(seconds: number): string {

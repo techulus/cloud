@@ -13,12 +13,20 @@ func HashRoutes(routes []TraefikRoute) string {
 	sortedRoutes := make([]TraefikRoute, len(routes))
 	copy(sortedRoutes, routes)
 	sort.Slice(sortedRoutes, func(i, j int) bool {
-		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
+		if sortedRoutes[i].ServiceId != sortedRoutes[j].ServiceId {
+			return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
+		}
+		if sortedRoutes[i].ID != sortedRoutes[j].ID {
+			return sortedRoutes[i].ID < sortedRoutes[j].ID
+		}
+		return sortedRoutes[i].Domain < sortedRoutes[j].Domain
 	})
 
 	var sb strings.Builder
 	for _, r := range sortedRoutes {
 		sb.WriteString(r.ServiceId)
+		sb.WriteString(":")
+		sb.WriteString(r.ID)
 		sb.WriteString(":")
 		sb.WriteString(r.Domain)
 		sb.WriteString(":")
@@ -53,11 +61,12 @@ func GetCurrentConfigHash() string {
 	}
 
 	var routes []TraefikRoute
-	for serviceId, router := range config.HTTP.Routers {
+	for routerName, router := range config.HTTP.Routers {
 		domain := extractDomainFromRule(router.Rule)
+		serviceId, routeID := parseHTTPRouteName(routerName)
 
 		var upstreams []Upstream
-		if svc, exists := config.HTTP.Services[serviceId]; exists {
+		if svc, exists := config.HTTP.Services[router.Service]; exists {
 			for _, server := range svc.LoadBalancer.Servers {
 				url := strings.TrimPrefix(server.URL, "http://")
 				weight := 1
@@ -72,7 +81,7 @@ func GetCurrentConfigHash() string {
 		}
 
 		routes = append(routes, TraefikRoute{
-			ID:        serviceId,
+			ID:        routeID,
 			Domain:    domain,
 			Upstreams: upstreams,
 			ServiceId: serviceId,
@@ -82,6 +91,15 @@ func GetCurrentConfigHash() string {
 	serverName := extractForwardedServerName(config.HTTP.Middlewares)
 
 	return HashRoutesWithServerName(routes, serverName)
+}
+
+func parseHTTPRouteName(name string) (string, string) {
+	name = strings.SplitN(name, "@", 2)[0]
+	parts := strings.SplitN(name, "--", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return name, name
 }
 
 func extractForwardedServerName(middlewares map[string]middleware) string {

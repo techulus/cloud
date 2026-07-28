@@ -259,6 +259,107 @@ describe("expected-state pure builders", () => {
 		).toThrow("Deployment dep_incomplete_ports has incomplete port allocation");
 	});
 
+	it("publishes one physical port for multiple HTTP domain aliases", () => {
+		const ports = ["app.example.com", "www.example.com"].map((domain) => ({
+			containerPort: 3000,
+			isPublic: true,
+			domain,
+			protocol: "http" as const,
+			externalPort: null,
+			tlsPassthrough: false,
+		}));
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_aliases",
+					serviceId: "svc_aliases",
+					serviceRevisionId: "rev_svc_aliases",
+					runtimeDesiredState: "running",
+				},
+			] as any,
+			services: [{ id: "svc_aliases", name: "aliases" }] as any,
+			revisions: [revision("svc_aliases", { ports })],
+			deploymentPorts: [
+				{ deploymentId: "dep_aliases", containerPort: 3000, hostPort: 31000 },
+			] as any,
+		});
+
+		expect(containers[0]?.ports).toEqual([
+			{ containerPort: 3000, hostPort: 31000 },
+		]);
+	});
+
+	it("deduplicates historical physical mappings for cross-protocol ports", () => {
+		const containers = buildExpectedContainersFromRows({
+			deployments: [
+				{
+					id: "dep_protocols",
+					serviceId: "svc_protocols",
+					serviceRevisionId: "rev_svc_protocols",
+					runtimeDesiredState: "running",
+				},
+			] as any,
+			services: [{ id: "svc_protocols", name: "protocols" }] as any,
+			revisions: [
+				revision("svc_protocols", {
+					ports: [
+						{
+							containerPort: 3000,
+							isPublic: true,
+							domain: "app.example.com",
+							protocol: "http",
+							externalPort: null,
+							tlsPassthrough: false,
+						},
+						{
+							containerPort: 3000,
+							isPublic: true,
+							domain: null,
+							protocol: "tcp",
+							externalPort: 10000,
+							tlsPassthrough: false,
+						},
+					],
+				}),
+			],
+			deploymentPorts: [
+				{ deploymentId: "dep_protocols", containerPort: 3000, hostPort: 31000 },
+				{ deploymentId: "dep_protocols", containerPort: 3000, hostPort: 31001 },
+			] as any,
+		});
+
+		expect(containers[0]?.ports).toEqual([
+			{ containerPort: 3000, hostPort: 31000 },
+		]);
+	});
+
+	it("builds one HTTP route per domain alias", () => {
+		const routes = buildTraefikRoutes({
+			serverId: "server_1",
+			ports: ["app.example.com", "www.example.com"].map((domain, index) => ({
+				id: `port_${index}`,
+				serviceId: "svc_1",
+				port: 3000,
+				isPublic: true,
+				protocol: "http",
+				domain,
+			})) as any,
+			routableDeployments: [
+				{ serviceId: "svc_1", serverId: "server_1", ipAddress: "10.0.0.1" },
+			] as any,
+		});
+
+		expect(routes.httpRoutes.map((route) => route.domain)).toEqual([
+			"app.example.com",
+			"www.example.com",
+		]);
+		expect(
+			routes.httpRoutes.every(
+				(route) => route.upstreams[0]?.url === "10.0.0.1:3000",
+			),
+		).toBe(true);
+	});
+
 	it("keeps HTTP local upstreams before remote upstreams", () => {
 		const routes = buildTraefikRoutes({
 			serverId: "server_local",
@@ -870,6 +971,14 @@ describe("expected-state pure builders", () => {
 					externalPort: null,
 					tlsPassthrough: false,
 				},
+				{
+					containerPort: 3000,
+					isPublic: true,
+					domain: "www.sleepy.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
 			],
 		});
 		const routes = buildServerlessRoutesFromRows({
@@ -897,6 +1006,15 @@ describe("expected-state pure builders", () => {
 			{
 				serviceId: "svc_1",
 				domain: "sleepy.example.com",
+				port: 3000,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				localDeploymentIds: ["dep_sleeping"],
+				upstreams: [],
+			},
+			{
+				serviceId: "svc_1",
+				domain: "www.sleepy.example.com",
 				port: 3000,
 				sleepAfterSeconds: 300,
 				wakeTimeoutSeconds: 120,

@@ -33,7 +33,7 @@ function draft(
 			{
 				port: 443,
 				isPublic: true,
-				domain: "api.example.com",
+				domain: null,
 				protocol: "tcp",
 				externalPort: 443,
 				tlsPassthrough: true,
@@ -85,6 +85,7 @@ describe("service revision specification", () => {
 		input.service.serverlessSleepAfterSeconds = 30;
 		input.service.healthCheckInterval = null;
 		input.ports[0].protocol = null;
+		input.ports[0].domain = "api.example.com";
 		input.ports[0].tlsPassthrough = null;
 
 		const spec = buildServiceRevisionSpec(input);
@@ -102,6 +103,83 @@ describe("service revision specification", () => {
 
 		expect(() => buildServiceRevisionSpec(input)).toThrow(
 			"At least one replica is required",
+		);
+	});
+
+	it("allows distinct public HTTP domains to share a container port", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "www.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(buildServiceRevisionSpec(input).ports).toHaveLength(2);
+	});
+
+	it("allows different protocols to share a numeric container port", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: true,
+					domain: null,
+					protocol: "tcp",
+					externalPort: 10000,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(buildServiceRevisionSpec(input).ports).toHaveLength(2);
+	});
+
+	it("rejects repeated container ports that are not HTTP aliases", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: false,
+					domain: null,
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"can only be repeated for public HTTP domains",
 		);
 	});
 

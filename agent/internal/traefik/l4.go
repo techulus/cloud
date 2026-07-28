@@ -78,11 +78,15 @@ func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRou
 		if len(route.Upstreams) == 0 {
 			continue
 		}
+		routeName := httpRouteName(route)
+		if _, exists := config.HTTP.Routers[routeName]; exists {
+			return fmt.Errorf("duplicate HTTP route %s", routeName)
+		}
 
-		config.HTTP.Routers[route.ServiceId] = routerWithMiddleware{
+		config.HTTP.Routers[routeName] = routerWithMiddleware{
 			Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
 			EntryPoints: []string{"websecure"},
-			Service:     route.ServiceId,
+			Service:     routeName,
 			TLS:         &tlsConfig{},
 			Middlewares: middlewareNames,
 		}
@@ -96,7 +100,7 @@ func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRou
 			servers[i] = srv
 		}
 
-		config.HTTP.Services[route.ServiceId] = service{
+		config.HTTP.Services[routeName] = service{
 			LoadBalancer: loadBalancer{
 				Servers: servers,
 			},
@@ -167,11 +171,11 @@ func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRou
 		return fmt.Errorf("failed to marshal traefik config: %w", err)
 	}
 
-	if err := os.MkdirAll(traefikDynamicDir, 0755); err != nil {
+	if err := os.MkdirAll(dynamicConfigDir, 0755); err != nil {
 		return fmt.Errorf("failed to create dynamic config dir: %w", err)
 	}
 
-	routesPath := filepath.Join(traefikDynamicDir, routesFileName)
+	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
 	tmpPath := routesPath + ".tmp"
 
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
@@ -185,6 +189,10 @@ func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRou
 
 	log.Printf("[traefik] routes updated successfully")
 	return nil
+}
+
+func httpRouteName(route TraefikRoute) string {
+	return route.ServiceId + "--" + route.ID
 }
 
 func HashTCPRoutes(routes []TraefikTCPRoute) string {
@@ -318,7 +326,7 @@ func GetCurrentL4ConfigHash() string {
 }
 
 func readCurrentFullConfig() (*traefikFullConfigWithMiddlewares, error) {
-	routesPath := filepath.Join(traefikDynamicDir, routesFileName)
+	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
 	data, err := os.ReadFile(routesPath)
 	if err != nil {
 		if os.IsNotExist(err) {
