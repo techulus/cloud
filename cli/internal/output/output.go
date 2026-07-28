@@ -45,13 +45,6 @@ func Next(w io.Writer, command string) {
 	Field(w, "Run", command)
 }
 
-func ShortID(id string) string {
-	if len(id) <= 16 {
-		return id
-	}
-	return id[:8] + "..." + id[len(id)-4:]
-}
-
 func Status(value string) string {
 	return strings.ReplaceAll(value, "_", " ")
 }
