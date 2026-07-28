@@ -246,11 +246,10 @@ export async function queryServiceMetrics(options: {
 	const window = getMetricWindow(options.range, now);
 	if (!endpoint) return createEmptyServiceMetrics(options.range, now);
 
-	const serviceMatcher = buildTraefikServiceMatcher(options.serviceId);
 	const serviceId = escapePromQL(options.serviceId);
 	const rangeWindow = formatPromDuration(window.stepSeconds);
 	const totalWindow = formatPromDuration(window.durationMs / 1000);
-	const traefikFilter = `service=~"${serviceMatcher}"`;
+	const traefikFilter = `service_id="${serviceId}"`;
 	const queryStart = addMilliseconds(
 		window.start,
 		window.stepSeconds * SECOND_IN_MILLISECONDS,
@@ -642,10 +641,6 @@ export function getMetricWindow(
 	};
 }
 
-export function buildTraefikServiceMatcher(serviceId: string): string {
-	return `^${escapePromRegex(serviceId)}(@file)?$`;
-}
-
 export function formatPromDuration(seconds: number): string {
 	if (seconds % 86400 === 0) return `${seconds / 86400}d`;
 	if (seconds % 3600 === 0) return `${seconds / 3600}h`;
@@ -754,8 +749,4 @@ function escapePromQL(value: string) {
 		.replace(/\\/g, "\\\\")
 		.replace(/"/g, '\\"')
 		.replace(/\n/g, "\\n");
-}
-
-function escapePromRegex(value: string) {
-	return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }

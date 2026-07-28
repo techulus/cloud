@@ -11,6 +11,7 @@ import (
 
 	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/traefik"
 )
 
 var serverlessTransitionCounter atomic.Uint64
@@ -22,6 +23,9 @@ type serverlessTransitionGuard struct {
 }
 
 func (a *Agent) SetLatestExpectedState(state *agenthttp.ExpectedState) {
+	if state != nil {
+		a.RouteOwners.Merge(traefik.HTTPRouteOwners(ConvertToHttpRoutes(state.Traefik.HttpRoutes)))
+	}
 	a.expectedStateMutex.Lock()
 	defer a.expectedStateMutex.Unlock()
 	a.latestExpectedState = state

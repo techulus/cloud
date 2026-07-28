@@ -11,7 +11,9 @@ import (
 
 	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/metrics"
 	"techulus/cloud-agent/internal/serverless"
+	"techulus/cloud-agent/internal/traefik"
 )
 
 const (
@@ -23,6 +25,13 @@ const (
 )
 
 func (a *Agent) Run(ctx context.Context) {
+	if a.IsProxy {
+		if cached, err := a.Client.LoadCachedExpectedState(); err == nil {
+			a.RouteOwners.Merge(traefik.HTTPRouteOwners(ConvertToHttpRoutes(cached.Traefik.HttpRoutes)))
+		} else {
+			log.Printf("[cache] expected state unavailable for initial Traefik attribution: %v", err)
+		}
+	}
 	if a.Config.RegistryURL != "" && a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
 		if err := container.Login(a.Config.RegistryURL, a.Config.RegistryUsername, a.Config.RegistryPassword, a.Config.RegistryInsecure); err != nil {
 			log.Printf("[registry] login failed: %v", err)
@@ -147,6 +156,10 @@ func (a *Agent) ForwardTraefikMetrics(ctx context.Context) error {
 		return err
 	}
 
+	body, err = metrics.EnrichTraefik(body, a.RouteOwners)
+	if err != nil {
+		return err
+	}
 	return a.MetricsSender.SendPrometheusMetrics(body, map[string]string{
 		"job":       "traefik",
 		"server_id": a.Config.ServerID,

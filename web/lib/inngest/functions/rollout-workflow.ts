@@ -314,7 +314,10 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		const serverValidation = await step.run("validate-servers", async () => {
 			try {
-				const serverMap = await validateServers(placements);
+				const serverMap = await validateServers(
+					placements,
+					specification.serverless.enabled,
+				);
 				const ids = [...serverMap.keys()];
 				await ingestRolloutLog(
 					rolloutId,
@@ -422,7 +425,10 @@ export const rolloutWorkflow = inngest.createFunction(
 				.set({ currentStage: "deploying" })
 				.where(eq(rollouts.id, rolloutId));
 
-			const serverMap = await validateServers(placements);
+			const serverMap = await validateServers(
+				placements,
+				specification.serverless.enabled,
+			);
 
 			const result = await createDeploymentRecords(rolloutId, serviceId, {
 				revisionId: revision.id,

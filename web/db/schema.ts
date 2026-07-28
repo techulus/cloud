@@ -504,7 +504,7 @@ export const servicePorts = pgTable(
 			.references(() => services.id, { onDelete: "cascade" }),
 		port: integer("port").notNull(),
 		isPublic: boolean("is_public").notNull().default(false),
-		domain: text("domain").unique(),
+		domain: text("domain").unique("service_ports_domain_unique"),
 		protocol: text("protocol", { enum: ["http", "tcp", "udp"] })
 			.notNull()
 			.default("http"),

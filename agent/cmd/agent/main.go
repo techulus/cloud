@@ -25,6 +25,7 @@ import (
 	"techulus/cloud-agent/internal/network"
 	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/reconcile"
+	"techulus/cloud-agent/internal/routeowners"
 	"techulus/cloud-agent/internal/traefik"
 	"techulus/cloud-agent/internal/wireguard"
 )
@@ -289,13 +290,14 @@ func main() {
 	var logsSender *logs.VictoriaLogsSender
 	var agentLogWriter *logs.AgentLogWriter
 	var metricsSender agent.MetricsSender
+	routeOwners := routeowners.NewRegistry()
 
 	if logsEndpoint != "" {
 		log.Println("[logs] log collection enabled, endpoint:", sanitizedEndpoint(logsEndpoint))
 		logsSender = logs.NewVictoriaLogsSender(logsEndpoint, config.ServerID)
 		logCollector = logs.NewCollector(logsSender, dataDir)
 		if isProxy {
-			traefikLogCollector = logs.NewTraefikCollector(logsSender)
+			traefikLogCollector = logs.NewTraefikCollector(logsSender, routeOwners)
 			log.Println("[traefik-logs] Traefik HTTP log collection enabled")
 		}
 		agentLogWriter = logs.NewAgentLogWriter(config.ServerID, logsSender)
@@ -337,7 +339,7 @@ func main() {
 	privateIP := network.PrivateIP()
 	log.Printf("Agent v%s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
 
-	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, builder, config.IsProxy, disableDNS)
+	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, routeOwners, builder, config.IsProxy, disableDNS)
 	agentInstance.Run(ctx)
 
 	if agentLogFlusherDone != nil {

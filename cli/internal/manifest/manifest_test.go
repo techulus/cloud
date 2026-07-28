@@ -125,7 +125,32 @@ func TestRejectWindowsAbsoluteRootDir(t *testing.T) {
 func TestRejectDuplicatePorts(t *testing.T) {
 	m := base()
 	m.Service.Ports = []Port{{ContainerPort: 8080}, {ContainerPort: 8080}}
-	if err := Validate(m); err == nil || !strings.Contains(err.Error(), "must be unique") {
+	if err := Validate(m); err == nil || !strings.Contains(err.Error(), "can only be repeated") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAllowsMultipleDomainsOnOnePort(t *testing.T) {
+	m := base()
+	first := "app.example.com"
+	second := "www.example.com"
+	m.Service.Ports = []Port{
+		{ContainerPort: 8080, Public: true, Domain: &first},
+		{ContainerPort: 8080, Public: true, Domain: &second},
+	}
+	if err := Validate(m); err != nil {
+		t.Fatalf("valid port aliases rejected: %v", err)
+	}
+}
+
+func TestRejectsDuplicatePortDomains(t *testing.T) {
+	m := base()
+	domain := "app.example.com"
+	m.Service.Ports = []Port{
+		{ContainerPort: 8080, Public: true, Domain: &domain},
+		{ContainerPort: 8080, Public: true, Domain: &domain},
+	}
+	if err := Validate(m); err == nil || !strings.Contains(err.Error(), "domain must be unique") {
 		t.Fatalf("error = %v", err)
 	}
 }

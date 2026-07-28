@@ -33,7 +33,7 @@ function draft(
 			{
 				port: 443,
 				isPublic: true,
-				domain: "api.example.com",
+				domain: null,
 				protocol: "tcp",
 				externalPort: 443,
 				tlsPassthrough: true,
@@ -85,6 +85,7 @@ describe("service revision specification", () => {
 		input.service.serverlessSleepAfterSeconds = 30;
 		input.service.healthCheckInterval = null;
 		input.ports[0].protocol = null;
+		input.ports[0].domain = "api.example.com";
 		input.ports[0].tlsPassthrough = null;
 
 		const spec = buildServiceRevisionSpec(input);
@@ -102,6 +103,83 @@ describe("service revision specification", () => {
 
 		expect(() => buildServiceRevisionSpec(input)).toThrow(
 			"At least one replica is required",
+		);
+	});
+
+	it("allows distinct public HTTP domains to share a container port", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "www.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(buildServiceRevisionSpec(input).ports).toHaveLength(2);
+	});
+
+	it("allows different protocols to share a numeric container port", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: true,
+					domain: null,
+					protocol: "tcp",
+					externalPort: 10000,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(buildServiceRevisionSpec(input).ports).toHaveLength(2);
+	});
+
+	it("rejects repeated container ports that are not HTTP aliases", () => {
+		const input = draft({
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "app.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+				{
+					port: 3000,
+					isPublic: false,
+					domain: null,
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
+
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"can only be repeated for public HTTP domains",
 		);
 	});
 
@@ -152,7 +230,7 @@ describe("service revision specification", () => {
 		});
 	});
 
-	it("rejects automatic placement for stateful, volume-backed, and serverless services", () => {
+	it("rejects automatic placement for stateful and volume-backed services", () => {
 		const stateful = draft({ volumes: [] });
 		stateful.service.stateful = true;
 		stateful.service.placementMode = "automatic";
@@ -169,19 +247,38 @@ describe("service revision specification", () => {
 		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
 			"Services with volumes cannot use automatic placement",
 		);
+	});
 
-		const serverless = draft({ volumes: [] });
+	it("allows automatic placement for stateless serverless services", () => {
+		const serverless = draft({
+			volumes: [],
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "api.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
 		serverless.service.serverlessEnabled = true;
 		serverless.service.placementMode = "automatic";
-		serverless.service.replicas = 1;
+		serverless.service.replicas = 3;
 
-		expect(() => buildServiceRevisionSpec(serverless)).toThrow(
-			"Serverless services cannot use automatic placement",
-		);
+		expect(buildServiceRevisionSpec(serverless)).toMatchObject({
+			stateful: false,
+			serverless: { enabled: true },
+			placement: { mode: "automatic", replicas: 3 },
+			placements: [],
+			volumes: [],
+		});
 	});
 
 	it("rejects serverless revisions without a public HTTP port and domain", () => {
 		const input = draft({
+			volumes: [],
 			ports: [
 				{
 					port: 3000,
@@ -213,5 +310,30 @@ describe("service revision specification", () => {
 		};
 
 		expect(() => buildServiceRevisionSpec(input)).not.toThrow();
+	});
+
+	it("accepts manually placed stateful serverless revisions", () => {
+		const input = draft({
+			placements: [{ serverId: "proxy-server", count: 1 }],
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
+		input.service.stateful = true;
+		input.service.serverlessEnabled = true;
+		input.ports[0] = {
+			port: 443,
+			isPublic: true,
+			domain: "api.example.com",
+			protocol: "http",
+			externalPort: null,
+			tlsPassthrough: false,
+		};
+
+		expect(buildServiceRevisionSpec(input)).toMatchObject({
+			stateful: true,
+			serverless: { enabled: true },
+			placement: { mode: "manual" },
+			placements: [{ serverId: "proxy-server", count: 1 }],
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
 	});
 });

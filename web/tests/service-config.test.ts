@@ -234,6 +234,52 @@ describe("service config", () => {
 		expect(diffConfigs(deployed, current)).toEqual([]);
 	});
 
+	it("compares multiple domains on one port without depending on order", () => {
+		const first = {
+			port: 8080,
+			isPublic: true,
+			domain: "app.example.com",
+			protocol: "http" as const,
+		};
+		const second = {
+			port: 8080,
+			isPublic: true,
+			domain: "www.example.com",
+			protocol: "http" as const,
+		};
+
+		expect(
+			diffConfigs(
+				deployedConfig({ ports: [first, second] }),
+				deployedConfig({ ports: [second, first] }),
+			),
+		).toEqual([]);
+	});
+
+	it("reports changes to one of multiple domains on a shared port", () => {
+		const unchanged = {
+			port: 8080,
+			isPublic: true,
+			domain: "app.example.com",
+			protocol: "http" as const,
+		};
+
+		expect(
+			diffConfigs(
+				deployedConfig({
+					ports: [unchanged, { ...unchanged, domain: "old.example.com" }],
+				}),
+				deployedConfig({
+					ports: [{ ...unchanged, domain: "new.example.com" }, unchanged],
+				}),
+			),
+		).toContainEqual({
+			field: "Port 8080",
+			from: "public, app.example.com; public, old.example.com",
+			to: "public, app.example.com; public, new.example.com",
+		});
+	});
+
 	it("reports serverless changes as pending config", () => {
 		const changes = diffConfigs(deployedConfig(), {
 			source: { type: "image", image: "nginx" },

@@ -199,6 +199,7 @@ export async function recoverInvalidAutomaticPlacements(
 			specification: serviceRevisions.specification,
 			serverStatus: servers.status,
 			serverWireguardIp: servers.wireguardIp,
+			serverIsProxy: servers.isProxy,
 			lastRecoveryAttemptAt: services.lastAutomaticRecoveryAttemptAt,
 		})
 		.from(deployments)
@@ -262,7 +263,9 @@ export async function recoverInvalidAutomaticPlacements(
 				continue;
 			const hasInvalidPlacement = serviceDeployments.some(
 				(deployment) =>
-					deployment.serverStatus !== "online" || !deployment.serverWireguardIp,
+					deployment.serverStatus !== "online" ||
+					!deployment.serverWireguardIp ||
+					(specification.serverless.enabled && !deployment.serverIsProxy),
 			);
 			if (!hasInvalidPlacement) continue;
 
