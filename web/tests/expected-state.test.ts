@@ -96,7 +96,7 @@ describe("expected-state pure builders", () => {
 					},
 					resourceLimits: { cpuCores: 1, memoryMb: 512 },
 					serverless: {
-						enabled: false,
+						enabled: true,
 						sleepAfterSeconds: 300,
 						wakeTimeoutSeconds: 300,
 					},
@@ -149,7 +149,7 @@ describe("expected-state pure builders", () => {
 					healthCheckStartPeriod: null,
 					resourceCpuLimit: 1,
 					resourceMemoryLimitMb: 512,
-					serverlessEnabled: false,
+					serverlessEnabled: true,
 				},
 			] as any,
 			deploymentPorts: [
@@ -172,7 +172,7 @@ describe("expected-state pure builders", () => {
 				{ containerPort: 80, hostPort: 80 },
 				{ containerPort: 3000, hostPort: 30001 },
 			],
-			publishLocalPorts: false,
+			publishLocalPorts: true,
 			env: { ALPHA: "first", ZED: "last" },
 			volumes: [
 				{ name: "data", containerPath: "/data" },
@@ -738,6 +738,62 @@ describe("expected-state pure builders", () => {
 						alwaysOn: true,
 					},
 				],
+			},
+		]);
+	});
+
+	it("builds proxy-local serverless metadata for stateful services", () => {
+		const routes = buildServerlessRoutesFromRows({
+			serverId: "proxy_1",
+			services: [
+				runtimeRevision("svc_stateful", {
+					stateful: true,
+					serverless: {
+						enabled: true,
+						sleepAfterSeconds: 300,
+						wakeTimeoutSeconds: 120,
+					},
+				}),
+			],
+			ports: [
+				{
+					id: "port_1",
+					serviceId: "svc_stateful",
+					port: 3000,
+					isPublic: true,
+					protocol: "http",
+					domain: "db.example.com",
+				},
+			] as any,
+			deployments: [
+				{
+					id: "dep_stateful",
+					serviceId: "svc_stateful",
+					serverId: "proxy_1",
+					ipAddress: "10.0.0.10",
+					runtimeDesiredState: "stopped",
+					trafficState: "active",
+					observedPhase: "sleeping",
+					serverIsProxy: true,
+				},
+			] as any,
+			containers: [
+				{
+					deploymentId: "dep_stateful",
+					desiredState: "stopped",
+				},
+			] as any,
+		});
+
+		expect(routes).toEqual([
+			{
+				serviceId: "svc_stateful",
+				domain: "db.example.com",
+				port: 3000,
+				sleepAfterSeconds: 300,
+				wakeTimeoutSeconds: 120,
+				localDeploymentIds: ["dep_stateful"],
+				upstreams: [],
 			},
 		]);
 	});

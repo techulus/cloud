@@ -169,21 +169,24 @@ describe("diffServiceRevisionSpecs", () => {
 		});
 	});
 
-	it("rejects persisted stateful and volume-backed serverless revisions", () => {
+	it("accepts persisted stateful and volume-backed serverless revisions", () => {
 		const stateful = spec();
 		stateful.serverless.enabled = true;
 		stateful.stateful = true;
 
-		expect(() => parseServiceRevisionSpec(stateful)).toThrow(
-			"Serverless services must be stateless",
-		);
+		expect(parseServiceRevisionSpec(stateful)).toMatchObject({
+			stateful: true,
+			serverless: { enabled: true },
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
 
 		const volumeBacked = spec();
 		volumeBacked.serverless.enabled = true;
 
-		expect(() => parseServiceRevisionSpec(volumeBacked)).toThrow(
-			"Serverless services cannot use volumes",
-		);
+		expect(parseServiceRevisionSpec(volumeBacked)).toMatchObject({
+			serverless: { enabled: true },
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
 	});
 
 	it("never exposes secret ciphertext while detecting additions, updates, and removals", () => {

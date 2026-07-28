@@ -210,8 +210,9 @@ Worker nodes do not run Traefik.
 
 Public HTTP services can be configured as serverless. Serverless scale-to-zero is
 proxy-local: deployments placed on proxy nodes may sleep after an idle period,
-then wake on the next public request handled by that proxy. Serverless services
-use manual placement on proxy nodes.
+then wake on the next public request handled by that proxy. Stateless services
+without volumes can use automatic placement across proxy nodes. Stateful or
+volume-backed serverless services require manual placement on a proxy node.
 
 Serverless uses the same declarative expected-state model as normal
 deployments, but proxy agents own the local lifecycle decision:

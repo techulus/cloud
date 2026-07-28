@@ -61,7 +61,6 @@ You can also manually lock any service to a specific server by setting the locke
 - Stateful services do not automatically fail over to another server.
 - Maximum 10 replicas per service.
 - Serverless scaling requires a public HTTP service domain.
-- Serverless services must be stateless and cannot use volumes.
 - Sleep and wake are proxy-local; serverless replicas must be placed on proxy nodes.
 - Serverless traffic must be routed only to proxy nodes that own a local proxy replica for that service.
 - Proxy agents report sleep and wake transitions through normal status reports.

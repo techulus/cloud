@@ -925,9 +925,6 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
-			if (service.stateful) {
-				throw new Error("Serverless services must be stateless");
-			}
 			const publicHttpPorts = await tx
 				.select({ id: servicePorts.id })
 				.from(servicePorts)
@@ -962,8 +959,13 @@ export async function updateServiceServerlessSettings(
 					.where(eq(serviceVolumes.serviceId, serviceId))
 					.limit(1),
 			]);
-			if (volume.length > 0) {
-				throw new Error("Serverless services cannot use volumes");
+			if (
+				service.placementMode === "automatic" &&
+				(service.stateful || volume.length > 0)
+			) {
+				throw new Error(
+					"Automatic placement is not supported for stateful services or services with volumes",
+				);
 			}
 			const totalConfiguredReplicas =
 				service.placementMode === "automatic"
@@ -1427,9 +1429,6 @@ export async function addServiceVolume(
 				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 				.then((rows) => rows[0]);
 			if (!service) throw new Error("Service not found");
-			if (service.serverlessEnabled) {
-				throw new Error("Disable serverless before adding a volume");
-			}
 			if (service.placementMode === "automatic") {
 				throw new Error("Switch to manual placement before adding a volume");
 			}

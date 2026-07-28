@@ -22,9 +22,6 @@ export const VolumesSection = memo(function VolumesSection({
 	const [error, setError] = useState<string | null>(null);
 
 	const volumes = service.volumes || [];
-	const volumeAddUnavailableReason = service.serverlessEnabled
-		? "Disable serverless before adding a volume"
-		: null;
 
 	const handleAdd = async () => {
 		if (!name || !containerPath) return;
@@ -110,35 +107,23 @@ export const VolumesSection = memo(function VolumesSection({
 				{error && (
 					<p className="text-sm text-red-600 dark:text-red-400">{error}</p>
 				)}
-				{volumeAddUnavailableReason && (
-					<p className="text-sm text-muted-foreground">
-						{volumeAddUnavailableReason}.
-					</p>
-				)}
 
 				<div className="flex flex-col sm:flex-row gap-2">
 					<Input
 						placeholder="Volume name (e.g., data)"
 						value={name}
 						onChange={(e) => setName(e.target.value)}
-						disabled={!!volumeAddUnavailableReason}
 						className="flex-1"
 					/>
 					<Input
 						placeholder="Container path (e.g., /data)"
 						value={containerPath}
 						onChange={(e) => setContainerPath(e.target.value)}
-						disabled={!!volumeAddUnavailableReason}
 						className="flex-1"
 					/>
 					<Button
 						onClick={handleAdd}
-						disabled={
-							isAdding ||
-							!!volumeAddUnavailableReason ||
-							!name ||
-							!containerPath
-						}
+						disabled={isAdding || !name || !containerPath}
 						size="icon"
 					>
 						<Plus className="h-4 w-4" />

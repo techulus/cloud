@@ -198,23 +198,6 @@ describe("service revision specification", () => {
 		});
 	});
 
-	it("rejects stateful and volume-backed serverless services", () => {
-		const stateful = draft({ volumes: [] });
-		stateful.service.stateful = true;
-		stateful.service.serverlessEnabled = true;
-
-		expect(() => buildServiceRevisionSpec(stateful)).toThrow(
-			"Serverless services must be stateless",
-		);
-
-		const volumeBacked = draft();
-		volumeBacked.service.serverlessEnabled = true;
-
-		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
-			"Serverless services cannot use volumes",
-		);
-	});
-
 	it("rejects serverless revisions without a public HTTP port and domain", () => {
 		const input = draft({
 			volumes: [],
@@ -237,7 +220,7 @@ describe("service revision specification", () => {
 	});
 
 	it("accepts serverless revisions with at least one public HTTP port and domain", () => {
-		const input = draft({ volumes: [] });
+		const input = draft();
 		input.service.serverlessEnabled = true;
 		input.ports[0] = {
 			port: 443,
@@ -249,5 +232,30 @@ describe("service revision specification", () => {
 		};
 
 		expect(() => buildServiceRevisionSpec(input)).not.toThrow();
+	});
+
+	it("accepts manually placed stateful serverless revisions", () => {
+		const input = draft({
+			placements: [{ serverId: "proxy-server", count: 1 }],
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
+		input.service.stateful = true;
+		input.service.serverlessEnabled = true;
+		input.ports[0] = {
+			port: 443,
+			isPublic: true,
+			domain: "api.example.com",
+			protocol: "http",
+			externalPort: null,
+			tlsPassthrough: false,
+		};
+
+		expect(buildServiceRevisionSpec(input)).toMatchObject({
+			stateful: true,
+			serverless: { enabled: true },
+			placement: { mode: "manual" },
+			placements: [{ serverId: "proxy-server", count: 1 }],
+			volumes: [{ name: "data", containerPath: "/data" }],
+		});
 	});
 });

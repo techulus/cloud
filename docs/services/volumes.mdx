@@ -18,8 +18,9 @@ Each volume has a name and a container path:
 
 When you add a volume, the service automatically becomes **stateful**. Stateful services are locked to a single server and limited to 1 replica so the container always mounts the same local data path. When the last volume is removed, the service reverts to stateless.
 
-Serverless scaling is not available for services with volumes. Disable serverless
-before adding a volume.
+Stateful services can use serverless scaling when they have a public HTTP domain
+and manual placement on a proxy node. Automatic serverless placement is only
+available to stateless services without volumes.
 
 ## Volume Backups
 
@@ -48,7 +49,6 @@ You can restore a volume from any completed backup. The restore process download
 ## Limitations
 
 - Services with volumes are locked to a single server.
-- Services with volumes cannot use serverless scaling.
 - Replica count is fixed at 1 for stateful services.
 - Volume data lives on the host filesystem and is not replicated to other servers.
 - If the server is lost, data is only recoverable from completed backups.
