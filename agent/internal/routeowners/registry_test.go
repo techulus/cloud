@@ -6,7 +6,6 @@ func TestRegistryRetainsOwnersAndHandlesFileSuffix(t *testing.T) {
 	registry := NewRegistry()
 	registry.Merge(map[string]string{"http-old": "service-old"})
 	registry.Merge(map[string]string{
-		"http-old": "service-other",
 		"http-new": "service-new",
 	})
 

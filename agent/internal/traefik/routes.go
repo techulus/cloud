@@ -14,11 +14,7 @@ type RoutesConfig struct {
 }
 
 func resourceName(kind, serviceID, routeID string) string {
-	canonical, _ := json.Marshal(struct {
-		ServiceID string `json:"serviceId"`
-		RouteID   string `json:"routeId"`
-	}{serviceID, routeID})
-	hash := sha256.Sum256(canonical)
+	hash := sha256.Sum256([]byte(serviceID + "\x00" + routeID))
 	return kind + "-" + hex.EncodeToString(hash[:])
 }
 

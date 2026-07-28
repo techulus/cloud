@@ -655,7 +655,7 @@ export async function patchConfiguration(
 		}
 	}
 
-	const update = db.transaction(async (tx) => {
+	return db.transaction(async (tx) => {
 		await tx.execute(
 			sql`SELECT pg_advisory_xact_lock(hashtext(${service.id}))`,
 		);
@@ -990,16 +990,28 @@ export async function patchConfiguration(
 					.delete(servicePorts)
 					.where(eq(servicePorts.serviceId, service.id));
 				if (input.ports.length > 0) {
-					await tx.insert(servicePorts).values(
-						input.ports.map((port) => ({
-							id: randomUUID(),
-							serviceId: service.id,
-							port: port.containerPort,
-							isPublic: port.public,
-							domain: port.public ? (port.domain ?? null) : null,
-							protocol: "http" as const,
-						})),
-					);
+					try {
+						await tx.insert(servicePorts).values(
+							input.ports.map((port) => ({
+								id: randomUUID(),
+								serviceId: service.id,
+								port: port.containerPort,
+								isPublic: port.public,
+								domain: port.public ? (port.domain ?? null) : null,
+								protocol: "http" as const,
+							})),
+						);
+					} catch (error) {
+						if (
+							(error as { code?: string; constraint?: string }).code ===
+								"23505" &&
+							(error as { constraint?: string }).constraint ===
+								"service_ports_domain_unique"
+						) {
+							domainError("Port domain is already in use", "DOMAIN_CONFLICT");
+						}
+						throw error;
+					}
 				}
 			}
 		}
@@ -1009,16 +1021,4 @@ export async function patchConfiguration(
 			changes,
 		};
 	});
-	try {
-		return await update;
-	} catch (error) {
-		if (
-			(error as { code?: string; constraint?: string }).code === "23505" &&
-			(error as { constraint?: string }).constraint ===
-				"service_ports_domain_unique"
-		) {
-			domainError("Port domain is already in use", "DOMAIN_CONFLICT");
-		}
-		throw error;
-	}
 }

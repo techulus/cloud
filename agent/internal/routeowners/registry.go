@@ -16,24 +16,16 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Merge(owners map[string]string) {
-	if r == nil {
-		return
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for resource, serviceID := range owners {
 		if resource != "" && serviceID != "" {
-			if _, exists := r.owners[resource]; !exists {
-				r.owners[resource] = serviceID
-			}
+			r.owners[resource] = serviceID
 		}
 	}
 }
 
 func (r *Registry) Lookup(resource string) (string, bool) {
-	if r == nil {
-		return "", false
-	}
 	resource = strings.TrimSuffix(resource, "@file")
 	r.mu.RLock()
 	defer r.mu.RUnlock()

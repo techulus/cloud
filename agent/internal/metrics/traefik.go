@@ -3,8 +3,6 @@ package metrics
 import (
 	"bytes"
 	"fmt"
-	"sort"
-	"strings"
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -21,6 +19,8 @@ func EnrichTraefik(data []byte, owners *routeowners.Registry) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse Prometheus metrics: %w", err)
 	}
+	var output bytes.Buffer
+	encoder := expfmt.NewEncoder(&output, expfmt.NewFormat(expfmt.TypeTextPlain))
 	for _, family := range families {
 		for _, metric := range family.Metric {
 			labels := metric.Label[:0]
@@ -40,20 +40,10 @@ func EnrichTraefik(data []byte, owners *routeowners.Registry) ([]byte, error) {
 				name, value := "service_id", serviceID
 				metric.Label = append(metric.Label, &dto.LabelPair{Name: &name, Value: &value})
 			}
-			sort.Slice(metric.Label, func(i, j int) bool { return metric.Label[i].GetName() < metric.Label[j].GetName() })
 		}
-	}
-	var output bytes.Buffer
-	encoder := expfmt.NewEncoder(&output, expfmt.NewFormat(expfmt.TypeTextPlain))
-	names := make([]string, 0, len(families))
-	for name := range families {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if err := encoder.Encode(families[name]); err != nil {
+		if err := encoder.Encode(family); err != nil {
 			return nil, err
 		}
 	}
-	return []byte(strings.TrimSpace(output.String()) + "\n"), nil
+	return output.Bytes(), nil
 }

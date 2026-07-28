@@ -120,25 +120,8 @@ func WriteRoutesConfig(compiled *RoutesConfig) error {
 		return fmt.Errorf("failed to create dynamic config dir: %w", err)
 	}
 	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
-	tmp, err := os.CreateTemp(dynamicConfigDir, routesFileName+".tmp-")
-	if err != nil {
-		return fmt.Errorf("failed to create temp config: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0644); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to write temp config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, routesPath); err != nil {
-		return fmt.Errorf("failed to rename config file: %w", err)
+	if err := atomicWrite(routesPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write routes config: %w", err)
 	}
 	log.Printf("[traefik] routes updated successfully")
 	return nil
