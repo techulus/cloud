@@ -689,10 +689,10 @@ export async function patchConfiguration(
 		const source = resolvePersistedSourceFromRows(persisted, repo);
 		if (
 			input.placement?.mode === "automatic" &&
-			(persisted.stateful || persisted.serverlessEnabled || volumes.length > 0)
+			(persisted.stateful || volumes.length > 0)
 		) {
 			domainError(
-				"Automatic placement is not supported for stateful, serverless, or volume-backed services",
+				"Automatic placement is not supported for stateful or volume-backed services",
 				"AUTOMATIC_PLACEMENT_UNSUPPORTED",
 				400,
 			);

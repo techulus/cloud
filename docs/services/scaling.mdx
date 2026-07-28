@@ -42,9 +42,9 @@ stores the desired replica count and distributes replicas across online,
 configured nodes during rollout. Manual placement selects exact target servers
 and replica counts.
 
-Serverless services currently require manual placement on proxy nodes. Automatic
-serverless placement will remain unavailable until every healthy proxy can route
-requests through the owning proxy's wake gateway.
+Serverless services support automatic placement across online, configured proxy
+nodes. Public ingress must use health checks to avoid proxy nodes that do not
+currently own a replica for the service.
 
 ## Server Pinning
 

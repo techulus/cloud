@@ -925,11 +925,6 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
-			if (service.placementMode === "automatic") {
-				throw new Error(
-					"Switch to manual placement before enabling serverless",
-				);
-			}
 			const publicHttpPorts = await tx
 				.select({ id: servicePorts.id })
 				.from(servicePorts)
@@ -949,24 +944,43 @@ export async function updateServiceServerlessSettings(
 				);
 			}
 
-			const configuredReplicas = await tx
-				.select({
-					count: serviceReplicas.count,
-					serverIsProxy: servers.isProxy,
-				})
-				.from(serviceReplicas)
-				.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
-				.where(eq(serviceReplicas.serviceId, serviceId));
-			const totalConfiguredReplicas = configuredReplicas.reduce(
-				(total, replica) => total + replica.count,
-				0,
-			);
+			const [configuredReplicas, volume] = await Promise.all([
+				tx
+					.select({
+						count: serviceReplicas.count,
+						serverIsProxy: servers.isProxy,
+					})
+					.from(serviceReplicas)
+					.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
+					.where(eq(serviceReplicas.serviceId, serviceId)),
+				tx
+					.select({ id: serviceVolumes.id })
+					.from(serviceVolumes)
+					.where(eq(serviceVolumes.serviceId, serviceId))
+					.limit(1),
+			]);
+			if (
+				service.placementMode === "automatic" &&
+				(service.stateful || volume.length > 0)
+			) {
+				throw new Error(
+					"Automatic placement is not supported for stateful services or services with volumes",
+				);
+			}
+			const totalConfiguredReplicas =
+				service.placementMode === "automatic"
+					? service.replicas
+					: configuredReplicas.reduce(
+							(total, replica) => total + replica.count,
+							0,
+						);
 
 			if (totalConfiguredReplicas < 1) {
 				throw new Error("Serverless services require at least one replica");
 			}
 
 			if (
+				service.placementMode === "manual" &&
 				configuredReplicas.some(
 					(replica) => replica.count > 0 && !replica.serverIsProxy,
 				)
@@ -1177,10 +1191,6 @@ export async function updateServiceConfig(
 
 			if (!currentService) throw new Error("Service not found");
 			if (placement.mode === "automatic") {
-				if (currentService.serverlessEnabled)
-					throw new Error(
-						"Automatic placement is not supported for serverless services",
-					);
 				const volume = await tx
 					.select({ id: serviceVolumes.id })
 					.from(serviceVolumes)
