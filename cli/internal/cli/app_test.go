@@ -81,7 +81,7 @@ func TestAuthDeviceExchangeCreatesAPIKeyAndWhoamiUsesIt(t *testing.T) {
 			if body["name"] == "" || body["metadata"] == nil {
 				t.Errorf("exchange body = %#v", body)
 			}
-			w.Write([]byte(`{"apiKey":"new-secret","keyId":"key-id","name":"CLI test"}`))
+			w.Write([]byte(`{"apiKey":"new-secret","keyId":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"CLI test"}`))
 		case "/api/v1/me":
 			if r.Header.Get("X-API-Key") != "new-secret" {
 				t.Errorf("X-API-Key = %q", r.Header.Get("X-API-Key"))
@@ -99,9 +99,10 @@ func TestAuthDeviceExchangeCreatesAPIKeyAndWhoamiUsesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := auth.NewConfigStore("test").ReadConfig()
-	if polls != 1 || cfg == nil || cfg.APIKey != "new-secret" || cfg.KeyID != "key-id" {
+	if polls != 1 || cfg == nil || cfg.APIKey != "new-secret" || cfg.KeyID != "0400075c-69aa-46c2-bccc-fc172b8c6b28" {
 		t.Fatalf("polls=%d config=%#v", polls, cfg)
 	}
+	assertHumanOutput(t, out.String(), "Key", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
 	out.Reset()
 	if err := execute(app, "auth", "whoami"); err != nil {
 		t.Fatal(err)
@@ -451,11 +452,11 @@ func TestDeploySourceNeutralAndMismatch(t *testing.T) {
 					return
 				}
 				posts++
-				w.Write([]byte(`{"operation":"rollout","status":"queued"}`))
+				w.Write([]byte(`{"operation":"rollout","status":"queued","rolloutId":"2c917d90-4bc1-4274-b3bf-34fed009fc12"}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
-			app, _ := testApp(t, d, s.Client())
+			app, out := testApp(t, d, s.Client())
 			err := execute(app, "deploy")
 			if tc.mismatch {
 				if err == nil || !strings.Contains(err.Error(), "tc apply") || posts != 0 {
@@ -463,6 +464,8 @@ func TestDeploySourceNeutralAndMismatch(t *testing.T) {
 				}
 			} else if err != nil || posts != 1 {
 				t.Fatalf("err=%v posts=%d", err, posts)
+			} else {
+				assertHumanOutput(t, out.String(), "Rollout", "2c917d90-4bc1-4274-b3bf-34fed009fc12")
 			}
 		})
 	}
@@ -487,7 +490,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 			var gotPath, gotQuery string
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-				w.Write([]byte(`{"service":{"id":"s","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
+				w.Write([]byte(`{"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
@@ -502,6 +505,14 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 				if json.Unmarshal(out.Bytes(), &value) != nil {
 					t.Fatalf("invalid JSON: %s", out.String())
 				}
+			}
+			if tc.args[0] == "status" {
+				app, out := testApp(t, t.TempDir(), s.Client())
+				args := append(tc.args, "--project", "p", "--environment", "e", "--service", "s")
+				if err := execute(app, args...); err != nil {
+					t.Fatal(err)
+				}
+				assertHumanOutput(t, out.String(), "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
 			}
 			base := "/api/v1/projects/p/environments/e/services/s"
 			if gotPath != base+tc.path || gotQuery != tc.query {
@@ -525,7 +536,7 @@ func TestBuildsHumanOutputIsFormatted(t *testing.T) {
 		{
 			name:     "github source",
 			response: `{"supported":true,"builds":[{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","status":"in_progress","branch":"main","commitSha":"abcdef1234567890abcdef1234567890abcdef12","createdAt":"2026-01-01T00:00:00.820Z"}],"nextCursor":"next-page"}`,
-			want:     []string{"Builds (1)", "ID", "0400075c...6b28", "Status", "in progress", "Branch", "main", "Commit", "abcdef12...ef12", "Created", "2026-01-01T00:00:00.82Z", "next-page"},
+			want:     []string{"Builds (1)", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "Status", "in progress", "Branch", "main", "Commit", "abcdef1234567890abcdef1234567890abcdef12", "Created", "2026-01-01T00:00:00.82Z", "next-page"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -543,7 +554,7 @@ func TestBuildsHumanOutputIsFormatted(t *testing.T) {
 }
 
 func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
-	s := responseServer(t, `{"current":{"source":{"type":"github","repository":"https://github.com/acme/app","branch":"main","rootDir":"cmd/api"},"hostname":"api.example.com","stateful":true,"replicas":2,"placements":[{"serverId":"server-1","serverName":"ubuntu-2","count":2}],"healthCheck":{"cmd":"curl localhost:3000","interval":10,"timeout":5,"retries":3,"startPeriod":30},"startCommand":"npm start","resources":{"cpuCores":2,"memoryMb":512},"ports":[{"containerPort":3000,"public":true,"domain":"api.example.com","protocol":"http","externalPort":null}],"volumes":[{"name":"data","containerPath":"/data"}],"serverless":{"enabled":false,"sleepAfterSeconds":300,"wakeTimeoutSeconds":30},"schedules":{"deployment":null,"backup":{"enabled":false,"schedule":null}}},"active":null,"activeRevisionId":"0400075c-69aa-46c2-bccc-fc172b8c6b28","activeDeploymentId":"2c917d90-4bc1-4274-b3bf-34fed009fc12","hasPendingChanges":true,"changes":[{"field":"replicas","from":"active revision","to":"current configuration"}],"management":{"patchable":true,"blockers":[]}}`)
+	s := responseServer(t, `{"current":{"source":{"type":"github","repository":"https://github.com/acme/app","branch":"main","rootDir":"cmd/api"},"hostname":"api.example.com","stateful":true,"replicas":2,"placements":[{"serverId":"server-1","serverName":"ubuntu-2","count":2},{"serverId":"a868807a-42ee-4a40-99fe-cd8303036b02","count":1}],"healthCheck":{"cmd":"curl localhost:3000","interval":10,"timeout":5,"retries":3,"startPeriod":30},"startCommand":"npm start","resources":{"cpuCores":2,"memoryMb":512},"ports":[{"containerPort":3000,"public":true,"domain":"api.example.com","protocol":"http","externalPort":null}],"volumes":[{"name":"data","containerPath":"/data"}],"serverless":{"enabled":false,"sleepAfterSeconds":300,"wakeTimeoutSeconds":30},"schedules":{"deployment":null,"backup":{"enabled":false,"schedule":null}}},"active":null,"activeRevisionId":"0400075c-69aa-46c2-bccc-fc172b8c6b28","activeDeploymentId":"2c917d90-4bc1-4274-b3bf-34fed009fc12","hasPendingChanges":true,"changes":[{"field":"replicas","from":"active revision","to":"current configuration"}],"management":{"patchable":true,"blockers":[]}}`)
 	writeConfig(t, s.URL)
 
 	app, out := testApp(t, t.TempDir(), s.Client())
@@ -551,7 +562,7 @@ func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deployment", "0400075c...6b28", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
+	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "a868807a-42ee-4a40-99fe-cd8303036b02: 1 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deployment", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
 }
 
 func TestMetricsHumanOutputIsFormatted(t *testing.T) {
@@ -590,7 +601,7 @@ func TestRevisionsHumanOutputIsFormatted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertHumanOutput(t, out.String(), "Revisions (2)", "0400075c...6b28", "Arjun Komath", "in progress", "Image: app:v1 -> app:v2", "3f9293e9...b056", "@octocat", "initial revision", "next-page")
+	assertHumanOutput(t, out.String(), "Revisions (2)", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "Arjun Komath", "in progress", "Image: app:v1 -> app:v2", "3f9293e9-d4d8-4b72-8ae4-94b3737ab056", "@octocat", "initial revision", "next-page")
 }
 
 func TestRolloutHumanOutputIsFormatted(t *testing.T) {
@@ -613,8 +624,8 @@ func TestRolloutHumanOutputIsFormatted(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"rollouts"}, []string{"Rollouts (1)", "2c917d90...fc12", "in progress", "health check", "ubuntu-2: running, healthy", "next-page"}},
-		{[]string{"rollout", "r1"}, []string{"Rollout", "2c917d90...fc12", "completed", "2026-07-21T11:05:30Z"}},
+		{[]string{"rollouts"}, []string{"Rollouts (1)", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "in progress", "health check", "ubuntu-2: running, healthy", "next-page"}},
+		{[]string{"rollout", "r1"}, []string{"Rollout", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "completed", "2026-07-21T11:05:30Z"}},
 		{[]string{"rollout", "logs", "r1"}, []string{"Rollout logs (2)", "[preparing]", "Rollout started", "[health check]", "Starting container"}},
 	} {
 		app, out := testApp(t, t.TempDir(), s.Client())

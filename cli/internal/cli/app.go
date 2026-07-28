@@ -594,7 +594,7 @@ func (a *App) deployCommand() *cobra.Command {
 			output.Field(a.Out, "Operation", result.Operation)
 			output.Field(a.Out, "Status", output.Status(result.Status))
 			if result.RolloutID != nil && *result.RolloutID != "" {
-				output.Field(a.Out, "Rollout", output.ShortID(*result.RolloutID))
+				output.Field(a.Out, "Rollout", *result.RolloutID)
 			}
 			if result.Operation == "build" {
 				output.Field(a.Out, "Next", "build queued; a rollout starts after it succeeds")
@@ -1338,7 +1338,7 @@ func (a *App) runAuthLogin(ctx context.Context, host string) error {
 	output.Field(a.Out, "Host", host)
 	key := "created"
 	if exchange.KeyID != "" {
-		key = output.ShortID(exchange.KeyID)
+		key = exchange.KeyID
 	}
 	output.Field(a.Out, "Key", key)
 	return nil
@@ -1472,7 +1472,7 @@ func printApplyResult(w io.Writer, result applyResponse) {
 func printStatus(w io.Writer, value manifest.Manifest, status statusResponse) {
 	fmt.Fprintf(w, "%s/%s/%s\n", value.Project.Slug, value.Environment.Name, value.Service.Name)
 	output.Section(w, "Service")
-	output.Field(w, "ID", output.ShortID(status.Service.ID))
+	output.Field(w, "ID", status.Service.ID)
 	if status.Service.Source.Type == "image" {
 		output.Field(w, "Source", status.Service.Source.Image)
 	} else {
@@ -1550,8 +1550,6 @@ func printBuilds(w io.Writer, result map[string]any) {
 					continue
 				}
 				switch field.key {
-				case "id", "commitSha":
-					value = output.ShortID(value)
 				case "status":
 					value = output.Status(value)
 				case "startedAt", "completedAt", "createdAt":
@@ -1602,8 +1600,8 @@ func printConfiguration(w io.Writer, result map[string]any) {
 	printSchedules(w, current["schedules"])
 
 	output.Section(w, "Deployment")
-	printOptionalField(w, "Revision", shortIDValue(result["activeRevisionId"]))
-	printOptionalField(w, "Deployment", shortIDValue(result["activeDeploymentId"]))
+	printOptionalField(w, "Revision", result["activeRevisionId"])
+	printOptionalField(w, "Deployment", result["activeDeploymentId"])
 	printOptionalField(w, "Pending", result["hasPendingChanges"])
 	changes, _ := result["changes"].([]any)
 	if len(changes) > 0 {
@@ -1675,13 +1673,6 @@ func printOptionalField(w io.Writer, label string, value any) {
 	}
 }
 
-func shortIDValue(value any) any {
-	if id, ok := value.(string); ok && id != "" {
-		return output.ShortID(id)
-	}
-	return nil
-}
-
 func printPlacements(w io.Writer, value any) {
 	placements, _ := value.([]any)
 	output.Field(w, "Placements", len(placements))
@@ -1692,7 +1683,7 @@ func printPlacements(w io.Writer, value any) {
 		}
 		server := placement["serverName"]
 		if server == nil {
-			server = shortIDValue(placement["serverId"])
+			server = placement["serverId"]
 		}
 		fmt.Fprintf(w, "    * %v: %v replica(s)\n", server, placement["count"])
 	}
@@ -1886,7 +1877,7 @@ func printRevisions(w io.Writer, result map[string]any) {
 			fmt.Fprintln(w)
 		}
 		if id, ok := revision["id"].(string); ok {
-			output.Field(w, "ID", output.ShortID(id))
+			output.Field(w, "ID", id)
 		}
 		if createdAt, ok := revision["createdAt"].(string); ok {
 			output.Field(w, "Created", output.Timestamp(createdAt))
@@ -1897,7 +1888,7 @@ func printRevisions(w io.Writer, result map[string]any) {
 		if rollout, ok := revision["rollout"].(map[string]any); ok {
 			id, _ := rollout["id"].(string)
 			status, _ := rollout["status"].(string)
-			value := output.ShortID(id)
+			value := id
 			if status != "" {
 				value += " (" + output.Status(status) + ")"
 			}
@@ -1956,8 +1947,6 @@ func printRolloutFields(w io.Writer, rollout map[string]any) {
 			continue
 		}
 		switch field.key {
-		case "id":
-			value = output.ShortID(value)
 		case "status", "currentStage":
 			value = output.Status(value)
 		case "createdAt", "completedAt":
