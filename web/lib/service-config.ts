@@ -538,14 +538,8 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedPortsByNumber = Map.groupBy(
-		deployed.ports || [],
-		(port) => port.port,
-	);
-	const currentPortsByNumber = Map.groupBy(
-		current.ports || [],
-		(port) => port.port,
-	);
+	const deployedPortsByNumber = groupPortsByNumber(deployed.ports || []);
+	const currentPortsByNumber = groupPortsByNumber(current.ports || []);
 	const portNumbers = Array.from(
 		new Set([...deployedPortsByNumber.keys(), ...currentPortsByNumber.keys()]),
 	).sort((a, b) => a - b);
@@ -634,6 +628,16 @@ export function diffConfigs(
 	}
 
 	return changes;
+}
+
+function groupPortsByNumber(ports: PortConfig[]): Map<number, PortConfig[]> {
+	const grouped = new Map<number, PortConfig[]>();
+	for (const port of ports) {
+		const entries = grouped.get(port.port) || [];
+		entries.push(port);
+		grouped.set(port.port, entries);
+	}
+	return grouped;
 }
 
 function describePorts(ports: PortConfig[]): string {
