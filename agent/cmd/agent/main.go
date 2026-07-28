@@ -337,7 +337,7 @@ func main() {
 
 	publicIP := network.PublicIP()
 	privateIP := network.PrivateIP()
-	log.Printf("Agent v%s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
+	log.Printf("Agent %s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
 
 	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, routeOwners, builder, config.IsProxy, disableDNS)
 	agentInstance.Run(ctx)
