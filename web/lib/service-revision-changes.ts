@@ -105,10 +105,15 @@ const serviceRevisionSpecSchema = z
 				code: "custom",
 				message: "Stateful services cannot use automatic placement",
 			});
-		if (spec.serverless.enabled && spec.placement.mode === "automatic")
+		if (spec.serverless.enabled && spec.stateful)
 			context.addIssue({
 				code: "custom",
-				message: "Serverless services cannot use automatic placement",
+				message: "Serverless services must be stateless",
+			});
+		if (spec.serverless.enabled && spec.volumes.length > 0)
+			context.addIssue({
+				code: "custom",
+				message: "Serverless services cannot use volumes",
 			});
 	});
 
@@ -143,7 +148,11 @@ export function parseServiceRevisionSpec(value: unknown): ServiceRevisionSpec {
 	const version = (value as { schemaVersion?: unknown } | null)?.schemaVersion;
 	if (version === 2) {
 		const legacy = serviceRevisionSpecV2Schema.parse(value);
-		return { ...legacy, schemaVersion: 3, placement: { mode: "manual" } };
+		return serviceRevisionSpecSchema.parse({
+			...legacy,
+			schemaVersion: 3,
+			placement: { mode: "manual" },
+		}) as ServiceRevisionSpec;
 	}
 	return serviceRevisionSpecSchema.parse(value) as ServiceRevisionSpec;
 }

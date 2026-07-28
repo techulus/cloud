@@ -201,6 +201,7 @@ export async function resolveRevisionPlacements(
 
 export async function validateServers(
 	placements: Placement[],
+	requireProxy = false,
 ): Promise<
 	Map<
 		string,
@@ -230,6 +231,9 @@ export async function validateServers(
 			}
 			if (!server.wireguardIp) {
 				throw new Error(`Server ${server.name} has no WireGuard IP`);
+			}
+			if (requireProxy && !server.isProxy) {
+				throw new Error(`Server ${server.name} is not a proxy node`);
 			}
 		}
 	}

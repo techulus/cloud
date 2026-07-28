@@ -152,7 +152,7 @@ describe("service revision specification", () => {
 		});
 	});
 
-	it("rejects automatic placement for stateful, volume-backed, and serverless services", () => {
+	it("rejects automatic placement for stateful and volume-backed services", () => {
 		const stateful = draft({ volumes: [] });
 		stateful.service.stateful = true;
 		stateful.service.placementMode = "automatic";
@@ -169,19 +169,55 @@ describe("service revision specification", () => {
 		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
 			"Services with volumes cannot use automatic placement",
 		);
+	});
 
-		const serverless = draft({ volumes: [] });
+	it("allows automatic placement for stateless serverless services", () => {
+		const serverless = draft({
+			volumes: [],
+			ports: [
+				{
+					port: 3000,
+					isPublic: true,
+					domain: "api.example.com",
+					protocol: "http",
+					externalPort: null,
+					tlsPassthrough: false,
+				},
+			],
+		});
 		serverless.service.serverlessEnabled = true;
 		serverless.service.placementMode = "automatic";
-		serverless.service.replicas = 1;
+		serverless.service.replicas = 3;
 
-		expect(() => buildServiceRevisionSpec(serverless)).toThrow(
-			"Serverless services cannot use automatic placement",
+		expect(buildServiceRevisionSpec(serverless)).toMatchObject({
+			stateful: false,
+			serverless: { enabled: true },
+			placement: { mode: "automatic", replicas: 3 },
+			placements: [],
+			volumes: [],
+		});
+	});
+
+	it("rejects stateful and volume-backed serverless services", () => {
+		const stateful = draft({ volumes: [] });
+		stateful.service.stateful = true;
+		stateful.service.serverlessEnabled = true;
+
+		expect(() => buildServiceRevisionSpec(stateful)).toThrow(
+			"Serverless services must be stateless",
+		);
+
+		const volumeBacked = draft();
+		volumeBacked.service.serverlessEnabled = true;
+
+		expect(() => buildServiceRevisionSpec(volumeBacked)).toThrow(
+			"Serverless services cannot use volumes",
 		);
 	});
 
 	it("rejects serverless revisions without a public HTTP port and domain", () => {
 		const input = draft({
+			volumes: [],
 			ports: [
 				{
 					port: 3000,
@@ -201,7 +237,7 @@ describe("service revision specification", () => {
 	});
 
 	it("accepts serverless revisions with at least one public HTTP port and domain", () => {
-		const input = draft();
+		const input = draft({ volumes: [] });
 		input.service.serverlessEnabled = true;
 		input.ports[0] = {
 			port: 443,

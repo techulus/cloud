@@ -36,8 +36,8 @@ export const ServerlessSection = memo(function ServerlessSection({
 		(replica) => replica.count > 0 && !replica.serverIsProxy,
 	);
 	const unavailableReason =
-		service.placementMode === "automatic"
-			? "Switch to manual placement before enabling serverless"
+		service.stateful || (service.volumes?.length ?? 0) > 0
+			? "Serverless services must be stateless and cannot use volumes"
 			: !hasPublicHttpEndpoint
 				? "Add a public HTTP port with a domain to enable serverless"
 				: hasWorkerReplica

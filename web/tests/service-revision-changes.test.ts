@@ -147,14 +147,42 @@ describe("diffServiceRevisionSpecs", () => {
 		]);
 	});
 
-	it("rejects persisted automatic serverless revisions", () => {
+	it("accepts persisted automatic serverless revisions", () => {
 		const automatic = spec();
 		automatic.placement = { mode: "automatic", replicas: 1 };
 		automatic.placements = [];
 		automatic.serverless.enabled = true;
+		automatic.volumes = [];
+		automatic.ports[0] = {
+			containerPort: 3000,
+			isPublic: true,
+			domain: "app.example.com",
+			protocol: "http",
+			externalPort: null,
+			tlsPassthrough: false,
+		};
 
-		expect(() => parseServiceRevisionSpec(automatic)).toThrow(
-			"Serverless services cannot use automatic placement",
+		expect(parseServiceRevisionSpec(automatic)).toMatchObject({
+			serverless: { enabled: true },
+			placement: { mode: "automatic", replicas: 1 },
+			volumes: [],
+		});
+	});
+
+	it("rejects persisted stateful and volume-backed serverless revisions", () => {
+		const stateful = spec();
+		stateful.serverless.enabled = true;
+		stateful.stateful = true;
+
+		expect(() => parseServiceRevisionSpec(stateful)).toThrow(
+			"Serverless services must be stateless",
+		);
+
+		const volumeBacked = spec();
+		volumeBacked.serverless.enabled = true;
+
+		expect(() => parseServiceRevisionSpec(volumeBacked)).toThrow(
+			"Serverless services cannot use volumes",
 		);
 	});
 
