@@ -538,49 +538,20 @@ export function diffConfigs(
 		});
 	}
 
-	const deployedPortsMap = new Map(
-		(deployed.ports || []).map((p) => [p.port, p]),
-	);
-	const currentPortsMap = new Map(
-		(current.ports || []).map((p) => [p.port, p]),
-	);
+	const deployedPortsByNumber = groupPortsByNumber(deployed.ports || []);
+	const currentPortsByNumber = groupPortsByNumber(current.ports || []);
+	const portNumbers = Array.from(
+		new Set([...deployedPortsByNumber.keys(), ...currentPortsByNumber.keys()]),
+	).sort((a, b) => a - b);
 
-	for (const [port, currentPort] of currentPortsMap) {
-		const deployedPort = deployedPortsMap.get(port);
-		const portType = currentPort.isPublic ? "public" : "internal";
-		const portDesc = currentPort.domain
-			? `${portType}, ${currentPort.domain}`
-			: portType;
-
-		if (!deployedPort) {
+	for (const port of portNumbers) {
+		const deployedDesc = describePorts(deployedPortsByNumber.get(port) || []);
+		const currentDesc = describePorts(currentPortsByNumber.get(port) || []);
+		if (deployedDesc !== currentDesc) {
 			changes.push({
 				field: `Port ${port}`,
-				from: "(none)",
-				to: portDesc,
-			});
-		} else {
-			const deployedType = deployedPort.isPublic ? "public" : "internal";
-			const deployedDesc = deployedPort.domain
-				? `${deployedType}, ${deployedPort.domain}`
-				: deployedType;
-
-			if (deployedDesc !== portDesc) {
-				changes.push({
-					field: `Port ${port}`,
-					from: deployedDesc,
-					to: portDesc,
-				});
-			}
-		}
-	}
-
-	for (const [port, deployedPort] of deployedPortsMap) {
-		if (!currentPortsMap.has(port)) {
-			const deployedType = deployedPort.isPublic ? "public" : "internal";
-			changes.push({
-				field: `Port ${port}`,
-				from: deployedType,
-				to: "(removed)",
+				from: deployedDesc || "(none)",
+				to: currentDesc || "(removed)",
 			});
 		}
 	}
@@ -657,6 +628,30 @@ export function diffConfigs(
 	}
 
 	return changes;
+}
+
+function groupPortsByNumber(ports: PortConfig[]): Map<number, PortConfig[]> {
+	const grouped = new Map<number, PortConfig[]>();
+	for (const port of ports) {
+		const entries = grouped.get(port.port) || [];
+		entries.push(port);
+		grouped.set(port.port, entries);
+	}
+	return grouped;
+}
+
+function describePorts(ports: PortConfig[]): string {
+	return ports
+		.map((port) => {
+			const details = [port.isPublic ? "public" : "internal"];
+			const protocol = port.protocol || "http";
+			if (protocol !== "http") details.push(protocol.toUpperCase());
+			if (port.domain) details.push(port.domain);
+			if (port.tlsPassthrough) details.push("TLS passthrough");
+			return details.join(", ");
+		})
+		.sort((a, b) => a.localeCompare(b))
+		.join("; ");
 }
 
 export function normalizeServerlessConfig(
