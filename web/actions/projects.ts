@@ -1121,7 +1121,11 @@ export async function updateServiceConfig(
 					const domain = port.domain?.trim().toLowerCase() || null;
 					const externalPort =
 						port.isPublic && (protocol === "tcp" || protocol === "udp")
-							? await allocatePort(protocol, reservedExternalPorts[protocol])
+							? await allocatePort(
+									tx,
+									protocol,
+									reservedExternalPorts[protocol],
+								)
 							: null;
 					if (
 						externalPort !== null &&
