@@ -4,6 +4,7 @@ import { Globe, Loader2, Lock } from "lucide-react";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { Input } from "@/components/ui/input";
+import { fetcher } from "@/lib/fetcher";
 
 type GitHubRepo = {
 	id: number;
@@ -22,8 +23,6 @@ type SelectedRepo = {
 	installationId?: number;
 };
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
-
 const EMPTY_REPOS: GitHubRepo[] = [];
 
 export function GitHubRepoSelector({
@@ -37,7 +36,7 @@ export function GitHubRepoSelector({
 }) {
 	const [search, setSearch] = useState("");
 
-	const { data, isLoading } = useSWR<{
+	const { data, error, isLoading } = useSWR<{
 		repos: GitHubRepo[];
 		installations: Array<{
 			id: number;
@@ -62,9 +61,9 @@ export function GitHubRepoSelector({
 		const alreadyInList = repos.some(
 			(r) => r.fullName.toLowerCase() === repoName.toLowerCase(),
 		);
-		if (alreadyInList) return null;
+		if (!error && alreadyInList) return null;
 		return repoName;
-	}, [search, repos]);
+	}, [error, search, repos]);
 
 	const handleSelect = (repo: GitHubRepo) => {
 		onChange({
@@ -122,26 +121,37 @@ export function GitHubRepoSelector({
 						disabled={disabled}
 					/>
 					<div className="max-h-48 overflow-y-auto rounded-md border">
-						{isLoading ? (
+						{publicRepoFromSearch && (
+							<div className="border-b p-1">
+								<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+									Public Repository
+								</p>
+								<button
+									type="button"
+									onClick={() => handleSelectPublic(publicRepoFromSearch)}
+									className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+								>
+									<Globe className="size-4" />
+									<span>{publicRepoFromSearch}</span>
+								</button>
+							</div>
+						)}
+
+						{isLoading && !data ? (
 							<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
 								<Loader2 className="size-4 animate-spin" />
 								Loading repositories...
 							</div>
 						) : (
 							<>
-								{publicRepoFromSearch && (
-									<div className="border-b p-1">
-										<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-											Public Repository
-										</p>
-										<button
-											type="button"
-											onClick={() => handleSelectPublic(publicRepoFromSearch)}
-											className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
-										>
-											<Globe className="size-4" />
-											<span>{publicRepoFromSearch}</span>
-										</button>
+								{error && (
+									<div
+										role="alert"
+										className="border-b p-4 text-center text-sm text-destructive"
+									>
+										{error instanceof Error
+											? error.message
+											: "Failed to load GitHub repositories"}
 									</div>
 								)}
 
@@ -170,7 +180,7 @@ export function GitHubRepoSelector({
 									</div>
 								)}
 
-								{!hasInstallations && !publicRepoFromSearch && (
+								{!error && !hasInstallations && !publicRepoFromSearch && (
 									<div className="space-y-1 p-4 text-center text-sm">
 										<p>No GitHub App installed.</p>
 										<p className="text-muted-foreground">
@@ -180,7 +190,8 @@ export function GitHubRepoSelector({
 									</div>
 								)}
 
-								{hasInstallations &&
+								{!error &&
+									hasInstallations &&
 									filteredRepos.length === 0 &&
 									!publicRepoFromSearch && (
 										<div className="space-y-1 p-4 text-center text-sm">

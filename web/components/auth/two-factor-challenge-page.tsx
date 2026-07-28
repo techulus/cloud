@@ -53,32 +53,36 @@ export function TwoFactorChallengePage() {
 		setError("");
 		setLoading(true);
 
-		const response =
-			mode === "totp"
-				? await authClient.twoFactor.verifyTotp({
-						code: normalizedCode,
-						trustDevice,
-					})
-				: await authClient.twoFactor.verifyBackupCode({
-						code: normalizedCode,
-						trustDevice,
-					});
+		try {
+			const response =
+				mode === "totp"
+					? await authClient.twoFactor.verifyTotp({
+							code: normalizedCode,
+							trustDevice,
+						})
+					: await authClient.twoFactor.verifyBackupCode({
+							code: normalizedCode,
+							trustDevice,
+						});
 
-		setLoading(false);
+			if (response.error) {
+				setError(
+					getAuthErrorMessage(
+						response.error,
+						mode === "totp"
+							? "Invalid authenticator code"
+							: "Invalid backup code",
+					),
+				);
+				return;
+			}
 
-		if (response.error) {
-			setError(
-				getAuthErrorMessage(
-					response.error,
-					mode === "totp"
-						? "Invalid authenticator code"
-						: "Invalid backup code",
-				),
-			);
-			return;
+			router.push(redirectTo);
+		} catch {
+			setError("Failed to verify two-factor code");
+		} finally {
+			setLoading(false);
 		}
-
-		router.push(redirectTo);
 	}
 
 	if (isPending || session) {

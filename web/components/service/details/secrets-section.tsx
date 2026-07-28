@@ -221,6 +221,7 @@ export const SecretsSection = memo(function SecretsSection({
 												type="button"
 												onClick={() => handleReveal(secret.id)}
 												disabled={revealingSecretId === secret.id}
+												aria-label={`${revealedSecrets[secret.id] ? "Hide" : "Show"} ${secret.key} value`}
 												className="text-muted-foreground hover:text-foreground disabled:opacity-50"
 											>
 												{revealedSecrets[secret.id] ? (
@@ -242,6 +243,7 @@ export const SecretsSection = memo(function SecretsSection({
 											<button
 												type="button"
 												onClick={() => handleDelete(secret.id)}
+												aria-label={`Delete ${secret.key}`}
 												className="text-muted-foreground hover:text-foreground"
 											>
 												<X className="h-4 w-4" />
@@ -280,6 +282,7 @@ export const SecretsSection = memo(function SecretsSection({
 								<button
 									type="button"
 									onClick={() => handleRemovePending(index)}
+									aria-label={`Remove ${variable.key}`}
 									className="text-muted-foreground hover:text-foreground ml-2 flex-shrink-0"
 								>
 									<X className="h-4 w-4" />

@@ -41,26 +41,30 @@ export function SignInPage() {
 		setError("");
 		setLoading(true);
 
-		const response = await signIn.email({
-			email,
-			password,
-		});
+		try {
+			const response = await signIn.email({
+				email,
+				password,
+			});
 
-		setLoading(false);
+			if (response.error) {
+				setError(response.error.message || "Failed to sign in");
+				return;
+			}
 
-		if (response.error) {
-			setError(response.error.message || "Failed to sign in");
-			return;
+			if (
+				(response.data as { twoFactorRedirect?: boolean } | null)
+					?.twoFactorRedirect
+			) {
+				return;
+			}
+
+			router.push(redirectTo);
+		} catch {
+			setError("Failed to sign in");
+		} finally {
+			setLoading(false);
 		}
-
-		if (
-			(response.data as { twoFactorRedirect?: boolean } | null)
-				?.twoFactorRedirect
-		) {
-			return;
-		}
-
-		router.push(redirectTo);
 	}
 
 	if (isPending || session) {
