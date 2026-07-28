@@ -289,7 +289,7 @@ describe("expected-state pure builders", () => {
 		]);
 	});
 
-	it("deduplicates historical physical mappings for cross-protocol ports", () => {
+	it("preserves historical physical mappings for cross-protocol ports", () => {
 		const containers = buildExpectedContainersFromRows({
 			deployments: [
 				{
@@ -330,6 +330,7 @@ describe("expected-state pure builders", () => {
 
 		expect(containers[0]?.ports).toEqual([
 			{ containerPort: 3000, hostPort: 31000 },
+			{ containerPort: 3000, hostPort: 31001 },
 		]);
 	});
 

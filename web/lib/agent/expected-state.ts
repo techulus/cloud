@@ -360,11 +360,6 @@ export function buildExpectedContainersFromRows({
 					(a, b) =>
 						a.containerPort - b.containerPort || a.hostPort - b.hostPort,
 				)
-				.filter(
-					(port, index, sortedPorts) =>
-						index === 0 ||
-						sortedPorts[index - 1].containerPort !== port.containerPort,
-				)
 				.map((port) => ({
 					containerPort: port.containerPort,
 					hostPort: port.hostPort,
@@ -372,7 +367,9 @@ export function buildExpectedContainersFromRows({
 			const expectedContainerPorts = getPublishedContainerPorts(
 				specification.ports,
 			);
-			const allocatedContainerPorts = ports.map((port) => port.containerPort);
+			const allocatedContainerPorts = [
+				...new Set(ports.map((port) => port.containerPort)),
+			];
 			if (
 				JSON.stringify(expectedContainerPorts) !==
 				JSON.stringify(allocatedContainerPorts)
