@@ -6,6 +6,7 @@ import type {
 	ServiceRevisionPort,
 	ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
+import { validateServiceRevisionPorts } from "@/lib/service-revision-spec";
 
 const serviceRevisionSpecFields = {
 	image: z.string(),
@@ -138,9 +139,19 @@ export function parseServiceRevisionSpec(value: unknown): ServiceRevisionSpec {
 	const version = (value as { schemaVersion?: unknown } | null)?.schemaVersion;
 	if (version === 2) {
 		const legacy = serviceRevisionSpecV2Schema.parse(value);
-		return { ...legacy, schemaVersion: 3, placement: { mode: "manual" } };
+		const specification = {
+			...legacy,
+			schemaVersion: 3 as const,
+			placement: { mode: "manual" as const },
+		};
+		validateServiceRevisionPorts(specification.ports);
+		return specification;
 	}
-	return serviceRevisionSpecSchema.parse(value) as ServiceRevisionSpec;
+	const specification = serviceRevisionSpecSchema.parse(
+		value,
+	) as ServiceRevisionSpec;
+	validateServiceRevisionPorts(specification.ports);
+	return specification;
 }
 
 function compareStrings(a: string, b: string): number {

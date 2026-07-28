@@ -11,6 +11,7 @@ import (
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
 	"techulus/cloud-agent/internal/reconcile"
+	"techulus/cloud-agent/internal/routeowners"
 )
 
 const (
@@ -44,7 +45,6 @@ type ActualState struct {
 	Containers            []container.Container
 	DnsConfigHash         string
 	TraefikConfigHash     string
-	L4ConfigHash          string
 	CertificatesHash      string
 	TraefikReloaded       bool
 	ChallengeRouteWritten bool
@@ -87,6 +87,7 @@ type Agent struct {
 	LogCollector                 *logs.Collector
 	TraefikLogCollector          *logs.TraefikCollector
 	MetricsSender                MetricsSender
+	RouteOwners                  *routeowners.Registry
 	Builder                      *build.Builder
 	isBuilding                   bool
 	buildMutex                   sync.Mutex
@@ -104,6 +105,7 @@ func NewAgent(
 	logCollector *logs.Collector,
 	traefikLogCollector *logs.TraefikCollector,
 	metricsSender MetricsSender,
+	routeOwners *routeowners.Registry,
 	builder *build.Builder,
 	isProxy bool,
 	disableDNS bool,
@@ -122,6 +124,7 @@ func NewAgent(
 		LogCollector:           logCollector,
 		TraefikLogCollector:    traefikLogCollector,
 		MetricsSender:          metricsSender,
+		RouteOwners:            routeOwners,
 		Builder:                builder,
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,

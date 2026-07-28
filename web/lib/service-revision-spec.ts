@@ -33,6 +33,83 @@ export type ServiceRevisionPort = {
 	tlsPassthrough: boolean;
 };
 
+export type ServicePortValidationIssue = {
+	code: "DUPLICATE_DOMAIN" | "DUPLICATE_PORT" | "INVALID_DOMAIN";
+	message: string;
+};
+
+export function findServicePortValidationIssue(
+	ports: Pick<
+		ServiceRevisionPort,
+		"containerPort" | "isPublic" | "domain" | "protocol"
+	>[],
+): ServicePortValidationIssue | null {
+	const domains = new Set<string>();
+	const portsByNumberAndProtocol = Map.groupBy(
+		ports,
+		(port) => `${port.containerPort}/${port.protocol}`,
+	);
+
+	for (const port of ports) {
+		if (port.protocol === "http" && port.isPublic && !port.domain) {
+			return {
+				code: "INVALID_DOMAIN",
+				message: "Public HTTP ports require a domain",
+			};
+		}
+		if ((!port.isPublic || port.protocol !== "http") && port.domain) {
+			return {
+				code: "INVALID_DOMAIN",
+				message: "Only public HTTP ports can define a domain",
+			};
+		}
+		if (port.domain) {
+			const domain = port.domain.toLowerCase();
+			if (domains.has(domain)) {
+				return {
+					code: "DUPLICATE_DOMAIN",
+					message: "Port domains must be unique",
+				};
+			}
+			domains.add(domain);
+		}
+	}
+
+	for (const group of portsByNumberAndProtocol.values()) {
+		if (
+			group.length > 1 &&
+			!group.every(
+				(port) => port.protocol === "http" && port.isPublic && port.domain,
+			)
+		) {
+			return {
+				code: "DUPLICATE_PORT",
+				message: `Port ${group[0].containerPort} (${group[0].protocol}) can only be repeated for public HTTP domains`,
+			};
+		}
+	}
+
+	return null;
+}
+
+export function validateServiceRevisionPorts(
+	ports: Pick<
+		ServiceRevisionPort,
+		"containerPort" | "isPublic" | "domain" | "protocol"
+	>[],
+) {
+	const issue = findServicePortValidationIssue(ports);
+	if (issue) throw new Error(issue.message);
+}
+
+export function getPublishedContainerPorts(
+	ports: Pick<ServiceRevisionPort, "containerPort">[],
+): number[] {
+	return [...new Set(ports.map((port) => port.containerPort))].sort(
+		(a, b) => a - b,
+	);
+}
+
 export type ServiceRevisionSecret = {
 	key: string;
 	encryptedValue: string;
@@ -143,6 +220,7 @@ function validateServiceRevisionSpec(
 	specification: ServiceRevisionSpec,
 	allowNoPlacements: boolean,
 ) {
+	validateServiceRevisionPorts(specification.ports);
 	const totalReplicas = getServiceRevisionTotalReplicas(specification);
 
 	if (totalReplicas < 1 && !allowNoPlacements) {

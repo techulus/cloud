@@ -18,6 +18,7 @@ import { validateDockerImageInternal } from "@/lib/docker-image";
 import { getServiceTotalReplicas } from "@/lib/service-config";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
+	findServicePortValidationIssue,
 	getDefaultServiceHostname,
 	getServiceRevisionTotalReplicas,
 } from "@/lib/service-revision-spec";
@@ -795,18 +796,20 @@ export async function patchConfiguration(
 					400,
 				);
 			}
-			if (
-				new Set(input.ports.map((port) => port.containerPort)).size !==
-				input.ports.length
-			) {
-				domainError("Port numbers must be unique", "DUPLICATE_PORT", 400);
+			const portIssue = findServicePortValidationIssue(
+				input.ports.map((port) => ({
+					containerPort: port.containerPort,
+					isPublic: port.public,
+					domain: port.domain ?? null,
+					protocol: "http" as const,
+				})),
+			);
+			if (portIssue) {
+				domainError(portIssue.message, portIssue.code, 400);
 			}
 			const domains = input.ports.flatMap((port) =>
 				port.public && port.domain ? [port.domain] : [],
 			);
-			if (new Set(domains).size !== domains.length) {
-				domainError("Port domains must be unique", "DUPLICATE_DOMAIN", 400);
-			}
 			for (const domain of domains) {
 				const duplicate = await tx
 					.select({ id: servicePorts.id })
@@ -965,28 +968,50 @@ export async function patchConfiguration(
 		if (input.ports) {
 			const currentPorts = ports
 				.map((port) => [port.port, port.isPublic, port.domain] as const)
-				.toSorted((a, b) => a[0] - b[0]);
+				.toSorted(
+					(a, b) =>
+						a[0] - b[0] ||
+						Number(a[1]) - Number(b[1]) ||
+						(a[2] ?? "").localeCompare(b[2] ?? ""),
+				);
 			const desiredPorts = input.ports
 				.map(
 					(port) =>
 						[port.containerPort, port.public, port.domain ?? null] as const,
 				)
-				.toSorted((a, b) => a[0] - b[0]);
+				.toSorted(
+					(a, b) =>
+						a[0] - b[0] ||
+						Number(a[1]) - Number(b[1]) ||
+						(a[2] ?? "").localeCompare(b[2] ?? ""),
+				);
 			if (changed("ports", currentPorts, desiredPorts)) {
 				await tx
 					.delete(servicePorts)
 					.where(eq(servicePorts.serviceId, service.id));
 				if (input.ports.length > 0) {
-					await tx.insert(servicePorts).values(
-						input.ports.map((port) => ({
-							id: randomUUID(),
-							serviceId: service.id,
-							port: port.containerPort,
-							isPublic: port.public,
-							domain: port.public ? (port.domain ?? null) : null,
-							protocol: "http" as const,
-						})),
-					);
+					try {
+						await tx.insert(servicePorts).values(
+							input.ports.map((port) => ({
+								id: randomUUID(),
+								serviceId: service.id,
+								port: port.containerPort,
+								isPublic: port.public,
+								domain: port.public ? (port.domain ?? null) : null,
+								protocol: "http" as const,
+							})),
+						);
+					} catch (error) {
+						if (
+							(error as { code?: string; constraint?: string }).code ===
+								"23505" &&
+							(error as { constraint?: string }).constraint ===
+								"service_ports_domain_unique"
+						) {
+							domainError("Port domain is already in use", "DOMAIN_CONFLICT");
+						}
+						throw error;
+					}
 				}
 			}
 		}

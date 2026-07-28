@@ -164,10 +164,7 @@ func (a *Agent) routingSyncedRolloutIds() []string {
 
 func (a *Agent) proxyRoutingStateConverged(expected *agenthttp.ExpectedState) bool {
 	compiled := a.compiledTraefikState(expected)
-	if compiled.HTTPHash != traefik.GetCurrentConfigHash() {
-		return false
-	}
-	if compiled.L4Hash != traefik.GetCurrentL4ConfigHash() {
+	if compiled.CompileErr != nil || compiled.RoutesHash != traefik.GetCurrentConfigHash() {
 		return false
 	}
 	if compiled.CertHash != traefik.GetCurrentCertificatesHash() {

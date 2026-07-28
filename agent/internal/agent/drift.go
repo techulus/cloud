@@ -208,7 +208,6 @@ func (a *Agent) getActualState() (*ActualState, error) {
 	}
 	if a.IsProxy {
 		state.TraefikConfigHash = traefik.GetCurrentConfigHash()
-		state.L4ConfigHash = traefik.GetCurrentL4ConfigHash()
 		state.CertificatesHash = traefik.GetCurrentCertificatesHash()
 		state.TraefikReloaded, err = traefik.DynamicConfigReloaded(a.DataDir)
 		if err != nil {
@@ -354,8 +353,8 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 
 	if a.IsProxy {
 		compiled := a.compiledTraefikState(expected)
-		if compiled.HTTPHash != actual.TraefikConfigHash ||
-			compiled.L4Hash != actual.L4ConfigHash ||
+		if compiled.CompileErr != nil ||
+			compiled.RoutesHash != actual.TraefikConfigHash ||
 			compiled.CertHash != actual.CertificatesHash ||
 			!actual.TraefikReloaded {
 			actions = append(actions, reconcileAction{
@@ -562,6 +561,9 @@ func (a *Agent) applyReconcileAction(action reconcileAction) error {
 
 func (a *Agent) updateTraefik() error {
 	compiled := a.compiledTraefikState(a.expectedState)
+	if compiled.CompileErr != nil {
+		return fmt.Errorf("failed to compile Traefik routes: %w", compiled.CompileErr)
+	}
 
 	needsRestart := false
 	metricsRestart, err := traefik.EnsureMetricsConfig()
@@ -585,8 +587,7 @@ func (a *Agent) updateTraefik() error {
 		}
 	}
 
-	routesChanged := compiled.HTTPHash != traefik.GetCurrentConfigHash() ||
-		compiled.L4Hash != traefik.GetCurrentL4ConfigHash()
+	routesChanged := compiled.RoutesHash != traefik.GetCurrentConfigHash()
 	certificatesChanged := compiled.CertHash != traefik.GetCurrentCertificatesHash()
 	if !routesChanged && !certificatesChanged {
 		if err := traefik.EnsureDynamicConfigReloaded(a.DataDir, 15*time.Second); err != nil {
@@ -610,7 +611,7 @@ func (a *Agent) updateTraefik() error {
 	}
 	if routesChanged {
 		log.Printf("[reconcile] updating Traefik routes (HTTP: %d, TCP: %d, UDP: %d)", len(compiled.HTTP), len(compiled.TCP), len(compiled.UDP))
-		if err := traefik.UpdateHttpRoutesWithL4(compiled.HTTP, compiled.TCP, compiled.UDP, a.expectedState.ServerName); err != nil {
+		if err := traefik.WriteRoutesConfig(compiled.Routes); err != nil {
 			return fmt.Errorf("failed to update Traefik: %w", err)
 		}
 	}

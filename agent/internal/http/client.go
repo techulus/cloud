@@ -204,10 +204,30 @@ func (c *Client) cacheExpectedState(state *ExpectedState) error {
 		return err
 	}
 	path := filepath.Join(c.dataDir, expectedStateCacheFile)
-	return os.WriteFile(path, data, 0600)
+	if err := os.MkdirAll(c.dataDir, 0700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(c.dataDir, expectedStateCacheFile+".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
-func (c *Client) loadCachedExpectedState() (*ExpectedState, error) {
+func (c *Client) LoadCachedExpectedState() (*ExpectedState, error) {
 	if c.dataDir == "" {
 		return nil, fmt.Errorf("data dir not configured")
 	}
@@ -261,7 +281,7 @@ func (c *Client) GetExpectedStateWithFallback() (*ExpectedState, bool, error) {
 	}
 
 	log.Printf("[state] CP unreachable, attempting to use cached state: %v", err)
-	cachedState, cacheErr := c.loadCachedExpectedState()
+	cachedState, cacheErr := c.LoadCachedExpectedState()
 	if cacheErr != nil {
 		return nil, false, fmt.Errorf("CP unreachable and no cached state available: %w (cache error: %v)", err, cacheErr)
 	}

@@ -433,7 +433,7 @@ function ServiceConfigPanel({
 	service: Service;
 	overview: OverviewData;
 }) {
-	const primaryEndpoint = getPrimaryEndpoint(overview.endpoints);
+	const displayedEndpoints = getDisplayedEndpoints(overview.endpoints);
 	const statusClasses = STATUS_TONE_CLASSES[overview.status.tone];
 	const hasResourceLimits =
 		service.resourceCpuLimit != null || service.resourceMemoryLimitMb != null;
@@ -499,13 +499,20 @@ function ServiceConfigPanel({
 				</div>
 
 				<div className="space-y-1.5 px-3 py-2.5">
-					<ConfigRow label="Endpoint">
-						<EndpointPrimary endpoint={primaryEndpoint} />
+					<ConfigRow
+						label={displayedEndpoints.length === 1 ? "Endpoint" : "Endpoints"}
+					>
+						{displayedEndpoints.map((endpoint, index) => (
+							<span key={endpoint.key}>
+								{index > 0 ? ", " : null}
+								<EndpointPrimary endpoint={endpoint} />
+							</span>
+						))}
 					</ConfigRow>
 					<ConfigRow label="Ports">
 						{formatPortSummary(service.ports || [])}
 					</ConfigRow>
-					{primaryEndpoint.kind !== "private" ? (
+					{displayedEndpoints[0]?.kind !== "private" ? (
 						<ConfigRow label="Internal DNS">
 							{`${service.hostname || service.name}.internal`}
 						</ConfigRow>
@@ -896,18 +903,28 @@ function formatInstanceSummary(overview: OverviewData): string {
 	return `${overview.runningDeployments}/${configured} running`;
 }
 
-function getPrimaryEndpoint(endpoints: EndpointItem[]): EndpointItem {
-	return (
-		endpoints.find((endpoint) => endpoint.kind === "public") ??
-		endpoints.find((endpoint) => endpoint.kind === "tcp") ??
+function getDisplayedEndpoints(endpoints: EndpointItem[]): EndpointItem[] {
+	const publicEndpoints = endpoints.filter(
+		(endpoint) => endpoint.kind === "public",
+	);
+	if (publicEndpoints.length > 0) {
+		return publicEndpoints.sort((a, b) => a.label.localeCompare(b.label));
+	}
+
+	const tcpEndpoints = endpoints.filter((endpoint) => endpoint.kind === "tcp");
+	if (tcpEndpoints.length > 0) {
+		return tcpEndpoints.sort((a, b) => a.label.localeCompare(b.label));
+	}
+
+	return [
 		endpoints[0] ?? {
 			key: "none",
 			kind: "private",
 			typeLabel: "Private",
 			label: "No endpoint",
 			target: "Internal DNS",
-		}
-	);
+		},
+	];
 }
 
 function formatPortSummary(ports: Service["ports"]): string {

@@ -51,6 +51,7 @@ import type {
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
+import { findServicePortValidationIssue } from "@/lib/service-revision-spec";
 import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import {
@@ -1097,78 +1098,118 @@ export async function updateServiceConfig(
 	}
 
 	if (config.ports) {
-		if (config.ports.remove && config.ports.remove.length > 0) {
-			for (const portId of config.ports.remove) {
-				await db.delete(servicePorts).where(eq(servicePorts.id, portId));
-			}
-		}
-
-		if (config.ports.add && config.ports.add.length > 0) {
-			const existing = await db
-				.select()
-				.from(servicePorts)
-				.where(eq(servicePorts.serviceId, serviceId));
-
-			for (const port of config.ports.add) {
-				const protocol = port.protocol || "http";
-
+		try {
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+				);
+				const existing = await tx
+					.select()
+					.from(servicePorts)
+					.where(eq(servicePorts.serviceId, serviceId));
+				const removedIds = new Set(config.ports?.remove ?? []);
 				if (
-					existing.some((p) => p.port === port.port && p.protocol === protocol)
+					[...removedIds].some((id) => !existing.some((port) => port.id === id))
 				) {
-					throw new Error(`Port ${port.port} (${protocol}) already exists`);
+					throw new Error("Port not found");
 				}
 
-				if (port.isPublic) {
-					if (protocol === "http") {
-						if (!port.domain) {
-							throw new Error("Domain is required for public HTTP ports");
-						}
-
-						const domain = port.domain.trim().toLowerCase();
-						if (!domain) {
-							throw new Error("Invalid domain");
-						}
-
-						const existingDomain = await db
-							.select()
-							.from(servicePorts)
-							.where(eq(servicePorts.domain, domain));
-
-						if (existingDomain.length > 0) {
-							throw new Error("Domain already in use");
-						}
-
-						await db.insert(servicePorts).values({
-							id: randomUUID(),
-							serviceId,
-							port: port.port,
-							isPublic: true,
-							domain,
-							protocol: "http",
-						});
-					} else if (protocol === "tcp" || protocol === "udp") {
-						const externalPort = await allocatePort(protocol);
-
-						await db.insert(servicePorts).values({
-							id: randomUUID(),
-							serviceId,
-							port: port.port,
-							isPublic: true,
-							protocol,
-							externalPort,
-							tlsPassthrough: port.tlsPassthrough ?? false,
-						});
+				const additions: (typeof servicePorts.$inferInsert)[] = [];
+				const reservedExternalPorts = {
+					tcp: new Set<number>(),
+					udp: new Set<number>(),
+				};
+				if (
+					(config.ports?.add ?? []).some(
+						(port) =>
+							port.isPublic &&
+							(port.protocol === "tcp" || port.protocol === "udp"),
+					)
+				) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext('service_port_external_allocation'))`,
+					);
+				}
+				for (const port of config.ports?.add ?? []) {
+					const protocol = port.protocol ?? "http";
+					const domain = port.domain?.trim().toLowerCase() || null;
+					const externalPort =
+						port.isPublic && (protocol === "tcp" || protocol === "udp")
+							? await allocatePort(
+									tx,
+									protocol,
+									reservedExternalPorts[protocol],
+								)
+							: null;
+					if (
+						externalPort !== null &&
+						(protocol === "tcp" || protocol === "udp")
+					) {
+						reservedExternalPorts[protocol].add(externalPort);
 					}
-				} else {
-					await db.insert(servicePorts).values({
+					additions.push({
 						id: randomUUID(),
 						serviceId,
 						port: port.port,
-						isPublic: false,
+						isPublic: port.isPublic,
+						domain: protocol === "http" && port.isPublic ? domain : null,
 						protocol,
+						externalPort,
+						tlsPassthrough:
+							protocol === "tcp" ? (port.tlsPassthrough ?? false) : false,
 					});
 				}
+
+				const finalPorts = [
+					...existing.filter((port) => !removedIds.has(port.id)),
+					...additions,
+				];
+				const issue = findServicePortValidationIssue(
+					finalPorts.map((port) => ({
+						containerPort: port.port,
+						isPublic: port.isPublic ?? false,
+						domain: port.domain ?? null,
+						protocol: port.protocol ?? "http",
+					})),
+				);
+				if (issue) throw new Error(issue.message);
+
+				for (const port of additions) {
+					if (!port.domain) continue;
+					const conflict = await tx
+						.select({ serviceId: servicePorts.serviceId })
+						.from(servicePorts)
+						.where(eq(servicePorts.domain, port.domain))
+						.limit(1)
+						.then((rows) => rows[0]);
+					if (conflict && conflict.serviceId !== serviceId) {
+						throw new Error("Domain already in use");
+					}
+				}
+
+				if (removedIds.size > 0) {
+					await tx
+						.delete(servicePorts)
+						.where(
+							and(
+								eq(servicePorts.serviceId, serviceId),
+								inArray(servicePorts.id, [...removedIds]),
+							),
+						);
+				}
+				if (additions.length > 0) {
+					await tx.insert(servicePorts).values(additions);
+				}
+			});
+		} catch (error) {
+			if (
+				(error as { code?: string; constraint?: string }).code === "23505" &&
+				(error as { constraint?: string }).constraint ===
+					"service_ports_domain_unique"
+			) {
+				throw new Error("Domain already in use");
 			}
+			throw error;
 		}
 	}
 
