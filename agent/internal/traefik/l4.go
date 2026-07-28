@@ -1,14 +1,10 @@
 package traefik
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,340 +37,127 @@ func ValidateL4Routes(tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute) 
 	return nil
 }
 
-func UpdateHttpRoutesWithL4(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute, serverName string) error {
+// CompileRoutes is the single pure compiler for the durable routes.yaml model.
+func CompileRoutes(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRoutes []TraefikUDPRoute, serverName string) (*RoutesConfig, error) {
 	if err := ValidateL4Routes(tcpRoutes, udpRoutes); err != nil {
-		return fmt.Errorf("port validation failed: %w", err)
+		return nil, fmt.Errorf("port validation failed: %w", err)
 	}
-
 	config := traefikFullConfigWithMiddlewares{
-		HTTP: httpConfigWithMiddlewares{
-			Routers:     make(map[string]routerWithMiddleware),
-			Services:    make(map[string]service),
-			Middlewares: make(map[string]middleware),
-		},
-		TCP: tcpConfig{
-			Routers:  make(map[string]tcpRouter),
-			Services: make(map[string]tcpService),
-		},
-		UDP: udpConfig{
-			Routers:  make(map[string]udpRouter),
-			Services: make(map[string]udpService),
-		},
+		HTTP: httpConfigWithMiddlewares{Routers: map[string]routerWithMiddleware{}, Services: map[string]service{}, Middlewares: map[string]middleware{}},
+		TCP:  tcpConfig{Routers: map[string]tcpRouter{}, Services: map[string]tcpService{}},
+		UDP:  udpConfig{Routers: map[string]udpRouter{}, Services: map[string]udpService{}},
 	}
-
 	var middlewareNames []string
 	if serverName != "" {
-		config.HTTP.Middlewares["forwarded_server"] = middleware{
-			Headers: &headersMiddleware{
-				CustomRequestHeaders: map[string]string{
-					"X-Forwarded-Server": serverName,
-				},
-			},
-		}
+		config.HTTP.Middlewares["forwarded_server"] = middleware{Headers: &headersMiddleware{CustomRequestHeaders: map[string]string{"X-Forwarded-Server": serverName}}}
 		middlewareNames = []string{"forwarded_server@file"}
 	}
-
 	for _, route := range httpRoutes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
-		routeName := httpRouteName(route)
-		if _, exists := config.HTTP.Routers[routeName]; exists {
-			return fmt.Errorf("duplicate HTTP route %s", routeName)
+		name := resourceName("http", route.ServiceId, route.ID)
+		if _, exists := config.HTTP.Routers[name]; exists {
+			return nil, duplicateResource("HTTP", name)
 		}
-
-		config.HTTP.Routers[routeName] = routerWithMiddleware{
-			Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
-			EntryPoints: []string{"websecure"},
-			Service:     routeName,
-			TLS:         &tlsConfig{},
-			Middlewares: middlewareNames,
-		}
-
+		config.HTTP.Routers[name] = routerWithMiddleware{Rule: fmt.Sprintf("Host(`%s`)", route.Domain), EntryPoints: []string{"websecure"}, Service: name, TLS: &tlsConfig{}, Middlewares: middlewareNames}
 		servers := make([]server, len(route.Upstreams))
 		for i, upstream := range route.Upstreams {
-			srv := server{URL: fmt.Sprintf("http://%s", upstream.URL)}
+			servers[i] = server{URL: fmt.Sprintf("http://%s", upstream.URL)}
 			if upstream.Weight > 0 {
-				srv.Weight = &upstream.Weight
+				servers[i].Weight = &route.Upstreams[i].Weight
 			}
-			servers[i] = srv
 		}
-
-		config.HTTP.Services[routeName] = service{
-			LoadBalancer: loadBalancer{
-				Servers: servers,
-			},
-		}
+		config.HTTP.Services[name] = service{LoadBalancer: loadBalancer{Servers: servers}}
 	}
-
 	for _, route := range tcpRoutes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
-
-		routerName := fmt.Sprintf("tcp_%s_%d", route.ServiceId, route.ExternalPort)
-		entryPoint := fmt.Sprintf("tcp-%d", route.ExternalPort)
-
-		tcpRtr := tcpRouter{
-			Rule:        "HostSNI(`*`)",
-			EntryPoints: []string{entryPoint},
-			Service:     routerName,
+		name := resourceName("tcp", route.ServiceId, route.ID)
+		if _, exists := config.TCP.Routers[name]; exists {
+			return nil, duplicateResource("TCP", name)
 		}
-
+		router := tcpRouter{Rule: "HostSNI(`*`)", EntryPoints: []string{fmt.Sprintf("tcp-%d", route.ExternalPort)}, Service: name}
 		if route.TLSPassthrough {
-			tcpRtr.TLS = &tcpTLSConfig{Passthrough: true}
+			router.TLS = &tcpTLSConfig{Passthrough: true}
 		}
-
-		config.TCP.Routers[routerName] = tcpRtr
-
+		config.TCP.Routers[name] = router
 		servers := make([]tcpServer, len(route.Upstreams))
 		for i, upstream := range route.Upstreams {
 			servers[i] = tcpServer{Address: upstream}
 		}
-
-		config.TCP.Services[routerName] = tcpService{
-			LoadBalancer: tcpLoadBalancer{
-				Servers: servers,
-			},
-		}
+		config.TCP.Services[name] = tcpService{LoadBalancer: tcpLoadBalancer{Servers: servers}}
 	}
-
 	for _, route := range udpRoutes {
 		if len(route.Upstreams) == 0 {
 			continue
 		}
-
-		routerName := fmt.Sprintf("udp_%s_%d", route.ServiceId, route.ExternalPort)
-		entryPoint := fmt.Sprintf("udp-%d", route.ExternalPort)
-
-		config.UDP.Routers[routerName] = udpRouter{
-			EntryPoints: []string{entryPoint},
-			Service:     routerName,
+		name := resourceName("udp", route.ServiceId, route.ID)
+		if _, exists := config.UDP.Routers[name]; exists {
+			return nil, duplicateResource("UDP", name)
 		}
-
+		config.UDP.Routers[name] = udpRouter{EntryPoints: []string{fmt.Sprintf("udp-%d", route.ExternalPort)}, Service: name}
 		servers := make([]udpServer, len(route.Upstreams))
 		for i, upstream := range route.Upstreams {
 			servers[i] = udpServer{Address: upstream}
 		}
-
-		config.UDP.Services[routerName] = udpService{
-			LoadBalancer: udpLoadBalancer{
-				Servers: servers,
-			},
-		}
+		config.UDP.Services[name] = udpService{LoadBalancer: udpLoadBalancer{Servers: servers}}
 	}
+	return &RoutesConfig{config: config}, nil
+}
 
-	log.Printf("[traefik] updating routes: %d HTTP, %d TCP, %d UDP", len(httpRoutes), len(tcpRoutes), len(udpRoutes))
-
-	data, err := yaml.Marshal(config)
+func WriteRoutesConfig(compiled *RoutesConfig) error {
+	if compiled == nil {
+		return fmt.Errorf("routes config is nil")
+	}
+	data, err := yaml.Marshal(compiled.config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal traefik config: %w", err)
 	}
-
 	if err := os.MkdirAll(dynamicConfigDir, 0755); err != nil {
 		return fmt.Errorf("failed to create dynamic config dir: %w", err)
 	}
-
 	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
-	tmpPath := routesPath + ".tmp"
-
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	tmp, err := os.CreateTemp(dynamicConfigDir, routesFileName+".tmp-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("failed to write temp config: %w", err)
 	}
-
+	if err := tmp.Close(); err != nil {
+		return err
+	}
 	if err := os.Rename(tmpPath, routesPath); err != nil {
-		os.Remove(tmpPath)
 		return fmt.Errorf("failed to rename config file: %w", err)
 	}
-
 	log.Printf("[traefik] routes updated successfully")
 	return nil
 }
 
-func httpRouteName(route TraefikRoute) string {
-	return route.ServiceId + "--" + route.ID
-}
-
-func HashTCPRoutes(routes []TraefikTCPRoute) string {
-	sortedRoutes := make([]TraefikTCPRoute, len(routes))
-	copy(sortedRoutes, routes)
-	sort.Slice(sortedRoutes, func(i, j int) bool {
-		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
-	})
-
-	var sb strings.Builder
-	for _, r := range sortedRoutes {
-		sb.WriteString(r.ServiceId)
-		sb.WriteString(":")
-		sb.WriteString(fmt.Sprintf("%d", r.ExternalPort))
-		sb.WriteString(":")
-		sb.WriteString(fmt.Sprintf("%t", r.TLSPassthrough))
-		sb.WriteString(":")
-		sortedUpstreams := make([]string, len(r.Upstreams))
-		copy(sortedUpstreams, r.Upstreams)
-		sort.Strings(sortedUpstreams)
-		for _, u := range sortedUpstreams {
-			sb.WriteString(u)
-			sb.WriteString(",")
-		}
-		sb.WriteString("|")
-	}
-	hash := sha256.Sum256([]byte(sb.String()))
-	return hex.EncodeToString(hash[:])
-}
-
-func HashUDPRoutes(routes []TraefikUDPRoute) string {
-	sortedRoutes := make([]TraefikUDPRoute, len(routes))
-	copy(sortedRoutes, routes)
-	sort.Slice(sortedRoutes, func(i, j int) bool {
-		return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
-	})
-
-	var sb strings.Builder
-	for _, r := range sortedRoutes {
-		sb.WriteString(r.ServiceId)
-		sb.WriteString(":")
-		sb.WriteString(fmt.Sprintf("%d", r.ExternalPort))
-		sb.WriteString(":")
-		sortedUpstreams := make([]string, len(r.Upstreams))
-		copy(sortedUpstreams, r.Upstreams)
-		sort.Strings(sortedUpstreams)
-		for _, u := range sortedUpstreams {
-			sb.WriteString(u)
-			sb.WriteString(",")
-		}
-		sb.WriteString("|")
-	}
-	hash := sha256.Sum256([]byte(sb.String()))
-	return hex.EncodeToString(hash[:])
-}
-
-func GetCurrentL4ConfigHash() string {
-	config, err := readCurrentFullConfig()
-	if err != nil {
-		log.Printf("[traefik:hash] failed to read config: %v", err)
-		return ""
-	}
-
-	var tcpRoutes []TraefikTCPRoute
-	for routerName, rtr := range config.TCP.Routers {
-		var externalPort int
-		var serviceId string
-
-		fmt.Sscanf(routerName, "tcp_%s_%d", &serviceId, &externalPort)
-
-		for _, ep := range rtr.EntryPoints {
-			fmt.Sscanf(ep, "tcp-%d", &externalPort)
-		}
-
-		parts := strings.Split(routerName, "_")
-		if len(parts) >= 2 {
-			serviceId = parts[1]
-		}
-
-		var upstreams []string
-		if svc, exists := config.TCP.Services[routerName]; exists {
-			for _, s := range svc.LoadBalancer.Servers {
-				upstreams = append(upstreams, s.Address)
-			}
-		}
-
-		tlsPassthrough := false
-		if rtr.TLS != nil {
-			tlsPassthrough = rtr.TLS.Passthrough
-		}
-
-		tcpRoutes = append(tcpRoutes, TraefikTCPRoute{
-			ID:             routerName,
-			ServiceId:      serviceId,
-			Upstreams:      upstreams,
-			ExternalPort:   externalPort,
-			TLSPassthrough: tlsPassthrough,
-		})
-	}
-
-	var udpRoutes []TraefikUDPRoute
-	for routerName, rtr := range config.UDP.Routers {
-		var externalPort int
-		var serviceId string
-
-		for _, ep := range rtr.EntryPoints {
-			fmt.Sscanf(ep, "udp-%d", &externalPort)
-		}
-
-		parts := strings.Split(routerName, "_")
-		if len(parts) >= 2 {
-			serviceId = parts[1]
-		}
-
-		var upstreams []string
-		if svc, exists := config.UDP.Services[routerName]; exists {
-			for _, s := range svc.LoadBalancer.Servers {
-				upstreams = append(upstreams, s.Address)
-			}
-		}
-
-		udpRoutes = append(udpRoutes, TraefikUDPRoute{
-			ID:           routerName,
-			ServiceId:    serviceId,
-			Upstreams:    upstreams,
-			ExternalPort: externalPort,
-		})
-	}
-
-	return HashTCPRoutes(tcpRoutes) + HashUDPRoutes(udpRoutes)
-}
-
 func readCurrentFullConfig() (*traefikFullConfigWithMiddlewares, error) {
-	routesPath := filepath.Join(dynamicConfigDir, routesFileName)
-	data, err := os.ReadFile(routesPath)
+	path := filepath.Join(dynamicConfigDir, routesFileName)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &traefikFullConfigWithMiddlewares{
-				HTTP: httpConfigWithMiddlewares{
-					Routers:     make(map[string]routerWithMiddleware),
-					Services:    make(map[string]service),
-					Middlewares: make(map[string]middleware),
-				},
-				TCP: tcpConfig{
-					Routers:  make(map[string]tcpRouter),
-					Services: make(map[string]tcpService),
-				},
-				UDP: udpConfig{
-					Routers:  make(map[string]udpRouter),
-					Services: make(map[string]udpService),
-				},
-			}, nil
+		if !os.IsNotExist(err) {
+			return nil, err
 		}
-		return nil, err
+		config := &traefikFullConfigWithMiddlewares{}
+		normalizeFullConfig(config)
+		return config, nil
 	}
-
 	var config traefikFullConfigWithMiddlewares
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-
-	if config.HTTP.Routers == nil {
-		config.HTTP.Routers = make(map[string]routerWithMiddleware)
-	}
-	if config.HTTP.Services == nil {
-		config.HTTP.Services = make(map[string]service)
-	}
-	if config.HTTP.Middlewares == nil {
-		config.HTTP.Middlewares = make(map[string]middleware)
-	}
-	if config.TCP.Routers == nil {
-		config.TCP.Routers = make(map[string]tcpRouter)
-	}
-	if config.TCP.Services == nil {
-		config.TCP.Services = make(map[string]tcpService)
-	}
-	if config.UDP.Routers == nil {
-		config.UDP.Routers = make(map[string]udpRouter)
-	}
-	if config.UDP.Services == nil {
-		config.UDP.Services = make(map[string]udpService)
-	}
-
+	normalizeFullConfig(&config)
 	return &config, nil
 }

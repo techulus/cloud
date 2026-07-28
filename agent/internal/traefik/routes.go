@@ -3,53 +3,46 @@ package traefik
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 )
 
-func HashRoutes(routes []TraefikRoute) string {
-	sortedRoutes := make([]TraefikRoute, len(routes))
-	copy(sortedRoutes, routes)
-	sort.Slice(sortedRoutes, func(i, j int) bool {
-		if sortedRoutes[i].ServiceId != sortedRoutes[j].ServiceId {
-			return sortedRoutes[i].ServiceId < sortedRoutes[j].ServiceId
-		}
-		if sortedRoutes[i].ID != sortedRoutes[j].ID {
-			return sortedRoutes[i].ID < sortedRoutes[j].ID
-		}
-		return sortedRoutes[i].Domain < sortedRoutes[j].Domain
-	})
-
-	var sb strings.Builder
-	for _, r := range sortedRoutes {
-		sb.WriteString(r.ServiceId)
-		sb.WriteString(":")
-		sb.WriteString(r.ID)
-		sb.WriteString(":")
-		sb.WriteString(r.Domain)
-		sb.WriteString(":")
-		sortedUpstreams := make([]Upstream, len(r.Upstreams))
-		copy(sortedUpstreams, r.Upstreams)
-		sort.Slice(sortedUpstreams, func(i, j int) bool {
-			return sortedUpstreams[i].URL < sortedUpstreams[j].URL
-		})
-		for _, u := range sortedUpstreams {
-			sb.WriteString(u.URL)
-			sb.WriteString("@")
-			sb.WriteString(fmt.Sprintf("%d", u.Weight))
-			sb.WriteString(",")
-		}
-		sb.WriteString("|")
-	}
-	hash := sha256.Sum256([]byte(sb.String()))
-	return hex.EncodeToString(hash[:])
+type RoutesConfig struct {
+	config traefikFullConfigWithMiddlewares
 }
 
-func HashRoutesWithServerName(routes []TraefikRoute, serverName string) string {
-	base := HashRoutes(routes)
-	hash := sha256.Sum256([]byte(base + "|server:" + serverName))
+func resourceName(kind, serviceID, routeID string) string {
+	canonical, _ := json.Marshal(struct {
+		ServiceID string `json:"serviceId"`
+		RouteID   string `json:"routeId"`
+	}{serviceID, routeID})
+	hash := sha256.Sum256(canonical)
+	return kind + "-" + hex.EncodeToString(hash[:])
+}
+
+func HTTPRouteOwners(routes []TraefikRoute) map[string]string {
+	owners := make(map[string]string)
+	for _, route := range routes {
+		if len(route.Upstreams) != 0 {
+			owners[resourceName("http", route.ServiceId, route.ID)] = route.ServiceId
+		}
+	}
+	return owners
+}
+
+func HashRoutesConfig(config *RoutesConfig) string {
+	if config == nil {
+		return ""
+	}
+	normalized := config.config
+	normalizeFullConfig(&normalized)
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
 }
 
@@ -59,60 +52,91 @@ func GetCurrentConfigHash() string {
 		log.Printf("[traefik:hash] failed to read config: %v", err)
 		return ""
 	}
+	return HashRoutesConfig(&RoutesConfig{config: *config})
+}
 
-	var routes []TraefikRoute
-	for routerName, router := range config.HTTP.Routers {
-		domain := extractDomainFromRule(router.Rule)
-		serviceId, routeID := parseHTTPRouteName(routerName)
-
-		var upstreams []Upstream
-		if svc, exists := config.HTTP.Services[router.Service]; exists {
-			for _, server := range svc.LoadBalancer.Servers {
-				url := strings.TrimPrefix(server.URL, "http://")
-				weight := 1
-				if server.Weight != nil {
-					weight = *server.Weight
-				}
-				upstreams = append(upstreams, Upstream{
-					URL:    url,
-					Weight: weight,
-				})
+func normalizeFullConfig(config *traefikFullConfigWithMiddlewares) {
+	if config.HTTP.Routers == nil {
+		config.HTTP.Routers = map[string]routerWithMiddleware{}
+	}
+	if config.HTTP.Services == nil {
+		config.HTTP.Services = map[string]service{}
+	}
+	if config.HTTP.Middlewares == nil {
+		config.HTTP.Middlewares = map[string]middleware{}
+	}
+	if config.TCP.Routers == nil {
+		config.TCP.Routers = map[string]tcpRouter{}
+	}
+	if config.TCP.Services == nil {
+		config.TCP.Services = map[string]tcpService{}
+	}
+	if config.UDP.Routers == nil {
+		config.UDP.Routers = map[string]udpRouter{}
+	}
+	if config.UDP.Services == nil {
+		config.UDP.Services = map[string]udpService{}
+	}
+	for key, router := range config.HTTP.Routers {
+		if router.EntryPoints == nil {
+			router.EntryPoints = []string{}
+		}
+		if router.Middlewares == nil {
+			router.Middlewares = []string{}
+		}
+		sort.Strings(router.EntryPoints)
+		sort.Strings(router.Middlewares)
+		config.HTTP.Routers[key] = router
+	}
+	for key, svc := range config.HTTP.Services {
+		if svc.LoadBalancer.Servers == nil {
+			svc.LoadBalancer.Servers = []server{}
+		}
+		sort.Slice(svc.LoadBalancer.Servers, func(i, j int) bool {
+			if svc.LoadBalancer.Servers[i].URL != svc.LoadBalancer.Servers[j].URL {
+				return svc.LoadBalancer.Servers[i].URL < svc.LoadBalancer.Servers[j].URL
 			}
-		}
-
-		routes = append(routes, TraefikRoute{
-			ID:        routeID,
-			Domain:    domain,
-			Upstreams: upstreams,
-			ServiceId: serviceId,
+			return weight(svc.LoadBalancer.Servers[i]) < weight(svc.LoadBalancer.Servers[j])
 		})
+		config.HTTP.Services[key] = svc
 	}
-
-	serverName := extractForwardedServerName(config.HTTP.Middlewares)
-
-	return HashRoutesWithServerName(routes, serverName)
-}
-
-func parseHTTPRouteName(name string) (string, string) {
-	name = strings.SplitN(name, "@", 2)[0]
-	parts := strings.SplitN(name, "--", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return name, name
-}
-
-func extractForwardedServerName(middlewares map[string]middleware) string {
-	if mw, exists := middlewares["forwarded_server"]; exists && mw.Headers != nil {
-		if value, ok := mw.Headers.CustomRequestHeaders["X-Forwarded-Server"]; ok {
-			return value
+	for key, router := range config.TCP.Routers {
+		if router.EntryPoints == nil {
+			router.EntryPoints = []string{}
 		}
+		sort.Strings(router.EntryPoints)
+		config.TCP.Routers[key] = router
 	}
-	return ""
+	for key, svc := range config.TCP.Services {
+		if svc.LoadBalancer.Servers == nil {
+			svc.LoadBalancer.Servers = []tcpServer{}
+		}
+		sort.Slice(svc.LoadBalancer.Servers, func(i, j int) bool { return svc.LoadBalancer.Servers[i].Address < svc.LoadBalancer.Servers[j].Address })
+		config.TCP.Services[key] = svc
+	}
+	for key, router := range config.UDP.Routers {
+		if router.EntryPoints == nil {
+			router.EntryPoints = []string{}
+		}
+		sort.Strings(router.EntryPoints)
+		config.UDP.Routers[key] = router
+	}
+	for key, svc := range config.UDP.Services {
+		if svc.LoadBalancer.Servers == nil {
+			svc.LoadBalancer.Servers = []udpServer{}
+		}
+		sort.Slice(svc.LoadBalancer.Servers, func(i, j int) bool { return svc.LoadBalancer.Servers[i].Address < svc.LoadBalancer.Servers[j].Address })
+		config.UDP.Services[key] = svc
+	}
 }
 
-func extractDomainFromRule(rule string) string {
-	rule = strings.TrimPrefix(rule, "Host(`")
-	rule = strings.TrimSuffix(rule, "`)")
-	return rule
+func weight(server server) int {
+	if server.Weight == nil {
+		return 0
+	}
+	return *server.Weight
+}
+
+func duplicateResource(kind, name string) error {
+	return fmt.Errorf("duplicate %s route %s", kind, name)
 }

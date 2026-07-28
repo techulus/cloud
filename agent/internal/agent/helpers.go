@@ -59,9 +59,10 @@ type compiledTraefikState struct {
 	TCPPorts     []int
 	UDPPorts     []int
 
-	HTTPHash string
-	L4Hash   string
-	CertHash string
+	Routes     *traefik.RoutesConfig
+	RoutesHash string
+	CompileErr error
+	CertHash   string
 }
 
 func compileTraefikState(expected *agenthttp.ExpectedState) *compiledTraefikState {
@@ -86,6 +87,7 @@ func compileTraefikState(expected *agenthttp.ExpectedState) *compiledTraefikStat
 		udpPorts = append(udpPorts, r.ExternalPort)
 	}
 
+	routesConfig, compileErr := traefik.CompileRoutes(httpRoutes, tcpRoutes, udpRoutes, expected.ServerName)
 	return &compiledTraefikState{
 		HTTP:         httpRoutes,
 		TCP:          tcpRoutes,
@@ -93,8 +95,9 @@ func compileTraefikState(expected *agenthttp.ExpectedState) *compiledTraefikStat
 		Certificates: certificates,
 		TCPPorts:     tcpPorts,
 		UDPPorts:     udpPorts,
-		HTTPHash:     traefik.HashRoutesWithServerName(httpRoutes, expected.ServerName),
-		L4Hash:       traefik.HashTCPRoutes(tcpRoutes) + traefik.HashUDPRoutes(udpRoutes),
+		Routes:       routesConfig,
+		RoutesHash:   traefik.HashRoutesConfig(routesConfig),
+		CompileErr:   compileErr,
 		CertHash:     traefik.HashCertificates(certificates),
 	}
 }

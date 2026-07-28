@@ -1,6 +1,25 @@
 package traefik
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestHTTPResourceNameIsOpaqueAndOwnerScoped(t *testing.T) {
+	name := resourceName("http", "service-42", "my--app.example.com")
+	if !strings.HasPrefix(name, "http-") {
+		t.Fatalf("resource name %q is missing its type prefix", name)
+	}
+	if strings.Contains(name, "service-42") || strings.Contains(name, "my--app.example.com") {
+		t.Fatalf("resource name %q exposes semantic identity", name)
+	}
+	if got := resourceName("http", "service-42", "my--app.example.com"); got != name {
+		t.Fatalf("resource name is not deterministic: %q != %q", got, name)
+	}
+	if got := resourceName("http", "service-43", "my--app.example.com"); got == name {
+		t.Fatal("same route ID under different owners produced the same resource name")
+	}
+}
 
 func TestHTTPAliasesGenerateDistinctRoutesAndConvergentHash(t *testing.T) {
 	originalDir := dynamicConfigDir
@@ -22,7 +41,11 @@ func TestHTTPAliasesGenerateDistinctRoutesAndConvergentHash(t *testing.T) {
 		},
 	}
 
-	if err := UpdateHttpRoutesWithL4(routes, nil, nil, ""); err != nil {
+	compiled, err := CompileRoutes(routes, nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRoutesConfig(compiled); err != nil {
 		t.Fatal(err)
 	}
 	config, err := readCurrentFullConfig()
@@ -36,7 +59,7 @@ func TestHTTPAliasesGenerateDistinctRoutesAndConvergentHash(t *testing.T) {
 		t.Fatalf("generated %d HTTP services, want 2", got)
 	}
 	for _, route := range routes {
-		name := httpRouteName(route)
+		name := resourceName("http", route.ServiceId, route.ID)
 		router, exists := config.HTTP.Routers[name]
 		if !exists {
 			t.Fatalf("router %q was not generated", name)
@@ -46,11 +69,14 @@ func TestHTTPAliasesGenerateDistinctRoutesAndConvergentHash(t *testing.T) {
 		}
 	}
 
-	if got, want := GetCurrentConfigHash(), HashRoutesWithServerName(routes, ""); got != want {
+	if got, want := GetCurrentConfigHash(), HashRoutesConfig(compiled); got != want {
 		t.Fatalf("current config hash %q, want %q", got, want)
 	}
-	reversed := []TraefikRoute{routes[1], routes[0]}
-	if HashRoutes(reversed) != HashRoutes(routes) {
+	reversed, err := CompileRoutes([]TraefikRoute{routes[1], routes[0]}, nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HashRoutesConfig(reversed) != HashRoutesConfig(compiled) {
 		t.Fatal("HTTP route hash depends on input order")
 	}
 }

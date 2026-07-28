@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	buildTraefikServiceMatcher,
 	createEmptyServiceMetrics,
 	formatPromDuration,
 	queryServiceMetrics,
@@ -21,15 +20,6 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(formatPromDuration(300)).toBe("5m");
 		expect(formatPromDuration(7200)).toBe("2h");
 		expect(formatPromDuration(45)).toBe("45s");
-	});
-
-	it("matches Traefik service labels with optional provider suffix", () => {
-		expect(buildTraefikServiceMatcher(SERVICE_ID)).toBe(
-			`^${SERVICE_ID}(?:--[^@]+)?(@file)?$`,
-		);
-		expect(buildTraefikServiceMatcher("svc.1")).toBe(
-			"^svc\\.1(?:--[^@]+)?(@file)?$",
-		);
 	});
 
 	it("creates an empty metrics payload", () => {
@@ -131,7 +121,7 @@ describe("VictoriaMetrics service metrics", () => {
 		expect(instantTimes).toEqual([String(END_TS), String(END_TS)]);
 		expect(queries.some((query) => query.includes("LogSQL"))).toBe(false);
 		expect(queries).toContain(
-			`sum by (code) (increase(traefik_service_requests_total{service=~"^${SERVICE_ID}(?:--[^@]+)?(@file)?$"}[5m]))`,
+			`sum by (code) (increase(traefik_service_requests_total{service_id="${SERVICE_ID}"}[5m]))`,
 		);
 		expect(queries).toContain(
 			`sum(avg_over_time(techulus_service_cpu_usage_percent{service_id="${SERVICE_ID}"}[5m]))`,
@@ -140,10 +130,10 @@ describe("VictoriaMetrics service metrics", () => {
 			`sum(avg_over_time(techulus_service_memory_usage_percent{service_id="${SERVICE_ID}"}[5m]))`,
 		);
 		expect(queries).toContain(
-			`sum(increase(traefik_service_requests_bytes_total{service=~"^${SERVICE_ID}(?:--[^@]+)?(@file)?$"}[1d]))`,
+			`sum(increase(traefik_service_requests_bytes_total{service_id="${SERVICE_ID}"}[1d]))`,
 		);
 		expect(queries).toContain(
-			`sum(increase(traefik_service_responses_bytes_total{service=~"^${SERVICE_ID}(?:--[^@]+)?(@file)?$"}[1d]))`,
+			`sum(increase(traefik_service_responses_bytes_total{service_id="${SERVICE_ID}"}[1d]))`,
 		);
 		expect(
 			starts.every((start) => start === String(END_TS - 24 * 60 * 60 + 5 * 60)),

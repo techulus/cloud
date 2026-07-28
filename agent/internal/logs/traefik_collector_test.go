@@ -3,10 +3,14 @@ package logs
 import (
 	"reflect"
 	"testing"
+
+	"techulus/cloud-agent/internal/routeowners"
 )
 
 func TestTraefikCollectorProcessLineQueuesRetainedFields(t *testing.T) {
-	collector := NewTraefikCollector(nil)
+	owners := routeowners.NewRegistry()
+	owners.Merge(map[string]string{"http-opaque": "service-42"})
+	collector := NewTraefikCollector(nil, owners)
 	collector.processLine([]byte(`{
 		"ClientHost":"192.0.2.10",
 		"DownstreamContentSize":321,
@@ -15,7 +19,7 @@ func TestTraefikCollectorProcessLineQueuesRetainedFields(t *testing.T) {
 		"RequestHost":"api.example.com",
 		"RequestMethod":"POST",
 		"RequestPath":"/v1/items",
-		"RouterName":"service-42@docker",
+		"RouterName":"http-opaque@file",
 		"StartUTC":"2026-07-23T10:11:12Z",
 		"time":"",
 		"ClientAddr":"ignored:1234",
@@ -40,13 +44,10 @@ func TestTraefikCollectorProcessLineQueuesRetainedFields(t *testing.T) {
 	}
 }
 
-func TestExtractServiceIdFromRouteSpecificRouterName(t *testing.T) {
-	for input, want := range map[string]string{
-		"service-42--app.example.com@file": "service-42",
-		"service-42@docker":                "service-42",
-	} {
-		if got := extractServiceId(input); got != want {
-			t.Fatalf("extractServiceId(%q) = %q, want %q", input, got, want)
-		}
+func TestTraefikCollectorDropsUnknownRouter(t *testing.T) {
+	collector := NewTraefikCollector(nil, routeowners.NewRegistry())
+	collector.processLine([]byte(`{"RequestHost":"example.com","RouterName":"unknown@file"}`))
+	if len(collector.queue) != 0 {
+		t.Fatal("unknown router was queued")
 	}
 }

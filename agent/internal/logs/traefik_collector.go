@@ -7,9 +7,10 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"time"
+
+	"techulus/cloud-agent/internal/routeowners"
 )
 
 const (
@@ -59,15 +60,18 @@ type TraefikCollector struct {
 	lastPos      int64
 	initialized  bool
 	droppedCount int
+	unknownCount int
+	owners       *routeowners.Registry
 }
 
-func NewTraefikCollector(sender HTTPLogSender) *TraefikCollector {
+func NewTraefikCollector(sender HTTPLogSender, owners *routeowners.Registry) *TraefikCollector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TraefikCollector{
 		sender: sender,
 		queue:  make([]HTTPLogEntry, 0, traefikMaxBatchSize),
 		ctx:    ctx,
 		cancel: cancel,
+		owners: owners,
 	}
 }
 
@@ -182,8 +186,12 @@ func (c *TraefikCollector) processLine(line []byte) {
 		return
 	}
 
-	serviceId := extractServiceId(entry.RouterName)
-	if serviceId == "" {
+	serviceId, ok := c.owners.Lookup(entry.RouterName)
+	if !ok {
+		c.unknownCount++
+		if c.unknownCount%100 == 1 {
+			log.Printf("[traefik-logs] dropping log for unknown router (total dropped: %d)", c.unknownCount)
+		}
 		return
 	}
 
@@ -207,11 +215,6 @@ func (c *TraefikCollector) processLine(line []byte) {
 	}
 
 	c.enqueue(httpEntry)
-}
-
-func extractServiceId(routerName string) string {
-	name := strings.SplitN(routerName, "@", 2)[0]
-	return strings.SplitN(name, "--", 2)[0]
 }
 
 func (c *TraefikCollector) enqueue(entry HTTPLogEntry) {
