@@ -36,9 +36,7 @@ func HashRoutesConfig(config *RoutesConfig) string {
 	if config == nil {
 		return ""
 	}
-	normalized := config.config
-	normalizeFullConfig(&normalized)
-	data, err := json.Marshal(normalized)
+	data, err := json.Marshal(config.config)
 	if err != nil {
 		return ""
 	}

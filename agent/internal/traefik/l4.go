@@ -104,6 +104,7 @@ func CompileRoutes(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRo
 		}
 		config.UDP.Services[name] = udpService{LoadBalancer: udpLoadBalancer{Servers: servers}}
 	}
+	normalizeFullConfig(&config)
 	return &RoutesConfig{config: config}, nil
 }
 

@@ -13,6 +13,7 @@ import (
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/metrics"
 	"techulus/cloud-agent/internal/serverless"
+	"techulus/cloud-agent/internal/traefik"
 )
 
 const (
@@ -26,7 +27,7 @@ const (
 func (a *Agent) Run(ctx context.Context) {
 	if a.IsProxy {
 		if cached, err := a.Client.LoadCachedExpectedState(); err == nil {
-			a.SetLatestExpectedState(cached)
+			a.RouteOwners.Merge(traefik.HTTPRouteOwners(ConvertToHttpRoutes(cached.Traefik.HttpRoutes)))
 		} else {
 			log.Printf("[cache] expected state unavailable for initial Traefik attribution: %v", err)
 		}
