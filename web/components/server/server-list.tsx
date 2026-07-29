@@ -1,9 +1,17 @@
 "use client";
 
-import { Globe, Server as ServerIcon } from "lucide-react";
+import { Cpu, Server as ServerIcon } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
+import {
+	SUMMARY_CARD_CLASSNAME,
+	SUMMARY_CARD_MIN_HEIGHT,
+	SummaryCardLine,
+	SummaryCardStat,
+	SummaryCardTitle,
+	SummaryCardValue,
+} from "@/components/core/summary-card";
 import { CreateServerDialog } from "@/components/server/create-server-dialog";
 import {
 	Empty,
@@ -12,14 +20,6 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
-import {
-	Item,
-	ItemContent,
-	ItemDescription,
-	ItemGroup,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
 import type { Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
 
@@ -27,8 +27,6 @@ type ServerWithResources = Pick<
 	Server,
 	| "id"
 	| "name"
-	| "publicIp"
-	| "wireguardIp"
 	| "status"
 	| "isProxy"
 	| "resourcesCpu"
@@ -105,43 +103,43 @@ export function ServerList({
 					</EmptyContent>
 				</Empty>
 			) : (
-				<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 					{servers.map((server) => (
-						<Item
+						<Link
 							key={server.id}
-							variant="outline"
-							render={<Link href={`/dashboard/servers/${server.id}`} />}
+							href={`/dashboard/servers/${server.id}`}
+							className={SUMMARY_CARD_CLASSNAME}
+							style={{ minHeight: SUMMARY_CARD_MIN_HEIGHT }}
 						>
-							<ItemMedia variant="icon">
-								{server.isProxy ? (
-									<Globe className="size-5 text-muted-foreground" />
-								) : (
-									<ServerIcon className="size-5 text-muted-foreground" />
+							<div className="flex items-center justify-between gap-2">
+								<SummaryCardTitle className="min-w-0">
+									{server.name}
+								</SummaryCardTitle>
+								{server.isProxy && (
+									<span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+										proxy
+									</span>
 								)}
-							</ItemMedia>
-							<ItemContent>
-								<div className="flex items-center justify-between">
-									<ItemTitle>{server.name}</ItemTitle>
-									<StatusIndicator status={server.status} />
-								</div>
-								<ItemDescription>
-									{formatResources(server) || formatOsArch(server) ? (
-										<>
-											{formatResources(server) && (
-												<span>{formatResources(server)}</span>
-											)}
-											{formatOsArch(server) && (
-												<span className="block">{formatOsArch(server)}</span>
-											)}
-										</>
-									) : (
-										"Not registered"
-									)}
-								</ItemDescription>
-							</ItemContent>
-						</Item>
+							</div>
+							<div className="mt-1.5">
+								<SummaryCardLine
+									icon={Cpu}
+									value={formatResources(server) || "not registered"}
+								/>
+							</div>
+							<div className="mt-auto pt-3">
+								<SummaryCardStat label="platform">
+									<SummaryCardValue>
+										{formatOsArch(server) || "—"}
+									</SummaryCardValue>
+								</SummaryCardStat>
+								<SummaryCardStat label="status">
+									<StatusIndicator status={server.status} showLabel />
+								</SummaryCardStat>
+							</div>
+						</Link>
 					))}
-				</ItemGroup>
+				</div>
 			)}
 		</div>
 	);

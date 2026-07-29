@@ -17,7 +17,13 @@ const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
 	},
 };
 
-export function StatusIndicator({ status }: { status: string }) {
+export function StatusIndicator({
+	status,
+	showLabel = false,
+}: {
+	status: string;
+	showLabel?: boolean;
+}) {
 	const color = STATUS_COLORS[status] || STATUS_COLORS.unknown;
 
 	return (
@@ -32,6 +38,13 @@ export function StatusIndicator({ status }: { status: string }) {
 					className={`relative inline-flex rounded-full h-2 w-2 ${color.dot}`}
 				/>
 			</span>
+			{showLabel && (
+				<span
+					className={`font-mono text-xs font-semibold uppercase tracking-wider ${color.text}`}
+				>
+					{status}
+				</span>
+			)}
 		</div>
 	);
 }
