@@ -6,7 +6,7 @@ import (
 )
 
 func base() Manifest {
-	return Manifest{APIVersion: "v1", Project: Project{ID: "p", Slug: "app"}, Environment: Environment{ID: "e", Name: "prod"}, Service: Service{ID: "s", Name: "web", Source: Source{Type: "image", Image: "nginx"}, Replicas: 1, Placement: &Placement{Mode: "automatic"}}}
+	return Manifest{APIVersion: "v1", Target: &Target{ServiceID: "s"}, Service: Service{Name: "web", Source: Source{Type: "image", Image: "nginx"}, Replicas: 1, Placement: &Placement{Mode: "automatic"}}}
 }
 func TestDefaultsAndRoundTrip(t *testing.T) {
 	m := base()
@@ -65,8 +65,6 @@ func TestPlacementRoundTripAndValidation(t *testing.T) {
 
 func TestPlacementIsRequired(t *testing.T) {
 	_, err := Parse([]byte(`apiVersion: v1
-project: {slug: app}
-environment: {name: prod}
 service:
   name: web
   source: {type: image, image: nginx}

@@ -164,6 +164,7 @@ export type ServiceRevisionSpec = {
 
 export type ServiceRevisionDraft = {
 	service: {
+		id: string;
 		name: string;
 		image: string;
 		hostname: string | null;
@@ -278,8 +279,7 @@ export function buildServiceRevisionSpec(
 		schemaVersion: SERVICE_REVISION_SCHEMA_VERSION,
 		image,
 		source: overrides.source ?? { type: "image", image },
-		hostname:
-			service.hostname?.trim() || getDefaultServiceHostname(service.name),
+		hostname: service.hostname?.trim() || getDefaultServiceHostname(service.id),
 		stateful: service.stateful ?? false,
 		serverless: {
 			enabled: service.serverlessEnabled ?? false,

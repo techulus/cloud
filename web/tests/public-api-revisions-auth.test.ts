@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
 			{ status: 401 },
 		),
 	})),
-	findNestedService: vi.fn(async () => ({ id: "service-1" })),
+	findService: vi.fn(async () => ({ id: "service-1" })),
 	queryServiceRevisionChangelog: vi.fn(async () => ({
 		revisions: [
 			{
@@ -60,25 +60,33 @@ vi.mock("@/lib/api-auth", () => ({
 
 vi.mock("@/lib/public-api", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/lib/public-api")>()),
-	findNestedService: mocks.findNestedService,
+	findServiceContext: async (_serviceId: string) => {
+		const service = await mocks.findService();
+		return service
+			? {
+					service,
+					projectId: "project-1",
+					projectSlug: "project",
+					environmentId: "environment-1",
+					environmentName: "production",
+				}
+			: null;
+	},
 }));
 
 vi.mock("@/lib/service-revision-changelog", () => ({
 	queryServiceRevisionChangelog: mocks.queryServiceRevisionChangelog,
 }));
 
-import { GET } from "@/app/api/v1/projects/[projectId]/environments/[environmentId]/services/[serviceId]/revisions/route";
+import { GET } from "@/app/api/v1/services/[serviceId]/revisions/route";
 
 it("lists public revisions with an API key without requiring a browser session", async () => {
 	const response = await GET(
-		new Request(
-			"https://cloud.test/api/v1/projects/project-1/environments/environment-1/services/service-1/revisions",
-			{ headers: { "x-api-key": "tcl_secret" } },
-		),
+		new Request("https://cloud.test/api/v1/services/service-1/revisions", {
+			headers: { "x-api-key": "tcl_secret" },
+		}),
 		{
 			params: Promise.resolve({
-				projectId: "project-1",
-				environmentId: "environment-1",
 				serviceId: "service-1",
 			}),
 		},

@@ -15,6 +15,7 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { validateDockerImageInternal } from "@/lib/docker-image";
+import { nameSchema } from "@/lib/schemas";
 import { getServiceTotalReplicas } from "@/lib/service-config";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -110,7 +111,7 @@ export const publicSourceSchema = z.discriminatedUnion("type", [
 		type: z.literal("github"),
 		repository: githubRepositorySchema,
 		branch: z.string().trim().min(1).max(255),
-		rootDir: rootDirSchema.nullable().optional(),
+		rootDir: rootDirSchema.nullable(),
 	}),
 ]);
 
@@ -120,7 +121,7 @@ export type PublicSource =
 			type: "github";
 			repository: string | null;
 			branch: string;
-			rootDir?: string;
+			rootDir: string | null;
 	  };
 export type NestedService = typeof services.$inferSelect;
 type GitHubRepo = typeof githubRepos.$inferSelect;
@@ -161,9 +162,7 @@ export function resolvePersistedSourceFromRows(
 			repo?.defaultBranch?.trim() ||
 			service.githubBranch?.trim() ||
 			"main",
-		...(service.githubRootDir?.trim()
-			? { rootDir: service.githubRootDir.trim() }
-			: {}),
+		rootDir: service.githubRootDir?.trim() || null,
 	};
 }
 
@@ -182,33 +181,27 @@ export async function resolvePersistedSource(
 	return resolvePersistedSourceFromRows(service, repo);
 }
 
-export async function findNestedService(
-	projectId: string,
-	environmentId: string,
-	serviceId: string,
-) {
-	const row = await db
-		.select({ service: services })
-		.from(projects)
+export async function findServiceContext(serviceId: string) {
+	return db
+		.select({
+			service: services,
+			projectId: projects.id,
+			projectSlug: projects.slug,
+			environmentId: environments.id,
+			environmentName: environments.name,
+		})
+		.from(services)
+		.innerJoin(projects, eq(projects.id, services.projectId))
 		.innerJoin(
 			environments,
 			and(
-				eq(environments.id, environmentId),
+				eq(environments.id, services.environmentId),
 				eq(environments.projectId, projects.id),
 			),
 		)
-		.innerJoin(
-			services,
-			and(
-				eq(services.id, serviceId),
-				eq(services.projectId, projects.id),
-				eq(services.environmentId, environments.id),
-				isNull(services.deletedAt),
-			),
-		)
-		.where(eq(projects.id, projectId))
-		.limit(1);
-	return row[0]?.service ?? null;
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+		.limit(1)
+		.then((rows) => rows[0] ?? null);
 }
 
 export function apiError(message: string, code: string, status: number) {
@@ -296,7 +289,7 @@ function sanitizeSpec(specification: unknown) {
 						type: "github" as const,
 						repository: spec.source.repository,
 						branch: spec.source.branch,
-						...(spec.source.rootDir ? { rootDir: spec.source.rootDir } : {}),
+						rootDir: spec.source.rootDir,
 					}
 				: { type: "image" as const, image: spec.source.image },
 		hostname: spec.hostname,
@@ -459,8 +452,7 @@ export async function safeConfiguration(service: NestedService) {
 
 	const comparableCurrent = {
 		source: current.source,
-		hostname:
-			current.hostname?.trim() || getDefaultServiceHostname(service.name),
+		hostname: current.hostname?.trim() || getDefaultServiceHostname(service.id),
 		stateful: current.stateful,
 		placement:
 			current.placement.mode === "automatic"
@@ -592,13 +584,14 @@ export const placementSchema = z.discriminatedUnion("mode", [
 				});
 		}),
 ]);
-export const configurationPatchSchema = z.strictObject({
-	source: publicSourceSchema.optional(),
-	hostname: hostnameSchema.nullable().optional(),
-	ports: z.array(portSchema).max(100).optional(),
-	placement: placementSchema.optional(),
-	healthCheck: healthCheckSchema.nullable().optional(),
-	startCommand: z.string().trim().min(1).max(4096).nullable().optional(),
+export const replaceConfigurationSchema = z.strictObject({
+	name: nameSchema,
+	source: publicSourceSchema,
+	hostname: hostnameSchema.nullable(),
+	ports: z.array(portSchema).max(100),
+	placement: placementSchema,
+	healthCheck: healthCheckSchema.nullable(),
+	startCommand: z.string().trim().min(1).max(4096).nullable(),
 	resources: z
 		.strictObject({
 			cpuCores: z.number().min(0.1).max(64).nullable(),
@@ -608,7 +601,7 @@ export const configurationPatchSchema = z.strictObject({
 			(value) => (value.cpuCores === null) === (value.memoryMb === null),
 			"CPU and memory limits must both be set or both be null",
 		)
-		.optional(),
+		.nullable(),
 });
 
 type PublicApiDomainError = Error & { code: string; status: number };
@@ -644,9 +637,9 @@ function healthCheckFromService(service: NestedService) {
 		: null;
 }
 
-export async function patchConfiguration(
+export async function replaceConfiguration(
 	service: NestedService,
-	input: z.infer<typeof configurationPatchSchema>,
+	input: z.infer<typeof replaceConfigurationSchema>,
 ) {
 	if (input.source?.type === "image" && input.source.image !== service.image) {
 		const validation = await validateDockerImageInternal(input.source.image);
@@ -835,6 +828,7 @@ export async function patchConfiguration(
 			changes.push(label);
 			return true;
 		};
+		if (changed("name", persisted.name, input.name)) set.name = input.name;
 
 		if (
 			input.hostname !== undefined &&
@@ -876,18 +870,20 @@ export async function patchConfiguration(
 			);
 		}
 		if (
-			input.resources !== undefined &&
 			changed(
 				"resources",
-				{
-					cpuCores: persisted.resourceCpuLimit,
-					memoryMb: persisted.resourceMemoryLimitMb,
-				},
+				persisted.resourceCpuLimit == null &&
+					persisted.resourceMemoryLimitMb == null
+					? null
+					: {
+							cpuCores: persisted.resourceCpuLimit,
+							memoryMb: persisted.resourceMemoryLimitMb,
+						},
 				input.resources,
 			)
 		) {
-			set.resourceCpuLimit = input.resources.cpuCores;
-			set.resourceMemoryLimitMb = input.resources.memoryMb;
+			set.resourceCpuLimit = input.resources?.cpuCores ?? null;
+			set.resourceMemoryLimitMb = input.resources?.memoryMb ?? null;
 		}
 		if (
 			input.source?.type === "image" &&
@@ -954,11 +950,9 @@ export async function patchConfiguration(
 						.where(eq(githubRepos.id, repo.id));
 				}
 			}
-			if (input.source.rootDir !== undefined) {
-				const desiredRoot = input.source.rootDir;
-				if (changed("source.rootDir", persisted.githubRootDir, desiredRoot)) {
-					set.githubRootDir = desiredRoot;
-				}
+			const desiredRoot = input.source.rootDir;
+			if (changed("source.rootDir", persisted.githubRootDir, desiredRoot)) {
+				set.githubRootDir = desiredRoot;
 			}
 		}
 

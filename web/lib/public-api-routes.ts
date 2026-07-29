@@ -14,12 +14,12 @@ import { METRIC_RANGE_KEYS } from "@/lib/metric-ranges";
 import {
 	apiError,
 	badRequest,
-	configurationPatchSchema,
-	findNestedService,
+	findServiceContext,
 	isPublicApiDomainError,
 	notFound,
-	patchConfiguration,
 	publicApiDomainResponse,
+	replaceConfiguration,
+	replaceConfigurationSchema,
 	resolvePersistedSource,
 	safeConfiguration,
 } from "@/lib/public-api";
@@ -42,8 +42,6 @@ import {
 import { isMetricsEnabled, queryServiceMetrics } from "@/lib/victoria-metrics";
 
 export type PublicServiceParams = {
-	projectId: string;
-	environmentId: string;
 	serviceId: string;
 };
 export type PublicServiceContext = { params: Promise<PublicServiceParams> };
@@ -54,12 +52,10 @@ async function readScope(request: Request, context: PublicServiceContext) {
 	if (!auth.ok) return { response: auth.response };
 	try {
 		const params = await context.params;
-		const service = await findNestedService(
-			params.projectId,
-			params.environmentId,
-			params.serviceId,
-		);
-		return service ? { service, params } : { response: notFound() };
+		const found = await findServiceContext(params.serviceId);
+		return found
+			? { service: found.service, target: found, params }
+			: { response: notFound() };
 	} catch (error) {
 		return { response: internalError(error, "resolve service scope") };
 	}
@@ -70,12 +66,10 @@ async function writeScope(request: Request, context: PublicServiceContext) {
 	if (!auth.ok) return { response: auth.response };
 	try {
 		const params = await context.params;
-		const service = await findNestedService(
-			params.projectId,
-			params.environmentId,
-			params.serviceId,
-		);
-		return service ? { service, params, auth } : { response: notFound() };
+		const found = await findServiceContext(params.serviceId);
+		return found
+			? { service: found.service, target: found, params, auth }
+			: { response: notFound() };
 	} catch (error) {
 		return { response: internalError(error, "resolve service scope") };
 	}
@@ -100,6 +94,47 @@ function internalError(error: unknown, operation: string) {
 	return apiError("Internal server error", "INTERNAL_ERROR", 500);
 }
 
+export async function getServiceDetails(
+	request: Request,
+	context: PublicServiceContext,
+) {
+	const scope = await readScope(request, context);
+	if ("response" in scope) return scope.response;
+	try {
+		const configuration = await safeConfiguration(scope.service);
+		const current = configuration.current;
+		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: scope.service.name },
+			},
+			service: {
+				id: scope.service.id,
+				name: scope.service.name,
+				source: current.source,
+				hostname: current.hostname,
+				ports: current.ports,
+				replicas: current.replicas,
+				placement:
+					current.placement.mode === "manual"
+						? { mode: "manual", servers: current.placements }
+						: current.placement,
+				healthCheck: current.healthCheck,
+				startCommand: current.startCommand,
+				resources:
+					current.resources.cpuCores == null ? null : current.resources,
+			},
+			management: configuration.management,
+		});
+	} catch (error) {
+		return internalError(error, "read service");
+	}
+}
+
 export async function getConfiguration(
 	request: Request,
 	context: PublicServiceContext,
@@ -113,13 +148,13 @@ export async function getConfiguration(
 	}
 }
 
-export async function patchConfigurationRoute(
+export async function putConfigurationRoute(
 	request: Request,
 	context: PublicServiceContext,
 ) {
 	const scope = await writeScope(request, context);
 	if ("response" in scope) return scope.response;
-	const parsed = configurationPatchSchema.safeParse(
+	const parsed = replaceConfigurationSchema.safeParse(
 		await request.json().catch(() => null),
 	);
 	if (!parsed.success) {
@@ -128,11 +163,13 @@ export async function patchConfigurationRoute(
 		);
 	}
 	try {
-		return Response.json(await patchConfiguration(scope.service, parsed.data));
+		return Response.json(
+			await replaceConfiguration(scope.service, parsed.data),
+		);
 	} catch (error) {
 		return isPublicApiDomainError(error)
 			? publicApiDomainResponse(error)
-			: internalError(error, "patch configuration");
+			: internalError(error, "replace configuration");
 	}
 }
 
@@ -211,6 +248,14 @@ export async function getStatus(
 			resolvePersistedSource(scope.service),
 		]);
 		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: scope.service.name },
+			},
 			service: {
 				id: scope.service.id,
 				name: scope.service.name,
@@ -435,6 +480,14 @@ export async function getServiceLogs(
 	if ("response" in scope) return scope.response;
 	if (!isLoggingEnabled()) {
 		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: scope.service.name },
+			},
 			provider: "disabled",
 			logs: [],
 			nextCursor: null,
@@ -467,6 +520,14 @@ export async function getServiceLogs(
 					})
 				: await query();
 		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: scope.service.name },
+			},
 			provider: "enabled",
 			logs: result.logs.map(publicServiceLog),
 			nextCursor: nextServiceLogCursor(result.logs, options.rawCursor),

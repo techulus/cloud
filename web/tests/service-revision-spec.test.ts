@@ -9,6 +9,7 @@ function draft(
 ): ServiceRevisionDraft {
 	return {
 		service: {
+			id: "service-1",
 			name: "API Service",
 			image: "nginx:latest",
 			hostname: "api.internal",
@@ -68,6 +69,18 @@ function draft(
 }
 
 describe("service revision specification", () => {
+	it("keeps the default hostname stable when the service is renamed", () => {
+		const original = draft();
+		original.service.hostname = null;
+		const renamed = draft();
+		renamed.service.hostname = null;
+		renamed.service.name = "Renamed API Service";
+
+		expect(buildServiceRevisionSpec(renamed).hostname).toBe(
+			buildServiceRevisionSpec(original).hostname,
+		);
+	});
+
 	it("normalizes draft row ordering", () => {
 		const first = buildServiceRevisionSpec(draft());
 		const reorderedDraft = draft();
