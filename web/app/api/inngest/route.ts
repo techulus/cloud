@@ -1,11 +1,13 @@
 import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
 import {
+	agentUpgradeTimeoutCheck,
 	backupWorkflow,
 	buildTriggerWorkflow,
 	buildWorkflow,
 	certificateRenewal,
 	challengeCleanup,
+	controlPlaneUpdateCheck,
 	expiredDeletedServicesPurge,
 	migrationWorkflow,
 	oldBackupsCleanup,
@@ -34,6 +36,8 @@ export const { GET, POST, PUT } = serve({
 		scheduledBackupsCheck,
 		oldBackupsCleanup,
 		staleItemsCleanup,
+		controlPlaneUpdateCheck,
+		agentUpgradeTimeoutCheck,
 		migrationWorkflow,
 		backupWorkflow,
 		restoreWorkflow,

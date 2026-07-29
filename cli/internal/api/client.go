@@ -64,6 +64,10 @@ func NewClient(host, apiKey string) *Client {
 }
 
 func (c *Client) RequestJSON(ctx context.Context, method, path string, query url.Values, body any, out any) error {
+	return c.RequestJSONWithHeaders(ctx, method, path, query, nil, body, out)
+}
+
+func (c *Client) RequestJSONWithHeaders(ctx context.Context, method, path string, query url.Values, customHeaders map[string]string, body any, out any) error {
 	endpoint := c.Host + path
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
@@ -71,6 +75,9 @@ func (c *Client) RequestJSON(ctx context.Context, method, path string, query url
 	headers := map[string]string{}
 	if c.APIKey != "" {
 		headers["x-api-key"] = c.APIKey
+	}
+	for key, value := range customHeaders {
+		headers[key] = value
 	}
 	return JSON(ctx, c.HTTPClient, method, endpoint, headers, body, out)
 }

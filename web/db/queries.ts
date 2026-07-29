@@ -1,4 +1,12 @@
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import {
+	and,
+	count,
+	countDistinct,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+} from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
 import {
@@ -14,6 +22,7 @@ import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
 } from "@/lib/control-plane-updates";
+import { observedReadyPhases } from "@/lib/deployment-status";
 import type {
 	EmailAlertsConfig,
 	SmtpConfig,
@@ -30,27 +39,50 @@ import {
 } from "@/lib/victoria-metrics";
 
 export async function listProjects() {
-	const projectList = await db
-		.select()
-		.from(projects)
-		.orderBy(projects.createdAt);
-
-	const projectsWithCounts = await Promise.all(
-		projectList.map(async (project) => {
-			const serviceCount = await db
-				.select({ count: services.id })
+	const [projectList, serviceCounts, onlineCounts, environmentCounts] =
+		await Promise.all([
+			db.select().from(projects).orderBy(projects.createdAt),
+			db
+				.select({ projectId: services.projectId, total: count() })
 				.from(services)
+				.where(isNull(services.deletedAt))
+				.groupBy(services.projectId),
+			db
+				.select({
+					projectId: services.projectId,
+					online: countDistinct(services.id),
+				})
+				.from(services)
+				.innerJoin(deployments, eq(deployments.serviceId, services.id))
 				.where(
-					and(eq(services.projectId, project.id), isNull(services.deletedAt)),
-				);
-			return {
-				...project,
-				serviceCount: serviceCount.length,
-			};
-		}),
+					and(
+						isNull(services.deletedAt),
+						inArray(deployments.observedPhase, [...observedReadyPhases]),
+					),
+				)
+				.groupBy(services.projectId),
+			db
+				.select({ projectId: environments.projectId, total: count() })
+				.from(environments)
+				.groupBy(environments.projectId),
+		]);
+
+	const totalByProject = new Map(
+		serviceCounts.map((row) => [row.projectId, row.total]),
+	);
+	const onlineByProject = new Map(
+		onlineCounts.map((row) => [row.projectId, row.online]),
+	);
+	const environmentsByProject = new Map(
+		environmentCounts.map((row) => [row.projectId, row.total]),
 	);
 
-	return projectsWithCounts;
+	return projectList.map((project) => ({
+		...project,
+		serviceCount: totalByProject.get(project.id) ?? 0,
+		onlineServiceCount: onlineByProject.get(project.id) ?? 0,
+		environmentCount: environmentsByProject.get(project.id) ?? 0,
+	}));
 }
 
 export async function getProject(id: string) {

@@ -6,8 +6,6 @@ import {
 	Github,
 	Globe,
 	HardDrive,
-	Lock,
-	Network,
 	Settings,
 	Trash2,
 	Upload,
@@ -17,6 +15,13 @@ import { useRouter } from "next/navigation";
 import type { AnchorHTMLAttributes, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import {
+	SUMMARY_CARD_MIN_HEIGHT,
+	SummaryCardLine,
+	SummaryCardStat,
+	SummaryCardTitle,
+	SummaryCardValue,
+} from "@/components/core/summary-card";
 import { buttonVariants } from "@/components/ui/button";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import {
@@ -41,7 +46,10 @@ import {
 	NativeSelectOption,
 } from "@/components/ui/native-select";
 import type { Environment, ServiceWithDetails } from "@/db/types";
-import { observedReadyPhases } from "@/lib/deployment-status";
+import {
+	observedReadyPhases,
+	observedStartingPhases,
+} from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 import {
@@ -56,7 +64,7 @@ type CanvasPosition = {
 };
 
 const SERVICE_CARD_WIDTH = 320;
-const SERVICE_CARD_HEIGHT = 150;
+const SERVICE_CARD_HEIGHT = SUMMARY_CARD_MIN_HEIGHT;
 const SERVICE_CARD_GAP_X = 56;
 const SERVICE_CARD_GAP_Y = 48;
 const DEFAULT_GRID_COLUMNS = 3;
@@ -67,6 +75,36 @@ const MIN_CANVAS_SCALE = 0.5;
 const SNAP_GRID_SIZE = 24;
 const CANVAS_DOT_PATTERN =
 	"radial-gradient(circle, color-mix(in oklab, var(--muted-foreground) 36%, transparent) 1px, transparent 1px)";
+
+function getStatusLabel(
+	deployments: ServiceWithDetails["deployments"],
+	runningCount: number,
+): string {
+	if (deployments.length === 0) {
+		return "not deployed";
+	}
+	if (deployments.some((d) => d.observedPhase === "failed")) {
+		return "failed";
+	}
+	if (runningCount === deployments.length) {
+		return "running";
+	}
+	if (
+		deployments.some((d) =>
+			(observedStartingPhases as readonly string[]).includes(d.observedPhase),
+		)
+	) {
+		return "deploying";
+	}
+	if (deployments.every((d) => d.observedPhase === "sleeping")) {
+		return "sleeping";
+	}
+	if (runningCount === 0) {
+		return "stopped";
+	}
+
+	return "degraded";
+}
 
 function getCanvasScale() {
 	if (typeof window === "undefined") {
@@ -137,27 +175,19 @@ function getServicePosition(
 
 function ServiceCardSkeleton() {
 	return (
-		<div className="flex flex-col items-stretch gap-2 w-full md:w-80">
-			<div className="flex min-h-36 w-full flex-col p-4 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-800/50">
-				<div className="flex items-center gap-2">
-					<div className="flex-1 min-w-0">
-						<div className="flex items-center gap-1.5">
-							<div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-							<div className="h-2 w-2 bg-slate-200 dark:bg-slate-700 rounded-full animate-pulse" />
-						</div>
-					</div>
+		<div className="flex flex-col items-stretch w-full md:w-80">
+			<div
+				className="flex w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 px-3.5 py-3"
+				style={{ minHeight: SERVICE_CARD_HEIGHT }}
+			>
+				<div className="h-4 w-32 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+				<div className="mt-2.5 space-y-2">
+					<div className="h-2.5 w-40 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+					<div className="h-2.5 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
 				</div>
-				<div className="mt-2 space-y-1.5">
-					<div className="flex items-center gap-1.5">
-						<div className="h-3 w-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-						<div className="h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-					</div>
-				</div>
-				<div className="mt-auto pt-2">
-					<div className="flex items-center justify-between">
-						<div className="h-3 w-12 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-						<div className="h-4 w-8 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
-					</div>
+				<div className="mt-auto space-y-2 pt-3">
+					<div className="h-2.5 w-full animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+					<div className="h-2.5 w-full animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
 				</div>
 			</div>
 		</div>
@@ -288,130 +318,79 @@ function ServiceCard({
 	service,
 	projectSlug,
 	envName,
-	edgeDomain,
 	dragHandleProps,
 }: {
 	service: ServiceWithDetails;
 	projectSlug: string;
 	envName: string;
-	edgeDomain: string | null;
 	dragHandleProps?: AnchorHTMLAttributes<HTMLAnchorElement>;
 }) {
 	const colors = getStatusColorFromDeployments(service.deployments);
 	const { className: dragHandleClassName, ...linkProps } =
 		dragHandleProps ?? {};
-	const publicPorts = service.ports.filter((p) => p.isPublic && p.domain);
-	const tcpUdpPorts = service.ports.filter(
-		(p) =>
-			(p.protocol === "tcp" || p.protocol === "udp") &&
-			p.isPublic &&
-			p.externalPort,
-	);
-	const hasInternalDns = service.deployments.some((d) =>
-		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
-	);
 	const runningCount = service.deployments.filter((d) =>
 		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	).length;
-
-	const hasEndpoints =
-		publicPorts.length > 0 ||
-		(tcpUdpPorts.length > 0 && edgeDomain) ||
-		hasInternalDns;
+	const statusLabel = getStatusLabel(service.deployments, runningCount);
+	const publicEndpoint = service.ports.find((p) => p.isPublic && p.domain);
+	const volumeNames = (service.volumes ?? []).map((v) => v.name).join(", ");
 
 	return (
-		<div className="flex flex-col items-stretch gap-2 w-full md:w-80">
+		<div className="flex flex-col items-stretch w-full md:w-80">
 			<Link
 				{...linkProps}
 				href={`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}`}
 				className={cn(
-					"group block w-full cursor-pointer rounded-xl transition-all duration-200 hover:shadow-lg hover:ring hover:ring-primary/25 dark:hover:ring-primary/55",
+					"group block w-full cursor-pointer rounded-xl transition-all duration-200 hover:ring hover:ring-primary/25 dark:hover:ring-primary/55",
 					dragHandleClassName,
 				)}
 			>
-				<div className="relative z-10 flex min-h-30 w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-2.5 py-2">
-					<div className="py-1">
-						<div className="flex items-center justify-between gap-2">
-							<h3 className="font-semibold text-[15px] text-foreground truncate">
-								{service.name}
-							</h3>
-							<div className="flex items-center gap-1.5 shrink-0">
-								<span className="relative flex h-2.5 w-2.5">
+				<div
+					className="relative z-10 flex w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-3.5 py-3"
+					style={{ minHeight: SERVICE_CARD_HEIGHT }}
+				>
+					<SummaryCardTitle>{service.name}</SummaryCardTitle>
+
+					{(publicEndpoint || volumeNames) && (
+						<div className="mt-1.5 space-y-0.5">
+							{publicEndpoint?.domain && (
+								<SummaryCardLine icon={Globe} value={publicEndpoint.domain} />
+							)}
+							{volumeNames && (
+								<SummaryCardLine icon={HardDrive} value={volumeNames} />
+							)}
+						</div>
+					)}
+
+					<div className="mt-auto pt-3">
+						<SummaryCardStat label="replicas">
+							<SummaryCardValue>
+								{service.deployments.length > 0
+									? `${runningCount}/${service.deployments.length}`
+									: "0"}
+							</SummaryCardValue>
+						</SummaryCardStat>
+						<SummaryCardStat label="status">
+							<span className="flex items-center gap-1.5">
+								<span className="relative flex h-2 w-2">
 									{runningCount > 0 && (
 										<span
 											className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.dot} opacity-75`}
 										/>
 									)}
 									<span
-										className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors.dot}`}
+										className={`relative inline-flex h-2 w-2 rounded-full ${colors.dot}`}
 									/>
 								</span>
-								<span className={`text-xs font-medium ${colors.text}`}>
-									{service.deployments.length > 0
-										? `${runningCount}/${service.deployments.length}`
-										: "Not deployed"}
-								</span>
-							</div>
-						</div>
-					</div>
-
-					{hasEndpoints && (
-						<div className="mt-2 space-y-1.5">
-							{publicPorts.map((port) => (
-								<div
-									key={port.id}
-									className="border-l-2 border-sky-500 pl-2.5 py-0.5"
+								<span
+									className={`font-mono text-xs font-semibold uppercase tracking-wider ${colors.text}`}
 								>
-									<div className="flex items-center gap-2 text-xs text-foreground">
-										<Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-										<span className="truncate">{port.domain}</span>
-									</div>
-								</div>
-							))}
-							{tcpUdpPorts.length > 0 &&
-								edgeDomain &&
-								tcpUdpPorts.map((port) => (
-									<div
-										key={port.id}
-										className="border-l-2 border-violet-500 pl-2.5 py-0.5"
-									>
-										<div className="flex items-center gap-2 text-xs text-foreground font-mono">
-											<Network className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-											<span className="truncate">
-												{port.protocol}://{edgeDomain}:{port.externalPort}
-											</span>
-										</div>
-									</div>
-								))}
-							{hasInternalDns && (
-								<div className="border-l-2 border-slate-300 dark:border-slate-600 pl-2.5 py-0.5">
-									<div className="flex items-center gap-2 text-xs text-foreground">
-										<Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-										<span className="truncate">
-											{service.hostname || service.name}.internal
-										</span>
-									</div>
-								</div>
-							)}
-						</div>
-					)}
-				</div>
-
-				{service.volumes && service.volumes.length > 0 && (
-					<div className="-mt-2 rounded-b-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-3 pt-4 pb-2.5 space-y-1.5">
-						{service.volumes.map((volume) => (
-							<div
-								key={volume.id}
-								className="flex items-center gap-2.5 text-muted-foreground"
-							>
-								<HardDrive className="h-4 w-4 shrink-0" />
-								<span className="text-xs font-medium truncate">
-									{volume.name}
+									{statusLabel}
 								</span>
-							</div>
-						))}
+							</span>
+						</SummaryCardStat>
 					</div>
-				)}
+				</div>
 			</Link>
 		</div>
 	);
@@ -422,7 +401,6 @@ function DraggableServiceCard({
 	index,
 	projectSlug,
 	envName,
-	edgeDomain,
 	canvasScale,
 	onPositionChange,
 }: {
@@ -430,7 +408,6 @@ function DraggableServiceCard({
 	index: number;
 	projectSlug: string;
 	envName: string;
-	edgeDomain: string | null;
 	canvasScale: number;
 	onPositionChange: (serviceId: string, position: CanvasPosition) => void;
 }) {
@@ -551,7 +528,6 @@ function DraggableServiceCard({
 				service={service}
 				projectSlug={projectSlug}
 				envName={envName}
-				edgeDomain={edgeDomain}
 				dragHandleProps={{
 					className:
 						"touch-none cursor-grab select-none active:cursor-grabbing",
@@ -572,13 +548,11 @@ export function ServiceCanvas({
 	projectSlug,
 	envId,
 	envName,
-	edgeDomain,
 }: {
 	projectId: string;
 	projectSlug: string;
 	envId: string;
 	envName: string;
-	edgeDomain: string | null;
 }) {
 	const { data: environments } = useSWR<Environment[]>(
 		`/api/projects/${projectId}/environments`,
@@ -828,7 +802,6 @@ export function ServiceCanvas({
 							service={service}
 							projectSlug={projectSlug}
 							envName={envName}
-							edgeDomain={edgeDomain}
 						/>
 					))}
 				</div>
@@ -881,7 +854,6 @@ export function ServiceCanvas({
 										index={index}
 										projectSlug={projectSlug}
 										envName={envName}
-										edgeDomain={edgeDomain}
 										canvasScale={canvasScale}
 										onPositionChange={handlePositionChange}
 									/>

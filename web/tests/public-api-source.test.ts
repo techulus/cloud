@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
 	canonicalGitHubRepository,
-	configurationPatchSchema,
 	isSafeRepositoryRoot,
 	publicSourceSchema,
+	replaceConfigurationSchema,
 } from "@/lib/public-api";
+
+const completeConfiguration = (overrides: Record<string, unknown> = {}) => ({
+	name: "web",
+	source: { type: "image", image: "nginx:1.27" },
+	hostname: "web",
+	ports: [],
+	placement: { mode: "automatic", replicas: 1 },
+	healthCheck: null,
+	startCommand: null,
+	resources: null,
+	...overrides,
+});
 
 describe("public API GitHub sources", () => {
 	it.each([
@@ -72,13 +84,16 @@ describe("public API GitHub sources", () => {
 
 	it("requires a nonblank GitHub branch", () => {
 		expect(
-			configurationPatchSchema.safeParse({
-				source: {
-					type: "github",
-					repository: "https://github.com/owner/repository",
-					branch: "   ",
-				},
-			}).success,
+			replaceConfigurationSchema.safeParse(
+				completeConfiguration({
+					source: {
+						type: "github",
+						repository: "https://github.com/owner/repository",
+						branch: "   ",
+						rootDir: null,
+					},
+				}),
+			).success,
 		).toBe(false);
 	});
 
@@ -92,31 +107,48 @@ describe("public API GitHub sources", () => {
 			type: "github",
 			repository: "https://github.com/owner/repository",
 			branch: "main",
+			rootDir: null,
 			image: "registry.example/app:latest",
 		},
 	])("rejects mixed source fields", (source) => {
-		expect(configurationPatchSchema.safeParse({ source }).success).toBe(false);
+		expect(
+			replaceConfigurationSchema.safeParse(completeConfiguration({ source }))
+				.success,
+		).toBe(false);
 	});
 
-	it("distinguishes omitted rootDir from explicit null", () => {
-		const omitted = publicSourceSchema.parse({
+	it("requires explicit null to clear rootDir", () => {
+		const omitted = publicSourceSchema.safeParse({
 			type: "github",
 			repository: "https://github.com/owner/repository",
 			branch: "main",
 		});
 		const cleared = publicSourceSchema.parse({
-			...omitted,
+			type: "github",
+			repository: "https://github.com/owner/repository",
+			branch: "main",
 			rootDir: null,
 		});
 
-		expect(omitted).not.toHaveProperty("rootDir");
+		expect(omitted.success).toBe(false);
 		expect(cleared).toHaveProperty("rootDir", null);
 	});
 });
 
 describe("public API placement schema", () => {
+	it("requires every managed field and rejects unknown fields", () => {
+		expect(replaceConfigurationSchema.safeParse({ name: "web" }).success).toBe(
+			false,
+		);
+		expect(
+			replaceConfigurationSchema.safeParse(
+				completeConfiguration({ unmanaged: true }),
+			).success,
+		).toBe(false);
+	});
+
 	it("rejects the removed standalone replicas field", () => {
-		expect(configurationPatchSchema.safeParse({ replicas: 3 }).success).toBe(
+		expect(replaceConfigurationSchema.safeParse({ replicas: 3 }).success).toBe(
 			false,
 		);
 	});
@@ -125,9 +157,10 @@ describe("public API placement schema", () => {
 		{ mode: "automatic", replicas: 3 },
 		{ mode: "manual", placements: [{ serverId: "server-1", count: 2 }] },
 	])("accepts valid placement intent", (placement) => {
-		expect(configurationPatchSchema.safeParse({ placement }).success).toBe(
-			true,
-		);
+		expect(
+			replaceConfigurationSchema.safeParse(completeConfiguration({ placement }))
+				.success,
+		).toBe(true);
 	});
 
 	it.each([
@@ -148,8 +181,9 @@ describe("public API placement schema", () => {
 			],
 		},
 	])("rejects invalid placement intent", (placement) => {
-		expect(configurationPatchSchema.safeParse({ placement }).success).toBe(
-			false,
-		);
+		expect(
+			replaceConfigurationSchema.safeParse(completeConfiguration({ placement }))
+				.success,
+		).toBe(false);
 	});
 });

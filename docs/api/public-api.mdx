@@ -46,20 +46,20 @@ Content-Type: application/json
 }
 ```
 
-## Authorization and containment
+## Authorization and service identity
 
 Roles are global for the current Techulus Cloud installation. There are no project-level permissions.
 
 - `reader`, `developer`, and `admin` can read resources.
 - `developer` and `admin` can change configuration and deploy services.
 
-Service URLs always include the project and environment:
+Service operations use the globally unique service ID:
 
 ```text
-/api/v1/projects/{projectId}/environments/{environmentId}/services/{serviceId}
+/api/v1/services/{serviceId}
 ```
 
-The API returns `404 NOT_FOUND` when an ID exists but does not belong to the parent IDs in the URL.
+Nested project and environment paths remain available for browsing collections. Service responses include an authoritative `target` with the containing project, environment, and service labels.
 
 ## Errors
 
@@ -82,7 +82,7 @@ Use `code` for automation. Do not match the human-readable `message`.
 | `GET` | `/api/v1/projects` | List projects |
 | `GET` | `/api/v1/projects/{projectId}/environments` | List environments in a project |
 | `GET` | `/api/v1/projects/{projectId}/environments/{environmentId}/services` | List services in an environment |
-| `GET` | `/api/v1/projects/{projectId}/environments/{environmentId}/services/{serviceId}` | Return one contained service |
+| `GET` | `/api/v1/services/{serviceId}` | Return the target and canonical service configuration |
 
 Collection responses use an opaque keyset cursor:
 
@@ -105,11 +105,12 @@ Pass `nextCursor` as `?cursor=...`. `limit` defaults to 100 and accepts values f
 
 ## Service resources
 
-The paths in this table are relative to the nested service URL.
+The paths in this table are relative to `/api/v1/services/{serviceId}`.
 
 | Method | Path suffix | Description |
 | --- | --- | --- |
-| `GET`, `PATCH` | `/configuration` | Read safe current/active configuration or atomically apply the managed subset |
+| `GET`, `PUT` | `/configuration` | Read safe current/active configuration or atomically replace all managed configuration |
+| `POST` | `/configuration/plan` | Validate and plan a complete managed configuration replacement |
 | `GET` | `/status` | Read source, latest build and rollout, and persisted deployments |
 | `POST` | `/deploy` | Queue an image rollout or GitHub build |
 | `GET` | `/logs` | Search logs and optionally long poll |
@@ -136,12 +137,15 @@ A GitHub service keeps mutable repository settings in `current.source`. Its `act
 
 Configuration and revision responses never include secret names, values, or ciphertext.
 
-### Patch configuration
+### Replace configuration
 
-`PATCH /configuration` is atomic. Every field is optional. Omitted fields remain unchanged. An included `ports` array replaces the entire managed port set.
+`POST /configuration/plan` accepts the same complete desired configuration as `PUT /configuration`. It performs no writes and returns the authoritative `target`, `action`, `currentVersion`, `desiredVersion`, and structured `changes` (`field`, `from`, and `to`). Service IDs on these flat service routes are authorized installation-globally rather than being scoped by a project ID in the URL.
+
+`PUT /configuration` is atomic and replaces the complete managed configuration. Send the `currentVersion` returned by the plan as one quoted strong ETag (for example, `If-Match: "sha256:…"`). Missing, unquoted, multiple, weak, or otherwise invalid headers are rejected; a service change after planning returns `409 CONFIGURATION_PLAN_STALE`. A successful response returns the authoritative target and the structured change set that was applied. The request must contain exactly `name`, `source`, `hostname`, `ports`, `placement`, `healthCheck`, `startCommand`, and `resources`. Omitted or unknown fields are rejected. `hostname` must be concrete and non-null. Use `null` to clear nullable fields, including `resources`.
 
 ```json
 {
+  "name": "web",
   "source": {
     "type": "github",
     "repository": "https://github.com/techulus/cloud",
@@ -175,6 +179,8 @@ Configuration and revision responses never include secret names, values, or ciph
 }
 ```
 
+The `tc apply` command sends this complete replacement. A linked `techulus.yml` stores only `target.serviceId`; desired service configuration remains under `service`. Explicit CLI targeting uses `--service <serviceId>`. During interactive `tc link`, a project with exactly one environment selects it automatically; zero environments is an error and multiple environments prompt for a choice.
+
 The API supports these source variants:
 
 ```json
@@ -190,7 +196,7 @@ The API supports these source variants:
 }
 ```
 
-GitHub repository URLs are canonical HTTPS `github.com` URLs. `rootDir` must stay inside the repository. Use `rootDir: null` to clear an existing build root. Source conversion and GitHub repository switching are not supported.
+GitHub repository URLs are canonical HTTPS `github.com` URLs. `rootDir` is required and must either stay inside the repository or be `null` to clear an existing build root. Source conversion and GitHub repository switching are not supported.
 
 Use automatic placement for stateless services:
 
@@ -312,4 +318,4 @@ The CLI uses the same endpoints documented above:
 | `tc metrics` | Query service metrics |
 | `tc revisions` | List the redacted revision changelog |
 
-`tc link` stores the selected project, environment, and service IDs in `techulus.yml`. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.
+`tc link` stores only the selected `target.serviceId` in `techulus.yml`. Relinking a manifest to a different service requires removing `target.serviceId` first. `tc apply` always displays the server-generated plan and prompts before writing; use `tc apply --yes` for noninteractive automation. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.

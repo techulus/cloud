@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,18 +17,17 @@ import (
 	"techulus/cloud-cli/internal/api"
 	"techulus/cloud-cli/internal/auth"
 	"techulus/cloud-cli/internal/manifest"
+	"techulus/cloud-cli/internal/output"
 )
 
 const imageManifest = `apiVersion: v1
-project: {id: p, slug: app}
-environment: {id: e, name: prod}
+target: {serviceId: s}
 service:
-  id: s
   name: web
   source: {type: image, image: nginx:1.27}
   replicas: 2
   placement: {mode: automatic}
-  hostname: null
+  hostname: web
   healthCheck: null
   startCommand: null
   ports: []
@@ -134,6 +134,108 @@ func TestInitRecommendsLinkInHumanAndJSON(t *testing.T) {
 	}
 }
 
+func TestInitCreatesConcreteValidHostname(t *testing.T) {
+	parent := t.TempDir()
+	d := filepath.Join(parent, "My API "+strings.Repeat("long-", 15))
+	if err := os.Mkdir(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := testApp(t, d, nil)
+	if err := execute(app, "init"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := manifest.Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Manifest.Service.Hostname == nil || len(*loaded.Manifest.Service.Hostname) > 63 || !strings.HasPrefix(*loaded.Manifest.Service.Hostname, "my-api-long") {
+		t.Fatalf("hostname = %#v", loaded.Manifest.Service.Hostname)
+	}
+}
+
+func TestDirectLinkPreservesDesiredConfigurationAndRejectsRebind(t *testing.T) {
+	d := t.TempDir()
+	var requested string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.Path
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/services/")
+		fmt.Fprintf(w, `{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":%q,"name":"remote"}},"service":{"id":%q,"name":"remote","source":{"type":"image","image":"remote:latest"},"ports":[],"replicas":1,"placement":{"mode":"automatic"},"hostname":null,"healthCheck":null,"startCommand":null,"resources":null},"management":{"patchable":true,"blockers":[]}}`, id, id)
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+	app, out := testApp(t, d, s.Client())
+	if err := execute(app, "init"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := manifest.Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := execute(app, "link", "--service", "s"); err != nil {
+		t.Fatal(err)
+	}
+	linked, _ := manifest.Load(d)
+	if requested != "/api/v1/services/s" || linked.Manifest.Target.ServiceID != "s" || !reflect.DeepEqual(linked.Manifest.Service, before.Manifest.Service) {
+		t.Fatalf("requested=%q manifest=%#v", requested, linked.Manifest)
+	}
+	assertHumanOutput(t, out.String(), "Linked", "app/prod/remote", filepath.Join(d, "techulus.yml"))
+	if err := execute(app, "link", "--service", "s"); err != nil {
+		t.Fatalf("same-target link: %v", err)
+	}
+	beforeMismatch, _ := os.ReadFile(filepath.Join(d, "techulus.yml"))
+	if err := execute(app, "link", "--service", "other"); err == nil || !strings.Contains(err.Error(), "remove target.serviceId") || !strings.Contains(err.Error(), "s") {
+		t.Fatalf("different-target error = %v", err)
+	}
+	afterMismatch, _ := os.ReadFile(filepath.Join(d, "techulus.yml"))
+	if !bytes.Equal(beforeMismatch, afterMismatch) {
+		t.Fatal("target mismatch changed manifest bytes")
+	}
+	if err := execute(app, "link", "--service", "other", "--force"); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("removed --force flag error = %v", err)
+	}
+}
+
+func TestDirectLinkMaterializesEffectiveHostname(t *testing.T) {
+	d := t.TempDir()
+	s := responseServer(t, `{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"Remote Service"}},"service":{"id":"s","name":"Remote Service","source":{"type":"image","image":"nginx"},"ports":[],"replicas":1,"placement":{"mode":"automatic"},"hostname":"remote-service","healthCheck":null,"startCommand":null,"resources":null},"management":{"patchable":true,"blockers":[]}}`)
+	writeConfig(t, s.URL)
+	app, _ := testApp(t, d, s.Client())
+	if err := execute(app, "link", "--service", "s"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := manifest.Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Manifest.Service.Hostname == nil || *loaded.Manifest.Service.Hostname != "remote-service" {
+		t.Fatalf("hostname = %#v", loaded.Manifest.Service.Hostname)
+	}
+}
+
+func TestDirectLinkRejectsUnmanagedServiceWithoutChangingManifest(t *testing.T) {
+	d := t.TempDir()
+	writeManifest(t, d, imageManifest)
+	before, err := os.ReadFile(filepath.Join(d, "techulus.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := responseServer(t, `{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"other","name":"remote"}},"service":{"id":"other","name":"remote","source":{"type":"image","image":"remote:latest"},"ports":[],"replicas":1,"placement":{"mode":"automatic"},"hostname":null,"healthCheck":null,"startCommand":null,"resources":null},"management":{"patchable":false,"blockers":[{"code":"UNSUPPORTED_PORTS","message":"TCP services must be managed in the web UI"}]}}`)
+	writeConfig(t, s.URL)
+	app, _ := testApp(t, d, s.Client())
+	err = execute(app, "link", "--service", "other")
+	if err == nil || !strings.Contains(err.Error(), "TCP services") {
+		t.Fatalf("error = %v", err)
+	}
+	after, readErr := os.ReadFile(filepath.Join(d, "techulus.yml"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("failed direct link changed the existing manifest")
+	}
+}
+
 func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 	var paths []string
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -145,8 +247,8 @@ func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 			w.Write([]byte(`{"environments":[{"id":"e","name":"prod"}]}`))
 		case "/api/v1/projects/p/environments/e/services":
 			w.Write([]byte(`{"services":[{"id":"s","name":"web","source":{"type":"github","repository":"https://github.com/acme/public","branch":"main","rootDir":"cmd/api"}}]}`))
-		case "/api/v1/projects/p/environments/e/services/s/configuration":
-			w.Write([]byte(`{"current":{"replicas":2,"placement":{"mode":"manual"},"placements":[{"serverId":"server-a","count":1},{"serverId":"server-b","count":1}],"hostname":null,"ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
+		case "/api/v1/services/s/configuration":
+			w.Write([]byte(`{"current":{"replicas":2,"placement":{"mode":"manual"},"placements":[{"serverId":"server-a","count":1},{"serverId":"server-b","count":1}],"hostname":"web","ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
 		default:
 			t.Errorf("path=%s", r.URL.Path)
 		}
@@ -154,9 +256,14 @@ func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 	defer s.Close()
 	writeConfig(t, s.URL)
 	d := t.TempDir()
-	app, _ := testApp(t, d, s.Client())
-	if err := execute(app, "link", "--project", "p", "--environment", "e", "--service", "s"); err != nil {
+	app, out := testApp(t, d, s.Client())
+	app.IsInteractive = func() bool { return true }
+	app.In = strings.NewReader("1\n1\n")
+	if err := execute(app, "link"); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Select an environment:") {
+		t.Fatalf("single environment unexpectedly prompted:\n%s", out.String())
 	}
 	loaded, err := manifest.Load(d)
 	if err != nil {
@@ -168,7 +275,7 @@ func TestLinkByIDsFetchesConfigurationAndSupportsPublicGitHub(t *testing.T) {
 	if loaded.Manifest.Service.Placement == nil || loaded.Manifest.Service.Placement.Mode != "manual" || len(loaded.Manifest.Service.Placement.Servers) != 2 || loaded.Manifest.Service.Placement.Servers[1].ServerID != "server-b" {
 		t.Fatalf("placement=%#v", loaded.Manifest.Service.Placement)
 	}
-	want := []string{"/api/v1/projects", "/api/v1/projects/p/environments", "/api/v1/projects/p/environments/e/services", "/api/v1/projects/p/environments/e/services/s/configuration"}
+	want := []string{"/api/v1/projects", "/api/v1/projects/p/environments", "/api/v1/projects/p/environments/e/services", "/api/v1/services/s/configuration"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("paths=%v", paths)
 	}
@@ -183,7 +290,7 @@ func TestLinkRejectsManualServiceWithoutPlacements(t *testing.T) {
 			w.Write([]byte(`{"environments":[{"id":"e","name":"prod"}]}`))
 		case "/api/v1/projects/p/environments/e/services":
 			w.Write([]byte(`{"services":[{"id":"s","name":"web","source":{"type":"image","image":"nginx"}}]}`))
-		case "/api/v1/projects/p/environments/e/services/s/configuration":
+		case "/api/v1/services/s/configuration":
 			w.Write([]byte(`{"current":{"replicas":0,"placement":{"mode":"manual"},"placements":[],"hostname":null,"ports":[],"healthCheck":null,"startCommand":null},"management":{"patchable":true,"blockers":[]}}`))
 		default:
 			t.Errorf("path=%s", r.URL.Path)
@@ -193,7 +300,9 @@ func TestLinkRejectsManualServiceWithoutPlacements(t *testing.T) {
 	writeConfig(t, s.URL)
 	d := t.TempDir()
 	app, _ := testApp(t, d, s.Client())
-	err := execute(app, "link", "--project", "p", "--environment", "e", "--service", "s")
+	app.IsInteractive = func() bool { return true }
+	app.In = strings.NewReader("1\n1\n")
+	err := execute(app, "link")
 	if err == nil || !strings.Contains(err.Error(), "configure at least one server placement") {
 		t.Fatalf("error = %v", err)
 	}
@@ -213,20 +322,20 @@ func TestApplyExactNestedPatchForSources(t *testing.T) {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				method, path = r.Method, r.URL.Path
 				json.NewDecoder(r.Body).Decode(&body)
-				w.Write([]byte(`{"action":"updated","changes":["source"]}`))
+				w.Write([]byte(`{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","desiredVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"source","from":"old","to":"new"}]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
 			app, _ := testApp(t, d, s.Client())
-			if err := execute(app, "apply"); err != nil {
+			if err := execute(app, "apply", "--yes"); err != nil {
 				t.Fatal(err)
 			}
-			if method != "PATCH" || path != "/api/v1/projects/p/environments/e/services/s/configuration" {
+			if method != "PUT" || path != "/api/v1/services/s/configuration" {
 				t.Fatalf("%s %s", method, path)
 			}
 			source := body["source"].(map[string]any)
 			placement := body["placement"].(map[string]any)
-			if source["type"] != tc.sourceType || placement["mode"] != "automatic" || placement["replicas"] != float64(2) || len(body) != 6 {
+			if source["type"] != tc.sourceType || placement["mode"] != "automatic" || placement["replicas"] != float64(2) || len(body) != 8 {
 				t.Fatalf("body=%#v", body)
 			}
 			if tc.name == "github_clear_root" {
@@ -257,12 +366,12 @@ func TestApplyPlacementPayloads(t *testing.T) {
 			var body map[string]any
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				json.NewDecoder(r.Body).Decode(&body)
-				w.Write([]byte(`{"action":"updated"}`))
+				w.Write([]byte(`{"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"placement","from":"old","to":"new"}]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
 			app, _ := testApp(t, d, s.Client())
-			if err := execute(app, "apply"); err != nil {
+			if err := execute(app, "apply", "--yes"); err != nil {
 				t.Fatal(err)
 			}
 			if _, exists := body["replicas"]; exists {
@@ -272,6 +381,319 @@ func TestApplyPlacementPayloads(t *testing.T) {
 				t.Fatalf("placement=%#v want=%#v", body["placement"], tc.want)
 			}
 		})
+	}
+}
+
+func TestApplyPlansAndRequiresConfirmation(t *testing.T) {
+	const firstVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	planWithChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"desiredVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"name","from":"old-web","to":"web"},{"field":"source.branch","from":"develop","to":"main"}]}`, firstVersion)
+	appliedWithChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"desiredVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"name","from":"applied-old-web","to":"web"}]}`, firstVersion)
+	noChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"noop","currentVersion":%q,"desiredVersion":%q,"changes":[]}`, firstVersion, firstVersion)
+
+	t.Run("no changes skips prompt and write", func(t *testing.T) {
+		requests := 0
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/services/s/configuration/plan" {
+				t.Errorf("request = %s %s", r.Method, r.URL.Path)
+			}
+			w.Write([]byte(noChanges))
+		}))
+		defer s.Close()
+		writeConfig(t, s.URL)
+		d := t.TempDir()
+		writeManifest(t, d, imageManifest)
+		app, out := testApp(t, d, s.Client())
+		if err := execute(app, "apply"); err != nil {
+			t.Fatal(err)
+		}
+		if requests != 1 || !strings.Contains(out.String(), "No changes. The service already matches techulus.yml.") || strings.Contains(out.String(), "Apply these changes?") {
+			t.Fatalf("requests=%d output=%q", requests, out.String())
+		}
+	})
+
+	t.Run("noninteractive displays every change and fails", func(t *testing.T) {
+		requests := 0
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			w.Write([]byte(planWithChanges))
+		}))
+		defer s.Close()
+		writeConfig(t, s.URL)
+		d := t.TempDir()
+		writeManifest(t, d, imageManifest)
+		app, out := testApp(t, d, s.Client())
+		err := execute(app, "apply")
+		if err == nil || !strings.Contains(err.Error(), "confirmation required") || requests != 1 {
+			t.Fatalf("error=%v requests=%d", err, requests)
+		}
+		assertHumanOutput(t, out.String(), "app/prod/web", "name: old-web -> web", "source.branch: develop -> main")
+	})
+
+	t.Run("decline does not write", func(t *testing.T) {
+		requests := 0
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			w.Write([]byte(planWithChanges))
+		}))
+		defer s.Close()
+		writeConfig(t, s.URL)
+		d := t.TempDir()
+		writeManifest(t, d, imageManifest)
+		app, out := testApp(t, d, s.Client())
+		app.IsInteractive = func() bool { return true }
+		app.In = strings.NewReader("no\n")
+		if err := execute(app, "apply"); err != nil {
+			t.Fatal(err)
+		}
+		if requests != 1 || !strings.Contains(out.String(), "Apply these changes? [y/N]") {
+			t.Fatalf("requests=%d output=%q", requests, out.String())
+		}
+	})
+
+	t.Run("yes applies the planned version", func(t *testing.T) {
+		var requests []string
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			switch len(requests) {
+			case 1:
+				w.Write([]byte(planWithChanges))
+			case 2:
+				if got := r.Header.Get("If-Match"); got != `"`+firstVersion+`"` {
+					t.Errorf("If-Match = %q", got)
+				}
+				w.Write([]byte(appliedWithChanges))
+			default:
+				t.Errorf("unexpected request %d", len(requests))
+			}
+		}))
+		defer s.Close()
+		writeConfig(t, s.URL)
+		d := t.TempDir()
+		writeManifest(t, d, imageManifest)
+		app, out := testApp(t, d, s.Client())
+		app.IsInteractive = func() bool { return true }
+		app.In = strings.NewReader("yes\n")
+		if err := execute(app, "apply"); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"POST /api/v1/services/s/configuration/plan", "PUT /api/v1/services/s/configuration"}
+		if !reflect.DeepEqual(requests, want) {
+			t.Fatalf("requests=%v", requests)
+		}
+		assertHumanOutput(t, out.String(), "Plan", "Applied", "name: applied-old-web -> web")
+	})
+}
+
+func TestApplyStalePlanBehavior(t *testing.T) {
+	const firstVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const secondVersion = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	plan := func(version, from string) string {
+		return fmt.Sprintf(`{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"changes":[{"field":"source.branch","from":%q,"to":"main"}]}`, version, from)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		input      string
+		wantCalls  int
+		wantSecond bool
+	}{
+		{name: "interactive replans and reconfirms", args: []string{"apply"}, input: "y\ny\n", wantCalls: 4, wantSecond: true},
+		{name: "yes replans but does not silently write", args: []string{"apply", "--yes"}, wantCalls: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				switch calls {
+				case 1:
+					w.Write([]byte(plan(firstVersion, "develop")))
+				case 2:
+					w.WriteHeader(http.StatusConflict)
+					w.Write([]byte(`{"code":"CONFIGURATION_PLAN_STALE","message":"Service configuration changed after the plan was created"}`))
+				case 3:
+					w.Write([]byte(plan(secondVersion, "release")))
+				case 4:
+					if !tc.wantSecond {
+						t.Fatal("unexpected second PUT")
+					}
+					if got := r.Header.Get("If-Match"); got != `"`+secondVersion+`"` {
+						t.Errorf("replacement If-Match = %q", got)
+					}
+					w.Write([]byte(plan(secondVersion, "release")))
+				default:
+					t.Fatalf("unexpected request %d", calls)
+				}
+			}))
+			defer s.Close()
+			writeConfig(t, s.URL)
+			d := t.TempDir()
+			writeManifest(t, d, imageManifest)
+			app, out := testApp(t, d, s.Client())
+			if tc.input != "" {
+				app.IsInteractive = func() bool { return true }
+				app.In = strings.NewReader(tc.input)
+			}
+			err := execute(app, tc.args...)
+			if tc.wantSecond && err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantSecond && (err == nil || !strings.Contains(err.Error(), "review the new plan")) {
+				t.Fatalf("error = %v", err)
+			}
+			if calls != tc.wantCalls || !strings.Contains(out.String(), "develop -> main") || !strings.Contains(out.String(), "release -> main") {
+				t.Fatalf("calls=%d output=%q", calls, out.String())
+			}
+		})
+	}
+}
+
+func TestApplyStopsAfterRepeatedStalePlans(t *testing.T) {
+	const version = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	plan := func(index int) string {
+		return fmt.Sprintf(`{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"changes":[{"field":"name","from":%q,"to":"web"}]}`, version, fmt.Sprintf("remote-%d", index))
+	}
+	calls := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"code":"CONFIGURATION_PLAN_STALE","message":"changed"}`))
+			return
+		}
+		w.Write([]byte(plan(calls)))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+	d := t.TempDir()
+	writeManifest(t, d, imageManifest)
+	app, out := testApp(t, d, s.Client())
+	app.IsInteractive = func() bool { return true }
+	app.In = strings.NewReader("y\ny\ny\n")
+	err := execute(app, "apply")
+	if err == nil || !strings.Contains(err.Error(), "keeps changing") || calls != 7 {
+		t.Fatalf("error=%v calls=%d", err, calls)
+	}
+	if !strings.Contains(out.String(), "remote-7 -> web") {
+		t.Fatalf("latest plan not displayed: %s", out.String())
+	}
+}
+
+func TestApplyYesMachineOutputUsesApplyResponse(t *testing.T) {
+	const plan = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"planned-old","to":"web"}]}`
+	const applied = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"applied-old","to":"web"}]}`
+	for _, mode := range []string{"--agent", "--json"} {
+		t.Run(mode, func(t *testing.T) {
+			requests := 0
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				if requests == 1 {
+					w.Write([]byte(plan))
+					return
+				}
+				w.Write([]byte(applied))
+			}))
+			defer s.Close()
+			writeConfig(t, s.URL)
+			d := t.TempDir()
+			writeManifest(t, d, imageManifest)
+			app, out := testApp(t, d, s.Client())
+			if err := execute(app, mode, "apply", "--yes"); err != nil {
+				t.Fatal(err)
+			}
+			var result applyResponse
+			if mode == "--agent" {
+				if json.Unmarshal(out.Bytes(), &result) != nil {
+					t.Fatalf("output=%q", out.String())
+				}
+			} else {
+				var envelope struct {
+					OK      bool          `json:"ok"`
+					Data    applyResponse `json:"data"`
+					Summary string        `json:"summary"`
+				}
+				if json.Unmarshal(out.Bytes(), &envelope) != nil || !envelope.OK || envelope.Summary != "Applied" {
+					t.Fatalf("output=%q", out.String())
+				}
+				result = envelope.Data
+			}
+			if requests != 2 || len(result.Changes) != 1 || result.Changes[0].From != "applied-old" {
+				t.Fatalf("requests=%d output=%q", requests, out.String())
+			}
+		})
+	}
+}
+
+func TestApplyStaleMachineErrorIncludesReplacementPlan(t *testing.T) {
+	const first = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"old","to":"web"}]}`
+	const replacement = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"name","from":"newer","to":"web"}]}`
+	calls := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			w.Write([]byte(first))
+		case 2:
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"code":"CONFIGURATION_PLAN_STALE","message":"changed"}`))
+		case 3:
+			w.Write([]byte(replacement))
+		default:
+			t.Fatalf("unexpected request %d", calls)
+		}
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+	d := t.TempDir()
+	writeManifest(t, d, imageManifest)
+	app, out := testApp(t, d, s.Client())
+	err := execute(app, "--agent", "apply", "--yes")
+	if err == nil || calls != 3 {
+		t.Fatalf("error=%v calls=%d", err, calls)
+	}
+	if err := output.Error(out, fmt.Errorf("apply failed: %w", err)); err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		OK    bool          `json:"ok"`
+		Error string        `json:"error"`
+		Plan  applyResponse `json:"plan"`
+	}
+	if json.Unmarshal(out.Bytes(), &envelope) != nil || envelope.OK || envelope.Plan.Changes[0].From != "newer" {
+		t.Fatalf("output=%s", out.String())
+	}
+}
+
+func TestApplyOutputFormatsStructuredValuesForHumans(t *testing.T) {
+	var out bytes.Buffer
+	printApplyResult(&out, "Plan", applyResponse{
+		Action: "updated",
+		Changes: []applyChange{{
+			Field: "ports",
+			From: []any{map[string]any{
+				"containerPort": float64(8080),
+				"domain":        nil,
+				"public":        false,
+			}},
+			To: []any{map[string]any{
+				"containerPort": float64(8080),
+				"domain":        "api.example.com",
+				"public":        true,
+			}},
+		}},
+	})
+
+	assertHumanOutput(
+		t,
+		out.String(),
+		"ports: [(containerPort=8080, domain=null, public=false)] -> [(containerPort=8080, domain=api.example.com, public=true)]",
+	)
+}
+
+func TestServiceBaseRejectsMissingTarget(t *testing.T) {
+	if _, err := serviceBase(manifest.Manifest{}); err == nil || !strings.Contains(err.Error(), "not linked") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -419,7 +841,7 @@ func TestMissingIDsFailLocally(t *testing.T) {
 	for _, command := range []string{"apply", "deploy", "status", "logs"} {
 		t.Run(command, func(t *testing.T) {
 			d := t.TempDir()
-			writeManifest(t, d, strings.ReplaceAll(imageManifest, "id: p, ", ""))
+			writeManifest(t, d, strings.ReplaceAll(imageManifest, "target: {serviceId: s}\n", ""))
 			app, _ := testApp(t, d, &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				t.Fatal("unexpected network request")
 				return nil, nil
@@ -490,14 +912,14 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 			var gotPath, gotQuery string
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-				w.Write([]byte(`{"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
+				w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
 			for _, mode := range []string{"--agent", "--json"} {
 				app, out := testApp(t, t.TempDir(), s.Client())
 				args := append([]string{mode}, tc.args...)
-				args = append(args, "--project", "p", "--environment", "e", "--service", "s")
+				args = append(args, "--service", "s")
 				if err := execute(app, args...); err != nil {
 					t.Fatal(err)
 				}
@@ -508,13 +930,13 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 			}
 			if tc.args[0] == "status" {
 				app, out := testApp(t, t.TempDir(), s.Client())
-				args := append(tc.args, "--project", "p", "--environment", "e", "--service", "s")
+				args := append(tc.args, "--service", "s")
 				if err := execute(app, args...); err != nil {
 					t.Fatal(err)
 				}
-				assertHumanOutput(t, out.String(), "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
+				assertHumanOutput(t, out.String(), "app/prod/web", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
 			}
-			base := "/api/v1/projects/p/environments/e/services/s"
+			base := "/api/v1/services/s"
 			if gotPath != base+tc.path || gotQuery != tc.query {
 				t.Fatalf("got %s?%s", gotPath, gotQuery)
 			}
@@ -544,7 +966,7 @@ func TestBuildsHumanOutputIsFormatted(t *testing.T) {
 			writeConfig(t, s.URL)
 
 			app, out := testApp(t, t.TempDir(), s.Client())
-			err := execute(app, "builds", "--project", "p", "--environment", "e", "--service", "s")
+			err := execute(app, "builds", "--service", "s")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -558,7 +980,7 @@ func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
 	writeConfig(t, s.URL)
 
 	app, out := testApp(t, t.TempDir(), s.Client())
-	err := execute(app, "config", "--project", "p", "--environment", "e", "--service", "s")
+	err := execute(app, "config", "--service", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +992,7 @@ func TestMetricsHumanOutputIsFormatted(t *testing.T) {
 	writeConfig(t, s.URL)
 
 	app, out := testApp(t, t.TempDir(), s.Client())
-	err := execute(app, "metrics", "--project", "p", "--environment", "e", "--service", "s")
+	err := execute(app, "metrics", "--service", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +1007,7 @@ func TestMetricsHumanOutputShowsDisabledProvider(t *testing.T) {
 	writeConfig(t, s.URL)
 
 	app, out := testApp(t, t.TempDir(), s.Client())
-	err := execute(app, "metrics", "--project", "p", "--environment", "e", "--service", "s")
+	err := execute(app, "metrics", "--service", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +1019,7 @@ func TestRevisionsHumanOutputIsFormatted(t *testing.T) {
 	writeConfig(t, s.URL)
 
 	app, out := testApp(t, t.TempDir(), s.Client())
-	err := execute(app, "revisions", "--project", "p", "--environment", "e", "--service", "s")
+	err := execute(app, "revisions", "--service", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,11 +1029,11 @@ func TestRevisionsHumanOutputIsFormatted(t *testing.T) {
 func TestRolloutHumanOutputIsFormatted(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/projects/p/environments/e/services/s/rollouts":
+		case "/api/v1/services/s/rollouts":
 			w.Write([]byte(`{"rollouts":[{"id":"2c917d90-4bc1-4274-b3bf-34fed009fc12","status":"in_progress","currentStage":"health_check","createdAt":"2026-07-21T11:04:59.46Z","completedAt":null,"deployments":[{"serverName":"ubuntu-2","phase":"running","healthStatus":"healthy"}]}],"nextCursor":"next-page"}`))
-		case "/api/v1/projects/p/environments/e/services/s/rollouts/r1":
+		case "/api/v1/services/s/rollouts/r1":
 			w.Write([]byte(`{"rollout":{"id":"2c917d90-4bc1-4274-b3bf-34fed009fc12","status":"completed","currentStage":"completed","createdAt":"2026-07-21T11:04:59.46Z","completedAt":"2026-07-21T11:05:30Z","deployments":[]}}`))
-		case "/api/v1/projects/p/environments/e/services/s/rollouts/r1/logs":
+		case "/api/v1/services/s/rollouts/r1/logs":
 			w.Write([]byte(`{"provider":"enabled","logs":[{"message":"Rollout started","stage":"preparing","timestamp":"2026-07-21T11:04:59.46Z"},{"message":"Starting container","stage":"health_check","timestamp":"2026-07-21T11:05:00.529Z"}]}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -629,7 +1051,7 @@ func TestRolloutHumanOutputIsFormatted(t *testing.T) {
 		{[]string{"rollout", "logs", "r1"}, []string{"Rollout logs (2)", "[preparing]", "Rollout started", "[health check]", "Starting container"}},
 	} {
 		app, out := testApp(t, t.TempDir(), s.Client())
-		args := append(tc.args, "--project", "p", "--environment", "e", "--service", "s")
+		args := append(tc.args, "--service", "s")
 		if err := execute(app, args...); err != nil {
 			t.Fatal(err)
 		}
@@ -674,7 +1096,7 @@ func TestLogsDrainAvailablePagesWithoutSleeping(t *testing.T) {
 		requests++
 		switch requests {
 		case 1:
-			w.Write([]byte(`{"provider":"enabled","logs":[],"nextCursor":"page-1"}`))
+			w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"provider":"enabled","logs":[],"nextCursor":"page-1"}`))
 		case 2:
 			if got := r.URL.Query().Get("cursor"); got != "page-1" {
 				t.Errorf("cursor=%q", got)
@@ -702,7 +1124,7 @@ func TestLogsDrainAvailablePagesWithoutSleeping(t *testing.T) {
 	if requests != 3 || sleeps != 0 {
 		t.Fatalf("requests=%d sleeps=%d", requests, sleeps)
 	}
-	if !strings.Contains(out.String(), "same-time-a") || !strings.Contains(out.String(), "same-time-b") {
+	if !strings.Contains(out.String(), "app/prod/web") || !strings.Contains(out.String(), "same-time-a") || !strings.Contains(out.String(), "same-time-b") {
 		t.Fatalf("missing equal-timestamp logs in output:\n%s", out.String())
 	}
 }

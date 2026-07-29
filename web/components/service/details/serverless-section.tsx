@@ -10,14 +10,36 @@ import { Switch } from "@/components/ui/switch";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
 
-export const ServerlessSection = memo(function ServerlessSection({
-	service,
-	onUpdate,
-}: {
+type ServerlessSectionProps = {
 	service: Service;
 	onUpdate: () => void;
-}) {
+};
+
+export const ServerlessSection = memo(function ServerlessSection(
+	props: ServerlessSectionProps,
+) {
+	const { service } = props;
+	// Persisted changes are authoritative and intentionally discard any stale local draft.
+	const settingsKey = `${service.id}:${service.serverlessEnabled}:${service.serverlessSleepAfterSeconds}:${service.serverlessWakeTimeoutSeconds}`;
+
+	return (
+		<ConfigSection
+			title="Serverless"
+			summary={service.serverlessEnabled ? "Enabled" : "Off"}
+			summaryMuted={!service.serverlessEnabled}
+			keepMounted
+		>
+			<ServerlessSectionEditor key={settingsKey} {...props} />
+		</ConfigSection>
+	);
+});
+
+function ServerlessSectionEditor({
+	service,
+	onUpdate,
+}: ServerlessSectionProps) {
 	const [isSaving, setIsSaving] = useState(false);
+	// oxlint-disable-next-line react-doctor/no-derived-useState -- The keyed editor intentionally resets this draft when persisted settings change.
 	const [enabled, setEnabled] = useState(service.serverlessEnabled);
 	const [sleepAfterSeconds, setSleepAfterSeconds] = useState(
 		String(service.serverlessSleepAfterSeconds ?? 300),
@@ -97,82 +119,76 @@ export const ServerlessSection = memo(function ServerlessSection({
 	};
 
 	return (
-		<ConfigSection
-			title="Serverless"
-			summary={service.serverlessEnabled ? "Enabled" : "Off"}
-			summaryMuted={!service.serverlessEnabled}
-		>
-			<div className="space-y-4">
-				<div className="flex items-center justify-between gap-4">
-					<span className="text-sm font-medium">Enable serverless</span>
-					<Switch
-						checked={enabled}
-						onCheckedChange={setEnabled}
-						disabled={(!!unavailableReason && !enabled) || isSaving}
+		<div className="space-y-4">
+			<div className="flex items-center justify-between gap-4">
+				<span className="text-sm font-medium">Enable serverless</span>
+				<Switch
+					checked={enabled}
+					onCheckedChange={setEnabled}
+					disabled={(!!unavailableReason && !enabled) || isSaving}
+				/>
+			</div>
+			<div className="grid gap-3 md:grid-cols-2">
+				<div className="space-y-1">
+					<label
+						htmlFor="serverless-sleep-after"
+						className="text-xs font-medium"
+					>
+						Sleep After (s)
+					</label>
+					<Input
+						id="serverless-sleep-after"
+						type="number"
+						min={MIN_SERVERLESS_SLEEP_AFTER_SECONDS}
+						max="86400"
+						step="30"
+						value={sleepAfterSeconds}
+						disabled={optionsDisabled}
+						onChange={(event) => setSleepAfterSeconds(event.target.value)}
 					/>
 				</div>
-				<div className="grid gap-3 md:grid-cols-2">
-					<div className="space-y-1">
-						<label
-							htmlFor="serverless-sleep-after"
-							className="text-xs font-medium"
-						>
-							Sleep After (s)
-						</label>
-						<Input
-							id="serverless-sleep-after"
-							type="number"
-							min={MIN_SERVERLESS_SLEEP_AFTER_SECONDS}
-							max="86400"
-							step="30"
-							value={sleepAfterSeconds}
-							disabled={optionsDisabled}
-							onChange={(event) => setSleepAfterSeconds(event.target.value)}
-						/>
-					</div>
-					<div className="space-y-1">
-						<label
-							htmlFor="serverless-wake-timeout"
-							className="text-xs font-medium"
-						>
-							Wake Timeout (s)
-						</label>
-						<Input
-							id="serverless-wake-timeout"
-							type="number"
-							min="10"
-							max="900"
-							step="10"
-							value={wakeTimeoutSeconds}
-							disabled={optionsDisabled}
-							onChange={(event) => setWakeTimeoutSeconds(event.target.value)}
-						/>
-					</div>
-				</div>
-
-				<p className="text-sm text-muted-foreground">
-					Containers scale down to zero when idle and wake on traffic. Requests
-					while sleeping are queued and served after the container is ready.
-				</p>
-
-				{unavailableReason && !enabled && (
-					<p className="text-xs text-muted-foreground">{unavailableReason}.</p>
-				)}
-
-				{validationError && (
-					<p className="text-xs text-destructive">{validationError}</p>
-				)}
-
-				{hasChanges && (
-					<Button
-						onClick={handleSave}
-						disabled={isSaving || !!validationError}
-						size="sm"
+				<div className="space-y-1">
+					<label
+						htmlFor="serverless-wake-timeout"
+						className="text-xs font-medium"
 					>
-						{isSaving ? "Saving..." : "Save"}
-					</Button>
-				)}
+						Wake Timeout (s)
+					</label>
+					<Input
+						id="serverless-wake-timeout"
+						type="number"
+						min="10"
+						max="900"
+						step="10"
+						value={wakeTimeoutSeconds}
+						disabled={optionsDisabled}
+						onChange={(event) => setWakeTimeoutSeconds(event.target.value)}
+					/>
+				</div>
 			</div>
-		</ConfigSection>
+
+			<p className="text-sm text-muted-foreground">
+				Containers scale down to zero when idle and wake on traffic. Requests
+				while sleeping are queued and served after the container is ready.
+			</p>
+
+			{unavailableReason && !enabled && (
+				<p className="text-xs text-muted-foreground">{unavailableReason}.</p>
+			)}
+
+			{validationError && (
+				<p className="text-xs text-destructive">{validationError}</p>
+			)}
+
+			{hasChanges && (
+				<Button
+					onClick={handleSave}
+					disabled={isSaving || !!validationError}
+					size="sm"
+				>
+					{isSaving ? "Saving..." : "Save"}
+				</Button>
+			)}
+		</div>
 	);
-});
+}

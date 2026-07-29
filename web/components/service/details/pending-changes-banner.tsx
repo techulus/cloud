@@ -3,6 +3,7 @@
 import { Rocket } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { memo, useState } from "react";
+import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { triggerBuild } from "@/actions/builds";
 import { deployService } from "@/actions/projects";
@@ -52,17 +53,32 @@ export const PendingChangesBanner = memo(function PendingChangesBanner({
 		try {
 			if (shouldBuild) {
 				await triggerBuild(service.id);
-				router.push(
-					`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
-				);
 			} else {
 				await deployService(service.id);
-				await mutate(`/api/services/${service.id}/rollouts`);
 			}
-			onUpdate();
+		} catch (error) {
+			toast.error(
+				error instanceof Error && error.message
+					? error.message
+					: shouldBuild
+						? "Failed to start build"
+						: "Failed to deploy service",
+			);
+			return;
 		} finally {
 			setIsDeploying(false);
 		}
+
+		if (shouldBuild) {
+			router.push(
+				`/dashboard/projects/${projectSlug}/${envName}/services/${service.id}/builds`,
+			);
+		} else {
+			await mutate(`/api/services/${service.id}/rollouts`).catch(
+				() => undefined,
+			);
+		}
+		onUpdate();
 	};
 
 	return (

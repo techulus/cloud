@@ -1,6 +1,13 @@
 import { Box } from "lucide-react";
 import Link from "next/link";
 import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summary";
+import {
+	SUMMARY_CARD_CLASSNAME,
+	SUMMARY_CARD_MIN_HEIGHT,
+	SummaryCardStat,
+	SummaryCardTitle,
+	SummaryCardValue,
+} from "@/components/core/summary-card";
 import { CreateProjectDialog } from "@/components/project/create-project-dialog";
 import { CreateServerDialog } from "@/components/server/create-server-dialog";
 import { ServerList } from "@/components/server/server-list";
@@ -11,14 +18,6 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
-import {
-	Item,
-	ItemContent,
-	ItemDescription,
-	ItemGroup,
-	ItemMedia,
-	ItemTitle,
-} from "@/components/ui/item";
 import { getClusterHealth, listProjects, listServers } from "@/db/queries";
 
 export default async function DashboardPage() {
@@ -55,56 +54,60 @@ export default async function DashboardPage() {
 						</EmptyContent>
 					</Empty>
 				) : (
-					<ItemGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+					<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 						{projects.map((project) => (
-							<Item
+							<Link
 								key={project.id}
-								variant="outline"
-								className="min-h-[80px]"
-								render={
-									<Link
-										href={`/dashboard/projects/${project.slug}/production`}
-									/>
-								}
+								href={`/dashboard/projects/${project.slug}/production`}
+								className={SUMMARY_CARD_CLASSNAME}
+								style={{ minHeight: SUMMARY_CARD_MIN_HEIGHT }}
 							>
-								<ItemMedia variant="icon">
-									<Box className="size-5 text-muted-foreground" />
-								</ItemMedia>
-								<ItemContent className="h-full justify-between">
-									<ItemTitle>{project.name}</ItemTitle>
-									<ItemDescription>
-										{project.serviceCount === 0
-											? "No services"
-											: project.serviceCount === 1
-												? "1 service"
-												: `${project.serviceCount} services`}
-									</ItemDescription>
-								</ItemContent>
-							</Item>
+								<SummaryCardTitle>{project.name}</SummaryCardTitle>
+								<div className="mt-auto pt-3">
+									<SummaryCardStat label="services">
+										<SummaryCardValue>
+											{project.serviceCount === 0 ? (
+												<span className="font-normal text-muted-foreground">
+													none
+												</span>
+											) : (
+												<>
+													{project.onlineServiceCount}/{project.serviceCount}{" "}
+													<span className="font-normal text-muted-foreground">
+														online
+													</span>
+												</>
+											)}
+										</SummaryCardValue>
+									</SummaryCardStat>
+									<SummaryCardStat label="environments">
+										<SummaryCardValue>
+											{project.environmentCount}
+										</SummaryCardValue>
+									</SummaryCardStat>
+								</div>
+							</Link>
 						))}
-					</ItemGroup>
+					</div>
 				)}
 			</div>
 
 			<div className="space-y-6">
 				<div className="flex items-center justify-between gap-3">
-					<div className="min-w-0">
+					<div className="min-w-0 space-y-1">
 						<h2 className="text-lg font-semibold">Servers</h2>
-						<p className="text-sm text-muted-foreground">
-							Real-time infrastructure status and fleet management
-						</p>
+						{servers.length > 0 ? (
+							<ClusterHealthSummary initialData={clusterHealth} />
+						) : (
+							<p className="text-sm text-muted-foreground">
+								Real-time infrastructure status and fleet management
+							</p>
+						)}
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
 						<CreateServerDialog />
 					</div>
 				</div>
-
-				{servers.length > 0 && (
-					<ClusterHealthSummary
-						initialData={clusterHealth}
-						showHeader={false}
-					/>
-				)}
 
 				<ServerList initialServers={servers} showHeader={false} />
 			</div>

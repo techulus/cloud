@@ -29,7 +29,7 @@ describe("public API configuration state", () => {
 		mocks.select.mockClear();
 	});
 
-	it("does not report a derived default hostname as a pending change", async () => {
+	it("derives a stable default hostname from immutable service identity", async () => {
 		mocks.rows.push(
 			[],
 			[],
@@ -84,7 +84,7 @@ describe("public API configuration state", () => {
 			backupSchedule: null,
 		} as never);
 
-		expect(configuration.current.hostname).toBeNull();
+		expect(configuration.current.hostname).toBe("hello-service");
 		expect(configuration.active?.hostname).toBe("hello-service");
 		expect(configuration.hasPendingChanges).toBe(false);
 		expect(configuration.changes).toEqual([]);

@@ -1,10 +1,10 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
-import { AlertTriangle } from "lucide-react";
-import { fetcher } from "@/lib/fetcher";
 import type { Server } from "@/db/types";
+import { fetcher } from "@/lib/fetcher";
 
 type ServerBasic = Pick<Server, "id" | "name" | "status">;
 
@@ -20,6 +20,10 @@ export function OfflineServersBanner() {
 	if (offlineServers.length === 0) return null;
 
 	const serverNames = offlineServers.map((s) => s.name).join(", ");
+	const viewHref =
+		offlineServers.length === 1
+			? `/dashboard/servers/${offlineServers[0].id}`
+			: "/dashboard";
 
 	return (
 		<div className="bg-destructive/10 border-b border-destructive/20 text-destructive px-4 py-2 flex items-center justify-center gap-3 text-sm">
@@ -28,7 +32,7 @@ export function OfflineServersBanner() {
 				{offlineServers.length === 1 ? "Server" : "Servers"} offline:{" "}
 				<strong>{serverNames}</strong>
 			</span>
-			<Link href="/dashboard" className="text-xs underline hover:no-underline">
+			<Link href={viewHref} className="text-xs underline hover:no-underline">
 				View
 			</Link>
 		</div>

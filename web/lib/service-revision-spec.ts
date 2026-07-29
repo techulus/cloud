@@ -1,10 +1,21 @@
 export const SERVICE_REVISION_SCHEMA_VERSION = 3 as const;
 
-export function getDefaultServiceHostname(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "");
+export function getDefaultServiceHostname(
+	name: string,
+	serviceId: string,
+): string {
+	const dnsLabel = (value: string) =>
+		value
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+	const fromId = dnsLabel(serviceId);
+	const value = dnsLabel(name) || (fromId ? `service-${fromId}` : "service");
+	if (value.length <= 63) return value;
+
+	const suffix = (fromId || "service").slice(0, 8);
+	const prefix = value.slice(0, 62 - suffix.length).replace(/-+$/g, "");
+	return `${prefix}-${suffix}`;
 }
 
 export type ServiceRevisionHealthCheck = {
@@ -164,6 +175,7 @@ export type ServiceRevisionSpec = {
 
 export type ServiceRevisionDraft = {
 	service: {
+		id: string;
 		name: string;
 		image: string;
 		hostname: string | null;
@@ -279,7 +291,8 @@ export function buildServiceRevisionSpec(
 		image,
 		source: overrides.source ?? { type: "image", image },
 		hostname:
-			service.hostname?.trim() || getDefaultServiceHostname(service.name),
+			service.hostname?.trim() ||
+			getDefaultServiceHostname(service.name, service.id),
 		stateful: service.stateful ?? false,
 		serverless: {
 			enabled: service.serverlessEnabled ?? false,
