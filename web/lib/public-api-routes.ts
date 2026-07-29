@@ -17,6 +17,7 @@ import {
 	findServiceContext,
 	isPublicApiDomainError,
 	notFound,
+	planConfiguration,
 	publicApiDomainResponse,
 	replaceConfiguration,
 	replaceConfigurationSchema,
@@ -46,6 +47,11 @@ export type PublicServiceParams = {
 };
 export type PublicServiceContext = { params: Promise<PublicServiceParams> };
 const readRoles = ["admin", "developer", "reader"] as const;
+
+export function parseConfigurationIfMatch(value: string | null): string | null {
+	const match = value?.match(/^"(sha256:[a-f0-9]{64})"$/);
+	return match?.[1] ?? null;
+}
 
 async function readScope(request: Request, context: PublicServiceContext) {
 	const auth = await requireApiKeyRole(request, [...readRoles]);
@@ -162,14 +168,56 @@ export async function putConfigurationRoute(
 			parsed.error.issues[0]?.message ?? "Invalid configuration",
 		);
 	}
+	const expectedVersion = parseConfigurationIfMatch(
+		request.headers.get("if-match"),
+	);
+	if (!expectedVersion) {
+		return badRequest("A valid If-Match configuration version is required");
+	}
 	try {
 		return Response.json(
-			await replaceConfiguration(scope.service, parsed.data),
+			await replaceConfiguration(scope.service, parsed.data, expectedVersion),
 		);
 	} catch (error) {
 		return isPublicApiDomainError(error)
 			? publicApiDomainResponse(error)
 			: internalError(error, "replace configuration");
+	}
+}
+
+export async function postConfigurationPlanRoute(
+	request: Request,
+	context: PublicServiceContext,
+) {
+	const scope = await writeScope(request, context);
+	if ("response" in scope) return scope.response;
+	const parsed = replaceConfigurationSchema.safeParse(
+		await request.json().catch(() => null),
+	);
+	if (!parsed.success)
+		return badRequest(
+			parsed.error.issues[0]?.message ?? "Invalid configuration",
+		);
+	try {
+		const { targetServiceName, ...plan } = await planConfiguration(
+			scope.service,
+			parsed.data,
+		);
+		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: targetServiceName },
+			},
+			...plan,
+		});
+	} catch (error) {
+		return isPublicApiDomainError(error)
+			? publicApiDomainResponse(error)
+			: internalError(error, "plan configuration");
 	}
 }
 

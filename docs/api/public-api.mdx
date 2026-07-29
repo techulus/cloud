@@ -110,6 +110,7 @@ The paths in this table are relative to `/api/v1/services/{serviceId}`.
 | Method | Path suffix | Description |
 | --- | --- | --- |
 | `GET`, `PUT` | `/configuration` | Read safe current/active configuration or atomically replace all managed configuration |
+| `POST` | `/configuration/plan` | Validate and plan a complete managed configuration replacement |
 | `GET` | `/status` | Read source, latest build and rollout, and persisted deployments |
 | `POST` | `/deploy` | Queue an image rollout or GitHub build |
 | `GET` | `/logs` | Search logs and optionally long poll |
@@ -138,7 +139,9 @@ Configuration and revision responses never include secret names, values, or ciph
 
 ### Replace configuration
 
-`PUT /configuration` is atomic and replaces the complete managed configuration. The request must contain exactly `name`, `source`, `hostname`, `ports`, `placement`, `healthCheck`, `startCommand`, and `resources`. Omitted or unknown fields are rejected. Use `null` to clear nullable fields, including `resources`.
+`POST /configuration/plan` accepts the same complete desired configuration as `PUT /configuration`. It performs no writes and returns the authoritative `target`, `action`, `currentVersion`, `desiredVersion`, and structured `changes` (`field`, `from`, and `to`). Service IDs on these flat service routes are authorized installation-globally rather than being scoped by a project ID in the URL.
+
+`PUT /configuration` is atomic and replaces the complete managed configuration. Send the `currentVersion` returned by the plan as one quoted strong ETag (for example, `If-Match: "sha256:…"`). Missing, unquoted, multiple, weak, or otherwise invalid headers are rejected; a service change after planning returns `409 CONFIGURATION_PLAN_STALE`. The request must contain exactly `name`, `source`, `hostname`, `ports`, `placement`, `healthCheck`, `startCommand`, and `resources`. Omitted or unknown fields are rejected. `hostname` must be concrete and non-null. Use `null` to clear nullable fields, including `resources`.
 
 ```json
 {
@@ -315,4 +318,4 @@ The CLI uses the same endpoints documented above:
 | `tc metrics` | Query service metrics |
 | `tc revisions` | List the redacted revision changelog |
 
-`tc link` stores only the selected `target.serviceId` in `techulus.yml`. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.
+`tc link` stores only the selected `target.serviceId` in `techulus.yml`. Relinking a manifest to a different service requires removing `target.serviceId` first. `tc apply` always displays the server-generated plan and prompts before writing; use `tc apply --yes` for noninteractive automation. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.

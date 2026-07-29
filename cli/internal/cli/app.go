@@ -55,6 +55,14 @@ type handledError struct {
 	err error
 }
 
+type applyPlanError struct {
+	message string
+	plan    applyResponse
+}
+
+func (e applyPlanError) Error() string { return e.message }
+func (e applyPlanError) PlanData() any { return e.plan }
+
 func (e handledError) Error() string {
 	return e.err.Error()
 }
@@ -291,7 +299,7 @@ service:
   source:
     type: image
     image: nginx:1.27
-  hostname: null
+  hostname: %s
   replicas: 1
   placement:
     mode: automatic
@@ -301,7 +309,7 @@ service:
     - containerPort: 80
       public: false
   resources: null
-`, folderName)
+`, folderName, folderName)
 			if err := os.WriteFile(manifestPath, []byte(starter), 0o644); err != nil {
 				return err
 			}
@@ -317,7 +325,6 @@ service:
 }
 
 func (a *App) linkCommand() *cobra.Command {
-	var force bool
 	var serviceID string
 	cmd := &cobra.Command{
 		Use:   "link",
@@ -329,11 +336,8 @@ func (a *App) linkCommand() *cobra.Command {
 			if a.isMachineOutput() {
 				return errors.New("tc link does not support --agent or --json")
 			}
-			explicitIDs := 0
-			if strings.TrimSpace(serviceID) != "" {
-				explicitIDs = 1
-			}
-			if explicitIDs == 0 && !a.IsInteractive() {
+			explicitID := strings.TrimSpace(serviceID) != ""
+			if !explicitID && !a.IsInteractive() {
 				return errors.New("tc link requires an interactive terminal or --service")
 			}
 			config, err := a.requireConfig()
@@ -356,7 +360,7 @@ func (a *App) linkCommand() *cobra.Command {
 			}
 
 			client := a.client(config)
-			if explicitIDs == 1 {
+			if explicitID {
 				var direct struct {
 					Service    serviceItem        `json:"service"`
 					Target     targetContext      `json:"target"`
@@ -368,7 +372,7 @@ func (a *App) linkCommand() *cobra.Command {
 				if err := managementCompatibilityError(direct.Management); err != nil {
 					return err
 				}
-				return a.finishLink(manifestPath, existing, force, direct.Service, direct.Target)
+				return a.finishLink(manifestPath, existing, direct.Service, direct.Target)
 			}
 			ps, err := fetchAllProjects(cmd.Context(), client)
 			if err != nil {
@@ -465,10 +469,13 @@ func (a *App) linkCommand() *cobra.Command {
 			}
 			m := manifest.Manifest{APIVersion: "v1", Target: &manifest.Target{ServiceID: service.ID}, Service: manifest.Service{Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, Placement: placement, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
 			if existing != nil {
-				if existing.Manifest.Linked() && existing.Manifest.Target.ServiceID != service.ID && !force {
-					return errors.New("manifest is linked to another service; use --force to rebind")
+				if existing.Manifest.Linked() && existing.Manifest.Target.ServiceID != service.ID {
+					return fmt.Errorf("manifest is linked to service %s; remove target.serviceId before relinking", existing.Manifest.Target.ServiceID)
 				}
 				m.Service = existing.Manifest.Service
+				if m.Service.Hostname == nil {
+					m.Service.Hostname = cfg.Current.Hostname
+				}
 			}
 			if err := manifest.Save(manifestPath, m); err != nil {
 				return err
@@ -480,13 +487,13 @@ func (a *App) linkCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "Replace an existing techulus.yml")
 	cmd.Flags().StringVar(&serviceID, "service", "", "Service ID")
 	return cmd
 }
 
 func (a *App) applyCommand() *cobra.Command {
-	return &cobra.Command{
+	var yes bool
+	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply techulus.yml to the linked service",
 		Annotations: map[string]string{
@@ -501,7 +508,6 @@ func (a *App) applyCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var result applyResponse
 			client := a.client(config)
 			if !loaded.Manifest.Linked() {
 				return errors.New("service is not linked: run `tc link`")
@@ -516,16 +522,79 @@ func (a *App) applyCommand() *cobra.Command {
 			} else {
 				body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
 			}
-			if err := client.RequestJSON(cmd.Context(), http.MethodPut, serviceBase(loaded.Manifest)+"/configuration", nil, body, &result); err != nil {
+			base := serviceBase(loaded.Manifest) + "/configuration"
+			var plan applyResponse
+			if err := client.RequestJSON(cmd.Context(), http.MethodPost, base+"/plan", nil, body, &plan); err != nil {
 				return err
 			}
-			if a.isMachineOutput() {
-				return a.writeData(result, "Apply")
+			confirmationReader := bufio.NewReader(a.In)
+			const maxStaleReplans = 3
+			staleReplans := 0
+			for {
+				if !a.isMachineOutput() {
+					printApplyResult(a.Out, plan)
+				}
+				if len(plan.Changes) == 0 {
+					if a.isMachineOutput() {
+						return a.writeData(plan, "Plan")
+					}
+					fmt.Fprintln(a.Out, "No changes. The service already matches techulus.yml.")
+					return nil
+				}
+				if staleReplans >= maxStaleReplans {
+					return applyPlanError{
+						message: "service configuration keeps changing; review the latest plan and try again",
+						plan:    plan,
+					}
+				}
+				if yes && staleReplans > 0 {
+					return applyPlanError{
+						message: "configuration changed; review the new plan and run tc apply --yes again",
+						plan:    plan,
+					}
+				}
+				if !yes {
+					if !a.IsInteractive() {
+						return applyPlanError{message: "confirmation required", plan: plan}
+					}
+					confirmed, confirmErr := a.confirmApply(confirmationReader)
+					if confirmErr != nil || !confirmed {
+						return confirmErr
+					}
+				}
+
+				var result applyResponse
+				err = client.RequestJSONWithHeaders(cmd.Context(), http.MethodPut, base, nil, map[string]string{"If-Match": fmt.Sprintf("%q", plan.CurrentVersion)}, body, &result)
+				var apiErr *api.APIError
+				if errors.As(err, &apiErr) && apiErr.Code == "CONFIGURATION_PLAN_STALE" {
+					if planErr := client.RequestJSON(cmd.Context(), http.MethodPost, base+"/plan", nil, body, &plan); planErr != nil {
+						return planErr
+					}
+					staleReplans++
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if a.isMachineOutput() {
+					return a.writeData(plan, "Applied")
+				}
+				return nil
 			}
-			printApplyResult(a.Out, result)
-			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "Apply the displayed plan without prompting")
+	return cmd
+}
+
+func (a *App) confirmApply(reader *bufio.Reader) (bool, error) {
+	fmt.Fprint(a.Out, "Apply these changes? [y/N] ")
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 func managementCompatibilityError(management *serviceManagement) error {
@@ -541,7 +610,7 @@ func managementCompatibilityError(management *serviceManagement) error {
 	return errors.New("this service cannot be managed with techulus.yml")
 }
 
-func (a *App) finishLink(path string, existing *manifest.Loaded, force bool, service serviceItem, target targetContext) error {
+func (a *App) finishLink(path string, existing *manifest.Loaded, service serviceItem, target targetContext) error {
 	serviceID := service.ID
 	if target.Service.ID != "" {
 		serviceID = target.Service.ID
@@ -551,11 +620,12 @@ func (a *App) finishLink(path string, existing *manifest.Loaded, force bool, ser
 			if existing.Manifest.Target.ServiceID == serviceID {
 				return a.printLinked(path, target)
 			}
-			if !force {
-				return errors.New("manifest is linked to another service; use --force to rebind")
-			}
+			return fmt.Errorf("manifest is linked to service %s; remove target.serviceId before relinking", existing.Manifest.Target.ServiceID)
 		}
 		existing.Manifest.Target = &manifest.Target{ServiceID: serviceID}
+		if existing.Manifest.Service.Hostname == nil {
+			existing.Manifest.Service.Hostname = service.Hostname
+		}
 		if err := manifest.Save(path, existing.Manifest); err != nil {
 			return err
 		}
@@ -1113,13 +1183,13 @@ func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest
 		return loaded.Manifest, nil
 	}
 	return manifest.Manifest{
-		APIVersion: "v1", Target: &manifest.Target{ServiceID: service}, Service: manifest.Service{Name: service},
+		APIVersion: "v1", Target: &manifest.Target{ServiceID: service},
 	}, nil
 }
 
 func serviceBase(value manifest.Manifest) string {
-	if value.Target == nil {
-		return "/api/v1/services/"
+	if value.Target == nil || strings.TrimSpace(value.Target.ServiceID) == "" {
+		panic("serviceBase called without a valid service target")
 	}
 	return "/api/v1/services/" + url.PathEscape(value.Target.ServiceID)
 }
@@ -1450,7 +1520,10 @@ func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest,
 }
 
 func printApplyResult(w io.Writer, result applyResponse) {
-	output.Section(w, "Apply")
+	output.Section(w, "Plan")
+	if result.Target.Service.ID != "" {
+		output.Field(w, "Target", fmt.Sprintf("%s/%s/%s", result.Target.Project.Slug, result.Target.Environment.Name, result.Target.Service.Name))
+	}
 	output.Field(w, "Action", result.Action)
 	if len(result.Changes) == 0 {
 		output.Field(w, "Changes", "none")
@@ -1458,7 +1531,7 @@ func printApplyResult(w io.Writer, result applyResponse) {
 	}
 	output.Section(w, fmt.Sprintf("Changes (%d)", len(result.Changes)))
 	for _, change := range result.Changes {
-		fmt.Fprintf(w, "  * %s\n", change)
+		fmt.Fprintf(w, "  * %s: %v -> %v\n", change.Field, change.From, change.To)
 	}
 }
 

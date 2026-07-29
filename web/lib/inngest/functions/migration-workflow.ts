@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -301,26 +301,31 @@ export const migrationWorkflow = inngest.createFunction(
 		}
 
 		await step.run("deploy-target", async () => {
-			await db
-				.update(services)
-				.set({ migrationStatus: "deploying_target" })
-				.where(eq(services.id, serviceId));
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+				);
+				await tx
+					.update(services)
+					.set({ migrationStatus: "deploying_target" })
+					.where(eq(services.id, serviceId));
 
-			await db
-				.delete(serviceReplicas)
-				.where(eq(serviceReplicas.serviceId, serviceId));
+				await tx
+					.delete(serviceReplicas)
+					.where(eq(serviceReplicas.serviceId, serviceId));
 
-			await db.insert(serviceReplicas).values({
-				id: randomUUID(),
-				serviceId,
-				serverId: targetServerId,
-				count: 1,
+				await tx.insert(serviceReplicas).values({
+					id: randomUUID(),
+					serviceId,
+					serverId: targetServerId,
+					count: 1,
+				});
+
+				await tx
+					.update(services)
+					.set({ lockedServerId: targetServerId })
+					.where(eq(services.id, serviceId));
 			});
-
-			await db
-				.update(services)
-				.set({ lockedServerId: targetServerId })
-				.where(eq(services.id, serviceId));
 
 			await deployServiceInternal(serviceId, actor, {
 				runtimeBaseRevisionId: sourceServiceRevisionId,

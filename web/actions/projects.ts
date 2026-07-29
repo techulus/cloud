@@ -51,7 +51,10 @@ import type {
 	HealthCheckConfig as ServiceHealthCheckConfig,
 } from "@/lib/service-config";
 import { MIN_SERVERLESS_SLEEP_AFTER_SECONDS } from "@/lib/service-config";
-import { findServicePortValidationIssue } from "@/lib/service-revision-spec";
+import {
+	findServicePortValidationIssue,
+	getDefaultServiceHostname,
+} from "@/lib/service-revision-spec";
 import type { DeleteConfirmation } from "@/lib/two-factor";
 import { getZodErrorMessage, slugify } from "@/lib/utils";
 import {
@@ -281,7 +284,10 @@ export async function createService(input: CreateServiceInput) {
 	}
 
 	const id = randomUUID();
-	const hostname = `${project.slug}-${slugify(name)}-${env.name}`;
+	const hostname = getDefaultServiceHostname(
+		`${project.slug}-${name}-${env.name}`,
+		id,
+	);
 	const newServiceCanvasPosition = {
 		canvasX: (SERVICE_CANVAS_WIDTH - SERVICE_CARD_WIDTH) / 2,
 		canvasY: 0,
@@ -661,23 +667,35 @@ export async function updateServiceHostname(
 	}
 
 	const sanitized = slugify(hostname);
-	if (!sanitized) {
-		throw new Error("Invalid hostname");
+	if (!sanitized || sanitized.length > 63) {
+		throw new Error(
+			"Hostname must be a valid DNS label of at most 63 characters",
+		);
 	}
 
-	const existing = await db
-		.select({ id: services.id })
-		.from(services)
-		.where(eq(services.hostname, sanitized));
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const current = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (!current) throw new Error("Service not found");
+		const existing = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(eq(services.hostname, sanitized));
 
-	if (existing.some((s) => s.id !== serviceId)) {
-		throw new Error("Hostname is already in use");
-	}
+		if (existing.some((s) => s.id !== serviceId)) {
+			throw new Error("Hostname is already in use");
+		}
 
-	await db
-		.update(services)
-		.set({ hostname: sanitized })
-		.where(eq(services.id, serviceId));
+		await tx
+			.update(services)
+			.set({ hostname: sanitized })
+			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
+	});
 
 	return { success: true, hostname: sanitized };
 }
@@ -687,10 +705,27 @@ export async function updateServiceName(serviceId: string, name: string) {
 	try {
 		const validatedName = nameSchema.parse(name);
 
-		await db
-			.update(services)
-			.set({ name: validatedName })
-			.where(eq(services.id, serviceId));
+		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+			);
+			const current = await tx
+				.select({ name: services.name, hostname: services.hostname })
+				.from(services)
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.limit(1)
+				.then((rows) => rows[0]);
+			if (!current) throw new Error("Service not found");
+			await tx
+				.update(services)
+				.set({
+					name: validatedName,
+					hostname:
+						current.hostname ??
+						getDefaultServiceHostname(current.name, serviceId),
+				})
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
+		});
 
 		return { success: true, name: validatedName };
 	} catch (error) {
@@ -738,6 +773,9 @@ export async function updateServiceGithubRepo(
 		}
 
 		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+			);
 			await tx
 				.update(services)
 				.set(updateData)
@@ -794,16 +832,19 @@ export async function updateServiceHealthCheck(
 		throw new Error("Service not found");
 	}
 
-	await db
-		.update(services)
-		.set({
-			healthCheckCmd: config.cmd,
-			healthCheckInterval: config.interval,
-			healthCheckTimeout: config.timeout,
-			healthCheckRetries: config.retries,
-			healthCheckStartPeriod: config.startPeriod,
-		})
-		.where(eq(services.id, serviceId));
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		await tx
+			.update(services)
+			.set({
+				healthCheckCmd: config.cmd,
+				healthCheckInterval: config.interval,
+				healthCheckTimeout: config.timeout,
+				healthCheckRetries: config.retries,
+				healthCheckStartPeriod: config.startPeriod,
+			})
+			.where(eq(services.id, serviceId));
+	});
 
 	return { success: true };
 }
@@ -818,10 +859,13 @@ export async function updateServiceStartCommand(
 		throw new Error("Service not found");
 	}
 
-	await db
-		.update(services)
-		.set({ startCommand })
-		.where(eq(services.id, serviceId));
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		await tx
+			.update(services)
+			.set({ startCommand })
+			.where(eq(services.id, serviceId));
+	});
 
 	return { success: true };
 }
@@ -854,13 +898,16 @@ export async function updateServiceResourceLimits(
 		throw new Error("Service not found");
 	}
 
-	await db
-		.update(services)
-		.set({
-			resourceCpuLimit: validated.cpuCores,
-			resourceMemoryLimitMb: validated.memoryMb,
-		})
-		.where(eq(services.id, serviceId));
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		await tx
+			.update(services)
+			.set({
+				resourceCpuLimit: validated.cpuCores,
+				resourceMemoryLimitMb: validated.memoryMb,
+			})
+			.where(eq(services.id, serviceId));
+	});
 
 	return { success: true };
 }
@@ -1064,37 +1111,42 @@ export async function updateServiceConfig(
 		throw new Error("Service not found");
 	}
 
-	if (config.source) {
-		await db
-			.update(services)
-			.set({ image: config.source.image })
-			.where(eq(services.id, serviceId));
-	}
+	if (config.source || config.healthCheck !== undefined) {
+		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+			);
+			if (config.source) {
+				await tx
+					.update(services)
+					.set({ image: config.source.image })
+					.where(eq(services.id, serviceId));
+			}
 
-	if (config.healthCheck !== undefined) {
-		if (config.healthCheck === null) {
-			await db
-				.update(services)
-				.set({
-					healthCheckCmd: null,
-					healthCheckInterval: null,
-					healthCheckTimeout: null,
-					healthCheckRetries: null,
-					healthCheckStartPeriod: null,
-				})
-				.where(eq(services.id, serviceId));
-		} else {
-			await db
-				.update(services)
-				.set({
-					healthCheckCmd: config.healthCheck.cmd,
-					healthCheckInterval: config.healthCheck.interval,
-					healthCheckTimeout: config.healthCheck.timeout,
-					healthCheckRetries: config.healthCheck.retries,
-					healthCheckStartPeriod: config.healthCheck.startPeriod,
-				})
-				.where(eq(services.id, serviceId));
-		}
+			if (config.healthCheck === null) {
+				await tx
+					.update(services)
+					.set({
+						healthCheckCmd: null,
+						healthCheckInterval: null,
+						healthCheckTimeout: null,
+						healthCheckRetries: null,
+						healthCheckStartPeriod: null,
+					})
+					.where(eq(services.id, serviceId));
+			} else if (config.healthCheck !== undefined) {
+				await tx
+					.update(services)
+					.set({
+						healthCheckCmd: config.healthCheck.cmd,
+						healthCheckInterval: config.healthCheck.interval,
+						healthCheckTimeout: config.healthCheck.timeout,
+						healthCheckRetries: config.healthCheck.retries,
+						healthCheckStartPeriod: config.healthCheck.startPeriod,
+					})
+					.where(eq(services.id, serviceId));
+			}
+		});
 	}
 
 	if (config.ports) {
@@ -1552,19 +1604,24 @@ export async function removeServiceVolume(volumeId: string) {
 		throw new Error("Stop the service before removing volumes");
 	}
 
-	await db.delete(serviceVolumes).where(eq(serviceVolumes.id, volumeId));
+	await db.transaction(async (tx) => {
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${volume[0].serviceId}))`,
+		);
+		await tx.delete(serviceVolumes).where(eq(serviceVolumes.id, volumeId));
 
-	const remainingVolumes = await db
-		.select({ id: serviceVolumes.id })
-		.from(serviceVolumes)
-		.where(eq(serviceVolumes.serviceId, volume[0].serviceId));
+		const remainingVolumes = await tx
+			.select({ id: serviceVolumes.id })
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, volume[0].serviceId));
 
-	if (remainingVolumes.length === 0 && service.stateful) {
-		await db
-			.update(services)
-			.set({ stateful: false })
-			.where(eq(services.id, service.id));
-	}
+		if (remainingVolumes.length === 0 && service.stateful) {
+			await tx
+				.update(services)
+				.set({ stateful: false })
+				.where(eq(services.id, service.id));
+		}
+	});
 
 	return { success: true };
 }

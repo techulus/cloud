@@ -90,8 +90,16 @@ type servicesResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 type applyResponse struct {
-	Action  string   `json:"action"`
-	Changes []string `json:"changes"`
+	Target         targetContext `json:"target"`
+	Action         string        `json:"action"`
+	CurrentVersion string        `json:"currentVersion"`
+	DesiredVersion string        `json:"desiredVersion"`
+	Changes        []applyChange `json:"changes"`
+}
+type applyChange struct {
+	Field string `json:"field"`
+	From  any    `json:"from"`
+	To    any    `json:"to"`
 }
 type deployResponse struct {
 	Operation string  `json:"operation"`

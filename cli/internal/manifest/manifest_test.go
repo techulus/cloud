@@ -6,7 +6,8 @@ import (
 )
 
 func base() Manifest {
-	return Manifest{APIVersion: "v1", Target: &Target{ServiceID: "s"}, Service: Service{Name: "web", Source: Source{Type: "image", Image: "nginx"}, Replicas: 1, Placement: &Placement{Mode: "automatic"}}}
+	hostname := "web"
+	return Manifest{APIVersion: "v1", Target: &Target{ServiceID: "s"}, Service: Service{Name: "web", Source: Source{Type: "image", Image: "nginx"}, Hostname: &hostname, Replicas: 1, Placement: &Placement{Mode: "automatic"}}}
 }
 func TestDefaultsAndRoundTrip(t *testing.T) {
 	m := base()
@@ -18,6 +19,24 @@ func TestDefaultsAndRoundTrip(t *testing.T) {
 	got, e := Parse(b)
 	if e != nil || got.Service.Replicas != 1 || got.Service.Ports == nil {
 		t.Fatalf("got=%#v err=%v", got, e)
+	}
+}
+
+func TestHostnameValidationAndSlugify(t *testing.T) {
+	for _, value := range []string{"", "Upper", "two words", "-leading", "trailing-", "two--hyphens", strings.Repeat("a", 64)} {
+		m := base()
+		m.Service.Hostname = &value
+		if err := Validate(m); err == nil {
+			t.Fatalf("invalid hostname %q accepted", value)
+		}
+	}
+
+	if got := Slugify("  My API__Service  "); got != "my-api-service" {
+		t.Fatalf("Slugify() = %q", got)
+	}
+	long := Slugify(strings.Repeat("long-name-", 10))
+	if len(long) > 63 || strings.HasSuffix(long, "-") || !hostnamePattern.MatchString(long) {
+		t.Fatalf("invalid truncated slug %q", long)
 	}
 }
 
@@ -68,6 +87,7 @@ func TestPlacementIsRequired(t *testing.T) {
 service:
   name: web
   source: {type: image, image: nginx}
+  hostname: web
   replicas: 2
 `))
 	if err == nil || !strings.Contains(err.Error(), "service.placement is required") {

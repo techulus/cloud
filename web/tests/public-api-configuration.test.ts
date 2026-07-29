@@ -42,7 +42,7 @@ describe("public API configuration state", () => {
 						schemaVersion: 2,
 						image: "nginx:1.27",
 						source: { type: "image", image: "nginx:1.27" },
-						hostname: "service-1",
+						hostname: "hello-service",
 						stateful: false,
 						serverless: {
 							enabled: false,
@@ -84,8 +84,8 @@ describe("public API configuration state", () => {
 			backupSchedule: null,
 		} as never);
 
-		expect(configuration.current.hostname).toBeNull();
-		expect(configuration.active?.hostname).toBe("service-1");
+		expect(configuration.current.hostname).toBe("hello-service");
+		expect(configuration.active?.hostname).toBe("hello-service");
 		expect(configuration.hasPendingChanges).toBe(false);
 		expect(configuration.changes).toEqual([]);
 	});

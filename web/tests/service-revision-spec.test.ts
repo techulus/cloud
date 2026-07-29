@@ -69,15 +69,30 @@ function draft(
 }
 
 describe("service revision specification", () => {
-	it("keeps the default hostname stable when the service is renamed", () => {
+	it("derives the legacy null-hostname fallback from the current service name", () => {
 		const original = draft();
 		original.service.hostname = null;
 		const renamed = draft();
 		renamed.service.hostname = null;
 		renamed.service.name = "Renamed API Service";
 
+		expect(buildServiceRevisionSpec(original).hostname).toBe("api-service");
 		expect(buildServiceRevisionSpec(renamed).hostname).toBe(
-			buildServiceRevisionSpec(original).hostname,
+			"renamed-api-service",
+		);
+	});
+
+	it("produces a valid DNS label for long and non-ASCII legacy names", () => {
+		const long = draft();
+		long.service.hostname = null;
+		long.service.name = "a".repeat(100);
+		const nonAscii = draft();
+		nonAscii.service.hostname = null;
+		nonAscii.service.name = "こんにちは";
+
+		expect(buildServiceRevisionSpec(long).hostname).toHaveLength(63);
+		expect(buildServiceRevisionSpec(nonAscii).hostname).toBe(
+			"service-service-1",
 		);
 	});
 

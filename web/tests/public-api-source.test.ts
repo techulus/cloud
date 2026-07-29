@@ -9,7 +9,7 @@ import {
 const completeConfiguration = (overrides: Record<string, unknown> = {}) => ({
 	name: "web",
 	source: { type: "image", image: "nginx:1.27" },
-	hostname: null,
+	hostname: "web",
 	ports: [],
 	placement: { mode: "automatic", replicas: 1 },
 	healthCheck: null,

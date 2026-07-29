@@ -13,7 +13,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var windowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+var (
+	windowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+	hostnamePattern     = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	slugChars           = regexp.MustCompile(`[^a-z0-9]+`)
+)
 
 type Manifest struct {
 	APIVersion string  `json:"apiVersion" yaml:"apiVersion"`
@@ -204,8 +208,14 @@ func Validate(m Manifest) error {
 	default:
 		return errors.New("service.source.type must be image or github")
 	}
-	if m.Service.Hostname != nil && *m.Service.Hostname == "" {
+	if m.Service.Hostname == nil {
+		return errors.New("service.hostname is required")
+	}
+	if *m.Service.Hostname == "" {
 		return errors.New("service.hostname cannot be blank")
+	}
+	if !hostnamePattern.MatchString(*m.Service.Hostname) || len(*m.Service.Hostname) > 63 {
+		return errors.New("service.hostname must be at most 63 lowercase letters, numbers, and hyphen-separated segments")
 	}
 	if m.Service.StartCommand != nil && *m.Service.StartCommand == "" {
 		return errors.New("service.startCommand cannot be blank")
@@ -321,8 +331,10 @@ func CanonicalGitHubRepository(value string) (string, error) {
 	return "https://github.com/" + parts[0] + "/" + parts[1], nil
 }
 
-var slugChars = regexp.MustCompile(`[^a-z0-9]+`)
-
 func Slugify(v string) string {
-	return strings.Trim(slugChars.ReplaceAllString(strings.ToLower(v), "-"), "-")
+	value := strings.Trim(slugChars.ReplaceAllString(strings.ToLower(v), "-"), "-")
+	if len(value) > 63 {
+		value = strings.Trim(value[:63], "-")
+	}
+	return value
 }

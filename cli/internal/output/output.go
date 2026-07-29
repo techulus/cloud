@@ -17,6 +17,12 @@ type Envelope struct {
 type ErrorEnvelope struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error"`
+	Plan  any    `json:"plan,omitempty"`
+}
+
+type errorWithPlan interface {
+	error
+	PlanData() any
 }
 
 func JSON(w io.Writer, value any) error {
@@ -29,7 +35,11 @@ func OK(w io.Writer, data any, summary string) error {
 }
 
 func Error(w io.Writer, err error) error {
-	return JSON(w, ErrorEnvelope{OK: false, Error: err.Error()})
+	envelope := ErrorEnvelope{OK: false, Error: err.Error()}
+	if planned, ok := err.(errorWithPlan); ok {
+		envelope.Plan = planned.PlanData()
+	}
+	return JSON(w, envelope)
 }
 
 func Section(w io.Writer, title string) {

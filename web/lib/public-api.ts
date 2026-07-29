@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
@@ -388,7 +388,9 @@ export async function safeConfiguration(service: NestedService) {
 				};
 	const current = {
 		source,
-		hostname: service.hostname,
+		hostname:
+			service.hostname?.trim() ||
+			getDefaultServiceHostname(service.name, service.id),
 		stateful: service.stateful,
 		replicas: replicaCount,
 		placements: sortedPlacements,
@@ -452,7 +454,7 @@ export async function safeConfiguration(service: NestedService) {
 
 	const comparableCurrent = {
 		source: current.source,
-		hostname: current.hostname?.trim() || getDefaultServiceHostname(service.id),
+		hostname: current.hostname,
 		stateful: current.stateful,
 		placement:
 			current.placement.mode === "automatic"
@@ -587,7 +589,7 @@ export const placementSchema = z.discriminatedUnion("mode", [
 export const replaceConfigurationSchema = z.strictObject({
 	name: nameSchema,
 	source: publicSourceSchema,
-	hostname: hostnameSchema.nullable(),
+	hostname: hostnameSchema,
 	ports: z.array(portSchema).max(100),
 	placement: placementSchema,
 	healthCheck: healthCheckSchema.nullable(),
@@ -637,11 +639,176 @@ function healthCheckFromService(service: NestedService) {
 		: null;
 }
 
+type ReplacementInput = z.infer<typeof replaceConfigurationSchema>;
+type ConfigurationChange = { field: string; from: unknown; to: unknown };
+
+function canonicalPlanSource(source: PublicSource) {
+	return source.type === "github"
+		? {
+				...source,
+				repository: source.repository?.toLowerCase() ?? null,
+			}
+		: source;
+}
+
+function canonicalReplacementState(
+	service: NestedService,
+	source: ReturnType<typeof resolvePersistedSourceFromRows>,
+	ports: Array<{ port: number; isPublic: boolean; domain: string | null }>,
+	placements: Array<{ serverId: string; count: number }>,
+) {
+	const resources =
+		service.resourceCpuLimit == null && service.resourceMemoryLimitMb == null
+			? null
+			: {
+					cpuCores: service.resourceCpuLimit,
+					memoryMb: service.resourceMemoryLimitMb,
+				};
+	return {
+		name: service.name,
+		source: canonicalPlanSource(source),
+		hostname:
+			service.hostname?.trim() ||
+			getDefaultServiceHostname(service.name, service.id),
+		ports: ports
+			.map((port) => ({
+				containerPort: port.port,
+				public: port.isPublic,
+				domain: port.domain,
+			}))
+			.toSorted(
+				(a, b) =>
+					a.containerPort - b.containerPort ||
+					Number(a.public) - Number(b.public) ||
+					(a.domain ?? "").localeCompare(b.domain ?? "", "en"),
+			),
+		placement:
+			service.placementMode === "automatic"
+				? { mode: "automatic" as const, replicas: service.replicas }
+				: {
+						mode: "manual" as const,
+						placements: placements
+							.map(({ serverId, count }) => ({ serverId, count }))
+							.toSorted((a, b) => a.serverId.localeCompare(b.serverId, "en")),
+					},
+		healthCheck: healthCheckFromService(service),
+		startCommand: service.startCommand?.trim() || null,
+		resources,
+	};
+}
+
+export function canonicalDesired(input: ReplacementInput) {
+	return {
+		...input,
+		source: canonicalPlanSource(input.source),
+		ports: input.ports
+			.map((port) => ({
+				...port,
+				domain: port.domain ?? null,
+			}))
+			.toSorted(
+				(a, b) =>
+					a.containerPort - b.containerPort ||
+					Number(a.public) - Number(b.public) ||
+					(a.domain ?? "").localeCompare(b.domain ?? "", "en"),
+			),
+		placement:
+			input.placement.mode === "manual"
+				? {
+						...input.placement,
+						placements: input.placement.placements.toSorted((a, b) =>
+							a.serverId.localeCompare(b.serverId, "en"),
+						),
+					}
+				: input.placement,
+	};
+}
+
+function fingerprint(value: unknown) {
+	return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function configurationChanges(
+	current: Record<string, unknown>,
+	desired: Record<string, unknown>,
+) {
+	const changes: ConfigurationChange[] = [];
+	const compare = (field: string, from: unknown, to: unknown) => {
+		if (JSON.stringify(from) === JSON.stringify(to)) return;
+		if (
+			from !== null &&
+			to !== null &&
+			typeof from === "object" &&
+			typeof to === "object" &&
+			!Array.isArray(from) &&
+			!Array.isArray(to)
+		) {
+			for (const key of new Set([
+				...Object.keys(from as Record<string, unknown>),
+				...Object.keys(to as Record<string, unknown>),
+			]))
+				compare(
+					`${field}.${key}`,
+					(from as Record<string, unknown>)[key],
+					(to as Record<string, unknown>)[key],
+				);
+			return;
+		}
+		changes.push({
+			field,
+			from: from === undefined ? null : from,
+			to: to === undefined ? null : to,
+		});
+	};
+	for (const field of Object.keys(desired))
+		compare(field, current[field], desired[field]);
+	return changes;
+}
+
+export function planCanonicalConfiguration(
+	current: ReturnType<typeof canonicalReplacementState>,
+	desiredInput: ReplacementInput,
+) {
+	const canonicalCurrent = {
+		...current,
+		source: canonicalPlanSource(current.source),
+	};
+	const desired = canonicalDesired(desiredInput);
+	const changes = configurationChanges(canonicalCurrent, desired);
+	return {
+		action: changes.length ? ("updated" as const) : ("noop" as const),
+		currentVersion: fingerprint(canonicalCurrent),
+		desiredVersion: fingerprint(desired),
+		changes,
+	};
+}
+
+export async function planConfiguration(
+	service: NestedService,
+	input: ReplacementInput,
+) {
+	return replaceConfigurationInternal(service, input, null);
+}
+
 export async function replaceConfiguration(
 	service: NestedService,
-	input: z.infer<typeof replaceConfigurationSchema>,
+	input: ReplacementInput,
+	expectedVersion: string,
 ) {
-	if (input.source?.type === "image" && input.source.image !== service.image) {
+	const { targetServiceName: _, ...plan } = await replaceConfigurationInternal(
+		service,
+		input,
+		expectedVersion,
+	);
+	return plan;
+}
+
+async function replaceConfigurationInternal(
+	service: NestedService,
+	input: ReplacementInput,
+	expectedVersion: string | null,
+) {
+	if (input.source.type === "image") {
 		const validation = await validateDockerImageInternal(input.source.image);
 		if (!validation.valid) {
 			domainError(validation.error || "Invalid image", "INVALID_IMAGE", 400);
@@ -659,7 +826,6 @@ export async function replaceConfiguration(
 			.limit(1)
 			.then((rows) => rows[0]);
 		if (!persisted) domainError("Service not found", "NOT_FOUND", 404);
-
 		const [ports, volumes, placements, repo] = await Promise.all([
 			tx
 				.select()
@@ -681,8 +847,21 @@ export async function replaceConfiguration(
 				.then((rows) => rows[0]),
 		]);
 		const source = resolvePersistedSourceFromRows(persisted, repo);
+		const currentState = canonicalReplacementState(
+			persisted,
+			source,
+			ports,
+			placements,
+		);
+		const plan = planCanonicalConfiguration(currentState, input);
+		if (expectedVersion !== null && plan.currentVersion !== expectedVersion) {
+			domainError(
+				"Service configuration changed after the plan was created",
+				"CONFIGURATION_PLAN_STALE",
+			);
+		}
 		if (
-			input.placement?.mode === "automatic" &&
+			input.placement.mode === "automatic" &&
 			(persisted.stateful || volumes.length > 0)
 		) {
 			domainError(
@@ -701,13 +880,13 @@ export async function replaceConfiguration(
 			domainError(blockers[0].message, blockers[0].code);
 		}
 
-		if (input.source && input.source.type !== persisted.sourceType) {
+		if (input.source.type !== persisted.sourceType) {
 			domainError(
 				"Source type conversion is not supported; change the source in the web UI",
 				"SOURCE_TYPE_CONVERSION",
 			);
 		}
-		if (input.source?.type === "github") {
+		if (input.source.type === "github") {
 			if (source.type !== "github" || !source.repository) {
 				domainError(
 					"The service does not have a valid linked GitHub repository",
@@ -724,7 +903,7 @@ export async function replaceConfiguration(
 				);
 			}
 		}
-		if (input.placement?.mode === "manual") {
+		if (input.placement.mode === "manual") {
 			const ids = input.placement.placements.map((item) => item.serverId);
 			const selected = await tx
 				.select({
@@ -762,63 +941,59 @@ export async function replaceConfiguration(
 				);
 		}
 
-		if (input.hostname) {
+		const duplicateHostname = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(
+				and(eq(services.hostname, input.hostname), ne(services.id, service.id)),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (duplicateHostname) {
+			domainError("Hostname is already in use", "HOSTNAME_CONFLICT");
+		}
+		if (
+			persisted.serverlessEnabled &&
+			!input.ports.some((port) => port.public && port.domain)
+		) {
+			domainError(
+				"Serverless services require a public HTTP port with a domain",
+				"SERVERLESS_PORT_REQUIRED",
+				400,
+			);
+		}
+		const portIssue = findServicePortValidationIssue(
+			input.ports.map((port) => ({
+				containerPort: port.containerPort,
+				isPublic: port.public,
+				domain: port.domain ?? null,
+				protocol: "http" as const,
+			})),
+		);
+		if (portIssue) {
+			domainError(portIssue.message, portIssue.code, 400);
+		}
+		const domains = input.ports.flatMap((port) =>
+			port.public && port.domain ? [port.domain] : [],
+		);
+		for (const domain of domains) {
 			const duplicate = await tx
-				.select({ id: services.id })
-				.from(services)
+				.select({ id: servicePorts.id })
+				.from(servicePorts)
 				.where(
 					and(
-						eq(services.hostname, input.hostname),
-						ne(services.id, service.id),
+						eq(servicePorts.domain, domain),
+						ne(servicePorts.serviceId, service.id),
 					),
 				)
 				.limit(1)
 				.then((rows) => rows[0]);
 			if (duplicate) {
-				domainError("Hostname is already in use", "HOSTNAME_CONFLICT");
+				domainError("Port domain is already in use", "DOMAIN_CONFLICT");
 			}
 		}
-		if (input.ports) {
-			if (
-				persisted.serverlessEnabled &&
-				!input.ports.some((port) => port.public && port.domain)
-			) {
-				domainError(
-					"Serverless services require a public HTTP port with a domain",
-					"SERVERLESS_PORT_REQUIRED",
-					400,
-				);
-			}
-			const portIssue = findServicePortValidationIssue(
-				input.ports.map((port) => ({
-					containerPort: port.containerPort,
-					isPublic: port.public,
-					domain: port.domain ?? null,
-					protocol: "http" as const,
-				})),
-			);
-			if (portIssue) {
-				domainError(portIssue.message, portIssue.code, 400);
-			}
-			const domains = input.ports.flatMap((port) =>
-				port.public && port.domain ? [port.domain] : [],
-			);
-			for (const domain of domains) {
-				const duplicate = await tx
-					.select({ id: servicePorts.id })
-					.from(servicePorts)
-					.where(
-						and(
-							eq(servicePorts.domain, domain),
-							ne(servicePorts.serviceId, service.id),
-						),
-					)
-					.limit(1)
-					.then((rows) => rows[0]);
-				if (duplicate) {
-					domainError("Port domain is already in use", "DOMAIN_CONFLICT");
-				}
-			}
+		if (expectedVersion === null) {
+			return { targetServiceName: persisted.name, ...plan };
 		}
 
 		const changes: string[] = [];
@@ -830,20 +1005,20 @@ export async function replaceConfiguration(
 		};
 		if (changed("name", persisted.name, input.name)) set.name = input.name;
 
-		if (
-			input.hostname !== undefined &&
-			changed("hostname", persisted.hostname, input.hostname)
-		) {
+		const hostnameChanged = changed(
+			"hostname",
+			currentState.hostname,
+			input.hostname,
+		);
+		if (!persisted.hostname?.trim() || hostnameChanged) {
 			set.hostname = input.hostname;
 		}
 		if (
-			input.startCommand !== undefined &&
-			changed("startCommand", persisted.startCommand, input.startCommand)
+			changed("startCommand", currentState.startCommand, input.startCommand)
 		) {
 			set.startCommand = input.startCommand;
 		}
 		if (
-			input.healthCheck !== undefined &&
 			changed(
 				"healthCheck",
 				healthCheckFromService(persisted),
@@ -886,7 +1061,7 @@ export async function replaceConfiguration(
 			set.resourceMemoryLimitMb = input.resources?.memoryMb ?? null;
 		}
 		if (
-			input.source?.type === "image" &&
+			input.source.type === "image" &&
 			changed("source.image", persisted.image, input.source.image)
 		) {
 			set.image = input.source.image;
@@ -935,7 +1110,7 @@ export async function replaceConfiguration(
 					);
 			}
 		}
-		if (input.source?.type === "github") {
+		if (input.source.type === "github") {
 			const effectiveBranch =
 				repo?.deployBranch ||
 				repo?.defaultBranch ||
@@ -1010,9 +1185,6 @@ export async function replaceConfiguration(
 			}
 		}
 
-		return {
-			action: changes.length > 0 ? ("updated" as const) : ("noop" as const),
-			changes,
-		};
+		return { targetServiceName: persisted.name, ...plan };
 	});
 }
