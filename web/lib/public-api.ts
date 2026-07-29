@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
@@ -15,6 +15,7 @@ import {
 	serviceVolumes,
 } from "@/db/schema";
 import { validateDockerImageInternal } from "@/lib/docker-image";
+import { nameSchema } from "@/lib/schemas";
 import { getServiceTotalReplicas } from "@/lib/service-config";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -110,7 +111,7 @@ export const publicSourceSchema = z.discriminatedUnion("type", [
 		type: z.literal("github"),
 		repository: githubRepositorySchema,
 		branch: z.string().trim().min(1).max(255),
-		rootDir: rootDirSchema.nullable().optional(),
+		rootDir: rootDirSchema.nullable(),
 	}),
 ]);
 
@@ -120,7 +121,7 @@ export type PublicSource =
 			type: "github";
 			repository: string | null;
 			branch: string;
-			rootDir?: string;
+			rootDir: string | null;
 	  };
 export type NestedService = typeof services.$inferSelect;
 type GitHubRepo = typeof githubRepos.$inferSelect;
@@ -161,9 +162,7 @@ export function resolvePersistedSourceFromRows(
 			repo?.defaultBranch?.trim() ||
 			service.githubBranch?.trim() ||
 			"main",
-		...(service.githubRootDir?.trim()
-			? { rootDir: service.githubRootDir.trim() }
-			: {}),
+		rootDir: service.githubRootDir?.trim() || null,
 	};
 }
 
@@ -182,33 +181,27 @@ export async function resolvePersistedSource(
 	return resolvePersistedSourceFromRows(service, repo);
 }
 
-export async function findNestedService(
-	projectId: string,
-	environmentId: string,
-	serviceId: string,
-) {
-	const row = await db
-		.select({ service: services })
-		.from(projects)
+export async function findServiceContext(serviceId: string) {
+	return db
+		.select({
+			service: services,
+			projectId: projects.id,
+			projectSlug: projects.slug,
+			environmentId: environments.id,
+			environmentName: environments.name,
+		})
+		.from(services)
+		.innerJoin(projects, eq(projects.id, services.projectId))
 		.innerJoin(
 			environments,
 			and(
-				eq(environments.id, environmentId),
+				eq(environments.id, services.environmentId),
 				eq(environments.projectId, projects.id),
 			),
 		)
-		.innerJoin(
-			services,
-			and(
-				eq(services.id, serviceId),
-				eq(services.projectId, projects.id),
-				eq(services.environmentId, environments.id),
-				isNull(services.deletedAt),
-			),
-		)
-		.where(eq(projects.id, projectId))
-		.limit(1);
-	return row[0]?.service ?? null;
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+		.limit(1)
+		.then((rows) => rows[0] ?? null);
 }
 
 export function apiError(message: string, code: string, status: number) {
@@ -296,7 +289,7 @@ function sanitizeSpec(specification: unknown) {
 						type: "github" as const,
 						repository: spec.source.repository,
 						branch: spec.source.branch,
-						...(spec.source.rootDir ? { rootDir: spec.source.rootDir } : {}),
+						rootDir: spec.source.rootDir,
 					}
 				: { type: "image" as const, image: spec.source.image },
 		hostname: spec.hostname,
@@ -395,7 +388,9 @@ export async function safeConfiguration(service: NestedService) {
 				};
 	const current = {
 		source,
-		hostname: service.hostname,
+		hostname:
+			service.hostname?.trim() ||
+			getDefaultServiceHostname(service.name, service.id),
 		stateful: service.stateful,
 		replicas: replicaCount,
 		placements: sortedPlacements,
@@ -459,8 +454,7 @@ export async function safeConfiguration(service: NestedService) {
 
 	const comparableCurrent = {
 		source: current.source,
-		hostname:
-			current.hostname?.trim() || getDefaultServiceHostname(service.name),
+		hostname: current.hostname,
 		stateful: current.stateful,
 		placement:
 			current.placement.mode === "automatic"
@@ -592,13 +586,14 @@ export const placementSchema = z.discriminatedUnion("mode", [
 				});
 		}),
 ]);
-export const configurationPatchSchema = z.strictObject({
-	source: publicSourceSchema.optional(),
-	hostname: hostnameSchema.nullable().optional(),
-	ports: z.array(portSchema).max(100).optional(),
-	placement: placementSchema.optional(),
-	healthCheck: healthCheckSchema.nullable().optional(),
-	startCommand: z.string().trim().min(1).max(4096).nullable().optional(),
+export const replaceConfigurationSchema = z.strictObject({
+	name: nameSchema,
+	source: publicSourceSchema,
+	hostname: hostnameSchema,
+	ports: z.array(portSchema).max(100),
+	placement: placementSchema,
+	healthCheck: healthCheckSchema.nullable(),
+	startCommand: z.string().trim().min(1).max(4096).nullable(),
 	resources: z
 		.strictObject({
 			cpuCores: z.number().min(0.1).max(64).nullable(),
@@ -608,7 +603,7 @@ export const configurationPatchSchema = z.strictObject({
 			(value) => (value.cpuCores === null) === (value.memoryMb === null),
 			"CPU and memory limits must both be set or both be null",
 		)
-		.optional(),
+		.nullable(),
 });
 
 type PublicApiDomainError = Error & { code: string; status: number };
@@ -644,15 +639,185 @@ function healthCheckFromService(service: NestedService) {
 		: null;
 }
 
-export async function patchConfiguration(
+type ReplacementInput = z.infer<typeof replaceConfigurationSchema>;
+type ConfigurationChange = { field: string; from: unknown; to: unknown };
+
+function canonicalPlanSource(source: PublicSource) {
+	return source.type === "github"
+		? {
+				...source,
+				repository: source.repository?.toLowerCase() ?? null,
+			}
+		: source;
+}
+
+function canonicalReplacementState(
 	service: NestedService,
-	input: z.infer<typeof configurationPatchSchema>,
+	source: ReturnType<typeof resolvePersistedSourceFromRows>,
+	ports: Array<{ port: number; isPublic: boolean; domain: string | null }>,
+	placements: Array<{ serverId: string; count: number }>,
 ) {
-	if (input.source?.type === "image" && input.source.image !== service.image) {
+	const resources =
+		service.resourceCpuLimit == null && service.resourceMemoryLimitMb == null
+			? null
+			: {
+					cpuCores: service.resourceCpuLimit,
+					memoryMb: service.resourceMemoryLimitMb,
+				};
+	return {
+		name: service.name,
+		source: canonicalPlanSource(source),
+		hostname:
+			service.hostname?.trim() ||
+			getDefaultServiceHostname(service.name, service.id),
+		ports: ports
+			.map((port) => ({
+				containerPort: port.port,
+				public: port.isPublic,
+				domain: port.domain,
+			}))
+			.toSorted(
+				(a, b) =>
+					a.containerPort - b.containerPort ||
+					Number(a.public) - Number(b.public) ||
+					(a.domain ?? "").localeCompare(b.domain ?? "", "en"),
+			),
+		placement:
+			service.placementMode === "automatic"
+				? { mode: "automatic" as const, replicas: service.replicas }
+				: {
+						mode: "manual" as const,
+						placements: placements
+							.map(({ serverId, count }) => ({ serverId, count }))
+							.toSorted((a, b) => a.serverId.localeCompare(b.serverId, "en")),
+					},
+		healthCheck: healthCheckFromService(service),
+		startCommand: service.startCommand?.trim() || null,
+		resources,
+	};
+}
+
+export function canonicalDesired(input: ReplacementInput) {
+	return {
+		...input,
+		source: canonicalPlanSource(input.source),
+		ports: input.ports
+			.map((port) => ({
+				...port,
+				domain: port.domain ?? null,
+			}))
+			.toSorted(
+				(a, b) =>
+					a.containerPort - b.containerPort ||
+					Number(a.public) - Number(b.public) ||
+					(a.domain ?? "").localeCompare(b.domain ?? "", "en"),
+			),
+		placement:
+			input.placement.mode === "manual"
+				? {
+						...input.placement,
+						placements: input.placement.placements.toSorted((a, b) =>
+							a.serverId.localeCompare(b.serverId, "en"),
+						),
+					}
+				: input.placement,
+	};
+}
+
+function fingerprint(value: unknown) {
+	return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function configurationChanges(
+	current: Record<string, unknown>,
+	desired: Record<string, unknown>,
+) {
+	const changes: ConfigurationChange[] = [];
+	const compare = (field: string, from: unknown, to: unknown) => {
+		if (JSON.stringify(from) === JSON.stringify(to)) return;
+		if (
+			from !== null &&
+			to !== null &&
+			typeof from === "object" &&
+			typeof to === "object" &&
+			!Array.isArray(from) &&
+			!Array.isArray(to)
+		) {
+			for (const key of new Set([
+				...Object.keys(from as Record<string, unknown>),
+				...Object.keys(to as Record<string, unknown>),
+			]))
+				compare(
+					`${field}.${key}`,
+					(from as Record<string, unknown>)[key],
+					(to as Record<string, unknown>)[key],
+				);
+			return;
+		}
+		changes.push({
+			field,
+			from: from === undefined ? null : from,
+			to: to === undefined ? null : to,
+		});
+	};
+	for (const field of Object.keys(desired))
+		compare(field, current[field], desired[field]);
+	return changes;
+}
+
+export function planCanonicalConfiguration(
+	current: ReturnType<typeof canonicalReplacementState>,
+	desiredInput: ReplacementInput,
+) {
+	const canonicalCurrent = {
+		...current,
+		source: canonicalPlanSource(current.source),
+	};
+	const desired = canonicalDesired(desiredInput);
+	const changes = configurationChanges(canonicalCurrent, desired);
+	return {
+		action: changes.length ? ("updated" as const) : ("noop" as const),
+		currentVersion: fingerprint(canonicalCurrent),
+		desiredVersion: fingerprint(desired),
+		changes,
+	};
+}
+
+export async function planConfiguration(
+	service: NestedService,
+	input: ReplacementInput,
+) {
+	return replaceConfigurationInternal(service, input, null);
+}
+
+export async function replaceConfiguration(
+	service: NestedService,
+	input: ReplacementInput,
+	expectedVersion: string,
+) {
+	const { targetServiceName: _, ...plan } = await replaceConfigurationInternal(
+		service,
+		input,
+		expectedVersion,
+	);
+	return plan;
+}
+
+async function replaceConfigurationInternal(
+	service: NestedService,
+	input: ReplacementInput,
+	expectedVersion: string | null,
+) {
+	let imageValidated = false;
+	if (
+		input.source.type === "image" &&
+		(service.sourceType !== "image" || input.source.image !== service.image)
+	) {
 		const validation = await validateDockerImageInternal(input.source.image);
 		if (!validation.valid) {
 			domainError(validation.error || "Invalid image", "INVALID_IMAGE", 400);
 		}
+		imageValidated = true;
 	}
 
 	return db.transaction(async (tx) => {
@@ -666,7 +831,6 @@ export async function patchConfiguration(
 			.limit(1)
 			.then((rows) => rows[0]);
 		if (!persisted) domainError("Service not found", "NOT_FOUND", 404);
-
 		const [ports, volumes, placements, repo] = await Promise.all([
 			tx
 				.select()
@@ -688,8 +852,31 @@ export async function patchConfiguration(
 				.then((rows) => rows[0]),
 		]);
 		const source = resolvePersistedSourceFromRows(persisted, repo);
+		const currentState = canonicalReplacementState(
+			persisted,
+			source,
+			ports,
+			placements,
+		);
 		if (
-			input.placement?.mode === "automatic" &&
+			input.source.type === "image" &&
+			input.source.image !== persisted.image &&
+			!imageValidated
+		) {
+			domainError(
+				"Service image changed while the configuration was being validated",
+				"CONFIGURATION_PLAN_STALE",
+			);
+		}
+		const plan = planCanonicalConfiguration(currentState, input);
+		if (expectedVersion !== null && plan.currentVersion !== expectedVersion) {
+			domainError(
+				"Service configuration changed after the plan was created",
+				"CONFIGURATION_PLAN_STALE",
+			);
+		}
+		if (
+			input.placement.mode === "automatic" &&
 			(persisted.stateful || volumes.length > 0)
 		) {
 			domainError(
@@ -708,13 +895,13 @@ export async function patchConfiguration(
 			domainError(blockers[0].message, blockers[0].code);
 		}
 
-		if (input.source && input.source.type !== persisted.sourceType) {
+		if (input.source.type !== persisted.sourceType) {
 			domainError(
 				"Source type conversion is not supported; change the source in the web UI",
 				"SOURCE_TYPE_CONVERSION",
 			);
 		}
-		if (input.source?.type === "github") {
+		if (input.source.type === "github") {
 			if (source.type !== "github" || !source.repository) {
 				domainError(
 					"The service does not have a valid linked GitHub repository",
@@ -731,7 +918,7 @@ export async function patchConfiguration(
 				);
 			}
 		}
-		if (input.placement?.mode === "manual") {
+		if (input.placement.mode === "manual") {
 			const ids = input.placement.placements.map((item) => item.serverId);
 			const selected = await tx
 				.select({
@@ -769,63 +956,59 @@ export async function patchConfiguration(
 				);
 		}
 
-		if (input.hostname) {
+		const duplicateHostname = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(
+				and(eq(services.hostname, input.hostname), ne(services.id, service.id)),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (duplicateHostname) {
+			domainError("Hostname is already in use", "HOSTNAME_CONFLICT");
+		}
+		if (
+			persisted.serverlessEnabled &&
+			!input.ports.some((port) => port.public && port.domain)
+		) {
+			domainError(
+				"Serverless services require a public HTTP port with a domain",
+				"SERVERLESS_PORT_REQUIRED",
+				400,
+			);
+		}
+		const portIssue = findServicePortValidationIssue(
+			input.ports.map((port) => ({
+				containerPort: port.containerPort,
+				isPublic: port.public,
+				domain: port.domain ?? null,
+				protocol: "http" as const,
+			})),
+		);
+		if (portIssue) {
+			domainError(portIssue.message, portIssue.code, 400);
+		}
+		const domains = input.ports.flatMap((port) =>
+			port.public && port.domain ? [port.domain] : [],
+		);
+		for (const domain of domains) {
 			const duplicate = await tx
-				.select({ id: services.id })
-				.from(services)
+				.select({ id: servicePorts.id })
+				.from(servicePorts)
 				.where(
 					and(
-						eq(services.hostname, input.hostname),
-						ne(services.id, service.id),
+						eq(servicePorts.domain, domain),
+						ne(servicePorts.serviceId, service.id),
 					),
 				)
 				.limit(1)
 				.then((rows) => rows[0]);
 			if (duplicate) {
-				domainError("Hostname is already in use", "HOSTNAME_CONFLICT");
+				domainError("Port domain is already in use", "DOMAIN_CONFLICT");
 			}
 		}
-		if (input.ports) {
-			if (
-				persisted.serverlessEnabled &&
-				!input.ports.some((port) => port.public && port.domain)
-			) {
-				domainError(
-					"Serverless services require a public HTTP port with a domain",
-					"SERVERLESS_PORT_REQUIRED",
-					400,
-				);
-			}
-			const portIssue = findServicePortValidationIssue(
-				input.ports.map((port) => ({
-					containerPort: port.containerPort,
-					isPublic: port.public,
-					domain: port.domain ?? null,
-					protocol: "http" as const,
-				})),
-			);
-			if (portIssue) {
-				domainError(portIssue.message, portIssue.code, 400);
-			}
-			const domains = input.ports.flatMap((port) =>
-				port.public && port.domain ? [port.domain] : [],
-			);
-			for (const domain of domains) {
-				const duplicate = await tx
-					.select({ id: servicePorts.id })
-					.from(servicePorts)
-					.where(
-						and(
-							eq(servicePorts.domain, domain),
-							ne(servicePorts.serviceId, service.id),
-						),
-					)
-					.limit(1)
-					.then((rows) => rows[0]);
-				if (duplicate) {
-					domainError("Port domain is already in use", "DOMAIN_CONFLICT");
-				}
-			}
+		if (expectedVersion === null) {
+			return { targetServiceName: persisted.name, ...plan };
 		}
 
 		const changes: string[] = [];
@@ -835,21 +1018,22 @@ export async function patchConfiguration(
 			changes.push(label);
 			return true;
 		};
+		if (changed("name", persisted.name, input.name)) set.name = input.name;
 
-		if (
-			input.hostname !== undefined &&
-			changed("hostname", persisted.hostname, input.hostname)
-		) {
+		const hostnameChanged = changed(
+			"hostname",
+			currentState.hostname,
+			input.hostname,
+		);
+		if (!persisted.hostname?.trim() || hostnameChanged) {
 			set.hostname = input.hostname;
 		}
 		if (
-			input.startCommand !== undefined &&
-			changed("startCommand", persisted.startCommand, input.startCommand)
+			changed("startCommand", currentState.startCommand, input.startCommand)
 		) {
 			set.startCommand = input.startCommand;
 		}
 		if (
-			input.healthCheck !== undefined &&
 			changed(
 				"healthCheck",
 				healthCheckFromService(persisted),
@@ -876,21 +1060,23 @@ export async function patchConfiguration(
 			);
 		}
 		if (
-			input.resources !== undefined &&
 			changed(
 				"resources",
-				{
-					cpuCores: persisted.resourceCpuLimit,
-					memoryMb: persisted.resourceMemoryLimitMb,
-				},
+				persisted.resourceCpuLimit == null &&
+					persisted.resourceMemoryLimitMb == null
+					? null
+					: {
+							cpuCores: persisted.resourceCpuLimit,
+							memoryMb: persisted.resourceMemoryLimitMb,
+						},
 				input.resources,
 			)
 		) {
-			set.resourceCpuLimit = input.resources.cpuCores;
-			set.resourceMemoryLimitMb = input.resources.memoryMb;
+			set.resourceCpuLimit = input.resources?.cpuCores ?? null;
+			set.resourceMemoryLimitMb = input.resources?.memoryMb ?? null;
 		}
 		if (
-			input.source?.type === "image" &&
+			input.source.type === "image" &&
 			changed("source.image", persisted.image, input.source.image)
 		) {
 			set.image = input.source.image;
@@ -939,7 +1125,7 @@ export async function patchConfiguration(
 					);
 			}
 		}
-		if (input.source?.type === "github") {
+		if (input.source.type === "github") {
 			const effectiveBranch =
 				repo?.deployBranch ||
 				repo?.defaultBranch ||
@@ -954,11 +1140,9 @@ export async function patchConfiguration(
 						.where(eq(githubRepos.id, repo.id));
 				}
 			}
-			if (input.source.rootDir !== undefined) {
-				const desiredRoot = input.source.rootDir;
-				if (changed("source.rootDir", persisted.githubRootDir, desiredRoot)) {
-					set.githubRootDir = desiredRoot;
-				}
+			const desiredRoot = input.source.rootDir;
+			if (changed("source.rootDir", persisted.githubRootDir, desiredRoot)) {
+				set.githubRootDir = desiredRoot;
 			}
 		}
 
@@ -1016,9 +1200,6 @@ export async function patchConfiguration(
 			}
 		}
 
-		return {
-			action: changes.length > 0 ? ("updated" as const) : ("noop" as const),
-			changes,
-		};
+		return { targetServiceName: persisted.name, ...plan };
 	});
 }

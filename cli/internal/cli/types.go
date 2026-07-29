@@ -41,10 +41,41 @@ type environmentItem struct {
 	Name string `json:"name"`
 }
 type serviceItem struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Hostname *string         `json:"hostname"`
-	Source   manifest.Source `json:"source"`
+	ID           string                `json:"id"`
+	Name         string                `json:"name"`
+	Hostname     *string               `json:"hostname"`
+	Source       manifest.Source       `json:"source"`
+	Ports        []manifest.Port       `json:"ports"`
+	Replicas     int                   `json:"replicas"`
+	Placement    *manifest.Placement   `json:"placement"`
+	HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
+	StartCommand *string               `json:"startCommand"`
+	Resources    *manifest.Resources   `json:"resources"`
+}
+type targetProject struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+}
+type targetEnvironment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+type targetService struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+type targetContext struct {
+	Project     targetProject     `json:"project"`
+	Environment targetEnvironment `json:"environment"`
+	Service     targetService     `json:"service"`
+}
+type managementBlocker struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+type serviceManagement struct {
+	Patchable bool                `json:"patchable"`
+	Blockers  []managementBlocker `json:"blockers"`
 }
 type projectsResponse struct {
 	Projects   []projectItem `json:"projects"`
@@ -59,8 +90,16 @@ type servicesResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 type applyResponse struct {
-	Action  string   `json:"action"`
-	Changes []string `json:"changes"`
+	Target         targetContext `json:"target"`
+	Action         string        `json:"action"`
+	CurrentVersion string        `json:"currentVersion"`
+	DesiredVersion string        `json:"desiredVersion"`
+	Changes        []applyChange `json:"changes"`
+}
+type applyChange struct {
+	Field string `json:"field"`
+	From  any    `json:"from"`
+	To    any    `json:"to"`
 }
 type deployResponse struct {
 	Operation string  `json:"operation"`
@@ -69,6 +108,7 @@ type deployResponse struct {
 	BuildID   *string `json:"buildId"`
 }
 type statusResponse struct {
+	Target  targetContext `json:"target"`
 	Service struct {
 		ID     string          `json:"id"`
 		Name   string          `json:"name"`
@@ -86,9 +126,10 @@ type serviceLog struct {
 }
 
 type logsResponse struct {
-	Provider    string       `json:"provider"`
-	Logs        []serviceLog `json:"logs"`
-	NextCursor  string       `json:"nextCursor"`
-	HasMore     bool         `json:"hasMore"`
-	PollAfterMS int          `json:"pollAfterMs"`
+	Target      targetContext `json:"target"`
+	Provider    string        `json:"provider"`
+	Logs        []serviceLog  `json:"logs"`
+	NextCursor  string        `json:"nextCursor"`
+	HasMore     bool          `json:"hasMore"`
+	PollAfterMS int           `json:"pollAfterMs"`
 }

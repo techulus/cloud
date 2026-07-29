@@ -13,24 +13,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var windowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+var (
+	windowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+	hostnamePattern     = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	slugChars           = regexp.MustCompile(`[^a-z0-9]+`)
+)
 
 type Manifest struct {
-	APIVersion  string      `json:"apiVersion" yaml:"apiVersion"`
-	Project     Project     `json:"project" yaml:"project"`
-	Environment Environment `json:"environment" yaml:"environment"`
-	Service     Service     `json:"service" yaml:"service"`
+	APIVersion string  `json:"apiVersion" yaml:"apiVersion"`
+	Target     *Target `json:"target,omitempty" yaml:"target,omitempty"`
+	Service    Service `json:"service" yaml:"service"`
 }
-type Project struct {
-	ID   string `json:"id,omitempty" yaml:"id,omitempty"`
-	Slug string `json:"slug" yaml:"slug"`
-}
-type Environment struct {
-	ID   string `json:"id,omitempty" yaml:"id,omitempty"`
-	Name string `json:"name" yaml:"name"`
+type Target struct {
+	ServiceID string `json:"serviceId,omitempty" yaml:"serviceId,omitempty"`
 }
 type Service struct {
-	ID           string       `json:"id,omitempty" yaml:"id,omitempty"`
 	Name         string       `json:"name" yaml:"name"`
 	Source       Source       `json:"source" yaml:"source"`
 	Hostname     *string      `json:"hostname" yaml:"hostname"`
@@ -115,11 +112,9 @@ func Save(path string, m Manifest) error {
 }
 func ApplyDefaults(m *Manifest) {
 	m.APIVersion = strings.TrimSpace(m.APIVersion)
-	m.Project.ID = strings.TrimSpace(m.Project.ID)
-	m.Project.Slug = strings.TrimSpace(m.Project.Slug)
-	m.Environment.ID = strings.TrimSpace(m.Environment.ID)
-	m.Environment.Name = strings.TrimSpace(m.Environment.Name)
-	m.Service.ID = strings.TrimSpace(m.Service.ID)
+	if m.Target != nil {
+		m.Target.ServiceID = strings.TrimSpace(m.Target.ServiceID)
+	}
 	m.Service.Name = strings.TrimSpace(m.Service.Name)
 	s := &m.Service.Source
 	s.Type = strings.ToLower(strings.TrimSpace(s.Type))
@@ -175,12 +170,6 @@ func Validate(m Manifest) error {
 	if m.APIVersion != "v1" {
 		return errors.New("apiVersion must be v1")
 	}
-	if m.Project.Slug == "" {
-		return errors.New("project.slug is required")
-	}
-	if m.Environment.Name == "" {
-		return errors.New("environment.name is required")
-	}
 	if m.Service.Name == "" {
 		return errors.New("service.name is required")
 	}
@@ -219,8 +208,14 @@ func Validate(m Manifest) error {
 	default:
 		return errors.New("service.source.type must be image or github")
 	}
-	if m.Service.Hostname != nil && *m.Service.Hostname == "" {
+	if m.Service.Hostname == nil {
+		return errors.New("service.hostname is required")
+	}
+	if *m.Service.Hostname == "" {
 		return errors.New("service.hostname cannot be blank")
+	}
+	if !hostnamePattern.MatchString(*m.Service.Hostname) || len(*m.Service.Hostname) > 63 {
+		return errors.New("service.hostname must be at most 63 lowercase letters, numbers, and hyphen-separated segments")
 	}
 	if m.Service.StartCommand != nil && *m.Service.StartCommand == "" {
 		return errors.New("service.startCommand cannot be blank")
@@ -315,7 +310,7 @@ func Validate(m Manifest) error {
 	return nil
 }
 func (m Manifest) Linked() bool {
-	return m.Project.ID != "" && m.Environment.ID != "" && m.Service.ID != ""
+	return m.Target != nil && strings.TrimSpace(m.Target.ServiceID) != ""
 }
 func CanonicalGitHubRepository(value string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(value))
@@ -336,8 +331,10 @@ func CanonicalGitHubRepository(value string) (string, error) {
 	return "https://github.com/" + parts[0] + "/" + parts[1], nil
 }
 
-var slugChars = regexp.MustCompile(`[^a-z0-9]+`)
-
 func Slugify(v string) string {
-	return strings.Trim(slugChars.ReplaceAllString(strings.ToLower(v), "-"), "-")
+	value := strings.Trim(slugChars.ReplaceAllString(strings.ToLower(v), "-"), "-")
+	if len(value) > 63 {
+		value = strings.Trim(value[:63], "-")
+	}
+	return value
 }

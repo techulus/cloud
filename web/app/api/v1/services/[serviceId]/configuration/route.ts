@@ -1,4 +1,4 @@
 export {
 	getConfiguration as GET,
-	patchConfigurationRoute as PATCH,
+	putConfigurationRoute as PUT,
 } from "@/lib/public-api-routes";

@@ -8,6 +8,7 @@ import {
 	isNull,
 	lte,
 	or,
+	sql,
 } from "drizzle-orm";
 import { cron } from "inngest";
 import { db } from "@/db";
@@ -276,17 +277,29 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 				}
 
 				const deletedAt = new Date();
-				await db
-					.update(services)
-					.set({
-						deletedAt,
-						purgeAfter: addUtcDays(deletedAt, DELETED_SERVICE_RETENTION_DAYS),
-						originalHostname: setup.service.hostname,
-						hostname: null,
-						deletionStatus: null,
-						deletionError: null,
-					})
-					.where(eq(services.id, serviceId));
+				await db.transaction(async (tx) => {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+					);
+					const current = await tx
+						.select({ hostname: services.hostname })
+						.from(services)
+						.where(eq(services.id, serviceId))
+						.limit(1)
+						.then((rows) => rows[0]);
+					if (!current) throw new Error("Service not found");
+					await tx
+						.update(services)
+						.set({
+							deletedAt,
+							purgeAfter: addUtcDays(deletedAt, DELETED_SERVICE_RETENTION_DAYS),
+							originalHostname: current.hostname,
+							hostname: null,
+							deletionStatus: null,
+							deletionError: null,
+						})
+						.where(eq(services.id, serviceId));
+				});
 			});
 
 			return { status: "deleted", serviceId, backupIds };
@@ -476,18 +489,23 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 			const deployResult = await step.run(
 				"start-restored-deployment",
 				async () => {
-					await db
-						.update(services)
-						.set({
-							deletedAt: null,
-							purgeAfter: null,
-							hostname: setup.service.originalHostname,
-							originalHostname: null,
-							deletionStatus: "restoring",
-							deletionError: null,
-							lockedServerId: setup.targetServerId,
-						})
-						.where(eq(services.id, serviceId));
+					await db.transaction(async (tx) => {
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+						);
+						await tx
+							.update(services)
+							.set({
+								deletedAt: null,
+								purgeAfter: null,
+								hostname: setup.service.originalHostname,
+								originalHostname: null,
+								deletionStatus: "restoring",
+								deletionError: null,
+								lockedServerId: setup.targetServerId,
+							})
+							.where(eq(services.id, serviceId));
+					});
 
 					try {
 						const result = await deployServiceInternal(serviceId, actor, {
@@ -498,20 +516,25 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						}
 						return result;
 					} catch (error) {
-						await db
-							.update(services)
-							.set({
-								deletedAt: toDate(setup.service.deletedAt),
-								purgeAfter: toDate(setup.service.purgeAfter),
-								hostname: null,
-								originalHostname: setup.service.originalHostname,
-								deletionStatus: "failed",
-								deletionError:
-									error instanceof Error
-										? error.message
-										: "Restore deployment failed",
-							})
-							.where(eq(services.id, serviceId));
+						await db.transaction(async (tx) => {
+							await tx.execute(
+								sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+							);
+							await tx
+								.update(services)
+								.set({
+									deletedAt: toDate(setup.service.deletedAt),
+									purgeAfter: toDate(setup.service.purgeAfter),
+									hostname: null,
+									originalHostname: setup.service.originalHostname,
+									deletionStatus: "failed",
+									deletionError:
+										error instanceof Error
+											? error.message
+											: "Restore deployment failed",
+								})
+								.where(eq(services.id, serviceId));
+						});
 						throw error;
 					}
 				},
@@ -552,19 +575,24 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			if (!healthyDeployment || failedDeployment) {
 				await step.run("mark-restore-deployment-failed", async () => {
-					await db
-						.update(services)
-						.set({
-							deletedAt: toDate(setup.service.deletedAt),
-							purgeAfter: toDate(setup.service.purgeAfter),
-							hostname: null,
-							originalHostname: setup.service.originalHostname,
-							deletionStatus: "failed",
-							deletionError:
-								failedDeployment?.failedStage ||
-								"Restore deployment did not become healthy",
-						})
-						.where(eq(services.id, serviceId));
+					await db.transaction(async (tx) => {
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+						);
+						await tx
+							.update(services)
+							.set({
+								deletedAt: toDate(setup.service.deletedAt),
+								purgeAfter: toDate(setup.service.purgeAfter),
+								hostname: null,
+								originalHostname: setup.service.originalHostname,
+								deletionStatus: "failed",
+								deletionError:
+									failedDeployment?.failedStage ||
+									"Restore deployment did not become healthy",
+							})
+							.where(eq(services.id, serviceId));
+					});
 				});
 				return { status: "failed", reason: "deployment" };
 			}
