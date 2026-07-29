@@ -557,7 +557,7 @@ export function parseComposeYaml(yamlContent: string): ComposeParseResult {
 
 		let replicas = serviceConfig.deploy?.replicas ?? 1;
 		if (replicas < 1) replicas = 1;
-		if (replicas > 10) replicas = 10;
+		if (replicas > 32) replicas = 32;
 		if (stateful && replicas > 1) {
 			warnings.push({
 				service: serviceName,

@@ -220,8 +220,8 @@ func Validate(m Manifest) error {
 	if m.Service.StartCommand != nil && *m.Service.StartCommand == "" {
 		return errors.New("service.startCommand cannot be blank")
 	}
-	if m.Service.Replicas < 1 || m.Service.Replicas > 10 {
-		return errors.New("service.replicas must be between 1 and 10")
+	if m.Service.Replicas < 1 || m.Service.Replicas > 32 {
+		return errors.New("service.replicas must be between 1 and 32")
 	}
 	if m.Service.Placement == nil {
 		return errors.New("service.placement is required")
@@ -249,8 +249,8 @@ func Validate(m Manifest) error {
 				}
 				total += server.Count
 			}
-			if total < 1 || total > 10 {
-				return errors.New("service.placement manual total must be between 1 and 10")
+			if total < 1 || total > 32 {
+				return errors.New("service.placement manual total must be between 1 and 32")
 			}
 			if total != m.Service.Replicas {
 				return errors.New("service.placement manual total must equal service.replicas")

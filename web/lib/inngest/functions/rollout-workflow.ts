@@ -24,7 +24,7 @@ import { handleRolloutFailure } from "./rollout-utils";
 
 const PREFLIGHT_FAILURE_MESSAGES = [
 	"At least one replica is required",
-	"Maximum 10 replicas allowed",
+	"Maximum 32 replicas allowed",
 	"No servers selected for deployment",
 	"Stateful services can only have exactly 1 replica",
 	"Stateful services must be deployed to exactly one server",

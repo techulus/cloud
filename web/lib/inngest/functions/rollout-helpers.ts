@@ -41,8 +41,8 @@ export function distributeReplicas(
 ): Placement[] {
 	const ids = [...new Set(serverIds)].sort((a, b) => a.localeCompare(b));
 	if (ids.length === 0) throw new Error("No eligible servers for deployment");
-	if (!Number.isInteger(replicas) || replicas < 1 || replicas > 10)
-		throw new Error("Replica count must be between 1 and 10");
+	if (!Number.isInteger(replicas) || replicas < 1 || replicas > 32)
+		throw new Error("Replica count must be between 1 and 32");
 	const counts = new Map(ids.map((id) => [id, 0]));
 	for (let index = 0; index < replicas; index++) {
 		const id = ids[index % ids.length];
@@ -114,8 +114,8 @@ export function calculateRevisionPlacements(
 	if (totalReplicas < 1) {
 		throw new Error("At least one replica is required");
 	}
-	if (totalReplicas > 10) {
-		throw new Error("Maximum 10 replicas allowed");
+	if (totalReplicas > 32) {
+		throw new Error("Maximum 32 replicas allowed");
 	}
 
 	if (specification.stateful) {

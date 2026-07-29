@@ -13,6 +13,7 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
@@ -198,7 +199,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 		setIsEditing(true);
 		setLocalReplicas((prev) => ({
 			...prev,
-			[serverId]: Math.max(0, Math.min(10, Math.floor(value))),
+			[serverId]: Math.max(0, Math.min(32, Math.floor(value))),
 		}));
 	}, []);
 
@@ -211,7 +212,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 				(sum, count) => sum + count,
 				0,
 			);
-			setDesiredReplicas(Math.max(1, Math.min(10, manualTotal || 1)));
+			setDesiredReplicas(Math.max(1, Math.min(32, manualTotal || 1)));
 		}
 		setPlacementMode(nextMode);
 	};
@@ -268,7 +269,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 			: null;
 	};
 
-	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 10;
+	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 32;
 
 	if (service.stateful) {
 		return (
@@ -401,41 +402,36 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
-						<div className="space-y-1">
-							<label htmlFor="desired-replicas" className="text-sm font-medium">
-								Desired replicas
-							</label>
-							<p className="text-sm text-muted-foreground">
-								The control plane distributes replicas evenly across healthy
-								{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
-								moves them after failures.
-							</p>
+						<div className="flex max-w-xl items-start justify-between gap-4">
+							<div className="space-y-1">
+								<p className="text-sm font-medium">Desired replicas</p>
+								<p className="text-sm text-muted-foreground">
+									The control plane distributes replicas evenly across healthy
+									{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
+									moves them after failures.
+								</p>
+							</div>
+							<span className="shrink-0 text-sm font-medium tabular-nums">
+								{desiredReplicas}
+							</span>
 						</div>
-						<Input
-							id="desired-replicas"
-							type="number"
-							min={1}
-							max={10}
-							step={1}
-							value={desiredReplicas}
-							onChange={(event) => {
-								setIsEditing(true);
-								setDesiredReplicas(
-									Math.max(
-										1,
-										Math.min(10, Math.floor(event.target.valueAsNumber || 1)),
-									),
-								);
-							}}
-							className="w-24"
-							aria-describedby="automatic-replica-range"
-						/>
-						<p
-							id="automatic-replica-range"
-							className="text-xs text-muted-foreground"
-						>
-							Choose between 1 and 10 replicas.
-						</p>
+						<div className="max-w-xl space-y-2 py-1">
+							<Slider
+								aria-label="Desired replicas"
+								min={1}
+								max={32}
+								step={1}
+								value={desiredReplicas}
+								onValueChange={(value) => {
+									setIsEditing(true);
+									setDesiredReplicas(value);
+								}}
+							/>
+							<div className="flex justify-between text-center text-xs text-muted-foreground">
+								<span className="w-4 shrink-0">1</span>
+								<span className="w-4 shrink-0">32</span>
+							</div>
+						</div>
 						{hasChanges ? (
 							<div className="pt-3 border-t">
 								<Button onClick={handleSave} disabled={isSaving} size="sm">
@@ -509,7 +505,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 											}
 											disabled={!!manualServerUnavailableReason(server)}
 											min={0}
-											max={10}
+											max={32}
 											className="w-16 h-8 text-center"
 										/>
 										<Button
@@ -523,7 +519,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 												)
 											}
 											disabled={
-												(localReplicas[server.id] || 0) >= 10 ||
+												(localReplicas[server.id] || 0) >= 32 ||
 												!!manualServerUnavailableReason(server)
 											}
 										>
@@ -541,7 +537,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 						</div>
 						{!manualTotalIsValid && (
 							<p className="text-sm text-amber-600 dark:text-amber-400">
-								Manual placement requires 1 to 10 replicas in total.
+								Manual placement requires 1 to 32 replicas in total.
 							</p>
 						)}
 						{hasChanges && (

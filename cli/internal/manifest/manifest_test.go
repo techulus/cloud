@@ -66,7 +66,7 @@ func TestPlacementRoundTripAndValidation(t *testing.T) {
 		{"blank server", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: " ", Count: 1}}}, 1},
 		{"duplicate server", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 1}, {ServerID: "a", Count: 1}}}, 2},
 		{"nonpositive count", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 0}}}, 1},
-		{"total exceeds limit", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 11}}}, 10},
+		{"total exceeds limit", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 33}}}, 32},
 		{"total differs from replicas", &Placement{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 1}}}, 2},
 	}
 	for _, tc := range tests {
@@ -79,6 +79,26 @@ func TestPlacementRoundTripAndValidation(t *testing.T) {
 				t.Fatal("invalid placement accepted")
 			}
 		})
+	}
+}
+
+func TestReplicaLimit(t *testing.T) {
+	for _, placement := range []*Placement{
+		{Mode: "automatic"},
+		{Mode: "manual", Servers: []PlacementServer{{ServerID: "a", Count: 32}}},
+	} {
+		m := base()
+		m.Service.Replicas = 32
+		m.Service.Placement = placement
+		if err := Validate(m); err != nil {
+			t.Fatalf("32 replicas rejected: %v", err)
+		}
+	}
+
+	m := base()
+	m.Service.Replicas = 33
+	if err := Validate(m); err == nil {
+		t.Fatal("33 replicas accepted")
 	}
 }
 

@@ -85,7 +85,7 @@ const serviceRevisionSpecSchema = z
 			z.strictObject({ mode: z.literal("manual") }),
 			z.strictObject({
 				mode: z.literal("automatic"),
-				replicas: z.number().int().min(1).max(10),
+				replicas: z.number().int().min(1).max(32),
 			}),
 		]),
 		...serviceRevisionSpecFields,

@@ -554,7 +554,7 @@ const hostnameSchema = z
 export const placementSchema = z.discriminatedUnion("mode", [
 	z.strictObject({
 		mode: z.literal("automatic"),
-		replicas: z.number().int().min(1).max(10),
+		replicas: z.number().int().min(1).max(32),
 	}),
 	z
 		.strictObject({
@@ -563,7 +563,7 @@ export const placementSchema = z.discriminatedUnion("mode", [
 				.array(
 					z.strictObject({
 						serverId: z.string().min(1),
-						count: z.number().int().min(1).max(10),
+						count: z.number().int().min(1).max(32),
 					}),
 				)
 				.min(1),
@@ -578,10 +578,10 @@ export const placementSchema = z.discriminatedUnion("mode", [
 					message: "Server IDs must be unique",
 					path: ["placements"],
 				});
-			if (value.placements.reduce((sum, item) => sum + item.count, 0) > 10)
+			if (value.placements.reduce((sum, item) => sum + item.count, 0) > 32)
 				context.addIssue({
 					code: "custom",
-					message: "Total replicas must be between 1 and 10",
+					message: "Total replicas must be between 1 and 32",
 					path: ["placements"],
 				});
 		}),
