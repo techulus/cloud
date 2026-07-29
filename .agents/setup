@@ -3,10 +3,16 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mise_bin="$HOME/.local/bin/mise"
+export PATH="$HOME/.local/bin:$PATH"
 
 echo "Installing mise..."
 if [[ ! -x "$mise_bin" ]]; then
 	curl -fsSL https://mise.run | sh
+fi
+
+echo "Installing Basecamp CLI..."
+if ! command -v basecamp >/dev/null 2>&1; then
+	curl -fsSL https://basecamp.com/install-cli | BASECAMP_BIN_DIR="$HOME/.local/bin" BASECAMP_SKIP_SETUP=1 BASECAMP_SETUP_AGENT=none bash
 fi
 
 profile_marker="# Techulus Cloud toolchains managed by mise"
