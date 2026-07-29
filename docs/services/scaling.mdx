@@ -7,7 +7,7 @@ description: "Replicas, placement, and server pinning."
 
 Each service can run multiple replicas across your cluster. Configure how many replicas run on each server from the service settings.
 
-Replica count ranges from 1 to 10 per service.
+Replica count ranges from 1 to 32 per service.
 
 ## Serverless scaling
 
@@ -59,7 +59,7 @@ You can also manually lock any service to a specific server by setting the locke
 - Stateful services are limited to 1 replica.
 - Stateful services are always pinned to their locked server.
 - Stateful services do not automatically fail over to another server.
-- Maximum 10 replicas per service.
+- Maximum 32 replicas per service.
 - Serverless scaling requires a public HTTP service domain.
 - Sleep and wake are proxy-local; serverless replicas must be placed on proxy nodes.
 - Serverless traffic must be routed only to proxy nodes that own a local proxy replica for that service.

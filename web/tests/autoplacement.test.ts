@@ -41,11 +41,17 @@ describe("automatic placement distribution", () => {
 		).toEqual(counts);
 	});
 
-	it("stacks ten replicas deterministically on two servers", () => {
-		expect(distributeReplicas(["b", "a"], 10)).toEqual([
-			{ serverId: "a", replicas: 5 },
-			{ serverId: "b", replicas: 5 },
+	it("stacks 32 replicas deterministically on two servers", () => {
+		expect(distributeReplicas(["b", "a"], 32)).toEqual([
+			{ serverId: "a", replicas: 16 },
+			{ serverId: "b", replicas: 16 },
 		]);
+	});
+
+	it("rejects more than 32 replicas", () => {
+		expect(() => distributeReplicas(["a"], 33)).toThrow(
+			"Replica count must be between 1 and 32",
+		);
 	});
 });
 

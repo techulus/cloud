@@ -250,12 +250,22 @@ describe("service revision specification", () => {
 	it("snapshots automatic placement intent without resolved placements", () => {
 		const input = draft({ volumes: [] });
 		input.service.placementMode = "automatic";
-		input.service.replicas = 4;
+		input.service.replicas = 32;
 
 		expect(buildServiceRevisionSpec(input)).toMatchObject({
-			placement: { mode: "automatic", replicas: 4 },
+			placement: { mode: "automatic", replicas: 32 },
 			placements: [],
 		});
+	});
+
+	it("rejects more than 32 automatic replicas", () => {
+		const input = draft({ volumes: [] });
+		input.service.placementMode = "automatic";
+		input.service.replicas = 33;
+
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"Maximum 32 replicas allowed",
+		);
 	});
 
 	it("rejects automatic placement for stateful and volume-backed services", () => {

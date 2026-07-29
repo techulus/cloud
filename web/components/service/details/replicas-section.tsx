@@ -199,7 +199,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 		setIsEditing(true);
 		setLocalReplicas((prev) => ({
 			...prev,
-			[serverId]: Math.max(0, Math.min(10, Math.floor(value))),
+			[serverId]: Math.max(0, Math.min(32, Math.floor(value))),
 		}));
 	}, []);
 
@@ -212,7 +212,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 				(sum, count) => sum + count,
 				0,
 			);
-			setDesiredReplicas(Math.max(1, Math.min(10, manualTotal || 1)));
+			setDesiredReplicas(Math.max(1, Math.min(32, manualTotal || 1)));
 		}
 		setPlacementMode(nextMode);
 	};
@@ -269,7 +269,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 			: null;
 	};
 
-	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 10;
+	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 32;
 
 	if (service.stateful) {
 		return (
@@ -402,19 +402,24 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
-						<div className="space-y-1">
-							<p className="text-sm font-medium">Desired replicas</p>
-							<p className="text-sm text-muted-foreground">
-								The control plane distributes replicas evenly across healthy
-								{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
-								moves them after failures.
-							</p>
+						<div className="flex items-start justify-between gap-4">
+							<div className="space-y-1">
+								<p className="text-sm font-medium">Desired replicas</p>
+								<p className="text-sm text-muted-foreground">
+									The control plane distributes replicas evenly across healthy
+									{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
+									moves them after failures.
+								</p>
+							</div>
+							<span className="shrink-0 text-sm font-medium tabular-nums">
+								{desiredReplicas}
+							</span>
 						</div>
 						<div className="space-y-2 py-1">
 							<Slider
 								aria-label="Desired replicas"
 								min={1}
-								max={10}
+								max={32}
 								step={1}
 								value={desiredReplicas}
 								onValueChange={(value) => {
@@ -422,21 +427,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 									setDesiredReplicas(value);
 								}}
 							/>
-							<div className="flex justify-between text-center text-xs">
-								{Array.from({ length: 10 }, (_, index) => index + 1).map(
-									(value) => (
-										<span
-											key={value}
-											className={
-												value <= desiredReplicas
-													? "w-3 shrink-0 text-foreground"
-													: "w-3 shrink-0 text-muted-foreground"
-											}
-										>
-											{value}
-										</span>
-									),
-								)}
+							<div className="flex justify-between text-center text-xs text-muted-foreground">
+								<span className="w-3 shrink-0">1</span>
+								<span className="w-3 shrink-0">32</span>
 							</div>
 						</div>
 						{hasChanges ? (
@@ -512,7 +505,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 											}
 											disabled={!!manualServerUnavailableReason(server)}
 											min={0}
-											max={10}
+											max={32}
 											className="w-16 h-8 text-center"
 										/>
 										<Button
@@ -526,7 +519,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 												)
 											}
 											disabled={
-												(localReplicas[server.id] || 0) >= 10 ||
+												(localReplicas[server.id] || 0) >= 32 ||
 												!!manualServerUnavailableReason(server)
 											}
 										>
@@ -544,7 +537,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 						</div>
 						{!manualTotalIsValid && (
 							<p className="text-sm text-amber-600 dark:text-amber-400">
-								Manual placement requires 1 to 10 replicas in total.
+								Manual placement requires 1 to 32 replicas in total.
 							</p>
 						)}
 						{hasChanges && (

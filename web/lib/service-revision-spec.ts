@@ -238,8 +238,8 @@ function validateServiceRevisionSpec(
 	if (totalReplicas < 1 && !allowNoPlacements) {
 		throw new Error("At least one replica is required");
 	}
-	if (totalReplicas > 10) {
-		throw new Error("Maximum 10 replicas allowed");
+	if (totalReplicas > 32) {
+		throw new Error("Maximum 32 replicas allowed");
 	}
 	if (
 		specification.placement.mode === "automatic" &&
