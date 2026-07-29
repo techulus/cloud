@@ -39,8 +39,8 @@ An open container deployment platform. See README.md for architecture.
 
 ## Communication
 
-- Keep responses concise and to the point. Avoid verbose essays; the user does
-  not have time to read them.
+- Keep responses concise and to the point. Avoid verbose responses unless
+  explicitly asked.
 
 ## ⚠️ Critical restrictions
 
