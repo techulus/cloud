@@ -10,11 +10,6 @@ if [[ ! -x "$mise_bin" ]]; then
 	curl -fsSL https://mise.run | sh
 fi
 
-echo "Installing Basecamp CLI..."
-if ! command -v basecamp >/dev/null 2>&1; then
-	curl -fsSL https://basecamp.com/install-cli | BASECAMP_BIN_DIR="$HOME/.local/bin" BASECAMP_SKIP_SETUP=1 BASECAMP_SETUP_AGENT=none bash
-fi
-
 profile_marker="# Techulus Cloud toolchains managed by mise"
 if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
 	cat >> "$HOME/.bash_profile" <<'EOF'
