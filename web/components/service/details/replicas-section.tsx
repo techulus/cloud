@@ -13,6 +13,7 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
@@ -402,40 +403,42 @@ export const ReplicasSection = memo(function ReplicasSection({
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
 						<div className="space-y-1">
-							<label htmlFor="desired-replicas" className="text-sm font-medium">
-								Desired replicas
-							</label>
+							<p className="text-sm font-medium">Desired replicas</p>
 							<p className="text-sm text-muted-foreground">
 								The control plane distributes replicas evenly across healthy
 								{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
 								moves them after failures.
 							</p>
 						</div>
-						<Input
-							id="desired-replicas"
-							type="number"
-							min={1}
-							max={10}
-							step={1}
-							value={desiredReplicas}
-							onChange={(event) => {
-								setIsEditing(true);
-								setDesiredReplicas(
-									Math.max(
-										1,
-										Math.min(10, Math.floor(event.target.valueAsNumber || 1)),
+						<div className="space-y-2 py-1">
+							<Slider
+								aria-label="Desired replicas"
+								min={1}
+								max={10}
+								step={1}
+								value={desiredReplicas}
+								onValueChange={(value) => {
+									setIsEditing(true);
+									setDesiredReplicas(value);
+								}}
+							/>
+							<div className="flex justify-between text-center text-xs">
+								{Array.from({ length: 10 }, (_, index) => index + 1).map(
+									(value) => (
+										<span
+											key={value}
+											className={
+												value <= desiredReplicas
+													? "w-3 shrink-0 text-foreground"
+													: "w-3 shrink-0 text-muted-foreground"
+											}
+										>
+											{value}
+										</span>
 									),
-								);
-							}}
-							className="w-24"
-							aria-describedby="automatic-replica-range"
-						/>
-						<p
-							id="automatic-replica-range"
-							className="text-xs text-muted-foreground"
-						>
-							Choose between 1 and 10 replicas.
-						</p>
+								)}
+							</div>
+						</div>
 						{hasChanges ? (
 							<div className="pt-3 border-t">
 								<Button onClick={handleSave} disabled={isSaving} size="sm">
