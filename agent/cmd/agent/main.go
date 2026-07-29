@@ -141,7 +141,7 @@ func main() {
 		}
 
 		if err = container.EnsureNetwork(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to ensure container network: %v", err)
+			log.Printf("Warning: Failed to ensure container network/forwarding: %v", err)
 		}
 
 		if !disableDNS {
@@ -258,7 +258,7 @@ func main() {
 
 		log.Println("Ensuring container network exists...")
 		if err = container.EnsureNetwork(config.SubnetID); err != nil {
-			log.Printf("Warning: Failed to create container network: %v", err)
+			log.Printf("Warning: Failed to ensure container network/forwarding: %v", err)
 		} else {
 			log.Println("Container network ready")
 		}
