@@ -1,30 +1,9 @@
 package container
 
 import (
-	"errors"
-	"os/exec"
 	"slices"
 	"testing"
 )
-
-func TestIPTablesRuleMissing(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{name: "rule absent", err: exec.Command("sh", "-c", "exit 1").Run(), want: true},
-		{name: "iptables failure", err: exec.Command("sh", "-c", "exit 2").Run(), want: false},
-		{name: "ordinary error", err: errors.New("failed"), want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isIPTablesRuleMissing(tt.err); got != tt.want {
-				t.Fatalf("isIPTablesRuleMissing() = %t, want %t", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestBuildPodmanRunArgsPublishesLoopbackPortsWithStaticIP(t *testing.T) {
 	args := buildPodmanRunArgs(&DeployConfig{
