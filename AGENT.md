@@ -37,6 +37,11 @@ An open container deployment platform. See README.md for architecture.
   high-value critical behavior, serious regression risk, or contracts that
   would be costly to break. Keep tests focused; avoid low-signal harnesses.
 
+## Communication
+
+- Keep responses concise and to the point. Avoid verbose essays; the user does
+  not have time to read them.
+
 ## ⚠️ Critical restrictions
 
 - **NEVER run the Node application** (`next dev`, `next start`, `pnpm dev`), Go Agent or Go CLI
