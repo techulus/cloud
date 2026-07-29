@@ -55,7 +55,7 @@ export function SummaryCardStat({
 			<span className="font-mono uppercase tracking-wider text-muted-foreground">
 				{label}
 			</span>
-			<span className="mb-[3px] flex-1 border-b border-dotted border-slate-300 dark:border-slate-600" />
+			<span className="mb-[3px] flex-1 border-b border-dotted border-slate-300 opacity-50 dark:border-slate-600" />
 			{children}
 		</div>
 	);
