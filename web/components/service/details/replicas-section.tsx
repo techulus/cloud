@@ -428,8 +428,8 @@ export const ReplicasSection = memo(function ReplicasSection({
 								}}
 							/>
 							<div className="flex justify-between text-center text-xs text-muted-foreground">
-								<span className="w-3 shrink-0">1</span>
-								<span className="w-3 shrink-0">32</span>
+								<span className="w-4 shrink-0">1</span>
+								<span className="w-4 shrink-0">32</span>
 							</div>
 						</div>
 						{hasChanges ? (
