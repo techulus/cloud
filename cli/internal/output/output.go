@@ -2,6 +2,7 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -36,7 +37,8 @@ func OK(w io.Writer, data any, summary string) error {
 
 func Error(w io.Writer, err error) error {
 	envelope := ErrorEnvelope{OK: false, Error: err.Error()}
-	if planned, ok := err.(errorWithPlan); ok {
+	var planned errorWithPlan
+	if errors.As(err, &planned) {
 		envelope.Plan = planned.PlanData()
 	}
 	return JSON(w, envelope)

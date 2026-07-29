@@ -175,9 +175,22 @@ export async function putConfigurationRoute(
 		return badRequest("A valid If-Match configuration version is required");
 	}
 	try {
-		return Response.json(
-			await replaceConfiguration(scope.service, parsed.data, expectedVersion),
+		const result = await replaceConfiguration(
+			scope.service,
+			parsed.data,
+			expectedVersion,
 		);
+		return Response.json({
+			target: {
+				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
+				environment: {
+					id: scope.target.environmentId,
+					name: scope.target.environmentName,
+				},
+				service: { id: scope.service.id, name: parsed.data.name },
+			},
+			...result,
+		});
 	} catch (error) {
 		return isPublicApiDomainError(error)
 			? publicApiDomainResponse(error)

@@ -522,7 +522,11 @@ func (a *App) applyCommand() *cobra.Command {
 			} else {
 				body["placement"] = map[string]any{"mode": "manual", "placements": placement.Servers}
 			}
-			base := serviceBase(loaded.Manifest) + "/configuration"
+			base, err := serviceBase(loaded.Manifest)
+			if err != nil {
+				return err
+			}
+			base += "/configuration"
 			var plan applyResponse
 			if err := client.RequestJSON(cmd.Context(), http.MethodPost, base+"/plan", nil, body, &plan); err != nil {
 				return err
@@ -532,7 +536,7 @@ func (a *App) applyCommand() *cobra.Command {
 			staleReplans := 0
 			for {
 				if !a.isMachineOutput() {
-					printApplyResult(a.Out, plan)
+					printApplyResult(a.Out, "Plan", plan)
 				}
 				if len(plan.Changes) == 0 {
 					if a.isMachineOutput() {
@@ -577,8 +581,9 @@ func (a *App) applyCommand() *cobra.Command {
 					return err
 				}
 				if a.isMachineOutput() {
-					return a.writeData(plan, "Applied")
+					return a.writeData(result, "Applied")
 				}
+				printApplyResult(a.Out, "Applied", result)
 				return nil
 			}
 		},
@@ -667,18 +672,22 @@ func (a *App) deployCommand() *cobra.Command {
 			if !loaded.Manifest.Linked() {
 				return errors.New("service is not linked: run `tc link`")
 			}
+			base, err := serviceBase(loaded.Manifest)
+			if err != nil {
+				return err
+			}
 			var persisted struct {
 				Current struct {
 					Source manifest.Source `json:"source"`
 				} `json:"current"`
 			}
-			if err := client.RequestJSON(cmd.Context(), http.MethodGet, serviceBase(loaded.Manifest)+"/configuration", nil, nil, &persisted); err != nil {
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, base+"/configuration", nil, nil, &persisted); err != nil {
 				return err
 			}
 			if !sourcesEqual(loaded.Manifest.Service.Source, persisted.Current.Source) {
 				return errors.New("service source differs from techulus.yml: run `tc apply` before deploying")
 			}
-			if err := client.RequestJSON(cmd.Context(), http.MethodPost, serviceBase(loaded.Manifest)+"/deploy", nil, nil, &result); err != nil {
+			if err := client.RequestJSON(cmd.Context(), http.MethodPost, base+"/deploy", nil, nil, &result); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
@@ -716,9 +725,13 @@ func (a *App) statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			base, err := serviceBase(value)
+			if err != nil {
+				return err
+			}
 			var status statusResponse
 			client := a.client(config)
-			if err := client.RequestJSON(cmd.Context(), http.MethodGet, serviceBase(value)+"/status", nil, nil, &status); err != nil {
+			if err := client.RequestJSON(cmd.Context(), http.MethodGet, base+"/status", nil, nil, &status); err != nil {
 				return err
 			}
 			if a.isMachineOutput() {
@@ -811,9 +824,6 @@ func (a *App) environmentsCommand() *cobra.Command {
 		if id == "" {
 			return errors.New("missing --project")
 		}
-		if id == "" {
-			return errors.New("missing --project (or link this directory)")
-		}
 		out, e := fetchAllEnvironments(cmd.Context(), a.client(cfg), "/api/v1/projects/"+url.PathEscape(id)+"/environments")
 		if e != nil {
 			return e
@@ -869,12 +879,16 @@ func (a *App) resourceCommand(name, short, suffix string, q func(*cobra.Command)
 		if e != nil {
 			return e
 		}
+		base, e := serviceBase(m)
+		if e != nil {
+			return e
+		}
 		query := url.Values{}
 		if q != nil {
 			query = q(cmd)
 		}
 		var out map[string]any
-		if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, serviceBase(m)+suffix, query, nil, &out); e != nil {
+		if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, base+suffix, query, nil, &out); e != nil {
 			return e
 		}
 		label := strings.ToUpper(name[:1]) + name[1:]
@@ -938,6 +952,10 @@ func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id st
 	if e != nil {
 		return e
 	}
+	base, e := serviceBase(m)
+	if e != nil {
+		return e
+	}
 	suffix := "/rollouts/" + url.PathEscape(id)
 	query := url.Values{}
 	if logs {
@@ -948,7 +966,7 @@ func (a *App) getRolloutResource(cmd *cobra.Command, t serviceTargetFlags, id st
 		}
 	}
 	var out map[string]any
-	if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, serviceBase(m)+suffix, query, nil, &out); e != nil {
+	if e = a.client(cfg).RequestJSON(cmd.Context(), http.MethodGet, base+suffix, query, nil, &out); e != nil {
 		return e
 	}
 	if a.isMachineOutput() {
@@ -1187,11 +1205,11 @@ func (a *App) resolveServiceTarget(target serviceTargetFlags) (manifest.Manifest
 	}, nil
 }
 
-func serviceBase(value manifest.Manifest) string {
+func serviceBase(value manifest.Manifest) (string, error) {
 	if value.Target == nil || strings.TrimSpace(value.Target.ServiceID) == "" {
-		panic("serviceBase called without a valid service target")
+		return "", errors.New("service is not linked: run `tc link`")
 	}
-	return "/api/v1/services/" + url.PathEscape(value.Target.ServiceID)
+	return "/api/v1/services/" + url.PathEscape(value.Target.ServiceID), nil
 }
 
 func sourcePatch(source manifest.Source) map[string]any {
@@ -1502,6 +1520,10 @@ func (a *App) sleep(ctx context.Context, duration time.Duration) error {
 }
 
 func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest, tail int, cursor, search, logRange string) (logsResponse, error) {
+	base, err := serviceBase(value)
+	if err != nil {
+		return logsResponse{}, err
+	}
 	query := url.Values{}
 	query.Set("tail", strconv.Itoa(tail))
 	if search != "" {
@@ -1515,12 +1537,12 @@ func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest,
 		query.Set("wait", "20")
 	}
 	var result logsResponse
-	err := client.RequestJSON(ctx, http.MethodGet, serviceBase(value)+"/logs", query, nil, &result)
+	err = client.RequestJSON(ctx, http.MethodGet, base+"/logs", query, nil, &result)
 	return result, err
 }
 
-func printApplyResult(w io.Writer, result applyResponse) {
-	output.Section(w, "Plan")
+func printApplyResult(w io.Writer, title string, result applyResponse) {
+	output.Section(w, title)
 	if result.Target.Service.ID != "" {
 		output.Field(w, "Target", fmt.Sprintf("%s/%s/%s", result.Target.Project.Slug, result.Target.Environment.Name, result.Target.Service.Name))
 	}
@@ -1531,7 +1553,35 @@ func printApplyResult(w io.Writer, result applyResponse) {
 	}
 	output.Section(w, fmt.Sprintf("Changes (%d)", len(result.Changes)))
 	for _, change := range result.Changes {
-		fmt.Fprintf(w, "  * %s: %v -> %v\n", change.Field, change.From, change.To)
+		fmt.Fprintf(w, "  * %s: %s -> %s\n", change.Field, formatApplyValue(change.From), formatApplyValue(change.To))
+	}
+}
+
+func formatApplyValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return typed
+	case []any:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, formatApplyValue(item))
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		fields := make([]string, 0, len(keys))
+		for _, key := range keys {
+			fields = append(fields, key+"="+formatApplyValue(typed[key]))
+		}
+		return "(" + strings.Join(fields, ", ") + ")"
+	default:
+		return fmt.Sprint(value)
 	}
 }
 

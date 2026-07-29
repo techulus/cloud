@@ -808,11 +808,16 @@ async function replaceConfigurationInternal(
 	input: ReplacementInput,
 	expectedVersion: string | null,
 ) {
-	if (input.source.type === "image") {
+	let imageValidated = false;
+	if (
+		input.source.type === "image" &&
+		(service.sourceType !== "image" || input.source.image !== service.image)
+	) {
 		const validation = await validateDockerImageInternal(input.source.image);
 		if (!validation.valid) {
 			domainError(validation.error || "Invalid image", "INVALID_IMAGE", 400);
 		}
+		imageValidated = true;
 	}
 
 	return db.transaction(async (tx) => {
@@ -853,6 +858,16 @@ async function replaceConfigurationInternal(
 			ports,
 			placements,
 		);
+		if (
+			input.source.type === "image" &&
+			input.source.image !== persisted.image &&
+			!imageValidated
+		) {
+			domainError(
+				"Service image changed while the configuration was being validated",
+				"CONFIGURATION_PLAN_STALE",
+			);
+		}
 		const plan = planCanonicalConfiguration(currentState, input);
 		if (expectedVersion !== null && plan.currentVersion !== expectedVersion) {
 			domainError(

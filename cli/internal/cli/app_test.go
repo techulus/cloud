@@ -387,6 +387,7 @@ func TestApplyPlacementPayloads(t *testing.T) {
 func TestApplyPlansAndRequiresConfirmation(t *testing.T) {
 	const firstVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	planWithChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"desiredVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"name","from":"old-web","to":"web"},{"field":"source.branch","from":"develop","to":"main"}]}`, firstVersion)
+	appliedWithChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":%q,"desiredVersion":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","changes":[{"field":"name","from":"applied-old-web","to":"web"}]}`, firstVersion)
 	noChanges := fmt.Sprintf(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"action":"noop","currentVersion":%q,"desiredVersion":%q,"changes":[]}`, firstVersion, firstVersion)
 
 	t.Run("no changes skips prompt and write", func(t *testing.T) {
@@ -461,7 +462,7 @@ func TestApplyPlansAndRequiresConfirmation(t *testing.T) {
 				if got := r.Header.Get("If-Match"); got != `"`+firstVersion+`"` {
 					t.Errorf("If-Match = %q", got)
 				}
-				w.Write([]byte(planWithChanges))
+				w.Write([]byte(appliedWithChanges))
 			default:
 				t.Errorf("unexpected request %d", len(requests))
 			}
@@ -470,7 +471,7 @@ func TestApplyPlansAndRequiresConfirmation(t *testing.T) {
 		writeConfig(t, s.URL)
 		d := t.TempDir()
 		writeManifest(t, d, imageManifest)
-		app, _ := testApp(t, d, s.Client())
+		app, out := testApp(t, d, s.Client())
 		app.IsInteractive = func() bool { return true }
 		app.In = strings.NewReader("yes\n")
 		if err := execute(app, "apply"); err != nil {
@@ -480,6 +481,7 @@ func TestApplyPlansAndRequiresConfirmation(t *testing.T) {
 		if !reflect.DeepEqual(requests, want) {
 			t.Fatalf("requests=%v", requests)
 		}
+		assertHumanOutput(t, out.String(), "Plan", "Applied", "name: applied-old-web -> web")
 	})
 }
 
@@ -578,14 +580,19 @@ func TestApplyStopsAfterRepeatedStalePlans(t *testing.T) {
 	}
 }
 
-func TestApplyYesMachineOutputIsStructuredPlan(t *testing.T) {
-	const response = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"old","to":"web"}]}`
+func TestApplyYesMachineOutputUsesApplyResponse(t *testing.T) {
+	const plan = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"planned-old","to":"web"}]}`
+	const applied = `{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"action":"updated","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[{"field":"name","from":"applied-old","to":"web"}]}`
 	for _, mode := range []string{"--agent", "--json"} {
 		t.Run(mode, func(t *testing.T) {
 			requests := 0
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				requests++
-				w.Write([]byte(response))
+				if requests == 1 {
+					w.Write([]byte(plan))
+					return
+				}
+				w.Write([]byte(applied))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
@@ -595,8 +602,23 @@ func TestApplyYesMachineOutputIsStructuredPlan(t *testing.T) {
 			if err := execute(app, mode, "apply", "--yes"); err != nil {
 				t.Fatal(err)
 			}
-			var value any
-			if requests != 2 || json.Unmarshal(out.Bytes(), &value) != nil {
+			var result applyResponse
+			if mode == "--agent" {
+				if json.Unmarshal(out.Bytes(), &result) != nil {
+					t.Fatalf("output=%q", out.String())
+				}
+			} else {
+				var envelope struct {
+					OK      bool          `json:"ok"`
+					Data    applyResponse `json:"data"`
+					Summary string        `json:"summary"`
+				}
+				if json.Unmarshal(out.Bytes(), &envelope) != nil || !envelope.OK || envelope.Summary != "Applied" {
+					t.Fatalf("output=%q", out.String())
+				}
+				result = envelope.Data
+			}
+			if requests != 2 || len(result.Changes) != 1 || result.Changes[0].From != "applied-old" {
 				t.Fatalf("requests=%d output=%q", requests, out.String())
 			}
 		})
@@ -630,7 +652,7 @@ func TestApplyStaleMachineErrorIncludesReplacementPlan(t *testing.T) {
 	if err == nil || calls != 3 {
 		t.Fatalf("error=%v calls=%d", err, calls)
 	}
-	if err := output.Error(out, err); err != nil {
+	if err := output.Error(out, fmt.Errorf("apply failed: %w", err)); err != nil {
 		t.Fatal(err)
 	}
 	var envelope struct {
@@ -640,6 +662,38 @@ func TestApplyStaleMachineErrorIncludesReplacementPlan(t *testing.T) {
 	}
 	if json.Unmarshal(out.Bytes(), &envelope) != nil || envelope.OK || envelope.Plan.Changes[0].From != "newer" {
 		t.Fatalf("output=%s", out.String())
+	}
+}
+
+func TestApplyOutputFormatsStructuredValuesForHumans(t *testing.T) {
+	var out bytes.Buffer
+	printApplyResult(&out, "Plan", applyResponse{
+		Action: "updated",
+		Changes: []applyChange{{
+			Field: "ports",
+			From: []any{map[string]any{
+				"containerPort": float64(8080),
+				"domain":        nil,
+				"public":        false,
+			}},
+			To: []any{map[string]any{
+				"containerPort": float64(8080),
+				"domain":        "api.example.com",
+				"public":        true,
+			}},
+		}},
+	})
+
+	assertHumanOutput(
+		t,
+		out.String(),
+		"ports: [(containerPort=8080, domain=null, public=false)] -> [(containerPort=8080, domain=api.example.com, public=true)]",
+	)
+}
+
+func TestServiceBaseRejectsMissingTarget(t *testing.T) {
+	if _, err := serviceBase(manifest.Manifest{}); err == nil || !strings.Contains(err.Error(), "not linked") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
