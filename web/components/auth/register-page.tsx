@@ -31,20 +31,24 @@ export function RegisterPage() {
 		setError("");
 		setLoading(true);
 
-		const { error } = await signUp.email({
-			name,
-			email,
-			password,
-		});
+		try {
+			const { error } = await signUp.email({
+				name,
+				email,
+				password,
+			});
 
-		setLoading(false);
+			if (error) {
+				setError(error.message || "Failed to create account");
+				return;
+			}
 
-		if (error) {
-			setError(error.message || "Failed to create account");
-			return;
+			router.push(redirectTo);
+		} catch {
+			setError("Failed to create account");
+		} finally {
+			setLoading(false);
 		}
-
-		router.push(redirectTo);
 	}
 
 	return (

@@ -19,6 +19,7 @@ import type {
 	Server as ServerType,
 	ServiceWithDetails as Service,
 } from "@/db/types";
+import { fetcher as fetchJson } from "@/lib/fetcher";
 
 type ServerInfo = Pick<
 	ServerType,
@@ -27,8 +28,7 @@ type ServerInfo = Pick<
 type PlacementMode = "manual" | "automatic";
 
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
-	const res = await fetch(url);
-	const servers: ServerInfo[] = await res.json();
+	const servers = await fetchJson<ServerInfo[]>(url);
 	return servers.map(({ id, name, isProxy, status, wireguardIp }) => ({
 		id,
 		name,
@@ -47,7 +47,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 	service: Service;
 	onUpdate: () => void;
 }) {
-	const { data: servers, isLoading } = useSWR(SERVERS_URL, fetcher);
+	const { data: servers, error, isLoading } = useSWR(SERVERS_URL, fetcher);
+	const loadError =
+		error instanceof Error ? error.message : "Failed to load servers";
 	const [localReplicas, setLocalReplicas] = useState<Record<string, number>>(
 		{},
 	);
@@ -282,6 +284,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 						<div className="flex justify-center py-4">
 							<Spinner />
 						</div>
+					) : error ? (
+						<Empty className="py-6">
+							<EmptyMedia variant="icon">
+								<AlertTriangle />
+							</EmptyMedia>
+							<EmptyTitle>Failed to load servers</EmptyTitle>
+							<EmptyDescription>{loadError}</EmptyDescription>
+						</Empty>
 					) : !servers || servers.length === 0 ? (
 						<Empty className="py-6">
 							<EmptyMedia variant="icon">
@@ -438,6 +448,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 					<div className="flex justify-center py-4">
 						<Spinner />
 					</div>
+				) : error ? (
+					<Empty className="py-6">
+						<EmptyMedia variant="icon">
+							<AlertTriangle />
+						</EmptyMedia>
+						<EmptyTitle>Failed to load servers</EmptyTitle>
+						<EmptyDescription>{loadError}</EmptyDescription>
+					</Empty>
 				) : !servers || servers.length === 0 ? (
 					<Empty className="py-6">
 						<EmptyMedia variant="icon">
