@@ -402,7 +402,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
-						<div className="flex items-start justify-between gap-4">
+						<div className="flex max-w-xl items-start justify-between gap-4">
 							<div className="space-y-1">
 								<p className="text-sm font-medium">Desired replicas</p>
 								<p className="text-sm text-muted-foreground">
@@ -415,7 +415,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 								{desiredReplicas}
 							</span>
 						</div>
-						<div className="space-y-2 py-1">
+						<div className="max-w-xl space-y-2 py-1">
 							<Slider
 								aria-label="Desired replicas"
 								min={1}
