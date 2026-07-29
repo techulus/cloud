@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/retry"
+	"techulus/cloud-agent/internal/wireguard"
 )
 
 func ContainerExists(containerID string) (bool, error) {
@@ -498,31 +500,70 @@ func EnsureNetwork(subnetId int) error {
 	gateway := fmt.Sprintf("10.200.%d.1", subnetId)
 
 	checkCmd := exec.Command("podman", "network", "inspect", NetworkName)
-	if err := checkCmd.Run(); err == nil {
+	if err := checkCmd.Run(); err != nil {
+		args := []string{
+			"network", "create",
+			"--driver", "bridge",
+			"--subnet", subnet,
+			"--gateway", gateway,
+			"--disable-dns",
+			NetworkName,
+		}
+
+		createCmd := exec.Command("podman", args...)
+		output, err := createCmd.CombinedOutput()
+		if err != nil && !strings.Contains(string(output), "already exists") {
+			return fmt.Errorf("failed to create network: %s: %w", string(output), err)
+		}
+
+		if err == nil {
+			// Podman only creates the bridge interface when a container uses the network.
+			// Run a throwaway container to force bridge creation so DNS can bind to the gateway IP.
+			exec.Command("podman", "run", "--rm", "--network", NetworkName, "busybox", "true").Run()
+		}
+	}
+
+	return ensureForwarding(subnetId)
+}
+
+func forwardingRuleArgs(subnetId int) []string {
+	return []string{
+		"-i", wireguard.DefaultInterface,
+		"-d", fmt.Sprintf("10.200.%d.0/24", subnetId),
+		"-m", "conntrack",
+		"--ctstate", "NEW,RELATED,ESTABLISHED",
+		"-j", "ACCEPT",
+	}
+}
+
+func isIPTablesRuleMissing(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+func ensureForwarding(subnetId int) error {
+	if exec.Command("systemctl", "is-active", "--quiet", "firewalld").Run() == nil {
+		return fmt.Errorf("active firewalld is not supported for WireGuard container forwarding")
+	}
+	if _, err := exec.LookPath("iptables"); err != nil {
+		return fmt.Errorf("iptables not found: %w", err)
+	}
+
+	rule := forwardingRuleArgs(subnetId)
+	checkArgs := append([]string{"-w", "5", "-C", "FORWARD"}, rule...)
+	output, err := exec.Command("iptables", checkArgs...).CombinedOutput()
+	if err == nil {
 		return nil
 	}
-
-	args := []string{
-		"network", "create",
-		"--driver", "bridge",
-		"--subnet", subnet,
-		"--gateway", gateway,
-		"--disable-dns",
-		NetworkName,
+	if !isIPTablesRuleMissing(err) {
+		return fmt.Errorf("failed to check WireGuard container forwarding: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 
-	createCmd := exec.Command("podman", args...)
-	output, err := createCmd.CombinedOutput()
+	insertArgs := append([]string{"-w", "5", "-I", "FORWARD", "1"}, rule...)
+	output, err = exec.Command("iptables", insertArgs...).CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(output), "already exists") {
-			return nil
-		}
-		return fmt.Errorf("failed to create network: %s: %w", string(output), err)
+		return fmt.Errorf("failed to allow WireGuard container forwarding: %s: %w", strings.TrimSpace(string(output)), err)
 	}
-
-	// Podman only creates the bridge interface when a container uses the network.
-	// Run a throwaway container to force bridge creation so DNS can bind to the gateway IP.
-	exec.Command("podman", "run", "--rm", "--network", NetworkName, "busybox", "true").Run()
 
 	return nil
 }
