@@ -46,15 +46,15 @@ vi.mock("@/lib/inngest/functions", () => mocks.functions);
 import "@/app/api/inngest/route";
 
 describe("Inngest route", () => {
-	it("registers control-plane update and agent-upgrade timeout crons", () => {
+	it("registers every configured function", () => {
 		expect(mocks.serve).toHaveBeenCalledOnce();
 		const options = mocks.serve.mock.calls[0]?.[0];
 
 		expect(options?.functions).toEqual(
-			expect.arrayContaining([
-				mocks.functions.controlPlaneUpdateCheck,
-				mocks.functions.agentUpgradeTimeoutCheck,
-			]),
+			expect.arrayContaining(Object.values(mocks.functions)),
+		);
+		expect(options?.functions).toHaveLength(
+			Object.keys(mocks.functions).length,
 		);
 	});
 });

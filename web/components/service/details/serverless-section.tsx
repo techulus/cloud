@@ -19,6 +19,7 @@ export const ServerlessSection = memo(function ServerlessSection(
 	props: ServerlessSectionProps,
 ) {
 	const { service } = props;
+	// Persisted changes are authoritative and intentionally discard any stale local draft.
 	const settingsKey = `${service.id}:${service.serverlessEnabled}:${service.serverlessSleepAfterSeconds}:${service.serverlessWakeTimeoutSeconds}`;
 
 	return (
