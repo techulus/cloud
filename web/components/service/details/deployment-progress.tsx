@@ -94,23 +94,28 @@ export function getBarState(
 		};
 	}
 
-	if (
+	const activeBuild =
+		service.activeBuild === undefined &&
 		service.latestBuild &&
 		ACTIVE_BUILD_STATUSES.includes(service.latestBuild.status)
-	) {
+			? service.latestBuild
+			: service.activeBuild;
+
+	if (activeBuild) {
 		return {
 			mode: "building",
-			buildId: service.latestBuild.id,
-			buildStatus: service.latestBuild.status,
+			buildId: activeBuild.id,
+			buildStatus: activeBuild.status,
 		};
 	}
 
 	const latestRollout = service.rollouts?.[0];
 	const activeRollout =
-		latestRollout?.status === "queued" ||
-		latestRollout?.status === "in_progress"
+		service.activeRollout === undefined &&
+		(latestRollout?.status === "queued" ||
+			latestRollout?.status === "in_progress")
 			? latestRollout
-			: undefined;
+			: service.activeRollout;
 
 	if (activeRollout) {
 		const currentStage =

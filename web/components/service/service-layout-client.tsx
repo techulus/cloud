@@ -57,11 +57,20 @@ export function ServiceLayoutClient({
 		onSuccess: (data) => {
 			const svc = data?.find((s) => s.id === serviceId);
 			if (!svc) return;
+			const hasActiveBuild =
+				svc.activeBuild === undefined
+					? svc.latestBuild != null &&
+						ACTIVE_BUILD_STATUSES.includes(svc.latestBuild.status)
+					: svc.activeBuild !== null;
+			const latestRollout = svc.rollouts?.[0];
+			const hasActiveRollout =
+				svc.activeRollout === undefined
+					? latestRollout?.status === "queued" ||
+						latestRollout?.status === "in_progress"
+					: svc.activeRollout !== null;
 			const isActive =
-				(svc.latestBuild != null &&
-					ACTIVE_BUILD_STATUSES.includes(svc.latestBuild.status)) ||
-				svc.rollouts?.[0]?.status === "queued" ||
-				svc.rollouts?.[0]?.status === "in_progress" ||
+				hasActiveBuild ||
+				hasActiveRollout ||
 				!!svc.migrationStatus ||
 				svc.deployments.some((d) =>
 					IN_PROGRESS_DEPLOY_STATUSES.includes(d.observedPhase),
