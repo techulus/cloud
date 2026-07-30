@@ -752,18 +752,24 @@ function getServiceStatus(
 ): ServiceStatus {
 	const latestRollout = service.rollouts?.[0];
 	const deployments = service.deployments || [];
-
-	if (service.migrationStatus) return { label: "Migrating", tone: "progress" };
-	if (
+	const activeBuild =
+		service.activeBuild === undefined &&
 		service.latestBuild &&
 		ACTIVE_BUILD_STATUSES.has(service.latestBuild.status)
-	) {
+			? service.latestBuild
+			: service.activeBuild;
+	const activeRollout =
+		service.activeRollout === undefined &&
+		(latestRollout?.status === "queued" ||
+			latestRollout?.status === "in_progress")
+			? latestRollout
+			: service.activeRollout;
+
+	if (service.migrationStatus) return { label: "Migrating", tone: "progress" };
+	if (activeBuild) {
 		return { label: "Building", tone: "progress" };
 	}
-	if (
-		latestRollout?.status === "queued" ||
-		latestRollout?.status === "in_progress"
-	) {
+	if (activeRollout) {
 		return { label: "Deploying", tone: "progress" };
 	}
 	if (runningDeployments > 0) return { label: "Live", tone: "live" };
