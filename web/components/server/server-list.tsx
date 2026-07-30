@@ -6,7 +6,10 @@ import useSWR from "swr";
 import { StatusIndicator } from "@/components/core/status-indicator";
 import {
 	SUMMARY_CARD_CLASSNAME,
-	SUMMARY_CARD_MIN_HEIGHT,
+	SUMMARY_CARD_COMPACT_CLASSNAME,
+	SUMMARY_CARD_COMPACT_TEXT_CLASSNAME,
+	SUMMARY_CARD_COMPACT_TITLE_CLASSNAME,
+	SUMMARY_CARD_GRID_CLASSNAME,
 	SummaryCardLine,
 	SummaryCardStat,
 	SummaryCardTitle,
@@ -22,6 +25,7 @@ import {
 } from "@/components/ui/empty";
 import type { Server } from "@/db/types";
 import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
 
 type ServerWithResources = Pick<
 	Server,
@@ -103,38 +107,60 @@ export function ServerList({
 					</EmptyContent>
 				</Empty>
 			) : (
-				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+				<div className={SUMMARY_CARD_GRID_CLASSNAME}>
 					{servers.map((server) => (
 						<Link
 							key={server.id}
 							href={`/dashboard/servers/${server.id}`}
-							className={SUMMARY_CARD_CLASSNAME}
-							style={{ minHeight: SUMMARY_CARD_MIN_HEIGHT }}
+							className={cn(
+								SUMMARY_CARD_CLASSNAME,
+								SUMMARY_CARD_COMPACT_CLASSNAME,
+							)}
 						>
 							<div className="flex items-center justify-between gap-2">
-								<SummaryCardTitle className="min-w-0">
+								<SummaryCardTitle
+									className={cn(
+										"min-w-0",
+										SUMMARY_CARD_COMPACT_TITLE_CLASSNAME,
+									)}
+								>
 									{server.name}
 								</SummaryCardTitle>
 								{server.isProxy && (
-									<span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+									<span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:text-[11px]">
 										proxy
 									</span>
 								)}
 							</div>
-							<div className="mt-1.5">
+							<div className="hidden sm:mt-1.5 sm:block">
 								<SummaryCardLine
 									icon={Cpu}
 									value={formatResources(server) || "not registered"}
 								/>
 							</div>
-							<div className="mt-auto pt-3">
-								<SummaryCardStat label="platform">
-									<SummaryCardValue>
+							<div className="mt-auto pt-2 sm:pt-3">
+								<SummaryCardStat
+									label="platform"
+									className={cn(
+										"hidden sm:flex",
+										SUMMARY_CARD_COMPACT_TEXT_CLASSNAME,
+									)}
+								>
+									<SummaryCardValue
+										className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+									>
 										{formatOsArch(server) || "—"}
 									</SummaryCardValue>
 								</SummaryCardStat>
-								<SummaryCardStat label="status">
-									<StatusIndicator status={server.status} showLabel />
+								<SummaryCardStat
+									label="status"
+									className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+								>
+									<StatusIndicator
+										status={server.status}
+										showLabel
+										labelClassName={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+									/>
 								</SummaryCardStat>
 							</div>
 						</Link>
