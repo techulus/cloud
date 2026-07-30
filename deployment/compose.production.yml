@@ -64,7 +64,6 @@ services:
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
       - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
-      - REGISTRY_URL=registry:5000
       - REGISTRY_HOST=registry.${ROOT_DOMAIN}
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
@@ -89,7 +88,7 @@ services:
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
       - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
-      - REGISTRY_URL=registry:5000
+      - REGISTRY_URL=${REGISTRY_URL:-registry:5000}
       - REGISTRY_HOST=registry.${ROOT_DOMAIN}
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
