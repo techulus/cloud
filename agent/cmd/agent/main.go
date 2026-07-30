@@ -282,7 +282,7 @@ func main() {
 		}
 	}
 
-	reconciler := reconcile.NewReconciler(config.EncryptionKey, dataDir)
+	reconciler := reconcile.NewReconciler(config.EncryptionKey, dataDir, config.RegistryInsecure)
 	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair, dataDir)
 
 	var logCollector *logs.Collector
