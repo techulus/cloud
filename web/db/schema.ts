@@ -321,8 +321,8 @@ export const servers = pgTable("servers", {
 	name: text("name").notNull(),
 	publicIp: text("public_ip"),
 	privateIp: text("private_ip"),
-	subnetId: integer("subnet_id"),
-	wireguardIp: text("wireguard_ip"),
+	subnetId: integer("subnet_id").unique("servers_subnet_id_unique"),
+	wireguardIp: text("wireguard_ip").unique("servers_wireguard_ip_unique"),
 	wireguardPublicKey: text("wireguard_public_key"),
 	signingPublicKey: text("signing_public_key"),
 	isProxy: boolean("is_proxy").default(false).notNull(),
@@ -692,6 +692,9 @@ export const deployments = pgTable(
 		index("deployments_service_id_idx").on(table.serviceId),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
+		uniqueIndex("deployments_server_id_ip_address_unique_idx")
+			.on(table.serverId, table.ipAddress)
+			.where(sql`${table.ipAddress} is not null`),
 		foreignKey({
 			name: "deployments_service_revision_service_fk",
 			columns: [table.serviceRevisionId, table.serviceId],
