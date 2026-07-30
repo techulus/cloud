@@ -1,8 +1,22 @@
-import { db } from "@/db";
-import { servers, deployments } from "@/db/schema";
-import { eq, isNotNull, and, ne } from "drizzle-orm";
-import { WIREGUARD_SUBNET_PREFIX, CONTAINER_SUBNET_PREFIX } from "./constants";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import { Address4 } from "ip-address";
+import { db } from "@/db";
+import { deployments, servers } from "@/db/schema";
+import { CONTAINER_SUBNET_PREFIX, WIREGUARD_SUBNET_PREFIX } from "./constants";
+
+type AllocationTransaction = Parameters<
+	Parameters<typeof db.transaction>[0]
+>[0];
+
+export const SUBNET_ALLOCATION_CONSTRAINTS = new Set([
+	"servers_subnet_id_unique",
+	"servers_wireguard_ip_unique",
+]);
+export const CONTAINER_IP_ALLOCATION_CONSTRAINTS = new Set([
+	"deployments_server_id_ip_address_unique_idx",
+]);
+const ALLOCATION_RETRY_LIMIT = 3;
 
 function sameSubnet(ip1: string, ip2: string, prefix: number = 16): boolean {
 	if (!ip1 || !ip2) return false;
@@ -15,11 +29,38 @@ function sameSubnet(ip1: string, ip2: string, prefix: number = 16): boolean {
 	}
 }
 
-export async function assignSubnet(): Promise<{
+export async function withAllocationRetry<T>(
+	operation: () => Promise<T>,
+	constraints: ReadonlySet<string>,
+): Promise<T> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await operation();
+		} catch (error) {
+			const databaseError = (
+				error instanceof DrizzleQueryError ? error.cause : error
+			) as { code?: string; constraint?: string };
+			if (
+				databaseError.code !== "23505" ||
+				!databaseError.constraint ||
+				!constraints.has(databaseError.constraint) ||
+				attempt >= ALLOCATION_RETRY_LIMIT
+			) {
+				throw error;
+			}
+		}
+	}
+}
+
+export async function assignSubnet(tx: AllocationTransaction): Promise<{
 	subnetId: number;
 	wireguardIp: string;
 }> {
-	const existingServers = await db
+	await tx.execute(
+		sql`SELECT pg_advisory_xact_lock(hashtext('subnet_allocation'))`,
+	);
+
+	const existingServers = await tx
 		.select({ subnetId: servers.subnetId })
 		.from(servers)
 		.where(isNotNull(servers.subnetId));
@@ -36,8 +77,15 @@ export async function assignSubnet(): Promise<{
 	throw new Error("No available subnets");
 }
 
-export async function assignContainerIp(serverId: string): Promise<string> {
-	const server = await db
+export async function assignContainerIp(
+	tx: AllocationTransaction,
+	serverId: string,
+): Promise<string> {
+	await tx.execute(
+		sql`SELECT pg_advisory_xact_lock(hashtext('container_ip_allocation'), hashtext(${serverId}))`,
+	);
+
+	const server = await tx
 		.select({ subnetId: servers.subnetId })
 		.from(servers)
 		.where(eq(servers.id, serverId))
@@ -47,7 +95,7 @@ export async function assignContainerIp(serverId: string): Promise<string> {
 		throw new Error("Server does not have a subnet assigned");
 	}
 
-	const existingDeployments = await db
+	const existingDeployments = await tx
 		.select({ ipAddress: deployments.ipAddress })
 		.from(deployments)
 		.where(

@@ -13,11 +13,17 @@ import {
 	getPublishedContainerPorts,
 	type ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
-import { assignContainerIp } from "@/lib/wireguard";
+import {
+	assignContainerIp,
+	CONTAINER_IP_ALLOCATION_CONSTRAINTS,
+	withAllocationRetry,
+} from "@/lib/wireguard";
 import { enqueueWork } from "@/lib/work-queue";
 
 const PORT_RANGE_START = 30000;
 const PORT_RANGE_END = 32767;
+
+type RolloutTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type Placement = { serverId: string; replicas: number };
 
@@ -65,8 +71,11 @@ export type DeploymentContext = {
 	isRollingUpdate: boolean;
 };
 
-async function getUsedPorts(serverId: string): Promise<Set<number>> {
-	const existingPorts = await db
+async function getUsedPorts(
+	tx: RolloutTransaction,
+	serverId: string,
+): Promise<Set<number>> {
+	const existingPorts = await tx
 		.select({ hostPort: deploymentPorts.hostPort })
 		.from(deploymentPorts)
 		.innerJoin(deployments, eq(deploymentPorts.deploymentId, deployments.id))
@@ -76,10 +85,11 @@ async function getUsedPorts(serverId: string): Promise<Set<number>> {
 }
 
 export async function allocateHostPorts(
+	tx: RolloutTransaction,
 	serverId: string,
 	count: number,
 ): Promise<number[]> {
-	const unavailablePorts = await getUsedPorts(serverId);
+	const unavailablePorts = await getUsedPorts(tx, serverId);
 	const allocated: number[] = [];
 
 	for (
@@ -356,38 +366,10 @@ export async function createDeploymentRecords(
 ): Promise<{ deploymentIds: string[] }> {
 	const { revisionId, specification, placements, serverMap } = context;
 
-	const existingDeployments = await db
-		.select({
-			id: deployments.id,
-			serviceId: deployments.serviceId,
-			serviceRevisionId: deployments.serviceRevisionId,
-			serverId: deployments.serverId,
-		})
-		.from(deployments)
-		.where(eq(deployments.rolloutId, rolloutId));
 	const requestedReplicasByServer = new Map(
 		placements.map((placement) => [placement.serverId, placement.replicas]),
 	);
-	const existingDeploymentsByServer = Map.groupBy(
-		existingDeployments,
-		(deployment) => deployment.serverId,
-	);
-	for (const deployment of existingDeployments) {
-		if (
-			deployment.serviceId !== serviceId ||
-			deployment.serviceRevisionId !== revisionId ||
-			!requestedReplicasByServer.has(deployment.serverId)
-		) {
-			throw new Error("Rollout deployment idempotency conflict");
-		}
-	}
-	for (const [serverId, existing] of existingDeploymentsByServer) {
-		if (existing.length > (requestedReplicasByServer.get(serverId) ?? 0)) {
-			throw new Error("Rollout deployment idempotency conflict");
-		}
-	}
-
-	const deploymentIds = existingDeployments.map((deployment) => deployment.id);
+	const deploymentIds = new Set<string>();
 	const publishedContainerPorts = getPublishedContainerPorts(
 		specification.ports,
 	);
@@ -400,68 +382,112 @@ export async function createDeploymentRecords(
 			throw new Error(`Server ${placement.serverId} not found`);
 		}
 
-		const existingReplicaCount =
-			existingDeploymentsByServer.get(placement.serverId)?.length ?? 0;
-		for (let i = existingReplicaCount; i < placement.replicas; i++) {
+		for (let i = 0; i < placement.replicas; i++) {
 			const deploymentId = randomUUID();
-			const hostPorts = await allocateHostPorts(
-				server.id,
-				publishedContainerPorts.length,
-			);
-			const ipAddress = await assignContainerIp(server.id);
 
-			await db.transaction(async (tx) => {
-				await tx.execute(
-					sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
-				);
-				const [rollout] = await tx
-					.select({ status: rollouts.status })
-					.from(rollouts)
-					.where(eq(rollouts.id, rolloutId))
-					.for("update");
-				if (rollout?.status !== "in_progress") {
-					throw new Error("Rollout is no longer in progress");
-				}
+			const currentDeploymentIds = await withAllocationRetry(
+				() =>
+					db.transaction(async (tx) => {
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+						);
+						const [rollout] = await tx
+							.select({ status: rollouts.status })
+							.from(rollouts)
+							.where(eq(rollouts.id, rolloutId))
+							.for("update");
+						if (rollout?.status !== "in_progress") {
+							throw new Error("Rollout is no longer in progress");
+						}
 
-				await tx.insert(deployments).values({
-					id: deploymentId,
-					serviceId,
-					serviceRevisionId: revisionId,
-					serverId: server.id,
-					ipAddress,
-					runtimeDesiredState: "running",
-					trafficState: "candidate",
-					observedPhase: "pending",
-					rolloutId,
-				});
+						const existingDeployments = await tx
+							.select({
+								id: deployments.id,
+								serviceId: deployments.serviceId,
+								serviceRevisionId: deployments.serviceRevisionId,
+								serverId: deployments.serverId,
+							})
+							.from(deployments)
+							.where(eq(deployments.rolloutId, rolloutId));
+						const existingDeploymentsByServer = Map.groupBy(
+							existingDeployments,
+							(deployment) => deployment.serverId,
+						);
+						for (const deployment of existingDeployments) {
+							if (
+								deployment.serviceId !== serviceId ||
+								deployment.serviceRevisionId !== revisionId ||
+								!requestedReplicasByServer.has(deployment.serverId)
+							) {
+								throw new Error("Rollout deployment idempotency conflict");
+							}
+						}
+						for (const [serverId, existing] of existingDeploymentsByServer) {
+							if (
+								existing.length > (requestedReplicasByServer.get(serverId) ?? 0)
+							) {
+								throw new Error("Rollout deployment idempotency conflict");
+							}
+						}
+						if (
+							(existingDeploymentsByServer.get(server.id)?.length ?? 0) >=
+							placement.replicas
+						) {
+							return existingDeployments.map((deployment) => deployment.id);
+						}
 
-				if (publishedContainerPorts.length > 0) {
-					await tx.insert(deploymentPorts).values(
-						publishedContainerPorts.map((containerPort, index) => ({
-							id: randomUUID(),
+						const ipAddress = await assignContainerIp(tx, server.id);
+						const hostPorts = await allocateHostPorts(
+							tx,
+							server.id,
+							publishedContainerPorts.length,
+						);
+						await tx.insert(deployments).values({
+							id: deploymentId,
+							serviceId,
+							serviceRevisionId: revisionId,
+							serverId: server.id,
+							ipAddress,
+							runtimeDesiredState: "running",
+							trafficState: "candidate",
+							observedPhase: "pending",
+							rolloutId,
+						});
+
+						if (publishedContainerPorts.length > 0) {
+							await tx.insert(deploymentPorts).values(
+								publishedContainerPorts.map((containerPort, index) => ({
+									id: randomUUID(),
+									deploymentId,
+									containerPort,
+									hostPort: hostPorts[index],
+								})),
+							);
+						}
+
+						await enqueueWork(
+							server.id,
+							"reconcile",
+							{
+								reason: "rollout_deployment_created",
+								deploymentId,
+							},
+							{ tx },
+						);
+
+						return [
+							...existingDeployments.map((deployment) => deployment.id),
 							deploymentId,
-							containerPort,
-							hostPort: hostPorts[index],
-						})),
-					);
-				}
+						];
+					}),
+				CONTAINER_IP_ALLOCATION_CONSTRAINTS,
+			);
 
-				await enqueueWork(
-					server.id,
-					"reconcile",
-					{
-						reason: "rollout_deployment_created",
-						deploymentId,
-					},
-					{ tx },
-				);
-			});
-
-			deploymentIds.push(deploymentId);
+			for (const id of currentDeploymentIds) deploymentIds.add(id);
 		}
 	}
 
-	return { deploymentIds };
+	return { deploymentIds: [...deploymentIds] };
 }
 
 export async function completeRollout(
