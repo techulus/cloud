@@ -44,5 +44,7 @@ An open container deployment platform. See README.md for architecture.
 
 ## ⚠️ Critical restrictions
 
+- **NEVER EVER merge a pull request.** This prohibition is absolute, even if
+  the pull request is approved, checks pass, or the user asks you to ship it.
 - **NEVER run the Node application** (`next dev`, `next start`, `pnpm dev`), Go Agent or Go CLI
   without explicit permission. Tests, typechecks, and `go build` are fine.
