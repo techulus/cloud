@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
 			registryUrl: process.env.REGISTRY_URL ?? null,
 			registryUsername: process.env.REGISTRY_USERNAME ?? null,
 			registryPassword: process.env.REGISTRY_PASSWORD ?? null,
-			registryInsecure: process.env.REGISTRY_INSECURE !== "false",
+			registryInsecure: process.env.REGISTRY_INSECURE === "true",
 		});
 	} catch (error) {
 		console.error("Agent registration error:", error);

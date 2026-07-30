@@ -75,7 +75,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
-	pullCmd := exec.Command("podman", "pull", "--tls-verify=false", image)
+	pullCmd := exec.Command("podman", buildPodmanPullArgs(config)...)
 	pullOutput, err := pullCmd.CombinedOutput()
 	if err != nil {
 		logFunc("stderr", fmt.Sprintf("Pull failed: %s", string(pullOutput)))
@@ -130,6 +130,15 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	return &DeployResult{
 		ContainerID: containerID,
 	}, nil
+}
+
+func buildPodmanPullArgs(config *DeployConfig) []string {
+	args := []string{"pull", podmanTLSVerifyArg(config.RegistryInsecure)}
+	return append(args, config.Image)
+}
+
+func podmanTLSVerifyArg(insecure bool) string {
+	return fmt.Sprintf("--tls-verify=%t", !insecure)
 }
 
 func buildPodmanRunArgs(config *DeployConfig, image string) []string {
@@ -374,13 +383,7 @@ func Login(registryURL, username, password string, insecure bool) error {
 
 	log.Printf("[podman:login] logging in to registry %s", registryURL)
 
-	args := []string{"login"}
-	if insecure {
-		args = append(args, "--tls-verify=false")
-	}
-	args = append(args, "-u", username, "-p", password, registryURL)
-
-	cmd := exec.Command("podman", args...)
+	cmd := exec.Command("podman", buildPodmanLoginArgs(registryURL, username, password, insecure)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to login to registry: %s: %w", string(output), err)
@@ -405,6 +408,16 @@ func Login(registryURL, username, password string, insecure bool) error {
 	}
 
 	return nil
+}
+
+func buildPodmanLoginArgs(registryURL, username, password string, insecure bool) []string {
+	return []string{
+		"login",
+		podmanTLSVerifyArg(insecure),
+		"-u", username,
+		"-p", password,
+		registryURL,
+	}
 }
 
 func writeDockerConfig(registryURL, username, password string) error {
