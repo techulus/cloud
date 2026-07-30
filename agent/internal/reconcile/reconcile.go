@@ -11,14 +11,16 @@ import (
 )
 
 type Reconciler struct {
-	encryptionKey string
-	dataDir       string
+	encryptionKey    string
+	dataDir          string
+	registryInsecure bool
 }
 
-func NewReconciler(encryptionKey, dataDir string) *Reconciler {
+func NewReconciler(encryptionKey, dataDir string, registryInsecure bool) *Reconciler {
 	return &Reconciler{
-		encryptionKey: encryptionKey,
-		dataDir:       dataDir,
+		encryptionKey:    encryptionKey,
+		dataDir:          dataDir,
+		registryInsecure: registryInsecure,
 	}
 }
 
@@ -66,6 +68,7 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 	_, err := container.Deploy(&container.DeployConfig{
 		Name:              exp.Name,
 		Image:             exp.Image,
+		RegistryInsecure:  r.registryInsecure,
 		ServiceID:         exp.ServiceID,
 		ServiceName:       exp.ServiceName,
 		DeploymentID:      exp.DeploymentID,

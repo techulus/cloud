@@ -6,7 +6,11 @@ import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { EncryptionKeyUnavailableError, resolveEncryptionKey } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
 import { formatZodErrors } from "@/lib/utils";
-import { assignSubnet } from "@/lib/wireguard";
+import {
+	assignSubnet,
+	SUBNET_ALLOCATION_CONSTRAINTS,
+	withAllocationRetry,
+} from "@/lib/wireguard";
 
 const TOKEN_EXPIRY_HOURS = 24;
 
@@ -60,38 +64,46 @@ export async function POST(request: NextRequest) {
 		const encryptionKeyBuffer = await resolveEncryptionKey();
 		const encryptionKey = encryptionKeyBuffer.toString("hex");
 
-		const { subnetId, wireguardIp } = await assignSubnet();
+		const allocation = await withAllocationRetry(
+			() =>
+				db.transaction(async (tx) => {
+					const { subnetId, wireguardIp } = await assignSubnet(tx);
+					const claimedServers = await tx
+						.update(servers)
+						.set({
+							wireguardPublicKey,
+							signingPublicKey,
+							subnetId,
+							wireguardIp,
+							publicIp: publicIp || null,
+							privateIp: privateIp || null,
+							isProxy: isProxy === true,
+							tokenUsedAt: now,
+							status: "online",
+							lastHeartbeat: now,
+						})
+						.where(
+							and(
+								eq(servers.id, server.id),
+								eq(servers.agentToken, token),
+								isNull(servers.tokenUsedAt),
+								gt(servers.tokenCreatedAt, expiryThreshold),
+							),
+						)
+						.returning({ id: servers.id });
 
-		const claimedServers = await db
-			.update(servers)
-			.set({
-				wireguardPublicKey,
-				signingPublicKey,
-				subnetId,
-				wireguardIp,
-				publicIp: publicIp || null,
-				privateIp: privateIp || null,
-				isProxy: isProxy === true,
-				tokenUsedAt: now,
-				status: "online",
-				lastHeartbeat: now,
-			})
-			.where(
-				and(
-					eq(servers.id, server.id),
-					eq(servers.agentToken, token),
-					isNull(servers.tokenUsedAt),
-					gt(servers.tokenCreatedAt, expiryThreshold),
-				),
-			)
-			.returning({ id: servers.id });
+					return claimedServers.length > 0 ? { subnetId, wireguardIp } : null;
+				}),
+			SUBNET_ALLOCATION_CONSTRAINTS,
+		);
 
-		if (claimedServers.length === 0) {
+		if (!allocation) {
 			return NextResponse.json(
 				{ error: "Invalid, expired, or already used token" },
 				{ status: 401 },
 			);
 		}
+		const { subnetId, wireguardIp } = allocation;
 
 		return NextResponse.json({
 			serverId: server.id,
@@ -103,7 +115,7 @@ export async function POST(request: NextRequest) {
 			registryUrl: process.env.REGISTRY_URL ?? null,
 			registryUsername: process.env.REGISTRY_USERNAME ?? null,
 			registryPassword: process.env.REGISTRY_PASSWORD ?? null,
-			registryInsecure: process.env.REGISTRY_INSECURE !== "false",
+			registryInsecure: process.env.REGISTRY_INSECURE === "true",
 		});
 	} catch (error) {
 		console.error("Agent registration error:", error);

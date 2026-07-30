@@ -65,8 +65,10 @@ export type ServiceWithDetails = Service & {
 	volumes?: ServiceVolume[];
 	secrets?: Array<Pick<Secret, "key"> & { updatedAt: Date | string }>;
 	rollouts?: Rollout[];
+	activeRollout?: Rollout | null;
 	lockedServer?: Pick<Server, "name"> | null;
 	latestBuild?: Pick<Build, "id" | "status"> | null;
+	activeBuild?: Pick<Build, "id" | "status"> | null;
 	hasGithubAppRepo?: boolean;
 	deletionBackupFallback?: {
 		volumeCount: number;

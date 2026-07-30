@@ -63,9 +63,11 @@ export async function GET(
 				replicas,
 				serviceSecrets,
 				serviceRollouts,
+				activeRollout,
 				volumes,
 				lockedServer,
 				latestBuild,
+				activeBuild,
 				githubRepo,
 			] = await Promise.all([
 				db
@@ -101,6 +103,18 @@ export async function GET(
 					.limit(1),
 				db
 					.select()
+					.from(rollouts)
+					.where(
+						and(
+							eq(rollouts.serviceId, service.id),
+							inArray(rollouts.status, ["queued", "in_progress"]),
+						),
+					)
+					.orderBy(desc(rollouts.createdAt))
+					.limit(1)
+					.then((r) => r[0] || null),
+				db
+					.select()
 					.from(serviceVolumes)
 					.where(eq(serviceVolumes.serviceId, service.id)),
 				service.lockedServerId
@@ -119,6 +133,24 @@ export async function GET(
 							.limit(1)
 							.then((r) => r[0] || null)
 					: Promise.resolve(null),
+				db
+					.select({ id: builds.id, status: builds.status })
+					.from(builds)
+					.where(
+						and(
+							eq(builds.serviceId, service.id),
+							inArray(builds.status, [
+								"pending",
+								"claimed",
+								"cloning",
+								"building",
+								"pushing",
+							]),
+						),
+					)
+					.orderBy(desc(builds.createdAt))
+					.limit(1)
+					.then((r) => r[0] || null),
 				service.sourceType === "github"
 					? db
 							.select()
@@ -262,9 +294,11 @@ export async function GET(
 				deployments: deploymentsWithDetails,
 				secrets: serviceSecrets,
 				rollouts: serviceRollouts,
+				activeRollout,
 				volumes,
 				lockedServer,
 				latestBuild,
+				activeBuild,
 				hasGithubAppRepo: githubRepo !== null,
 				activeConfig,
 				currentSource,

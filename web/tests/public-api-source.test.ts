@@ -154,7 +154,9 @@ describe("public API placement schema", () => {
 	});
 
 	it.each([
+		{ mode: "automatic", replicas: 32 },
 		{ mode: "automatic", replicas: 3 },
+		{ mode: "manual", placements: [{ serverId: "server-1", count: 32 }] },
 		{ mode: "manual", placements: [{ serverId: "server-1", count: 2 }] },
 	])("accepts valid placement intent", (placement) => {
 		expect(
@@ -165,12 +167,13 @@ describe("public API placement schema", () => {
 
 	it.each([
 		{ mode: "automatic", replicas: 0 },
+		{ mode: "automatic", replicas: 33 },
 		{ mode: "manual", placements: [] },
 		{
 			mode: "manual",
 			placements: [
-				{ serverId: "a", count: 6 },
-				{ serverId: "b", count: 5 },
+				{ serverId: "a", count: 17 },
+				{ serverId: "b", count: 16 },
 			],
 		},
 		{

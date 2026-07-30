@@ -75,7 +75,7 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 
 	logFunc("stdout", fmt.Sprintf("Pulling image: %s", image))
 
-	pullCmd := exec.Command("podman", "pull", "--tls-verify=false", image)
+	pullCmd := exec.Command("podman", buildPodmanPullArgs(config)...)
 	pullOutput, err := pullCmd.CombinedOutput()
 	if err != nil {
 		logFunc("stderr", fmt.Sprintf("Pull failed: %s", string(pullOutput)))
@@ -130,6 +130,14 @@ func Deploy(config *DeployConfig) (*DeployResult, error) {
 	return &DeployResult{
 		ContainerID: containerID,
 	}, nil
+}
+
+func buildPodmanPullArgs(config *DeployConfig) []string {
+	args := []string{"pull"}
+	if config.RegistryInsecure {
+		args = append(args, "--tls-verify=false")
+	}
+	return append(args, config.Image)
 }
 
 func buildPodmanRunArgs(config *DeployConfig, image string) []string {
