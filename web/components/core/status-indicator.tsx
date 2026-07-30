@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+
 const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
 	online: {
 		dot: "bg-emerald-500",
@@ -20,9 +22,11 @@ const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
 export function StatusIndicator({
 	status,
 	showLabel = false,
+	labelClassName,
 }: {
 	status: string;
 	showLabel?: boolean;
+	labelClassName?: string;
 }) {
 	const color = STATUS_COLORS[status] || STATUS_COLORS.unknown;
 
@@ -40,7 +44,11 @@ export function StatusIndicator({
 			</span>
 			{showLabel && (
 				<span
-					className={`font-mono text-xs font-semibold uppercase tracking-wider ${color.text}`}
+					className={cn(
+						"font-mono text-xs font-semibold uppercase tracking-wider",
+						color.text,
+						labelClassName,
+					)}
 				>
 					{status}
 				</span>

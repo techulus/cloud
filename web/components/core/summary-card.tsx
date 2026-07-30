@@ -4,6 +4,17 @@ import { cn } from "@/lib/utils";
 
 export const SUMMARY_CARD_MIN_HEIGHT = 148;
 
+// Dashboard lists lay cards out two per row on mobile, so below `sm` they shed
+// height, padding and a step of font size. The `sm` min-height must stay in
+// sync with SUMMARY_CARD_MIN_HEIGHT.
+export const SUMMARY_CARD_GRID_CLASSNAME =
+	"grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3";
+export const SUMMARY_CARD_COMPACT_CLASSNAME =
+	"min-h-[96px] px-3 py-2.5 sm:min-h-[148px] sm:px-3.5 sm:py-3";
+export const SUMMARY_CARD_COMPACT_TITLE_CLASSNAME =
+	"text-[13px] sm:text-[15px]";
+export const SUMMARY_CARD_COMPACT_TEXT_CLASSNAME = "text-[11px] sm:text-xs";
+
 export const SUMMARY_CARD_CLASSNAME =
 	"group flex w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 px-3.5 py-3 transition-all duration-200 hover:ring hover:ring-primary/25 dark:hover:ring-primary/55";
 
@@ -46,12 +57,14 @@ export function SummaryCardLine({
 export function SummaryCardStat({
 	label,
 	children,
+	className,
 }: {
 	label: string;
 	children: ReactNode;
+	className?: string;
 }) {
 	return (
-		<div className="flex items-center gap-2 text-xs leading-5">
+		<div className={cn("flex items-center gap-2 text-xs leading-5", className)}>
 			<span className="font-mono uppercase tracking-wider text-muted-foreground">
 				{label}
 			</span>
@@ -61,9 +74,20 @@ export function SummaryCardStat({
 	);
 }
 
-export function SummaryCardValue({ children }: { children: ReactNode }) {
+export function SummaryCardValue({
+	children,
+	className,
+}: {
+	children: ReactNode;
+	className?: string;
+}) {
 	return (
-		<span className="font-mono text-xs font-semibold text-foreground">
+		<span
+			className={cn(
+				"font-mono text-xs font-semibold text-foreground",
+				className,
+			)}
+		>
 			{children}
 		</span>
 	);
