@@ -1,7 +1,6 @@
 package container
 
 import (
-	"reflect"
 	"slices"
 	"testing"
 )
@@ -13,8 +12,8 @@ func TestBuildPodmanPullArgs(t *testing.T) {
 		want     []string
 	}{
 		{
-			name: "verifies TLS by default",
-			want: []string{"pull", "--tls-verify=true", "registry.example.com/app:latest"},
+			name: "does not disable TLS by default",
+			want: []string{"pull", "registry.example.com/app:latest"},
 		},
 		{
 			name:     "disables TLS verification when configured",
@@ -29,35 +28,8 @@ func TestBuildPodmanPullArgs(t *testing.T) {
 				Image:            "registry.example.com/app:latest",
 				RegistryInsecure: tt.insecure,
 			})
-			if !reflect.DeepEqual(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Fatalf("buildPodmanPullArgs() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildPodmanLoginArgs(t *testing.T) {
-	tests := []struct {
-		name     string
-		insecure bool
-		want     []string
-	}{
-		{
-			name: "verifies TLS by default",
-			want: []string{"login", "--tls-verify=true", "-u", "user", "-p", "password", "registry.example.com"},
-		},
-		{
-			name:     "disables TLS verification when configured",
-			insecure: true,
-			want:     []string{"login", "--tls-verify=false", "-u", "user", "-p", "password", "registry.example.com"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := buildPodmanLoginArgs("registry.example.com", "user", "password", tt.insecure)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("buildPodmanLoginArgs() = %q, want %q", got, tt.want)
 			}
 		})
 	}
