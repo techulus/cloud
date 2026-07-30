@@ -38,7 +38,7 @@ type Config struct {
 	RegistryURL      string `json:"registryUrl,omitempty"`
 	RegistryUsername string `json:"registryUsername,omitempty"`
 	RegistryPassword string `json:"registryPassword,omitempty"`
-	RegistryInsecure bool   `json:"registryInsecureOptIn"`
+	RegistryInsecure bool   `json:"registryInsecure"`
 }
 
 type ActualState struct {
