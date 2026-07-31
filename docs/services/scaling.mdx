@@ -30,6 +30,10 @@ Serverless settings are configured per service:
 | Sleep after | `300s` | Idle period before running containers are stopped |
 | Wake timeout | `300s` | Maximum time the wake gateway waits for ready upstreams |
 
+The serverless settings appear only when the service has a public HTTP port with
+a domain. Removing the final qualifying endpoint disables serverless in the
+pending service configuration.
+
 A cold wake starts the sleeping local proxy replicas for that host. Held
 requests resume when one upstream is ready.
 

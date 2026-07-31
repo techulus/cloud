@@ -694,6 +694,7 @@ function canonicalReplacementState(
 		healthCheck: healthCheckFromService(service),
 		startCommand: service.startCommand?.trim() || null,
 		resources,
+		serverless: { enabled: service.serverlessEnabled },
 	};
 }
 
@@ -773,7 +774,15 @@ export function planCanonicalConfiguration(
 		...current,
 		source: canonicalPlanSource(current.source),
 	};
-	const desired = canonicalDesired(desiredInput);
+	const desiredConfiguration = canonicalDesired(desiredInput);
+	const desired = {
+		...desiredConfiguration,
+		serverless: {
+			enabled:
+				canonicalCurrent.serverless.enabled &&
+				desiredConfiguration.ports.some((port) => port.public && port.domain),
+		},
+	};
 	const changes = configurationChanges(canonicalCurrent, desired);
 	return {
 		action: changes.length ? ("updated" as const) : ("noop" as const),
@@ -869,6 +878,9 @@ async function replaceConfigurationInternal(
 			);
 		}
 		const plan = planCanonicalConfiguration(currentState, input);
+		const effectiveServerlessEnabled =
+			persisted.serverlessEnabled &&
+			input.ports.some((port) => port.public && port.domain);
 		if (expectedVersion !== null && plan.currentVersion !== expectedVersion) {
 			domainError(
 				"Service configuration changed after the plan was created",
@@ -946,7 +958,7 @@ async function replaceConfigurationInternal(
 					400,
 				);
 			if (
-				persisted.serverlessEnabled &&
+				effectiveServerlessEnabled &&
 				selected.some((server) => !server.isProxy)
 			)
 				domainError(
@@ -966,16 +978,6 @@ async function replaceConfigurationInternal(
 			.then((rows) => rows[0]);
 		if (duplicateHostname) {
 			domainError("Hostname is already in use", "HOSTNAME_CONFLICT");
-		}
-		if (
-			persisted.serverlessEnabled &&
-			!input.ports.some((port) => port.public && port.domain)
-		) {
-			domainError(
-				"Serverless services require a public HTTP port with a domain",
-				"SERVERLESS_PORT_REQUIRED",
-				400,
-			);
 		}
 		const portIssue = findServicePortValidationIssue(
 			input.ports.map((port) => ({
@@ -1013,6 +1015,9 @@ async function replaceConfigurationInternal(
 
 		const changes: string[] = [];
 		const set: Partial<NestedService> = {};
+		if (persisted.serverlessEnabled !== effectiveServerlessEnabled) {
+			set.serverlessEnabled = effectiveServerlessEnabled;
+		}
 		const changed = (label: string, from: unknown, to: unknown) => {
 			if (JSON.stringify(from) === JSON.stringify(to)) return false;
 			changes.push(label);
