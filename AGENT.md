@@ -37,12 +37,77 @@ An open container deployment platform. See README.md for architecture.
   high-value critical behavior, serious regression risk, or contracts that
   would be costly to break. Keep tests focused; avoid low-signal harnesses.
 
+## Spec-driven development workflow
+
+For any requested code or configuration change, work through these phases in
+order. Do not collapse requirements, specification, and implementation
+planning into a single step.
+
+### 1. Research and refine requirements
+
+Understand the problem before designing a solution.
+
+- Inspect the relevant code, documentation, existing behavior, and project
+  constraints.
+- Clarify the desired outcome, scope, non-goals, edge cases, and acceptance
+  criteria.
+- Identify assumptions and ask focused questions when ambiguity would
+  materially affect the solution.
+- Present the refined requirements for confirmation.
+
+Deliverable: agreed requirements, constraints, assumptions, and acceptance
+criteria.
+
+### 2. Build the specification
+
+Describe what will be built and how it should work.
+
+- Define user-visible and system behavior.
+- Describe the technical approach, architecture, interfaces, data flow, and
+  error handling.
+- Address important edge cases and consequential tradeoffs.
+- Keep the specification solution-level rather than file-by-file.
+
+Deliverable: a reviewable specification of the intended behavior and technical
+design.
+
+### 3. Create the development plan
+
+Translate the specification into concrete implementation work.
+
+- List the files and modules that will be added, changed, renamed, or removed.
+- Describe the specific changes required in each location.
+- Include API, schema, type, dependency, and configuration changes where
+  applicable.
+- Define the tests and verification commands that will be run.
+- Order the work into small, reviewable steps and identify remaining risks.
+
+Deliverable: an actionable, file-level development plan.
+
+### 4. Implement after approval
+
+Do not modify the codebase until the user approves the development plan.
+
+- Implement the approved plan using the smallest correct changes and existing
+  project patterns.
+- Run the planned verification and report the results honestly.
+- If new information requires a material change to the requirements,
+  specification, scope, or architecture, pause implementation and return to
+  the appropriate phase for approval.
+- Resolve minor implementation details autonomously when they do not alter the
+  approved behavior or scope.
+
+Deliverable: implemented changes, verification results, and a concise summary
+of any deviations or limitations.
+
 ## Communication
 
-- Keep responses concise and to the point. Avoid verbose responses unless
-  explicitly asked.
+- Keep all written content as short as possible without omitting necessary
+  detail. Expand only when explicitly asked.
 
 ## ⚠️ Critical restrictions
 
+- **NEVER EVER merge a pull request.** This prohibition is absolute, even if
+  the pull request is approved, checks pass, or the user asks you to ship it.
 - **NEVER run the Node application** (`next dev`, `next start`, `pnpm dev`), Go Agent or Go CLI
   without explicit permission. Tests, typechecks, and `go build` are fine.

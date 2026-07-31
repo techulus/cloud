@@ -69,7 +69,8 @@ type middleware struct {
 }
 
 type headersMiddleware struct {
-	CustomRequestHeaders map[string]string `yaml:"customRequestHeaders,omitempty"`
+	CustomRequestHeaders  map[string]string `yaml:"customRequestHeaders,omitempty"`
+	CustomResponseHeaders map[string]string `yaml:"customResponseHeaders,omitempty"`
 }
 
 type replacePathRegex struct {

@@ -154,56 +154,49 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 	volumePath := filepath.Join(a.DataDir, "volumes", serviceID, volumeName)
 	log.Printf("[restore_volume] restoring volume %s to %s", volumeName, volumePath)
 
-	reportFailure := func(err error) error {
-		if reportErr := a.Client.ReportRestoreComplete(backupID, false, err.Error()); reportErr != nil {
-			log.Printf("[restore_volume] warning: failed to report restore failure: %v", reportErr)
-		}
-		return err
-	}
-
 	tarPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("restore-%s.tar.gz", backupID))
 	if err != nil {
-		return reportFailure(fmt.Errorf("failed to create temp archive path: %w", err))
+		return fmt.Errorf("failed to create temp archive path: %w", err)
 	}
 	defer os.Remove(tarPath)
 
 	if !strings.HasSuffix(storagePath, ".tar.gz") {
-		return reportFailure(fmt.Errorf("unsupported backup archive path: %s", storagePath))
+		return fmt.Errorf("unsupported backup archive path: %s", storagePath)
 	}
 
 	s3Client, err := createS3Client(storageConfig)
 	if err != nil {
-		return reportFailure(fmt.Errorf("failed to create S3 client: %w", err))
+		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
 	if err := downloadFromS3(s3Client, storageConfig.Bucket, storagePath, tarPath); err != nil {
-		return reportFailure(fmt.Errorf("failed to download from S3: %w", err))
+		return fmt.Errorf("failed to download from S3: %w", err)
 	}
 
 	log.Printf("[restore_volume] downloaded from S3: %s/%s", storageConfig.Bucket, storagePath)
 
 	checksum, err := calculateChecksum(tarPath)
 	if err != nil {
-		return reportFailure(fmt.Errorf("failed to calculate checksum: %w", err))
+		return fmt.Errorf("failed to calculate checksum: %w", err)
 	}
 
 	if checksum != expectedChecksum {
-		return reportFailure(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum))
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, checksum)
 	}
 
 	tempExtractPath, err := tempArtifactPath(a.DataDir, fmt.Sprintf("restore-extract-%s", backupID))
 	if err != nil {
-		return reportFailure(fmt.Errorf("failed to create temp extract path: %w", err))
+		return fmt.Errorf("failed to create temp extract path: %w", err)
 	}
 	defer os.RemoveAll(tempExtractPath)
 
 	if err := os.MkdirAll(tempExtractPath, 0755); err != nil {
-		return reportFailure(fmt.Errorf("failed to create temp extract directory: %w", err))
+		return fmt.Errorf("failed to create temp extract directory: %w", err)
 	}
 
 	log.Printf("[restore_volume] extracting archive to temp location for validation")
 	if err := extractTarGz(tarPath, tempExtractPath); err != nil {
-		return reportFailure(fmt.Errorf("failed to extract archive: %w", err))
+		return fmt.Errorf("failed to extract archive: %w", err)
 	}
 
 	var shouldStartContainer bool
@@ -214,7 +207,7 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 		} else if running {
 			log.Printf("[restore_volume] stopping container %s before restore", Truncate(containerID, 12))
 			if err := container.Stop(containerID); err != nil {
-				return reportFailure(fmt.Errorf("failed to stop container: %w", err))
+				return fmt.Errorf("failed to stop container: %w", err)
 			}
 			shouldStartContainer = true
 		} else {
@@ -243,26 +236,22 @@ func (a *Agent) processVolumeRestore(backupID, serviceID, containerID, volumeNam
 
 	if err := os.RemoveAll(volumePath); err != nil && !os.IsNotExist(err) {
 		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to remove existing volume: %w", err))
+		return fmt.Errorf("failed to remove existing volume: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(volumePath), 0755); err != nil {
 		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to create volume parent directory: %w", err))
+		return fmt.Errorf("failed to create volume parent directory: %w", err)
 	}
 
 	if err := moveDir(tempExtractPath, volumePath); err != nil {
 		startContainerWithRetry()
-		return reportFailure(fmt.Errorf("failed to move restored data to volume path: %w", err))
+		return fmt.Errorf("failed to move restored data to volume path: %w", err)
 	}
 
 	startContainerWithRetry()
 
 	log.Printf("[restore_volume] restored volume %s successfully", volumeName)
-
-	if err := a.Client.ReportRestoreComplete(backupID, true, ""); err != nil {
-		log.Printf("[restore_volume] warning: failed to report restore complete: %v", err)
-	}
 
 	return nil
 }

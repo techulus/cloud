@@ -3,7 +3,10 @@ import Link from "next/link";
 import { ClusterHealthSummary } from "@/components/cluster/cluster-health-summary";
 import {
 	SUMMARY_CARD_CLASSNAME,
-	SUMMARY_CARD_MIN_HEIGHT,
+	SUMMARY_CARD_COMPACT_CLASSNAME,
+	SUMMARY_CARD_COMPACT_TEXT_CLASSNAME,
+	SUMMARY_CARD_COMPACT_TITLE_CLASSNAME,
+	SUMMARY_CARD_GRID_CLASSNAME,
 	SummaryCardStat,
 	SummaryCardTitle,
 	SummaryCardValue,
@@ -19,6 +22,7 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import { getClusterHealth, listProjects, listServers } from "@/db/queries";
+import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
 	const [servers, projects, clusterHealth] = await Promise.all([
@@ -28,12 +32,12 @@ export default async function DashboardPage() {
 	]);
 
 	return (
-		<div className="container max-w-7xl mx-auto px-4 py-6 space-y-12">
-			<div className="space-y-6">
+		<div className="container max-w-7xl mx-auto px-4 py-4 space-y-8 sm:py-6 sm:space-y-12">
+			<div className="space-y-4 sm:space-y-6">
 				<div className="flex items-center justify-between">
 					<div>
 						<h2 className="text-lg font-semibold">Projects</h2>
-						<p className="text-sm text-muted-foreground">
+						<p className="hidden text-sm text-muted-foreground sm:block">
 							Deploy and manage services
 						</p>
 					</div>
@@ -54,18 +58,29 @@ export default async function DashboardPage() {
 						</EmptyContent>
 					</Empty>
 				) : (
-					<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+					<div className={SUMMARY_CARD_GRID_CLASSNAME}>
 						{projects.map((project) => (
 							<Link
 								key={project.id}
 								href={`/dashboard/projects/${project.slug}/production`}
-								className={SUMMARY_CARD_CLASSNAME}
-								style={{ minHeight: SUMMARY_CARD_MIN_HEIGHT }}
+								className={cn(
+									SUMMARY_CARD_CLASSNAME,
+									SUMMARY_CARD_COMPACT_CLASSNAME,
+								)}
 							>
-								<SummaryCardTitle>{project.name}</SummaryCardTitle>
-								<div className="mt-auto pt-3">
-									<SummaryCardStat label="services">
-										<SummaryCardValue>
+								<SummaryCardTitle
+									className={SUMMARY_CARD_COMPACT_TITLE_CLASSNAME}
+								>
+									{project.name}
+								</SummaryCardTitle>
+								<div className="mt-auto pt-2 sm:pt-3">
+									<SummaryCardStat
+										label="services"
+										className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+									>
+										<SummaryCardValue
+											className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+										>
 											{project.serviceCount === 0 ? (
 												<span className="font-normal text-muted-foreground">
 													none
@@ -73,15 +88,20 @@ export default async function DashboardPage() {
 											) : (
 												<>
 													{project.onlineServiceCount}/{project.serviceCount}{" "}
-													<span className="font-normal text-muted-foreground">
+													<span className="hidden font-normal text-muted-foreground sm:inline">
 														online
 													</span>
 												</>
 											)}
 										</SummaryCardValue>
 									</SummaryCardStat>
-									<SummaryCardStat label="environments">
-										<SummaryCardValue>
+									<SummaryCardStat
+										label="environments"
+										className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+									>
+										<SummaryCardValue
+											className={SUMMARY_CARD_COMPACT_TEXT_CLASSNAME}
+										>
 											{project.environmentCount}
 										</SummaryCardValue>
 									</SummaryCardStat>
@@ -92,7 +112,7 @@ export default async function DashboardPage() {
 				)}
 			</div>
 
-			<div className="space-y-6">
+			<div className="space-y-4 sm:space-y-6">
 				<div className="flex items-center justify-between gap-3">
 					<div className="min-w-0 space-y-1">
 						<h2 className="text-lg font-semibold">Servers</h2>

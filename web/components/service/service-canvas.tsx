@@ -6,6 +6,8 @@ import {
 	Github,
 	Globe,
 	HardDrive,
+	LayoutGrid,
+	LoaderCircle,
 	Settings,
 	Trash2,
 	Upload,
@@ -14,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AnchorHTMLAttributes, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
 import {
 	SUMMARY_CARD_MIN_HEIGHT,
@@ -22,7 +25,7 @@ import {
 	SummaryCardTitle,
 	SummaryCardValue,
 } from "@/components/core/summary-card";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { getStatusColorFromDeployments } from "@/components/ui/canvas-wrapper";
 import {
 	ContextMenu,
@@ -63,14 +66,18 @@ type CanvasPosition = {
 	canvasY: number;
 };
 
+type CanvasPositionUpdate = CanvasPosition & {
+	serviceId: string;
+};
+
 const SERVICE_CARD_WIDTH = 320;
 const SERVICE_CARD_HEIGHT = SUMMARY_CARD_MIN_HEIGHT;
 const SERVICE_CARD_GAP_X = 56;
 const SERVICE_CARD_GAP_Y = 48;
 const DEFAULT_GRID_COLUMNS = 3;
-const DEFAULT_GRID_ROWS = 3;
 const CANVAS_WIDTH = 1320;
-const CANVAS_HEIGHT = 900;
+const MIN_CANVAS_HEIGHT = 900;
+const CANVAS_VERTICAL_PADDING = 48;
 const MIN_CANVAS_SCALE = 0.5;
 const SNAP_GRID_SIZE = 24;
 const CANVAS_DOT_PATTERN =
@@ -106,7 +113,7 @@ function getStatusLabel(
 	return "degraded";
 }
 
-function getCanvasScale() {
+function getCanvasScale(canvasHeight = MIN_CANVAS_HEIGHT) {
 	if (typeof window === "undefined") {
 		return 1;
 	}
@@ -116,29 +123,65 @@ function getCanvasScale() {
 
 	return Math.max(
 		MIN_CANVAS_SCALE,
-		Math.min(1, availableWidth / CANVAS_WIDTH, availableHeight / CANVAS_HEIGHT),
+		Math.min(1, availableWidth / CANVAS_WIDTH, availableHeight / canvasHeight),
 	);
 }
 
-function getDefaultServicePosition(index: number): CanvasPosition {
-	const gridWidth =
-		DEFAULT_GRID_COLUMNS * SERVICE_CARD_WIDTH +
-		(DEFAULT_GRID_COLUMNS - 1) * SERVICE_CARD_GAP_X;
+function getGridCanvasHeight(serviceCount: number) {
+	const rowCount = Math.ceil(serviceCount / DEFAULT_GRID_COLUMNS);
 	const gridHeight =
-		DEFAULT_GRID_ROWS * SERVICE_CARD_HEIGHT +
-		(DEFAULT_GRID_ROWS - 1) * SERVICE_CARD_GAP_Y;
-	const gridStartX = (CANVAS_WIDTH - gridWidth) / 2;
-	const gridStartY = (CANVAS_HEIGHT - gridHeight) / 2;
-	const column = index % DEFAULT_GRID_COLUMNS;
+		rowCount * SERVICE_CARD_HEIGHT +
+		Math.max(0, rowCount - 1) * SERVICE_CARD_GAP_Y;
+
+	return Math.max(MIN_CANVAS_HEIGHT, gridHeight + CANVAS_VERTICAL_PADDING * 2);
+}
+
+function getCanvasHeight(services: ServiceWithDetails[] | undefined) {
+	const gridCanvasHeight = getGridCanvasHeight(services?.length ?? 0);
+	const persistedCanvasHeight = Math.max(
+		0,
+		...(services ?? []).map((service) =>
+			service.canvasY === null
+				? 0
+				: service.canvasY + SERVICE_CARD_HEIGHT + CANVAS_VERTICAL_PADDING,
+		),
+	);
+
+	return Math.max(gridCanvasHeight, persistedCanvasHeight);
+}
+
+function getAutoLayoutPosition(
+	index: number,
+	serviceCount: number,
+	canvasHeight: number,
+): CanvasPosition {
 	const row = Math.floor(index / DEFAULT_GRID_COLUMNS);
+	const rowStartIndex = row * DEFAULT_GRID_COLUMNS;
+	const cardsInRow = Math.min(
+		DEFAULT_GRID_COLUMNS,
+		serviceCount - rowStartIndex,
+	);
+	const rowWidth =
+		cardsInRow * SERVICE_CARD_WIDTH +
+		Math.max(0, cardsInRow - 1) * SERVICE_CARD_GAP_X;
+	const rowStartX = (CANVAS_WIDTH - rowWidth) / 2;
+	const rowCount = Math.ceil(serviceCount / DEFAULT_GRID_COLUMNS);
+	const gridHeight =
+		rowCount * SERVICE_CARD_HEIGHT +
+		Math.max(0, rowCount - 1) * SERVICE_CARD_GAP_Y;
+	const gridStartY = (canvasHeight - gridHeight) / 2;
+	const column = index - rowStartIndex;
 
 	return {
-		canvasX: gridStartX + column * (SERVICE_CARD_WIDTH + SERVICE_CARD_GAP_X),
+		canvasX: rowStartX + column * (SERVICE_CARD_WIDTH + SERVICE_CARD_GAP_X),
 		canvasY: gridStartY + row * (SERVICE_CARD_HEIGHT + SERVICE_CARD_GAP_Y),
 	};
 }
 
-function clampPosition(position: CanvasPosition): CanvasPosition {
+function clampPosition(
+	position: CanvasPosition,
+	canvasHeight: number,
+): CanvasPosition {
 	return {
 		canvasX: Math.max(
 			0,
@@ -147,25 +190,33 @@ function clampPosition(position: CanvasPosition): CanvasPosition {
 		canvasY: Math.max(
 			0,
 			Math.min(
-				CANVAS_HEIGHT - SERVICE_CARD_HEIGHT,
+				canvasHeight - SERVICE_CARD_HEIGHT,
 				Math.round(position.canvasY),
 			),
 		),
 	};
 }
 
-function snapPosition(position: CanvasPosition): CanvasPosition {
-	return clampPosition({
-		canvasX: Math.round(position.canvasX / SNAP_GRID_SIZE) * SNAP_GRID_SIZE,
-		canvasY: Math.round(position.canvasY / SNAP_GRID_SIZE) * SNAP_GRID_SIZE,
-	});
+function snapPosition(
+	position: CanvasPosition,
+	canvasHeight: number,
+): CanvasPosition {
+	return clampPosition(
+		{
+			canvasX: Math.round(position.canvasX / SNAP_GRID_SIZE) * SNAP_GRID_SIZE,
+			canvasY: Math.round(position.canvasY / SNAP_GRID_SIZE) * SNAP_GRID_SIZE,
+		},
+		canvasHeight,
+	);
 }
 
 function getServicePosition(
 	service: ServiceWithDetails,
 	index: number,
+	serviceCount: number,
+	canvasHeight: number,
 ): CanvasPosition {
-	const fallback = getDefaultServicePosition(index);
+	const fallback = getAutoLayoutPosition(index, serviceCount, canvasHeight);
 
 	return {
 		canvasX: service.canvasX ?? fallback.canvasX,
@@ -399,16 +450,24 @@ function ServiceCard({
 function DraggableServiceCard({
 	service,
 	index,
+	serviceCount,
 	projectSlug,
 	envName,
 	canvasScale,
+	canvasHeight,
+	positionWritePending,
+	positionWritePendingRef,
 	onPositionChange,
 }: {
 	service: ServiceWithDetails;
 	index: number;
+	serviceCount: number;
 	projectSlug: string;
 	envName: string;
 	canvasScale: number;
+	canvasHeight: number;
+	positionWritePending: boolean;
+	positionWritePendingRef: { current: boolean };
 	onPositionChange: (serviceId: string, position: CanvasPosition) => void;
 }) {
 	const [dragPosition, setDragPosition] = useState<CanvasPosition | null>(null);
@@ -420,11 +479,13 @@ function DraggableServiceCard({
 		moved: boolean;
 	} | null>(null);
 	const suppressClickRef = useRef(false);
-	const position = dragPosition ?? getServicePosition(service, index);
+	const position =
+		dragPosition ??
+		getServicePosition(service, index, serviceCount, canvasHeight);
 
 	const handlePointerDown = useCallback(
 		(event: PointerEvent<HTMLAnchorElement>) => {
-			if (event.button !== 0) {
+			if (event.button !== 0 || positionWritePendingRef.current) {
 				return;
 			}
 
@@ -437,7 +498,7 @@ function DraggableServiceCard({
 				moved: false,
 			};
 		},
-		[position],
+		[position, positionWritePendingRef],
 	);
 
 	const handlePointerMove = useCallback(
@@ -449,10 +510,13 @@ function DraggableServiceCard({
 
 			const deltaX = (event.clientX - drag.startX) / canvasScale;
 			const deltaY = (event.clientY - drag.startY) / canvasScale;
-			const nextPosition = clampPosition({
-				canvasX: drag.origin.canvasX + deltaX,
-				canvasY: drag.origin.canvasY + deltaY,
-			});
+			const nextPosition = clampPosition(
+				{
+					canvasX: drag.origin.canvasX + deltaX,
+					canvasY: drag.origin.canvasY + deltaY,
+				},
+				canvasHeight,
+			);
 
 			if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
 				drag.moved = true;
@@ -461,7 +525,7 @@ function DraggableServiceCard({
 
 			setDragPosition(nextPosition);
 		},
-		[canvasScale],
+		[canvasHeight, canvasScale],
 	);
 
 	const handlePointerUp = useCallback(
@@ -479,10 +543,10 @@ function DraggableServiceCard({
 
 			if (drag.moved) {
 				suppressClickRef.current = true;
-				onPositionChange(service.id, snapPosition(position));
+				onPositionChange(service.id, snapPosition(position, canvasHeight));
 			}
 		},
-		[onPositionChange, position, service.id],
+		[canvasHeight, onPositionChange, position, service.id],
 	);
 
 	const handlePointerCancel = useCallback(
@@ -529,8 +593,12 @@ function DraggableServiceCard({
 				projectSlug={projectSlug}
 				envName={envName}
 				dragHandleProps={{
-					className:
-						"touch-none cursor-grab select-none active:cursor-grabbing",
+					className: cn(
+						"touch-none select-none",
+						positionWritePending
+							? "cursor-wait"
+							: "cursor-grab active:cursor-grabbing",
+					),
 					onPointerDown: handlePointerDown,
 					onPointerMove: handlePointerMove,
 					onPointerUp: handlePointerUp,
@@ -561,6 +629,8 @@ export function ServiceCanvas({
 
 	const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
 	const [githubDialogOpen, setGithubDialogOpen] = useState(false);
+	const [positionWritePending, setPositionWritePending] = useState(false);
+	const positionWritePendingRef = useRef(false);
 	const [canvasScale, setCanvasScale] = useState(getCanvasScale);
 
 	const {
@@ -575,14 +645,18 @@ export function ServiceCanvas({
 			revalidateOnFocus: true,
 		},
 	);
+	const canvasHeight = getCanvasHeight(services);
 
 	useEffect(() => {
-		const updateCanvasScale = () => setCanvasScale(getCanvasScale());
+		const updateCanvasScale = () =>
+			setCanvasScale(getCanvasScale(canvasHeight));
+
+		updateCanvasScale();
 
 		window.addEventListener("resize", updateCanvasScale);
 
 		return () => window.removeEventListener("resize", updateCanvasScale);
-	}, []);
+	}, [canvasHeight]);
 
 	const composeHref = `/dashboard/projects/${projectSlug}/${envName}/import-compose`;
 
@@ -614,56 +688,103 @@ export function ServiceCanvas({
 		[projectId, envId, projectSlug, envName, mutate],
 	);
 
-	const handlePositionChange = useCallback(
-		(serviceId: string, position: CanvasPosition) => {
-			const nextPosition = clampPosition(position);
+	const savePositions = useCallback(
+		async (positions: CanvasPositionUpdate[]) => {
+			if (positionWritePendingRef.current) {
+				return;
+			}
 
-			void mutate(
-				(current) =>
-					current?.map((service) =>
-						service.id === serviceId
-							? {
-									...service,
-									...nextPosition,
-								}
-							: service,
-					),
-				false,
+			const optimisticPositions = new Map(
+				positions.map(({ serviceId, canvasX, canvasY }) => [
+					serviceId,
+					{ canvasX, canvasY },
+				]),
 			);
 
-			void fetch(`/api/projects/${projectId}/services/${serviceId}/position`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(nextPosition),
-			})
-				.then(async (response) => {
-					if (!response.ok) {
-						void mutate();
-						return;
-					}
+			positionWritePendingRef.current = true;
+			setPositionWritePending(true);
 
-					const savedPosition = (await response.json()) as CanvasPosition;
+			try {
+				await mutate(
+					async (current) => {
+						const response = await fetch(
+							`/api/projects/${projectId}/services`,
+							{
+								method: "PATCH",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ positions }),
+							},
+						);
 
-					void mutate(
-						(current) =>
-							current?.map((service) =>
-								service.id === serviceId
-									? {
-											...service,
-											canvasX: savedPosition.canvasX,
-											canvasY: savedPosition.canvasY,
-										}
-									: service,
-							),
-						false,
-					);
-				})
-				.catch(() => {
-					void mutate();
-				});
+						if (!response.ok) {
+							throw new Error("Failed to save canvas positions");
+						}
+
+						const savedPositions = (await response.json()) as Array<
+							CanvasPosition & { id: string }
+						>;
+						const savedPositionsById = new Map(
+							savedPositions.map(({ id, canvasX, canvasY }) => [
+								id,
+								{ canvasX, canvasY },
+							]),
+						);
+
+						return current?.map((service) => ({
+							...service,
+							...savedPositionsById.get(service.id),
+						}));
+					},
+					{
+						optimisticData: (current) =>
+							(current ?? []).map((service) => ({
+								...service,
+								...optimisticPositions.get(service.id),
+							})),
+						rollbackOnError: true,
+						revalidate: true,
+					},
+				);
+			} catch {
+				toast.error("Could not save the canvas layout");
+			} finally {
+				positionWritePendingRef.current = false;
+				setPositionWritePending(false);
+			}
 		},
 		[mutate, projectId],
 	);
+
+	const handlePositionChange = useCallback(
+		(serviceId: string, position: CanvasPosition) => {
+			void savePositions([
+				{
+					serviceId,
+					...clampPosition(position, canvasHeight),
+				},
+			]);
+		},
+		[canvasHeight, savePositions],
+	);
+
+	const handleAutoLayout = useCallback(() => {
+		if (!services || positionWritePendingRef.current) {
+			return;
+		}
+
+		const gridCanvasHeight = getGridCanvasHeight(services.length);
+		const positions: CanvasPositionUpdate[] = services.map(
+			(service, index) => ({
+				serviceId: service.id,
+				...clampPosition(
+					getAutoLayoutPosition(index, services.length, gridCanvasHeight),
+					gridCanvasHeight,
+				),
+			}),
+		);
+
+		void savePositions(positions);
+	}, [savePositions, services]);
 
 	if (!environments || isLoading) {
 		return (
@@ -827,7 +948,21 @@ export function ServiceCanvas({
 						projectSlug={projectSlug}
 						className="absolute top-4 left-4 z-10"
 					/>
-					<div className="absolute top-4 right-4 z-10">
+					<div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="icon-sm"
+							disabled={positionWritePending}
+							onClick={() => void handleAutoLayout()}
+							aria-label="Auto layout"
+							title="Auto layout"
+						>
+							{positionWritePending ? (
+								<LoaderCircle className="animate-spin" />
+							) : (
+								<LayoutGrid />
+							)}
+						</Button>
 						<AddServiceMenu {...menuCallbacks} />
 					</div>
 					<div className="flex min-h-full items-center justify-center px-10 py-6">
@@ -835,14 +970,14 @@ export function ServiceCanvas({
 							className="relative"
 							style={{
 								width: CANVAS_WIDTH * canvasScale,
-								height: CANVAS_HEIGHT * canvasScale,
+								height: canvasHeight * canvasScale,
 							}}
 						>
 							<div
 								className="relative"
 								style={{
 									width: CANVAS_WIDTH,
-									height: CANVAS_HEIGHT,
+									height: canvasHeight,
 									transform: `scale(${canvasScale})`,
 									transformOrigin: "top left",
 								}}
@@ -852,9 +987,13 @@ export function ServiceCanvas({
 										key={service.id}
 										service={service}
 										index={index}
+										serviceCount={services.length}
 										projectSlug={projectSlug}
 										envName={envName}
 										canvasScale={canvasScale}
+										canvasHeight={canvasHeight}
+										positionWritePending={positionWritePending}
+										positionWritePendingRef={positionWritePendingRef}
 										onPositionChange={handlePositionChange}
 									/>
 								))}

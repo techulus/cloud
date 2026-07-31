@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
+import { z } from "zod";
 import { db } from "@/db";
 import {
 	builds,
@@ -16,6 +17,7 @@ import {
 	serviceVolumes,
 	volumeBackups,
 } from "@/db/schema";
+import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { auth } from "@/lib/auth";
 import { getTimestamp } from "@/lib/date";
 import { resolvePersistedSourceFromRows } from "@/lib/public-api";
@@ -24,6 +26,111 @@ import {
 	type SourceConfig,
 } from "@/lib/service-config";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+
+const MAX_CANVAS_COORDINATE = 2_147_483_647;
+
+class CanvasServiceNotFoundError extends Error {}
+
+const canvasPositionsSchema = z.object({
+	positions: z
+		.array(
+			z.object({
+				serviceId: z.string().min(1),
+				canvasX: z.number().int().min(0).max(MAX_CANVAS_COORDINATE),
+				canvasY: z.number().int().min(0).max(MAX_CANVAS_COORDINATE),
+			}),
+		)
+		.min(1)
+		.max(10_000)
+		.refine(
+			(positions) =>
+				new Set(positions.map((position) => position.serviceId)).size ===
+				positions.length,
+		),
+});
+
+export async function PATCH(
+	request: Request,
+	{ params }: { params: Promise<{ id: string }> },
+) {
+	const sessionResult = await requireRequestDeveloperRole(request);
+	if (!sessionResult.ok) {
+		return sessionResult.response;
+	}
+
+	const { id: projectId } = await params;
+	const body = await request.json().catch(() => null);
+	const parsed = canvasPositionsSchema.safeParse(body);
+
+	if (!parsed.success) {
+		return Response.json({ error: "Invalid positions" }, { status: 400 });
+	}
+
+	try {
+		const savedPositions = await db.transaction(async (tx) => {
+			const serviceIds = parsed.data.positions.map(
+				(position) => position.serviceId,
+			);
+			const activeServices = await tx
+				.select({ id: services.id })
+				.from(services)
+				.where(
+					and(
+						eq(services.projectId, projectId),
+						inArray(services.id, serviceIds),
+						isNull(services.deletedAt),
+					),
+				);
+
+			if (activeServices.length !== parsed.data.positions.length) {
+				throw new CanvasServiceNotFoundError();
+			}
+
+			const positions: Array<{
+				id: string;
+				canvasX: number | null;
+				canvasY: number | null;
+			}> = [];
+
+			for (const position of parsed.data.positions) {
+				const [savedPosition] = await tx
+					.update(services)
+					.set({
+						canvasX: position.canvasX,
+						canvasY: position.canvasY,
+					})
+					.where(
+						and(
+							eq(services.id, position.serviceId),
+							eq(services.projectId, projectId),
+							isNull(services.deletedAt),
+						),
+					)
+					.returning({
+						id: services.id,
+						canvasX: services.canvasX,
+						canvasY: services.canvasY,
+					});
+
+				if (!savedPosition) {
+					throw new CanvasServiceNotFoundError();
+				}
+
+				positions.push(savedPosition);
+			}
+
+			return positions;
+		});
+
+		return Response.json(savedPositions);
+	} catch (error) {
+		if (error instanceof CanvasServiceNotFoundError) {
+			return Response.json({ error: "Service not found" }, { status: 404 });
+		}
+
+		throw error;
+	}
+}
 
 export async function GET(
 	request: Request,

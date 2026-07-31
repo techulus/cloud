@@ -9,6 +9,7 @@ import {
 	BreadcrumbDataProvider,
 	useBreadcrumbs,
 } from "@/components/core/breadcrumb-data";
+import { DashboardCommandMenu } from "@/components/dashboard/dashboard-command-menu";
 import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
 import { OfflineServersBanner } from "@/components/server/offline-servers-banner";
 import {
@@ -37,8 +38,8 @@ function DashboardHeader({ email, name }: { email: string; name: string }) {
 
 	return (
 		<header className="h-14 border-b">
-			<div className="container max-w-full mx-auto px-4 h-full flex items-center justify-between">
-				<div className="flex items-center gap-3">
+			<div className="container max-w-full mx-auto px-4 h-full flex items-center justify-between gap-2">
+				<div className="flex min-w-0 items-center gap-3">
 					<Link href="/dashboard" className="flex items-center">
 						<Image
 							src="/logo.png"
@@ -50,7 +51,7 @@ function DashboardHeader({ email, name }: { email: string; name: string }) {
 					</Link>
 					{breadcrumbs.length > 0 ? (
 						<>
-							<nav className="hidden sm:flex items-center gap-2 text-sm">
+							<nav className="hidden min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-sm sm:flex">
 								{breadcrumbs.map((crumb, index) => (
 									<span
 										key={getBreadcrumbKey(crumb, index)}
@@ -72,7 +73,7 @@ function DashboardHeader({ email, name }: { email: string; name: string }) {
 									</span>
 								))}
 							</nav>
-							<nav className="flex sm:hidden items-center gap-2 text-sm">
+							<nav className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-sm sm:hidden">
 								{showEllipsis && (
 									<>
 										<span className="text-muted-foreground">...</span>
@@ -105,43 +106,46 @@ function DashboardHeader({ email, name }: { email: string; name: string }) {
 						<span className="text-sm font-semibold">techulus.cloud</span>
 					)}
 				</div>
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						className="flex items-center rounded-md p-2 hover:bg-accent transition-colors cursor-pointer"
-						render={<button type="button" />}
-					>
-						<User className="size-4" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" sideOffset={8} className="w-40">
-						<DropdownMenuGroup>
-							<DropdownMenuLabel>
-								<span className="block truncate text-sm font-semibold">
-									{name}
-								</span>
-								<span className="block truncate text-xs font-normal text-muted-foreground">
-									{email}
-								</span>
-							</DropdownMenuLabel>
-						</DropdownMenuGroup>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							render={<Link href="/dashboard/settings" />}
-							className="cursor-pointer"
+				<div className="flex shrink-0 items-center gap-2">
+					<DashboardCommandMenu />
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							className="flex items-center rounded-md p-2 hover:bg-accent transition-colors cursor-pointer"
+							render={<button type="button" />}
 						>
-							<Settings className="size-4" />
-							Settings
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							variant="destructive"
-							onClick={() => signOut().then(() => router.push("/"))}
-							className="cursor-pointer"
-						>
-							<LogOut className="size-4" />
-							Sign Out
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
+							<User className="size-4" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" sideOffset={8} className="w-40">
+							<DropdownMenuGroup>
+								<DropdownMenuLabel>
+									<span className="block truncate text-sm font-semibold">
+										{name}
+									</span>
+									<span className="block truncate text-xs font-normal text-muted-foreground">
+										{email}
+									</span>
+								</DropdownMenuLabel>
+							</DropdownMenuGroup>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								render={<Link href="/dashboard/settings" />}
+								className="cursor-pointer"
+							>
+								<Settings className="size-4" />
+								Settings
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								variant="destructive"
+								onClick={() => signOut().then(() => router.push("/"))}
+								className="cursor-pointer"
+							>
+								<LogOut className="size-4" />
+								Sign Out
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				</div>
 			</div>
 		</header>
 	);

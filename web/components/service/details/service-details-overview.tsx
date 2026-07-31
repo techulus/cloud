@@ -327,7 +327,7 @@ export function ServiceMetricsPanel({
 										? formatCompactDate(value)
 										: formatCompactDateTime(value)
 								}
-								className="text-xs"
+								className="text-[10px]"
 							/>
 							<YAxis
 								width={64}
@@ -336,7 +336,7 @@ export function ServiceMetricsPanel({
 								tickFormatter={(value) =>
 									formatAxisTick(Number(value), chartMode)
 								}
-								className="text-xs"
+								className="text-[10px]"
 							/>
 							<Tooltip
 								cursor={{ strokeDasharray: "3 3" }}
