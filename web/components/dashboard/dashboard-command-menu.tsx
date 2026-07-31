@@ -39,6 +39,32 @@ function ResultIcon({ item }: { item: NavigationItem }) {
 	return <FolderIcon className={className} />;
 }
 
+function NavigationResult({
+	item,
+	onSelect,
+}: {
+	item: NavigationItem;
+	onSelect: (href: string) => void;
+}) {
+	return (
+		<CommandItem
+			value={`${item.label} ${item.description ?? ""} ${item.id}`}
+			keywords={item.keywords}
+			onSelect={() => onSelect(item.href)}
+		>
+			<ResultIcon item={item} />
+			<span className="min-w-0 flex-1">
+				<span className="block truncate">{item.label}</span>
+				{item.description && (
+					<span className="block truncate text-xs text-muted-foreground">
+						{item.description}
+					</span>
+				)}
+			</span>
+		</CommandItem>
+	);
+}
+
 export function DashboardCommandMenu() {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
@@ -127,35 +153,32 @@ export function DashboardCommandMenu() {
 						) : (
 							<>
 								<CommandEmpty>No pages found.</CommandEmpty>
-								{groups.map((group) => {
-									const items = data?.items.filter(
-										(item) => item.group === group,
-									);
-									if (!items?.length) return null;
+								{search.trim()
+									? data?.items.map((item) => (
+											<NavigationResult
+												key={item.id}
+												item={item}
+												onSelect={handleSelect}
+											/>
+										))
+									: groups.map((group) => {
+											const items = data?.items.filter(
+												(item) => item.group === group,
+											);
+											if (!items?.length) return null;
 
-									return (
-										<CommandGroup key={group} heading={group}>
-											{items.map((item) => (
-												<CommandItem
-													key={item.id}
-													value={`${item.id} ${item.label} ${item.description ?? ""}`}
-													keywords={item.keywords}
-													onSelect={() => handleSelect(item.href)}
-												>
-													<ResultIcon item={item} />
-													<span className="min-w-0 flex-1">
-														<span className="block truncate">{item.label}</span>
-														{item.description && (
-															<span className="block truncate text-xs text-muted-foreground">
-																{item.description}
-															</span>
-														)}
-													</span>
-												</CommandItem>
-											))}
-										</CommandGroup>
-									);
-								})}
+											return (
+												<CommandGroup key={group} heading={group}>
+													{items.map((item) => (
+														<NavigationResult
+															key={item.id}
+															item={item}
+															onSelect={handleSelect}
+														/>
+													))}
+												</CommandGroup>
+											);
+										})}
 							</>
 						)}
 					</CommandList>
