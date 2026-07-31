@@ -84,6 +84,9 @@ func TestRoutesConfigRoundTripProducesConvergentHash(t *testing.T) {
 	if forwardedServer.Headers == nil || forwardedServer.Headers.CustomRequestHeaders["X-Forwarded-Server"] != "proxy-1" {
 		t.Fatalf("forwarded server middleware was not preserved: %#v", forwardedServer)
 	}
+	if forwardedServer.Headers.CustomResponseHeaders["X-Techulus-Host"] != "proxy-1" {
+		t.Fatalf("Techulus host response header was not preserved: %#v", forwardedServer)
+	}
 	tcpRouter := config.TCP.Routers[resourceName("tcp", "service-tcp", "tcp-route")]
 	if tcpRouter.TLS == nil || !tcpRouter.TLS.Passthrough {
 		t.Fatalf("TCP TLS passthrough was not preserved: %#v", tcpRouter)

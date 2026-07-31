@@ -49,7 +49,10 @@ func CompileRoutes(httpRoutes []TraefikRoute, tcpRoutes []TraefikTCPRoute, udpRo
 	}
 	var middlewareNames []string
 	if serverName != "" {
-		config.HTTP.Middlewares["forwarded_server"] = middleware{Headers: &headersMiddleware{CustomRequestHeaders: map[string]string{"X-Forwarded-Server": serverName}}}
+		config.HTTP.Middlewares["forwarded_server"] = middleware{Headers: &headersMiddleware{
+			CustomRequestHeaders:  map[string]string{"X-Forwarded-Server": serverName},
+			CustomResponseHeaders: map[string]string{"X-Techulus-Host": serverName},
+		}}
 		middlewareNames = []string{"forwarded_server@file"}
 	}
 	for _, route := range httpRoutes {
