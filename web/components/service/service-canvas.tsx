@@ -776,7 +776,10 @@ export function ServiceCanvas({
 		const positions: CanvasPositionUpdate[] = services.map(
 			(service, index) => ({
 				serviceId: service.id,
-				...getAutoLayoutPosition(index, services.length, gridCanvasHeight),
+				...clampPosition(
+					getAutoLayoutPosition(index, services.length, gridCanvasHeight),
+					gridCanvasHeight,
+				),
 			}),
 		);
 
