@@ -599,26 +599,3 @@ func (c *Client) ReportBackupFailed(backupID string, errorMsg string) error {
 
 	return nil
 }
-
-func (c *Client) ReportRestoreComplete(backupID string, success bool, errorMsg string) error {
-	payload := map[string]interface{}{
-		"backupId": backupID,
-		"success":  success,
-	}
-	if errorMsg != "" {
-		payload["error"] = errorMsg
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal restore complete: %w", err)
-	}
-
-	resp, err := c.doSignedJSONRequest(c.baseURL+"/api/v1/agent/restore/complete", body, []int{http.StatusOK}, "failed to report restore complete", "restore complete report failed")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	return nil
-}
