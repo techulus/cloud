@@ -83,10 +83,8 @@ export function DashboardCommandMenu() {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
 				event.preventDefault();
-				setOpen((current) => {
-					if (current) setSearch("");
-					return !current;
-				});
+				setSearch("");
+				setOpen((current) => !current);
 			}
 		};
 
