@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, servers, workQueue } from "@/db/schema";
+import { deployments, servers, volumeBackups, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
@@ -152,20 +152,31 @@ export async function completeWorkItemResults(
 	const rejected: RejectedWorkItemResult[] = [];
 
 	for (const result of results) {
-		const updated = await db
-			.update(workQueue)
-			.set({ status: result.status })
-			.where(
-				and(
-					eq(workQueue.id, result.id),
-					eq(workQueue.serverId, serverId),
-					eq(workQueue.status, "processing"),
-					eq(workQueue.attempts, result.attempt),
-				),
-			)
-			.returning();
+		const item = await db.transaction(async (tx) => {
+			const updated = await tx
+				.update(workQueue)
+				.set({ status: result.status })
+				.where(
+					and(
+						eq(workQueue.id, result.id),
+						eq(workQueue.serverId, serverId),
+						eq(workQueue.status, "processing"),
+						eq(workQueue.attempts, result.attempt),
+					),
+				)
+				.returning();
 
-		if (updated.length === 0) {
+			const item = updated[0];
+			if (!item) return null;
+
+			if (item.type === "restore_volume") {
+				await publishRestoreWorkResult(tx, item, result);
+			}
+
+			return item;
+		});
+
+		if (!item) {
 			rejected.push({
 				id: result.id,
 				reason: await getRejectionReason(serverId, result.id, result.attempt),
@@ -174,7 +185,9 @@ export async function completeWorkItemResults(
 		}
 
 		accepted.push(result.id);
-		await runWorkItemCompletionSideEffects(updated[0], result);
+		if (item.type !== "restore_volume") {
+			await runWorkItemCompletionSideEffects(item, result);
+		}
 	}
 
 	return { accepted, rejected };
@@ -335,6 +348,99 @@ async function getRejectionReason(
 	if (item.status !== "processing") return "not_processing";
 	if (item.attempts !== attempt) return "attempt_mismatch";
 	return "unknown";
+}
+
+async function publishRestoreWorkResult(
+	tx: WorkQueueTransaction,
+	item: WorkQueue,
+	result: WorkItemResult,
+): Promise<void> {
+	let value: unknown;
+	try {
+		value = JSON.parse(item.payload);
+	} catch {
+		throw new Error(`Restore work item ${item.id} has invalid JSON payload`);
+	}
+
+	if (!value || typeof value !== "object") {
+		throw new Error(`Restore work item ${item.id} has invalid payload`);
+	}
+
+	const payload = value as Partial<WorkPayloadByType["restore_volume"]>;
+	if (
+		typeof payload.backupId !== "string" ||
+		payload.backupId.length === 0 ||
+		typeof payload.serviceId !== "string" ||
+		payload.serviceId.length === 0 ||
+		typeof payload.isMigrationRestore !== "boolean"
+	) {
+		throw new Error(`Restore work item ${item.id} has invalid restore context`);
+	}
+
+	const backup = await tx
+		.select({
+			volumeId: volumeBackups.volumeId,
+			serviceId: volumeBackups.serviceId,
+		})
+		.from(volumeBackups)
+		.where(eq(volumeBackups.id, payload.backupId))
+		.then((rows) => rows[0]);
+
+	if (!backup) {
+		throw new Error(`Restore work item ${item.id} references a missing backup`);
+	}
+	if (backup.serviceId !== payload.serviceId) {
+		throw new Error(
+			`Restore work item ${item.id} has mismatched service context`,
+		);
+	}
+
+	if (payload.isMigrationRestore) {
+		await inngest.send(
+			inngestEvents.migrationRestoreFinished.create(
+				{
+					backupId: payload.backupId,
+					serviceId: payload.serviceId,
+					status: result.status,
+					...(result.status === "failed"
+						? { error: result.error || "Restore failed" }
+						: {}),
+				},
+				{
+					id: `migration-restore-${result.status}-${item.id}`,
+				},
+			),
+		);
+		return;
+	}
+
+	if (result.status === "completed") {
+		await inngest.send(
+			inngestEvents.restoreCompleted.create(
+				{
+					backupId: payload.backupId,
+					volumeId: backup.volumeId,
+					serviceId: payload.serviceId,
+					isMigrationRestore: false,
+				},
+				{ id: `restore-completed-${item.id}` },
+			),
+		);
+		return;
+	}
+
+	await inngest.send(
+		inngestEvents.restoreFailed.create(
+			{
+				backupId: payload.backupId,
+				volumeId: backup.volumeId,
+				serviceId: payload.serviceId,
+				error: result.error || "Restore failed",
+				isMigrationRestore: false,
+			},
+			{ id: `restore-failed-${item.id}` },
+		),
+	);
 }
 
 async function runWorkItemCompletionSideEffects(
