@@ -43,6 +43,12 @@ For any requested code or configuration change, work through these phases in
 order. Do not collapse requirements, specification, and implementation
 planning into a single step.
 
+- Use subagents where helpful for bounded research, investigation, independent
+  analysis, and synthesizing findings or answers.
+- As each stage is completed, compact the working context into its agreed
+  deliverable before progressing. Preserve material decisions, constraints,
+  assumptions, unresolved questions, and risks.
+
 ### 1. Research and refine requirements
 
 Understand the problem before designing a solution.
