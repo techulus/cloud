@@ -19,6 +19,11 @@ export const ServerlessSection = memo(function ServerlessSection(
 	props: ServerlessSectionProps,
 ) {
 	const { service } = props;
+	const hasPublicHttpEndpoint = service.ports.some(
+		(port) => port.isPublic && port.protocol === "http" && !!port.domain,
+	);
+	if (!hasPublicHttpEndpoint) return null;
+
 	// Persisted changes are authoritative and intentionally discard any stale local draft.
 	const settingsKey = `${service.id}:${service.serverlessEnabled}:${service.serverlessSleepAfterSeconds}:${service.serverlessWakeTimeoutSeconds}`;
 
@@ -47,21 +52,12 @@ function ServerlessSectionEditor({
 	const [wakeTimeoutSeconds, setWakeTimeoutSeconds] = useState(
 		String(service.serverlessWakeTimeoutSeconds ?? 300),
 	);
-	const hasPublicHttpEndpoint = useMemo(
-		() =>
-			service.ports.some(
-				(port) => port.isPublic && port.protocol === "http" && !!port.domain,
-			),
-		[service.ports],
-	);
 	const hasWorkerReplica = service.configuredReplicas.some(
 		(replica) => replica.count > 0 && !replica.serverIsProxy,
 	);
-	const unavailableReason = !hasPublicHttpEndpoint
-		? "Add a public HTTP port with a domain to enable serverless"
-		: hasWorkerReplica
-			? "Serverless services can only be deployed to proxy nodes"
-			: null;
+	const unavailableReason = hasWorkerReplica
+		? "Serverless services can only be deployed to proxy nodes"
+		: null;
 	const optionsDisabled = !!unavailableReason || isSaving;
 
 	const parsed = useMemo(

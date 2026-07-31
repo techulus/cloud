@@ -47,13 +47,20 @@ describe("configuration plan protocol", () => {
 			healthCheck: null,
 			startCommand: null,
 			resources: null,
+			serverless: { enabled: false },
 		};
 		const result = planCanonicalConfiguration(current, {
-			...current,
+			name: current.name,
 			source: {
 				...current.source,
 				repository: "https://github.com/techulus/cloud",
 			},
+			hostname: current.hostname,
+			ports: current.ports,
+			placement: current.placement,
+			healthCheck: current.healthCheck,
+			startCommand: current.startCommand,
+			resources: current.resources,
 		});
 
 		expect(result.action).toBe("noop");
@@ -113,6 +120,7 @@ describe("configuration plan protocol", () => {
 			},
 			startCommand: "npm start",
 			resources: { cpuCores: 2, memoryMb: 512 },
+			serverless: { enabled: false },
 		};
 		const result = planCanonicalConfiguration(current, {
 			name: "web",
@@ -174,6 +182,7 @@ describe("configuration plan protocol", () => {
 			healthCheck: null,
 			startCommand: null,
 			resources: null,
+			serverless: { enabled: false },
 		};
 		const desired = {
 			name: "web",
@@ -207,5 +216,81 @@ describe("configuration plan protocol", () => {
 		expect(first.action).toBe("noop");
 		expect(first.changes).toEqual([]);
 		expect(second.desiredVersion).toBe(first.desiredVersion);
+	});
+
+	it("plans disabling serverless when the final public HTTP domain is removed", () => {
+		const current = {
+			name: "web",
+			source: { type: "image" as const, image: "nginx" },
+			hostname: "web",
+			ports: [{ containerPort: 8080, public: true, domain: "web.example.com" }],
+			placement: { mode: "automatic" as const, replicas: 1 },
+			healthCheck: null,
+			startCommand: null,
+			resources: null,
+			serverless: { enabled: true },
+		};
+		const desired = {
+			name: "web",
+			source: { type: "image" as const, image: "nginx" },
+			hostname: "web",
+			ports: [{ containerPort: 8080, public: false }],
+			placement: { mode: "automatic" as const, replicas: 1 },
+			healthCheck: null,
+			startCommand: null,
+			resources: null,
+		};
+
+		const result = planCanonicalConfiguration(current, desired);
+
+		expect(result.changes).toContainEqual({
+			field: "serverless.enabled",
+			from: true,
+			to: false,
+		});
+		expect(
+			planCanonicalConfiguration(
+				{ ...current, serverless: { enabled: false } },
+				desired,
+			).changes,
+		).not.toContainEqual(
+			expect.objectContaining({ field: "serverless.enabled" }),
+		);
+	});
+
+	it("preserves serverless and fingerprints its state when a public domain remains", () => {
+		const current = {
+			name: "web",
+			source: { type: "image" as const, image: "nginx" },
+			hostname: "web",
+			ports: [{ containerPort: 8080, public: true, domain: "web.example.com" }],
+			placement: { mode: "automatic" as const, replicas: 1 },
+			healthCheck: null,
+			startCommand: null,
+			resources: null,
+			serverless: { enabled: true },
+		};
+		const desired = {
+			name: current.name,
+			source: current.source,
+			hostname: current.hostname,
+			ports: current.ports,
+			placement: current.placement,
+			healthCheck: current.healthCheck,
+			startCommand: current.startCommand,
+			resources: current.resources,
+		};
+
+		const enabled = planCanonicalConfiguration(current, desired);
+		const disabled = planCanonicalConfiguration(
+			{ ...current, serverless: { enabled: false } },
+			desired,
+		);
+
+		expect(enabled.action).toBe("noop");
+		expect(enabled.changes).toEqual([]);
+		expect(disabled.action).toBe("noop");
+		expect(disabled.currentVersion).not.toBe(enabled.currentVersion);
+		expect(disabled.desiredVersion).not.toBe(enabled.desiredVersion);
 	});
 });

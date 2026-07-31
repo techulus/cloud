@@ -1225,6 +1225,17 @@ export async function updateServiceConfig(
 					})),
 				);
 				if (issue) throw new Error(issue.message);
+				if (
+					!finalPorts.some(
+						(port) =>
+							port.isPublic && port.protocol === "http" && port.domain !== null,
+					)
+				) {
+					await tx
+						.update(services)
+						.set({ serverlessEnabled: false })
+						.where(eq(services.id, serviceId));
+				}
 
 				for (const port of additions) {
 					if (!port.domain) continue;
