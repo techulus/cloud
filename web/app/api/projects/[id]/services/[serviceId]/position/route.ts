@@ -4,9 +4,11 @@ import { db } from "@/db";
 import { services } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 
+const MAX_CANVAS_COORDINATE = 2_147_483_647;
+
 const positionSchema = z.object({
-	canvasX: z.number().int().min(0).max(10000),
-	canvasY: z.number().int().min(0).max(10000),
+	canvasX: z.number().int().min(0).max(MAX_CANVAS_COORDINATE),
+	canvasY: z.number().int().min(0).max(MAX_CANVAS_COORDINATE),
 });
 
 export async function PATCH(
@@ -19,7 +21,8 @@ export async function PATCH(
 	}
 
 	const { id: projectId, serviceId } = await params;
-	const parsed = positionSchema.safeParse(await request.json());
+	const body = await request.json().catch(() => null);
+	const parsed = positionSchema.safeParse(body);
 
 	if (!parsed.success) {
 		return Response.json({ error: "Invalid position" }, { status: 400 });
