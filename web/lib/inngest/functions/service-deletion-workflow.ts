@@ -31,6 +31,10 @@ import {
 	markDeploymentRemoved,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
+import {
+	cleanupRegistryArtifactsForService,
+	prepareRegistryArtifactCleanup,
+} from "@/lib/registry-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -46,7 +50,16 @@ async function markServiceDeletionFailed(serviceId: string, error: unknown) {
 			deletionError:
 				error instanceof Error ? error.message : "Service operation failed",
 		})
-		.where(eq(services.id, serviceId));
+		.where(
+			and(
+				eq(services.id, serviceId),
+				isNull(services.deletedAt),
+				or(
+					eq(services.deletionStatus, "backing_up"),
+					eq(services.deletionStatus, "deleting"),
+				),
+			),
+		);
 }
 
 export const serviceDeletionWorkflow = inngest.createFunction(
@@ -288,7 +301,7 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 						.limit(1)
 						.then((rows) => rows[0]);
 					if (!current) throw new Error("Service not found");
-					await tx
+					const deleted = await tx
 						.update(services)
 						.set({
 							deletedAt,
@@ -298,7 +311,17 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 							deletionStatus: null,
 							deletionError: null,
 						})
-						.where(eq(services.id, serviceId));
+						.where(
+							and(
+								eq(services.id, serviceId),
+								isNull(services.deletedAt),
+								eq(services.deletionStatus, "deleting"),
+							),
+						)
+						.returning({ id: services.id });
+					if (deleted.length === 0) {
+						throw new Error("Service deletion ownership was lost");
+					}
 				});
 			});
 
@@ -645,23 +668,65 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 						or(
 							isNull(services.deletionStatus),
 							eq(services.deletionStatus, "failed"),
+							eq(services.deletionStatus, "deleting"),
 						),
 						lte(services.purgeAfter, new Date()),
 					),
 				);
 
 			for (const service of expiredServices) {
-				const backups = await db
-					.select({ id: volumeBackups.id })
-					.from(volumeBackups)
-					.where(eq(volumeBackups.serviceId, service.id));
+				try {
+					const claimed = await db.transaction(async (tx) => {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(hashtext(${service.id}))`,
+						);
+						const claimed = await tx
+							.update(services)
+							.set({ deletionStatus: "deleting", deletionError: null })
+							.where(
+								and(
+									eq(services.id, service.id),
+									isNotNull(services.deletedAt),
+									isNotNull(services.purgeAfter),
+									lte(services.purgeAfter, new Date()),
+									or(
+										isNull(services.deletionStatus),
+										eq(services.deletionStatus, "failed"),
+										eq(services.deletionStatus, "deleting"),
+									),
+								),
+							)
+							.returning({ id: services.id })
+							.then((rows) => rows[0]);
+						if (!claimed) return undefined;
+						return {
+							...claimed,
+							registryCleanupReady: await prepareRegistryArtifactCleanup(
+								tx,
+								service.id,
+							),
+						};
+					});
+					if (!claimed) continue;
+					if (!claimed.registryCleanupReady) continue;
+					await cleanupRegistryArtifactsForService(service.id);
+					const backups = await db
+						.select({ id: volumeBackups.id })
+						.from(volumeBackups)
+						.where(eq(volumeBackups.serviceId, service.id));
 
-				for (const backup of backups) {
-					await deleteBackupInternal(backup.id);
+					for (const backup of backups) {
+						await deleteBackupInternal(backup.id);
+					}
+
+					await db.delete(secrets).where(eq(secrets.serviceId, service.id));
+					await db.delete(services).where(eq(services.id, service.id));
+				} catch (error) {
+					console.error(
+						`[service-purge] failed to purge service ${service.id}`,
+						error,
+					);
 				}
-
-				await db.delete(secrets).where(eq(secrets.serviceId, service.id));
-				await db.delete(services).where(eq(services.id, service.id));
 			}
 		});
 	},

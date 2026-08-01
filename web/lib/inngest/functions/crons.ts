@@ -5,6 +5,7 @@ import {
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
+import { cleanupRegistryArtifactsDaily } from "@/lib/registry-retention";
 import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
@@ -153,6 +154,20 @@ export const agentUpgradeTimeoutCheck = inngest.createFunction(
 		await step.run("fail-timed-out-agent-upgrades", async () => {
 			console.log("[cron] checking timed out agent upgrades");
 			await failTimedOutAgentUpgrades();
+		});
+	},
+);
+
+export const registryArtifactRetention = inngest.createFunction(
+	{
+		id: "cron-registry-artifact-retention",
+		triggers: [cron("0 5 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("cleanup-registry-artifacts", async () => {
+			console.log("[cron] cleaning up registry artifacts");
+			await cleanupRegistryArtifactsDaily();
 		});
 	},
 );

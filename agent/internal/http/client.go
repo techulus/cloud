@@ -391,7 +391,7 @@ func (c *Client) ClaimBuild(buildID string) (*BuildDetails, error) {
 	return &result, nil
 }
 
-func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha string) error {
+func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha, imageURI string) error {
 	payload := map[string]string{
 		"status": status,
 	}
@@ -400,6 +400,9 @@ func (c *Client) UpdateBuildStatus(buildID, status, errorMsg, resolvedCommitSha 
 	}
 	if resolvedCommitSha != "" {
 		payload["resolvedCommitSha"] = resolvedCommitSha
+	}
+	if imageURI != "" {
+		payload["imageUri"] = imageURI
 	}
 
 	body, err := json.Marshal(payload)

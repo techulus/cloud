@@ -20,7 +20,7 @@ http:
 auth:
   htpasswd:
     realm: basic-realm
-    path: /etc/docker/registry/htpasswd
+    path: /etc/distribution/htpasswd
 
 health:
   storagedriver:
