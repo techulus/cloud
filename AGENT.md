@@ -39,9 +39,16 @@ An open container deployment platform. See README.md for architecture.
 
 ## Spec-driven development workflow
 
-For any requested code or configuration change, work through these phases in
-order. Do not collapse requirements and specification/development planning
-into a single step.
+For any requested code or configuration change, follow this order: research
+and requirements confirmation, combined specification/development planning,
+explicit approval of the completed plan, then implementation. Do not collapse
+requirements refinement and specification/planning. In each phase, use its
+named tool when available; otherwise follow that phase's fallback.
+
+Research notes, requirements, specifications, and plans are workflow artifacts
+and may be written or updated before approval. Do not change product code or
+configuration until the user explicitly approves the completed specification
+and development plan.
 
 - Use subagents where helpful for bounded research, investigation, independent
   analysis, and synthesizing findings or answers.
@@ -53,23 +60,26 @@ into a single step.
 
 Understand the problem before designing a solution.
 
-Use `research_codebase` for this phase.
+Use `research_codebase` when available: make its readiness call, send the
+research question, and use same-session follow-ups for further investigation.
+Synthesize its findings into requirements, constraints, assumptions,
+non-goals, edge cases, and acceptance criteria; resolve material ambiguities
+and present the refined requirements for confirmation.
 
-- Inspect the relevant code, documentation, existing behavior, and project
-  constraints.
-- Clarify the desired outcome, scope, non-goals, edge cases, and acceptance
-  criteria.
-- Identify assumptions and ask focused questions when ambiguity would
-  materially affect the solution.
-- Present the refined requirements for confirmation.
+If `research_codebase` is unavailable, inspect the relevant code and
+constraints directly, summarize the same requirements, and obtain user
+confirmation.
 
 Deliverable: agreed requirements, constraints, assumptions, and acceptance
 criteria.
 
 ### 2. Build the specification and development plan
 
-Describe what will be built, how it should work, and how it will be
-implemented. Use `create_plan` for this phase.
+Begin only after requirements are confirmed. Use `create_plan` when available:
+start with the confirmed requirements and relevant research, then use
+same-session follow-ups to resolve decisions and incorporate feedback. An
+outline approval permits detailed-plan development only; implementation
+requires explicit approval of the completed plan.
 
 - Define user-visible and system behavior.
 - Describe the technical approach, architecture, interfaces, data flow, and
@@ -83,20 +93,27 @@ implemented. Use `create_plan` for this phase.
 - Define the tests and verification commands that will be run.
 - Order the work into small, reviewable steps and identify remaining risks.
 
+If `create_plan` is unavailable, define the behavior, architecture, edge cases,
+file changes, and verification directly, resolve consequential decisions, and
+present the complete plan for explicit approval.
+
 Deliverable: a reviewable specification of the intended behavior and technical
 design, plus an actionable, file-level development plan.
 
 ### 3. Implement after approval
 
-Do not modify the codebase until the user approves the development plan. Use
-`implement_plan` for this phase.
+After explicit approval, use `implement_plan` when available, starting with the
+approved plan path. By default, complete one approved phase, run its automated
+verification, update plan checkboxes, report the manual verification steps,
+and pause for explicit confirmation before continuing.
+
+If `implement_plan` is unavailable, follow the same phase-by-phase process and
+stop on any material mismatch.
 
 - Implement the approved plan using the smallest correct changes and existing
   project patterns.
-- Run the planned verification and report the results honestly.
-- If new information requires a material change to the requirements,
-  specification, scope, or architecture, pause implementation and return to
-  the appropriate phase for approval.
+- If a material mismatch affects requirements, specification, scope, or
+  architecture, stop and return to the appropriate phase for approval.
 - Resolve minor implementation details autonomously when they do not alter the
   approved behavior or scope.
 
