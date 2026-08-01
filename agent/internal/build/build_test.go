@@ -258,6 +258,45 @@ func TestResolveDockerfileFallsBackToRailpack(t *testing.T) {
 	}
 }
 
+func TestReadImageDigest(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "valid", content: `{"containerimage.digest":"` + digest + `"}`, want: digest},
+		{name: "missing digest", content: `{}`},
+		{name: "wrong algorithm", content: `{"containerimage.digest":"sha512:` + strings.Repeat("a", 64) + `"}`},
+		{name: "wrong length", content: `{"containerimage.digest":"sha256:abc"}`},
+		{name: "non hex", content: `{"containerimage.digest":"sha256:` + strings.Repeat("g", 64) + `"}`},
+		{name: "malformed json", content: `{`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "metadata.json")
+			if err := os.WriteFile(path, []byte(tt.content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := readImageDigest(path)
+			if tt.want == "" {
+				if err == nil {
+					t.Fatalf("readImageDigest() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("readImageDigest() = %q, %v, want %q, nil", got, err, tt.want)
+			}
+		})
+	}
+
+	if _, err := readImageDigest(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("readImageDigest() missing file: want error")
+	}
+}
+
 func runGit(t *testing.T, args ...string) string {
 	t.Helper()
 	output, err := exec.Command("git", args...).CombinedOutput()

@@ -16,6 +16,7 @@ import (
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/paths"
+	"techulus/cloud-agent/internal/registryauth"
 )
 
 func (a *Agent) ProcessRestart(item agenthttp.WorkQueueItem) error {
@@ -137,6 +138,11 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		a.buildMutex.Unlock()
 	}()
 
+	snapshot, releaseRegistryAuth, err := a.RegistryAuth.Acquire()
+	if err != nil {
+		return err
+	}
+	defer releaseRegistryAuth()
 	buildDetails, err := a.Client.ClaimBuild(payload.BuildID)
 	if err != nil {
 		return fmt.Errorf("failed to claim build: %w", err)
@@ -148,7 +154,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 	}
 	log.Printf("[build] starting build %s for commit %s (timeout: %d minutes)", Truncate(payload.BuildID, 8), Truncate(buildDetails.Build.CommitSha, 8), timeoutMinutes)
 
-	if err := a.Client.UpdateBuildStatus(payload.BuildID, "cloning", "", ""); err != nil {
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "cloning", "", "", ""); err != nil {
 		log.Printf("[build] failed to update status to cloning: %v", err)
 	}
 
@@ -182,27 +188,29 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		RootDir:         buildDetails.RootDir,
 		Secrets:         decryptedSecrets,
 		TargetPlatforms: buildDetails.TargetPlatforms,
+		DockerConfigDir: snapshot.DockerConfigDir,
+		TargetTLSVerify: snapshot.TLSVerify(buildDetails.ImageURI),
 	}
 
 	onStatusChange := func(status string) {
-		if err := a.Client.UpdateBuildStatus(payload.BuildID, status, "", buildConfig.ResolvedCommitSha); err != nil {
+		if err := a.Client.UpdateBuildStatus(payload.BuildID, status, "", buildConfig.ResolvedCommitSha, ""); err != nil {
 			log.Printf("[build] failed to update status to %s: %v", status, err)
 		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMinutes)*time.Minute)
 	defer cancel()
-	err = a.Builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
+	artifact, err := a.Builder.Build(ctx, buildConfig, checkCancelled, onStatusChange)
 	if err != nil {
 		log.Printf("[build] build %s failed: %v", Truncate(payload.BuildID, 8), err)
-		if updateErr := a.Client.UpdateBuildStatus(payload.BuildID, "failed", err.Error(), buildConfig.ResolvedCommitSha); updateErr != nil {
+		if updateErr := a.Client.UpdateBuildStatus(payload.BuildID, "failed", err.Error(), buildConfig.ResolvedCommitSha, ""); updateErr != nil {
 			log.Printf("[build] failed to update status to failed: %v", updateErr)
 		}
 		return err
 	}
 
 	log.Printf("[build] build %s completed successfully", Truncate(payload.BuildID, 8))
-	if err := a.Client.UpdateBuildStatus(payload.BuildID, "completed", "", buildConfig.ResolvedCommitSha); err != nil {
+	if err := a.Client.UpdateBuildStatus(payload.BuildID, "completed", "", buildConfig.ResolvedCommitSha, artifact); err != nil {
 		log.Printf("[build] failed to update status to completed: %v", err)
 	}
 
@@ -231,13 +239,37 @@ func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
 	}
 
 	log.Printf("[create_manifest] creating manifest for %s with %d images", payload.FinalImageUri, len(payload.Images))
+	snapshot, releaseRegistryAuth, err := a.RegistryAuth.Acquire()
+	if err != nil {
+		return err
+	}
+	defer releaseRegistryAuth()
+	tls := snapshot.TLSVerify(payload.FinalImageUri)
+	host, err := registryauth.ImageHost(payload.FinalImageUri)
+	if err != nil {
+		return fmt.Errorf("invalid manifest target reference")
+	}
+	for _, img := range payload.Images {
+		imageHost, hostErr := registryauth.ImageHost(img)
+		if hostErr != nil || imageHost != host {
+			return fmt.Errorf("manifest references must use one registry host")
+		}
+		if snapshot.TLSVerify(img) != tls {
+			return fmt.Errorf("manifest registry TLS policies differ")
+		}
+	}
 
-	craneArgs := []string{"index", "append", "--insecure", "-t", payload.FinalImageUri}
+	craneArgs := []string{"index", "append"}
+	if !tls {
+		craneArgs = append(craneArgs, "--insecure")
+	}
+	craneArgs = append(craneArgs, "-t", payload.FinalImageUri)
 	for _, img := range payload.Images {
 		craneArgs = append(craneArgs, "-m", img)
 	}
 
 	cmd := exec.Command(paths.CranePath, craneArgs...)
+	cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+snapshot.DockerConfigDir, "HOME="+snapshot.EmptyHome)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[create_manifest] crane failed: %s", string(output))
@@ -246,4 +278,19 @@ func (a *Agent) ProcessCreateManifest(item agenthttp.WorkQueueItem) error {
 
 	log.Printf("[create_manifest] manifest created successfully for %s", payload.FinalImageUri)
 	return nil
+}
+
+func (a *Agent) ProcessSyncRegistries(item agenthttp.WorkQueueItem) error {
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil || payload.Version == "" {
+		return fmt.Errorf("invalid sync_registries payload")
+	}
+	if err := a.RegistryAuth.MarkDirty(payload.Version); err != nil {
+		return fmt.Errorf("mark registry sync required: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.RegistryAuth.Sync(ctx)
 }

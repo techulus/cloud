@@ -11,6 +11,29 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
+export function registryCredentialAad(
+	id: string,
+	canonicalHost: string,
+): Buffer {
+	return Buffer.from(`registry-credential:v1\0${id}\0${canonicalHost}`, "utf8");
+}
+
+export async function encryptRegistryPassword(
+	plaintext: string,
+	id: string,
+	canonicalHost: string,
+): Promise<string> {
+	const key = await resolveEncryptionKey();
+	const iv = randomBytes(IV_LENGTH);
+	const cipher = createCipheriv(ALGORITHM, key, iv);
+	cipher.setAAD(registryCredentialAad(id, canonicalHost));
+	const encrypted = Buffer.concat([
+		cipher.update(plaintext, "utf8"),
+		cipher.final(),
+	]);
+	return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64");
+}
+
 export async function encryptSecret(plaintext: string): Promise<string> {
 	const key = await resolveEncryptionKey();
 	const iv = randomBytes(IV_LENGTH);

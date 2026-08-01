@@ -321,7 +321,10 @@ export async function createRolloutWithServiceRevision(
 		let overrides: ServiceRevisionSpecOverrides | undefined;
 		if (runtimeBaseRevisionId) {
 			const baseRevision = await tx
-				.select({ specification: serviceRevisions.specification })
+				.select({
+					specification: serviceRevisions.specification,
+					artifactDeletedAt: serviceRevisions.artifactDeletedAt,
+				})
 				.from(serviceRevisions)
 				.where(
 					and(
@@ -338,6 +341,9 @@ export async function createRolloutWithServiceRevision(
 			);
 			if (baseSpecification.source.type !== "github") {
 				throw new Error("GitHub runtime base revision is not a GitHub build");
+			}
+			if (baseRevision.artifactDeletedAt) {
+				throw new Error("Service revision artifact is no longer available");
 			}
 			overrides = {
 				image: baseSpecification.image,
@@ -369,6 +375,12 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 ) {
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const activeService = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+			.then((rows) => rows[0]);
+		if (!activeService) throw new Error("Service not found");
 		const pending = await tx
 			.select({ id: rollouts.id })
 			.from(rollouts)
@@ -451,6 +463,9 @@ export async function createRolloutForServiceRevision(
 		}
 
 		const specification = parseServiceRevisionSpec(revision.specification);
+		if (specification.source.type === "github" && revision.artifactDeletedAt) {
+			throw new Error("Service revision artifact is no longer available");
+		}
 		if (specification.image !== artifactImageUri) {
 			throw new Error("Built artifact does not match the service revision");
 		}

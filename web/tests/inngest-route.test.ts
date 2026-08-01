@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
 		onRestoreFailed: { id: "on-restore-failed" },
 		restoreTriggerWorkflow: { id: "restore-trigger-workflow" },
 		restoreWorkflow: { id: "restore-workflow" },
+		registryArtifactRetention: { id: "registry-artifact-retention" },
 		rolloutWorkflow: { id: "rollout-workflow" },
 		scheduledBackupsCheck: { id: "scheduled-backups-check" },
 		scheduledDeploymentsCheck: { id: "scheduled-deployments-check" },

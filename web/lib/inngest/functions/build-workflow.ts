@@ -29,7 +29,7 @@ const nonTerminalBuildStatuses: BuildStatus[] = [
 	"pushing",
 ];
 
-function platformImageForTarget(finalImage: string, targetPlatform: string) {
+function validateTargetPlatform(targetPlatform: string) {
 	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
 	if (
 		operatingSystem !== "linux" ||
@@ -39,7 +39,21 @@ function platformImageForTarget(finalImage: string, targetPlatform: string) {
 	) {
 		throw new Error(`Invalid build target platform: ${targetPlatform}`);
 	}
-	return `${finalImage}-${architecture}`;
+}
+
+function imageRepository(image: string) {
+	const withoutDigest = image.split("@", 1)[0];
+	const lastSlash = withoutDigest.lastIndexOf("/");
+	const tag = withoutDigest.lastIndexOf(":");
+	return tag > lastSlash ? withoutDigest.slice(0, tag) : withoutDigest;
+}
+
+function isDigestForRepository(image: string, repository: string) {
+	return (
+		image.startsWith(`${repository}@sha256:`) &&
+		image.length === repository.length + "@sha256:".length + 64 &&
+		/^[0-9a-f]{64}$/.test(image.slice(-64))
+	);
 }
 
 async function getGroupBuilds(
@@ -130,18 +144,16 @@ function validateCompletedGroup(
 	manifest: Extract<ManifestState, { status: "completed" }>,
 ) {
 	if (groupBuilds.length === 0) throw new Error("Build group is missing");
+	const repository = imageRepository(manifest.finalImageUri);
 	const expectedImages = groupBuilds.map((build) => {
 		if (build.status !== "completed") {
 			throw new Error("Build group is not complete");
 		}
-		const expectedImage = platformImageForTarget(
-			manifest.finalImageUri,
-			build.targetPlatform,
-		);
-		if (build.imageUri !== expectedImage) {
+		validateTargetPlatform(build.targetPlatform);
+		if (!build.imageUri || !isDigestForRepository(build.imageUri, repository)) {
 			throw new Error("Platform build artifact does not match its revision");
 		}
-		return expectedImage;
+		return build.imageUri;
 	});
 	const expected = [...expectedImages].sort();
 	const actual = [...manifest.images].sort();

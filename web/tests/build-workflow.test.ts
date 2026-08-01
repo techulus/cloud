@@ -43,6 +43,10 @@ vi.mock("@/lib/inngest/events", () => ({
 
 import { buildWorkflow } from "@/lib/inngest/functions/build-workflow";
 
+function digest(image: string, character = "a") {
+	return `${image.slice(0, image.lastIndexOf(":"))}@sha256:${character.repeat(64)}`;
+}
+
 function invoke(serviceRevisionId: string, buildGroupId: string) {
 	const step = {
 		run: vi.fn(async (_name: string, operation: () => unknown) => operation()),
@@ -73,20 +77,23 @@ function completedGroup(
 	buildGroupId: string,
 	image: string,
 ) {
+	const repository = image.slice(0, image.lastIndexOf(":"));
+	const amd64Image = `${repository}@sha256:${"a".repeat(64)}`;
+	const arm64Image = `${repository}@sha256:${"b".repeat(64)}`;
 	const group = [
 		{
 			id: `${buildGroupId}-amd64`,
 			status: "completed",
 			serviceRevisionId,
 			targetPlatform: "linux/amd64",
-			imageUri: `${image}-amd64`,
+			imageUri: amd64Image,
 		},
 		{
 			id: `${buildGroupId}-arm64`,
 			status: "completed",
 			serviceRevisionId,
 			targetPlatform: "linux/arm64",
-			imageUri: `${image}-arm64`,
+			imageUri: arm64Image,
 		},
 	];
 	mocks.queryResults.push(
@@ -99,7 +106,7 @@ function completedGroup(
 					serviceRevisionId,
 					buildGroupId,
 					finalImageUri: image,
-					images: [`${image}-amd64`, `${image}-arm64`],
+					images: [amd64Image, arm64Image],
 				}),
 			},
 		],
@@ -168,7 +175,7 @@ describe("revision-first build completion", () => {
 		const completed = {
 			...pending,
 			status: "completed",
-			imageUri: `${image}-amd64`,
+			imageUri: digest(image),
 		};
 		mocks.queryResults.push(
 			[pending],
@@ -181,7 +188,7 @@ describe("revision-first build completion", () => {
 						serviceRevisionId: "revision-missed-build-event",
 						buildGroupId: "group-missed-build-event",
 						finalImageUri: image,
-						images: [`${image}-amd64`],
+						images: [digest(image)],
 					}),
 				},
 			],
@@ -210,7 +217,7 @@ describe("revision-first build completion", () => {
 				id: "missed-manifest-amd64",
 				status: "completed",
 				targetPlatform: "linux/amd64",
-				imageUri: `${image}-amd64`,
+				imageUri: digest(image),
 			},
 		];
 		mocks.queryResults.push(
@@ -224,7 +231,7 @@ describe("revision-first build completion", () => {
 						serviceRevisionId: "revision-missed-manifest-event",
 						buildGroupId: "group-missed-manifest-event",
 						finalImageUri: image,
-						images: [`${image}-amd64`],
+						images: [digest(image)],
 					}),
 				},
 			],
@@ -253,13 +260,13 @@ describe("revision-first build completion", () => {
 				id: "incomplete-amd64",
 				status: "completed",
 				targetPlatform: "linux/amd64",
-				imageUri: `${image}-amd64`,
+				imageUri: digest(image),
 			},
 			{
 				id: "incomplete-arm64",
 				status: "completed",
 				targetPlatform: "linux/arm64",
-				imageUri: `${image}-arm64`,
+				imageUri: digest(image, "b"),
 			},
 		];
 		mocks.queryResults.push(
@@ -272,7 +279,7 @@ describe("revision-first build completion", () => {
 						serviceRevisionId: "revision-incomplete-manifest",
 						buildGroupId: "group-incomplete-manifest",
 						finalImageUri: image,
-						images: [`${image}-amd64`],
+						images: [digest(image)],
 					}),
 				},
 			],

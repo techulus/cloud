@@ -146,6 +146,8 @@ func (a *Agent) ProcessWorkItem(item agenthttp.WorkQueueItem) error {
 		return a.ProcessRestoreVolume(item)
 	case "create_manifest":
 		return a.ProcessCreateManifest(item)
+	case "sync_registries":
+		return a.ProcessSyncRegistries(item)
 	case "upgrade_agent":
 		return a.ProcessAgentUpgrade(item)
 	default:

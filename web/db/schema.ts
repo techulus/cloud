@@ -355,6 +355,25 @@ export const servers = pgTable("servers", {
 		.notNull(),
 });
 
+export const registryCredentials = pgTable(
+	"registry_credentials",
+	{
+		id: text("id").primaryKey(),
+		host: text("host").notNull(),
+		username: text("username").notNull(),
+		encryptedPassword: text("encrypted_password").notNull(),
+		tlsVerify: boolean("tls_verify").default(true).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.$onUpdate(() => new Date())
+			.notNull(),
+	},
+	(table) => [uniqueIndex("registry_credentials_host_idx").on(table.host)],
+);
+
 export const projects = pgTable("projects", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
@@ -608,6 +627,7 @@ export const serviceRevisions = pgTable(
 			.$type<ServiceRevisionSpec>()
 			.notNull(),
 		actor: jsonb("actor").$type<ServiceRevisionActor | null>(),
+		artifactDeletedAt: timestamp("artifact_deleted_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -780,6 +800,7 @@ export const workQueue = pgTable(
 				"restore_volume",
 				"create_manifest",
 				"upgrade_agent",
+				"sync_registries",
 			],
 		}).notNull(),
 		payload: text("payload").notNull(),
@@ -804,6 +825,11 @@ export const workQueue = pgTable(
 			.on(table.serverId)
 			.where(
 				sql`${table.type} = 'upgrade_agent' AND ${table.status} IN ('pending', 'processing')`,
+			),
+		uniqueIndex("work_queue_one_pending_registry_sync_idx")
+			.on(table.serverId)
+			.where(
+				sql`${table.type} = 'sync_registries' AND ${table.status} = 'pending'`,
 			),
 	],
 );

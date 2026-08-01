@@ -5,12 +5,11 @@ import { cn } from "@/lib/utils";
 export const SUMMARY_CARD_MIN_HEIGHT = 148;
 
 // Dashboard lists lay cards out two per row on mobile, so below `sm` they shed
-// height, padding and a step of font size. The `sm` min-height must stay in
-// sync with SUMMARY_CARD_MIN_HEIGHT.
+// padding and a step of font size.
 export const SUMMARY_CARD_GRID_CLASSNAME =
 	"grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3";
 export const SUMMARY_CARD_COMPACT_CLASSNAME =
-	"min-h-[96px] px-3 py-2.5 sm:min-h-[148px] sm:px-3.5 sm:py-3";
+	"px-3 py-2.5 sm:px-3.5 sm:py-3 lg:min-h-[120px]";
 export const SUMMARY_CARD_COMPACT_TITLE_CLASSNAME =
 	"text-[13px] sm:text-[15px]";
 export const SUMMARY_CARD_COMPACT_TEXT_CLASSNAME = "text-[11px] sm:text-xs";

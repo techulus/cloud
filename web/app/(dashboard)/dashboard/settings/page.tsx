@@ -2,7 +2,23 @@ import { listMembers } from "@/actions/members";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { GlobalSettings } from "@/components/settings/global-settings";
 import { getGlobalSettings, listServers } from "@/db/queries";
+import { requireAdminRole } from "@/lib/auth";
 import { AdminNotConfiguredError } from "@/lib/members";
+import { listRegistryMetadata } from "@/lib/registry-credentials";
+
+async function getRegistryData() {
+	try {
+		if (!(await requireAdminRole())) return null;
+		return await listRegistryMetadata();
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			(error.message === "Unauthorized" || error.message === "Forbidden")
+		)
+			return null;
+		throw error;
+	}
+}
 
 async function getMembersData() {
 	try {
@@ -32,10 +48,11 @@ async function getMembersData() {
 }
 
 export default async function SettingsPage() {
-	const [servers, settings, membersData] = await Promise.all([
+	const [servers, settings, membersData, registries] = await Promise.all([
 		listServers(),
 		getGlobalSettings(),
 		getMembersData(),
+		getRegistryData(),
 	]);
 
 	return (
@@ -58,6 +75,7 @@ export default async function SettingsPage() {
 					servers={servers}
 					membersData={membersData}
 					initialSettings={settings}
+					registries={registries}
 					appVersion={
 						process.env.TECHULUS_CLOUD_VERSION ??
 						process.env.NEXT_PUBLIC_APP_VERSION ??

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -21,6 +21,7 @@ type StatusUpdate = {
 	status: "cloning" | "building" | "pushing" | "completed" | "failed";
 	error?: string;
 	resolvedCommitSha?: string;
+	imageUri?: string;
 };
 
 const validStatuses = new Set<StatusUpdate["status"]>([
@@ -45,17 +46,16 @@ const transitionSources: Record<StatusUpdate["status"], BuildStatus[]> = {
 	failed: ["pending", "claimed", "cloning", "building", "pushing"],
 };
 
-function platformImageForTarget(finalImage: string, targetPlatform: string) {
-	const [operatingSystem, architecture, ...extra] = targetPlatform.split("/");
-	if (
-		operatingSystem !== "linux" ||
-		!architecture ||
-		extra.length > 0 ||
-		!["amd64", "arm64"].includes(architecture)
-	) {
-		throw new Error(`Invalid build target platform: ${targetPlatform}`);
-	}
-	return `${finalImage}-${architecture}`;
+function imageRepository(image: string) {
+	const withoutDigest = image.split("@", 1)[0];
+	const lastSlash = withoutDigest.lastIndexOf("/");
+	const tag = withoutDigest.lastIndexOf(":");
+	return tag > lastSlash ? withoutDigest.slice(0, tag) : withoutDigest;
+}
+
+function digestImageRepository(image: string) {
+	const match = /^(.*)@sha256:[0-9a-f]{64}$/.exec(image);
+	return match?.[1] ?? null;
 }
 
 async function sendBuildCompletedEvent(data: {
@@ -169,20 +169,24 @@ export async function POST(
 
 	let platformImageUri: string | null = null;
 	if (update.status === "completed") {
-		try {
-			platformImageUri = platformImageForTarget(
-				specification.image,
-				build.targetPlatform,
-			);
-		} catch (error) {
+		if (!update.imageUri || !digestImageRepository(update.imageUri)) {
 			return NextResponse.json(
-				{
-					error:
-						error instanceof Error ? error.message : "Invalid build target",
-				},
-				{ status: 500 },
+				{ error: "Completed build requires a valid image digest" },
+				{ status: 400 },
 			);
 		}
+		if (
+			digestImageRepository(update.imageUri) !==
+			imageRepository(specification.image)
+		) {
+			return NextResponse.json(
+				{
+					error: "Completed build artifact does not match its service revision",
+				},
+				{ status: 409 },
+			);
+		}
+		platformImageUri = update.imageUri;
 	}
 
 	const updateData: Record<string, unknown> = { status: update.status };
@@ -351,26 +355,41 @@ export async function POST(
 			groupBuilds.every((candidate) => {
 				if (candidate.status !== "completed") return false;
 				return (
-					candidate.imageUri ===
-					platformImageForTarget(specification.image, candidate.targetPlatform)
+					candidate.imageUri &&
+					digestImageRepository(candidate.imageUri) ===
+						imageRepository(specification.image)
 				);
 			});
 		if (allCompleted) {
-			const images = groupBuilds.map((candidate) =>
-				platformImageForTarget(specification.image, candidate.targetPlatform),
+			const images = groupBuilds.map(
+				(candidate) => candidate.imageUri as string,
 			);
-			await enqueueWork(
-				auth.serverId,
-				"create_manifest",
-				{
-					images,
-					finalImageUri: specification.image,
-					serviceId: build.serviceId,
-					serviceRevisionId: build.serviceRevisionId,
-					buildGroupId: build.buildGroupId,
-				},
-				{ id: `manifest-work-${build.buildGroupId}` },
-			);
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`select pg_advisory_xact_lock(hashtext(${build.serviceId}))`,
+				);
+				const activeService = await tx
+					.select({ id: services.id })
+					.from(services)
+					.where(
+						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
+					)
+					.limit(1)
+					.then((rows) => rows[0]);
+				if (!activeService) return;
+				await enqueueWork(
+					auth.serverId,
+					"create_manifest",
+					{
+						images,
+						finalImageUri: specification.image,
+						serviceId: build.serviceId,
+						serviceRevisionId: build.serviceRevisionId,
+						buildGroupId: build.buildGroupId,
+					},
+					{ id: `manifest-work-${build.buildGroupId}`, tx },
+				);
+			});
 		}
 
 		await sendBuildCompletedEvent({

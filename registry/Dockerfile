@@ -1,8 +1,8 @@
-FROM registry:2
+FROM registry:3.1.1
 
 RUN apk add --no-cache apache2-utils curl
 
-COPY config.yml /etc/docker/registry/config.yml
+COPY config.yml /etc/distribution/config.yml
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

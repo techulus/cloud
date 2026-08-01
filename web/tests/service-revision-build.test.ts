@@ -171,7 +171,7 @@ describe("GitHub build service revisions", () => {
 	it("combines current runtime config with a GitHub base artifact", async () => {
 		const base = sourceSpecification();
 		mocks.selectResults.push(
-			[{ specification: base }],
+			[{ specification: base, artifactDeletedAt: null }],
 			[],
 			[
 				{
@@ -219,5 +219,23 @@ describe("GitHub build service revisions", () => {
 			placements: [{ serverId: "server-target", count: 1 }],
 		});
 		expect(inserted.specification.image).not.toContain(":latest");
+	});
+
+	it("rejects a redeployment whose managed artifact was deleted", async () => {
+		mocks.selectResults.push([
+			{
+				specification: sourceSpecification(),
+				artifactDeletedAt: new Date("2026-07-31T00:00:00.000Z"),
+			},
+		]);
+
+		await expect(
+			createRolloutWithServiceRevision(
+				"service-1",
+				{ type: "system" },
+				"revision-expired",
+			),
+		).rejects.toThrow("Service revision artifact is no longer available");
+		expect(mocks.tx.insert).not.toHaveBeenCalled();
 	});
 });
