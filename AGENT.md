@@ -40,8 +40,8 @@ An open container deployment platform. See README.md for architecture.
 ## Spec-driven development workflow
 
 For any requested code or configuration change, work through these phases in
-order. Do not collapse requirements, specification, and implementation
-planning into a single step.
+order. Do not collapse requirements and specification/development planning
+into a single step.
 
 - Use subagents where helpful for bounded research, investigation, independent
   analysis, and synthesizing findings or answers.
@@ -52,6 +52,8 @@ planning into a single step.
 ### 1. Research and refine requirements
 
 Understand the problem before designing a solution.
+
+Use `research_codebase` for this phase.
 
 - Inspect the relevant code, documentation, existing behavior, and project
   constraints.
@@ -64,23 +66,16 @@ Understand the problem before designing a solution.
 Deliverable: agreed requirements, constraints, assumptions, and acceptance
 criteria.
 
-### 2. Build the specification
+### 2. Build the specification and development plan
 
-Describe what will be built and how it should work.
+Describe what will be built, how it should work, and how it will be
+implemented. Use `create_plan` for this phase.
 
 - Define user-visible and system behavior.
 - Describe the technical approach, architecture, interfaces, data flow, and
   error handling.
 - Address important edge cases and consequential tradeoffs.
 - Keep the specification solution-level rather than file-by-file.
-
-Deliverable: a reviewable specification of the intended behavior and technical
-design.
-
-### 3. Create the development plan
-
-Translate the specification into concrete implementation work.
-
 - List the files and modules that will be added, changed, renamed, or removed.
 - Describe the specific changes required in each location.
 - Include API, schema, type, dependency, and configuration changes where
@@ -88,11 +83,13 @@ Translate the specification into concrete implementation work.
 - Define the tests and verification commands that will be run.
 - Order the work into small, reviewable steps and identify remaining risks.
 
-Deliverable: an actionable, file-level development plan.
+Deliverable: a reviewable specification of the intended behavior and technical
+design, plus an actionable, file-level development plan.
 
-### 4. Implement after approval
+### 3. Implement after approval
 
-Do not modify the codebase until the user approves the development plan.
+Do not modify the codebase until the user approves the development plan. Use
+`implement_plan` for this phase.
 
 - Implement the approved plan using the smallest correct changes and existing
   project patterns.
