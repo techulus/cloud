@@ -15,6 +15,7 @@ import {
 	observedReadyPhases,
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
+import { normalizeImageReference } from "@/lib/registry-reference";
 import { selectRoutingSyncRolloutIds } from "@/lib/routing-sync";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -830,13 +831,7 @@ function compareServerlessUpstreams(
 }
 
 function normalizeImage(image: string) {
-	if (!image.includes("/")) {
-		return `docker.io/library/${image}`;
-	}
-	if (!image.includes(".") && image.split("/").length === 2) {
-		return `docker.io/${image}`;
-	}
-	return image;
+	return normalizeImageReference(image);
 }
 
 export function buildRuntimeRoutePorts(

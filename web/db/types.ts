@@ -6,6 +6,7 @@ import type {
 	environments,
 	memberInvitations,
 	projects,
+	registryCredentials,
 	rollouts,
 	secrets,
 	servers,
@@ -30,6 +31,7 @@ export type DeploymentPort = typeof deploymentPorts.$inferSelect;
 export type Rollout = typeof rollouts.$inferSelect;
 export type Build = typeof builds.$inferSelect;
 export type WorkQueue = typeof workQueue.$inferSelect;
+export type RegistryCredential = typeof registryCredentials.$inferSelect;
 export type User = typeof user.$inferSelect;
 export type MemberInvitation = typeof memberInvitations.$inferSelect;
 export type MemberRole = User["role"];

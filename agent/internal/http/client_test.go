@@ -19,7 +19,7 @@ func TestSignedJSONRequests(t *testing.T) {
 	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.URL.Path == "/api/v1/agent/status" {
-			message := r.Header.Get("x-timestamp") + ":" + string(body)
+			message := "agent-request:v2\x00" + r.Header.Get("x-timestamp") + "\x00" + r.Method + "\x00" + r.URL.RequestURI() + "\x00" + string(body)
 			if r.Method != stdhttp.MethodPost || r.Header.Get("Content-Type") != "application/json" || r.Header.Get("x-server-id") != "server-1" || r.Header.Get("x-signature") != keyPair.Sign([]byte(message)) {
 				t.Error("request method, headers, or signature not preserved")
 			}

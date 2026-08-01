@@ -112,10 +112,6 @@ export async function POST(request: NextRequest) {
 			encryptionKey,
 			loggingEndpoint: process.env.VICTORIA_LOGS_URL ?? null,
 			metricsEndpoint: process.env.VICTORIA_METRICS_URL ?? null,
-			registryUrl: process.env.REGISTRY_URL ?? null,
-			registryUsername: process.env.REGISTRY_USERNAME ?? null,
-			registryPassword: process.env.REGISTRY_PASSWORD ?? null,
-			registryInsecure: process.env.REGISTRY_INSECURE === "true",
 		});
 	} catch (error) {
 		console.error("Agent registration error:", error);

@@ -9,6 +9,7 @@ import {
 	canonicalGitHubRepository,
 	resolvePersistedSourceFromRows,
 } from "@/lib/public-api";
+import { resolveRegistryImageHost } from "@/lib/registry-reference";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -106,10 +107,7 @@ async function queueResolvedBuild(
 		throw new Error("GitHub source changed before the build was queued");
 	}
 
-	const registryHost = process.env.REGISTRY_HOST?.replace(/\/+$/, "");
-	if (!registryHost) {
-		throw new Error("REGISTRY_HOST environment variable is required");
-	}
+	const registryHost = resolveRegistryImageHost();
 	const serviceRevisionId = input.idempotencyKey
 		? deterministicRevisionId(input.idempotencyKey)
 		: randomUUID();

@@ -11,6 +11,7 @@ import (
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/logs"
 	"techulus/cloud-agent/internal/reconcile"
+	"techulus/cloud-agent/internal/registryauth"
 	"techulus/cloud-agent/internal/routeowners"
 )
 
@@ -28,17 +29,13 @@ const (
 )
 
 type Config struct {
-	ServerID         string `json:"serverId"`
-	SubnetID         int    `json:"subnetId"`
-	WireGuardIP      string `json:"wireguardIp"`
-	EncryptionKey    string `json:"encryptionKey"`
-	IsProxy          bool   `json:"isProxy"`
-	LoggingEndpoint  string `json:"loggingEndpoint,omitempty"`
-	MetricsEndpoint  string `json:"metricsEndpoint,omitempty"`
-	RegistryURL      string `json:"registryUrl,omitempty"`
-	RegistryUsername string `json:"registryUsername,omitempty"`
-	RegistryPassword string `json:"registryPassword,omitempty"`
-	RegistryInsecure bool   `json:"registryInsecure"`
+	ServerID        string `json:"serverId"`
+	SubnetID        int    `json:"subnetId"`
+	WireGuardIP     string `json:"wireguardIp"`
+	EncryptionKey   string `json:"encryptionKey"`
+	IsProxy         bool   `json:"isProxy"`
+	LoggingEndpoint string `json:"loggingEndpoint,omitempty"`
+	MetricsEndpoint string `json:"metricsEndpoint,omitempty"`
 }
 
 type ActualState struct {
@@ -89,6 +86,7 @@ type Agent struct {
 	MetricsSender                MetricsSender
 	RouteOwners                  *routeowners.Registry
 	Builder                      *build.Builder
+	RegistryAuth                 *registryauth.Manager
 	isBuilding                   bool
 	buildMutex                   sync.Mutex
 	currentBuildID               string
@@ -107,6 +105,7 @@ func NewAgent(
 	metricsSender MetricsSender,
 	routeOwners *routeowners.Registry,
 	builder *build.Builder,
+	registryAuth *registryauth.Manager,
 	isProxy bool,
 	disableDNS bool,
 ) *Agent {
@@ -126,6 +125,7 @@ func NewAgent(
 		MetricsSender:          metricsSender,
 		RouteOwners:            routeOwners,
 		Builder:                builder,
+		RegistryAuth:           registryAuth,
 		IsProxy:                isProxy,
 		DisableDNS:             disableDNS,
 		deploymentDeployLocks:  map[string]*sync.Mutex{},

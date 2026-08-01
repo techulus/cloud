@@ -35,6 +35,8 @@ type Config struct {
 	RootDir           string
 	Secrets           map[string]string
 	TargetPlatforms   []string
+	DockerConfigDir   string
+	TargetTLSVerify   bool
 }
 
 type LogSender interface {
@@ -259,7 +261,10 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	if len(config.TargetPlatforms) > 0 {
 		platform = config.TargetPlatforms[0]
 	}
-	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,push-by-digest=true,registry.insecure=true", config.ImageRepository)
+	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,push-by-digest=true", config.ImageRepository)
+	if !config.TargetTLSVerify {
+		outputFlag += ",registry.insecure=true"
+	}
 
 	if dockerfile.found {
 		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
@@ -285,7 +290,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 		cmd := exec.CommandContext(ctx, paths.BuildctlPath, args...)
 		cmd.Dir = contextDir
-		cmd.Env = append(os.Environ(), secretEnv...)
+		cmd.Env = append(os.Environ(), append(secretEnv, "DOCKER_CONFIG="+config.DockerConfigDir)...)
 		output, err := b.runCommandStreaming(cmd, config)
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed with output: %s", truncateStr(config.BuildID, 8), output)
@@ -334,7 +339,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 		cmd = exec.CommandContext(ctx, paths.BuildctlPath, args...)
 		cmd.Dir = contextDir
-		cmd.Env = append(os.Environ(), secretEnv...)
+		cmd.Env = append(os.Environ(), append(secretEnv, "DOCKER_CONFIG="+config.DockerConfigDir)...)
 		output, err = b.runCommandStreaming(cmd, config)
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)

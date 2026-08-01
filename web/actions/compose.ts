@@ -99,7 +99,7 @@ export async function importCompose(
 		if (!validation.valid) {
 			errors.push({
 				service: validation.service,
-				message: `Invalid image '${validation.image}': ${validation.error || "Image not found"}`,
+				message: `Invalid image syntax '${validation.image}': ${validation.error || "Invalid image reference"}`,
 			});
 		}
 	}

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, servers, volumeBackups, workQueue } from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
@@ -70,6 +70,7 @@ export type WorkPayloadByType = {
 		buildGroupId: string;
 	};
 	upgrade_agent: { targetVersion: string; expectedSha256: string };
+	sync_registries: { version: string };
 };
 
 export type WorkItemResult = {
@@ -138,6 +139,32 @@ export async function enqueueReconcileForAllOnlineServers(
 		.where(eq(servers.status, "online"));
 	for (const server of onlineServers) {
 		await enqueueWork(server.id, "reconcile", { reason }, { tx });
+	}
+}
+
+export async function enqueueRegistrySyncForAllRegisteredServers(
+	version: string,
+	tx: WorkQueueTransaction,
+) {
+	const registeredServers = await tx
+		.select({ id: servers.id })
+		.from(servers)
+		.where(isNotNull(servers.signingPublicKey));
+	for (const server of registeredServers) {
+		await tx
+			.insert(workQueue)
+			.values({
+				id: randomUUID(),
+				serverId: server.id,
+				type: "sync_registries",
+				payload: JSON.stringify({ version }),
+			})
+			.onConflictDoUpdate({
+				target: workQueue.serverId,
+				targetWhere: sql`${workQueue.type} = 'sync_registries' AND ${workQueue.status} = 'pending'`,
+				set: { payload: JSON.stringify({ version }), createdAt: new Date() },
+			});
+		await notifyWorkAvailable(server.id, tx);
 	}
 }
 
@@ -245,7 +272,9 @@ export async function claimNextWorkItem(
 			SELECT id
 			FROM work_queue
 			WHERE ${claimable}
-			ORDER BY created_at ASC
+			ORDER BY
+				CASE WHEN type = 'sync_registries' THEN 0 ELSE 1 END,
+				created_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)

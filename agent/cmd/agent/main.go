@@ -25,6 +25,7 @@ import (
 	"techulus/cloud-agent/internal/network"
 	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/reconcile"
+	"techulus/cloud-agent/internal/registryauth"
 	"techulus/cloud-agent/internal/routeowners"
 	"techulus/cloud-agent/internal/traefik"
 	"techulus/cloud-agent/internal/wireguard"
@@ -126,6 +127,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
+		if err := configuration.Save(config); err != nil {
+			log.Fatalf("Failed to rewrite config: %v", err)
+		}
 
 		log.Printf("Loaded config: serverID=%s, subnetId=%d, wireguardIP=%s", config.ServerID, config.SubnetID, config.WireGuardIP)
 
@@ -194,29 +198,14 @@ func main() {
 			respMetricsEndpoint = *resp.MetricsEndpoint
 		}
 
-		var registryURL, registryUsername, registryPassword string
-		if resp.RegistryURL != nil {
-			registryURL = *resp.RegistryURL
-		}
-		if resp.RegistryUsername != nil {
-			registryUsername = *resp.RegistryUsername
-		}
-		if resp.RegistryPassword != nil {
-			registryPassword = *resp.RegistryPassword
-		}
-
 		config = &agent.Config{
-			ServerID:         resp.ServerID,
-			SubnetID:         resp.SubnetID,
-			WireGuardIP:      resp.WireGuardIP,
-			EncryptionKey:    resp.EncryptionKey,
-			IsProxy:          isProxy,
-			LoggingEndpoint:  respLoggingEndpoint,
-			MetricsEndpoint:  respMetricsEndpoint,
-			RegistryURL:      registryURL,
-			RegistryUsername: registryUsername,
-			RegistryPassword: registryPassword,
-			RegistryInsecure: resp.RegistryInsecure,
+			ServerID:        resp.ServerID,
+			SubnetID:        resp.SubnetID,
+			WireGuardIP:     resp.WireGuardIP,
+			EncryptionKey:   resp.EncryptionKey,
+			IsProxy:         isProxy,
+			LoggingEndpoint: respLoggingEndpoint,
+			MetricsEndpoint: respMetricsEndpoint,
 		}
 
 		if logsEndpointFlag != "" {
@@ -275,15 +264,20 @@ func main() {
 		}
 	}
 
-	if config.RegistryURL != "" && config.RegistryUsername != "" {
-		log.Printf("[registry] attempting login to %s", config.RegistryURL)
-		if err := container.Login(config.RegistryURL, config.RegistryUsername, config.RegistryPassword, config.RegistryInsecure); err != nil {
-			log.Printf("[registry] warning: failed to login to registry: %v", err)
-		}
-	}
-
-	reconciler := reconcile.NewReconciler(config.EncryptionKey, dataDir, config.RegistryInsecure)
 	client := agenthttp.NewClient(controlPlaneURL, config.ServerID, signingKeyPair, dataDir)
+	registryManager, err := registryauth.NewManager(dataDir, config.EncryptionKey, client)
+	if err != nil {
+		log.Fatalf("Failed to initialize registry authentication: %v", err)
+	}
+	if err := registryManager.MarkDirty("startup"); err != nil {
+		log.Fatalf("Failed to require initial registry synchronization: %v", err)
+	}
+	initialCtx, initialCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := registryManager.Sync(initialCtx); err != nil {
+		log.Printf("[registry] initial sync failed: %v", err)
+	}
+	initialCancel()
+	reconciler := reconcile.NewReconciler(config.EncryptionKey, dataDir, registryManager)
 
 	var logCollector *logs.Collector
 	var traefikLogCollector *logs.TraefikCollector
@@ -339,7 +333,7 @@ func main() {
 	privateIP := network.PrivateIP()
 	log.Printf("Agent %s started. Public IP: %s, Private IP: %s. Tick interval: %v", agent.Version, publicIP, privateIP, agent.TickInterval)
 
-	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, routeOwners, builder, config.IsProxy, disableDNS)
+	agentInstance := agent.NewAgent(client, reconciler, config, publicIP, privateIP, dataDir, logCollector, traefikLogCollector, metricsSender, routeOwners, builder, registryManager, config.IsProxy, disableDNS)
 	agentInstance.Run(ctx)
 
 	if agentLogFlusherDone != nil {
