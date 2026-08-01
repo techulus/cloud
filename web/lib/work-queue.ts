@@ -388,11 +388,19 @@ async function publishRestoreWorkResult(
 	try {
 		value = JSON.parse(item.payload);
 	} catch {
-		throw new Error(`Restore work item ${item.id} has invalid JSON payload`);
+		console.error("[work-queue] skipping restore result publication:", {
+			workItemId: item.id,
+			reason: "invalid JSON payload",
+		});
+		return;
 	}
 
 	if (!value || typeof value !== "object") {
-		throw new Error(`Restore work item ${item.id} has invalid payload`);
+		console.error("[work-queue] skipping restore result publication:", {
+			workItemId: item.id,
+			reason: "invalid payload",
+		});
+		return;
 	}
 
 	const payload = value as Partial<WorkPayloadByType["restore_volume"]>;
@@ -403,7 +411,11 @@ async function publishRestoreWorkResult(
 		payload.serviceId.length === 0 ||
 		typeof payload.isMigrationRestore !== "boolean"
 	) {
-		throw new Error(`Restore work item ${item.id} has invalid restore context`);
+		console.error("[work-queue] skipping restore result publication:", {
+			workItemId: item.id,
+			reason: "invalid restore context",
+		});
+		return;
 	}
 
 	const backup = await tx
@@ -416,12 +428,18 @@ async function publishRestoreWorkResult(
 		.then((rows) => rows[0]);
 
 	if (!backup) {
-		throw new Error(`Restore work item ${item.id} references a missing backup`);
+		console.error("[work-queue] skipping restore result publication:", {
+			workItemId: item.id,
+			reason: "missing backup",
+		});
+		return;
 	}
 	if (backup.serviceId !== payload.serviceId) {
-		throw new Error(
-			`Restore work item ${item.id} has mismatched service context`,
-		);
+		console.error("[work-queue] skipping restore result publication:", {
+			workItemId: item.id,
+			reason: "mismatched service context",
+		});
+		return;
 	}
 
 	if (payload.isMigrationRestore) {
