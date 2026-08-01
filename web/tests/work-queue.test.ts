@@ -262,25 +262,39 @@ describe("restore work completion", () => {
 			"missing migration context",
 			JSON.stringify({ backupId: "backup-1", serviceId: "service-1" }),
 		],
-	])("rejects %s in the persisted payload", async (_label, payload) => {
+	])("accepts %s without publishing an event", async (_label, payload) => {
 		mocks.state.updatedRows = [restoreWorkItem("work-1", { payload })];
 
-		await expect(
-			completeWorkItemResults("server-1", [
-				{ id: "work-1", attempt: 1, status: "completed" },
-			]),
-		).rejects.toThrow("Restore work item work-1");
+		const result = await completeWorkItemResults("server-1", [
+			{ id: "work-1", attempt: 1, status: "completed" },
+		]);
+
+		expect(result).toEqual({ accepted: ["work-1"], rejected: [] });
+		expect(mocks.state.persistedStatus).toBe("completed");
 		expect(mocks.send).not.toHaveBeenCalled();
 	});
 
-	it("rejects a backup from a different service", async () => {
+	it("accepts a result for a missing backup without publishing an event", async () => {
+		mocks.state.backupRows = [];
+
+		const result = await completeWorkItemResults("server-1", [
+			{ id: "work-1", attempt: 1, status: "completed" },
+		]);
+
+		expect(result).toEqual({ accepted: ["work-1"], rejected: [] });
+		expect(mocks.state.persistedStatus).toBe("completed");
+		expect(mocks.send).not.toHaveBeenCalled();
+	});
+
+	it("accepts a backup from a different service without publishing an event", async () => {
 		mocks.state.backupRows = [{ volumeId: "volume-1", serviceId: "service-2" }];
 
-		await expect(
-			completeWorkItemResults("server-1", [
-				{ id: "work-1", attempt: 1, status: "completed" },
-			]),
-		).rejects.toThrow("mismatched service context");
+		const result = await completeWorkItemResults("server-1", [
+			{ id: "work-1", attempt: 1, status: "completed" },
+		]);
+
+		expect(result).toEqual({ accepted: ["work-1"], rejected: [] });
+		expect(mocks.state.persistedStatus).toBe("completed");
 		expect(mocks.send).not.toHaveBeenCalled();
 	});
 
