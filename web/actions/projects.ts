@@ -49,6 +49,7 @@ import { validateDockerImageInternal } from "@/lib/docker-image";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
+import { resolveRegistryImageHost } from "@/lib/registry-reference";
 import {
 	cleanupRegistryArtifactsForService,
 	prepareRegistryArtifactCleanup,
@@ -303,6 +304,12 @@ const SERVICE_CARD_WIDTH = 320;
 export async function createService(input: CreateServiceInput) {
 	await requireDeveloperRole();
 	const { projectId, environmentId, name, image, github } = input;
+	if (!github) {
+		const validation = await validateDockerImageInternal(image);
+		if (!validation.valid) {
+			throw new Error(validation.error ?? "Invalid image reference");
+		}
+	}
 	const resourceLimits = input.resourceLimits ?? {
 		cpuCores: null,
 		memoryMb: null,
@@ -334,10 +341,7 @@ export async function createService(input: CreateServiceInput) {
 	let githubRootDir: string | null = null;
 
 	if (github) {
-		const registryHost = process.env.REGISTRY_HOST;
-		if (!registryHost) {
-			throw new Error("REGISTRY_HOST environment variable is required");
-		}
+		const registryHost = resolveRegistryImageHost();
 		finalImage = `${registryHost}/${projectId}/${id}:latest`;
 		sourceType = "github";
 		githubRepoUrl = github.repoUrl;
@@ -877,10 +881,7 @@ export async function updateServiceGithubRepo(
 		};
 
 		if (normalizedUrl) {
-			const registryHost = process.env.REGISTRY_HOST;
-			if (!registryHost) {
-				throw new Error("REGISTRY_HOST environment variable is required");
-			}
+			const registryHost = resolveRegistryImageHost();
 			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
 		}
 
@@ -1221,6 +1222,12 @@ export async function updateServiceConfig(
 	const service = await getService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
+	}
+	if (config.source) {
+		const validation = await validateDockerImageInternal(config.source.image);
+		if (!validation.valid) {
+			throw new Error(validation.error ?? "Invalid image reference");
+		}
 	}
 
 	if (config.source || config.healthCheck !== undefined) {

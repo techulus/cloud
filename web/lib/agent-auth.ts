@@ -54,7 +54,8 @@ export async function verifyAgentRequest(
 		};
 	}
 
-	const messageToVerify = `${timestamp}:${body ?? ""}`;
+	const url = new URL(request.url);
+	const messageToVerify = `agent-request:v2\0${timestamp}\0${request.method}\0${url.pathname}${url.search}\0${body ?? ""}`;
 	const isValid = verifyEd25519Signature(
 		server.signingPublicKey,
 		messageToVerify,

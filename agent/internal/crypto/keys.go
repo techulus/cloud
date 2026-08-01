@@ -88,6 +88,15 @@ func KeyPairExists(dir string) bool {
 }
 
 func DecryptSecret(encryptedBase64 string, keyHex string) (string, error) {
+	return decryptAESGCM(encryptedBase64, keyHex, nil)
+}
+
+func DecryptRegistryCredential(encryptedBase64, keyHex, id, canonicalHost string) (string, error) {
+	aad := []byte("registry-credential:v1\x00" + id + "\x00" + canonicalHost)
+	return decryptAESGCM(encryptedBase64, keyHex, aad)
+}
+
+func decryptAESGCM(encryptedBase64 string, keyHex string, aad []byte) (string, error) {
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		return "", fmt.Errorf("invalid encryption key: %w", err)
@@ -120,7 +129,7 @@ func DecryptSecret(encryptedBase64 string, keyHex string) (string, error) {
 	}
 
 	ciphertextWithTag := append(ciphertext, authTag...)
-	plaintext, err := gcm.Open(nil, iv, ciphertextWithTag, nil)
+	plaintext, err := gcm.Open(nil, iv, ciphertextWithTag, aad)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed: %w", err)
 	}

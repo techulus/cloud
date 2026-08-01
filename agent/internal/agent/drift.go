@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/dns"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/registryauth"
 	"techulus/cloud-agent/internal/retry"
 	"techulus/cloud-agent/internal/traefik"
 	"techulus/cloud-agent/internal/wireguard"
@@ -403,21 +403,7 @@ func (a *Agent) planReconcile(expected *agenthttp.ExpectedState, actual *ActualS
 }
 
 func normalizeImage(image string) string {
-	digest := ""
-	if digestIndex := strings.Index(image, "@"); digestIndex != -1 {
-		digest = image[digestIndex:]
-		image = image[:digestIndex]
-	}
-
-	image = strings.TrimPrefix(image, "docker.io/library/")
-	image = strings.TrimPrefix(image, "docker.io/")
-
-	lastSlash := strings.LastIndex(image, "/")
-	lastColon := strings.LastIndex(image, ":")
-	if digest == "" && lastColon <= lastSlash {
-		image = image + ":latest"
-	}
-	return image + digest
+	return registryauth.NormalizeImage(image)
 }
 
 func desiredContainerState(container agenthttp.ExpectedContainer) string {

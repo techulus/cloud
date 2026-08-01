@@ -30,6 +30,7 @@ import {
 } from "@/components/settings/edge-domain-settings";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { MemberSettings } from "@/components/settings/member-settings";
+import { RegistrySettings } from "@/components/settings/registry-settings";
 import { TwoFactorSettings } from "@/components/settings/two-factor-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
 } from "@/lib/control-plane-updates";
+import type { RegistryMetadata } from "@/lib/registry-credentials";
 import type { EmailAlertsConfig } from "@/lib/settings-keys";
 
 type Props = {
@@ -93,6 +95,7 @@ type Props = {
 		controlPlaneUpgradeState: ControlPlaneUpgradeState | null;
 	};
 	appVersion: string | null;
+	registries: RegistryMetadata[] | null;
 };
 
 const CONTROL_PLANE_UPGRADE_DOCS_URL =
@@ -103,6 +106,7 @@ export function GlobalSettings({
 	membersData,
 	initialSettings,
 	appVersion,
+	registries,
 }: Props) {
 	const router = useRouter();
 	const [tab, setTab] = useQueryState("tab", {
@@ -272,6 +276,11 @@ export function GlobalSettings({
 				{membersData && (
 					<TabsTrigger value="members" className="px-4 shrink-0">
 						Members
+					</TabsTrigger>
+				)}
+				{registries && (
+					<TabsTrigger value="registries" className="px-4 shrink-0">
+						Registries
 					</TabsTrigger>
 				)}
 				<TabsTrigger value="update" className="px-4 shrink-0">
@@ -457,6 +466,12 @@ export function GlobalSettings({
 						initialMembers={membersData.members}
 						initialInvitations={membersData.invitations}
 					/>
+				</TabsContent>
+			)}
+
+			{registries && (
+				<TabsContent value="registries" className="space-y-6 pt-4">
+					<RegistrySettings registries={registries} />
 				</TabsContent>
 			)}
 

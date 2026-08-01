@@ -16,6 +16,7 @@ import (
 
 	"techulus/cloud-agent/internal/crypto"
 	"techulus/cloud-agent/internal/health"
+	"techulus/cloud-agent/internal/registryauth"
 )
 
 type Client struct {
@@ -24,6 +25,35 @@ type Client struct {
 	keyPair  *crypto.KeyPair
 	client   *http.Client
 	dataDir  string
+}
+
+func (c *Client) GetRegistryBundle(ctx context.Context) (*registryauth.Bundle, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/agent/registries", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create registry request: %w", err)
+	}
+	c.signRequest(req, "")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch registry bundle: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch registry bundle returned status %d", resp.StatusCode)
+	}
+	limited := io.LimitReader(resp.Body, 2*1024*1024+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read registry response: %w", err)
+	}
+	if len(data) > 2*1024*1024 {
+		return nil, errors.New("registry response too large")
+	}
+	var bundle registryauth.Bundle
+	if err = json.Unmarshal(data, &bundle); err != nil {
+		return nil, errors.New("invalid registry response")
+	}
+	return &bundle, nil
 }
 
 func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string) *Client {
@@ -40,7 +70,7 @@ func NewClient(baseURL, serverID string, keyPair *crypto.KeyPair, dataDir string
 
 func (c *Client) signRequest(req *http.Request, body string) {
 	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	message := timestamp + ":" + body
+	message := "agent-request:v2\x00" + timestamp + "\x00" + req.Method + "\x00" + req.URL.RequestURI() + "\x00" + body
 	signature := c.keyPair.Sign([]byte(message))
 
 	req.Header.Set("x-server-id", c.serverID)

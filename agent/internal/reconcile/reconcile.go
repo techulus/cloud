@@ -8,23 +8,29 @@ import (
 	"techulus/cloud-agent/internal/container"
 	"techulus/cloud-agent/internal/crypto"
 	agenthttp "techulus/cloud-agent/internal/http"
+	"techulus/cloud-agent/internal/registryauth"
 )
 
 type Reconciler struct {
-	encryptionKey    string
-	dataDir          string
-	registryInsecure bool
+	encryptionKey string
+	dataDir       string
+	registryAuth  *registryauth.Manager
 }
 
-func NewReconciler(encryptionKey, dataDir string, registryInsecure bool) *Reconciler {
+func NewReconciler(encryptionKey, dataDir string, registryAuth *registryauth.Manager) *Reconciler {
 	return &Reconciler{
-		encryptionKey:    encryptionKey,
-		dataDir:          dataDir,
-		registryInsecure: registryInsecure,
+		encryptionKey: encryptionKey,
+		dataDir:       dataDir,
+		registryAuth:  registryAuth,
 	}
 }
 
 func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
+	snapshot, releaseRegistryAuth, err := r.registryAuth.Acquire()
+	if err != nil {
+		return err
+	}
+	defer releaseRegistryAuth()
 	portMappings := make([]container.PortMapping, len(exp.Ports))
 	for i, p := range exp.Ports {
 		portMappings[i] = container.PortMapping{
@@ -65,10 +71,11 @@ func (r *Reconciler) Deploy(exp agenthttp.ExpectedContainer) error {
 		}
 	}
 
-	_, err := container.Deploy(&container.DeployConfig{
+	_, err = container.Deploy(&container.DeployConfig{
 		Name:              exp.Name,
 		Image:             exp.Image,
-		RegistryInsecure:  r.registryInsecure,
+		AuthFile:          snapshot.AuthFile,
+		TLSVerify:         snapshot.TLSVerify(exp.Image),
 		ServiceID:         exp.ServiceID,
 		ServiceName:       exp.ServiceName,
 		DeploymentID:      exp.DeploymentID,

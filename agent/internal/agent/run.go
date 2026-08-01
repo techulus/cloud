@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
 	"techulus/cloud-agent/internal/metrics"
 	"techulus/cloud-agent/internal/serverless"
@@ -32,14 +31,6 @@ func (a *Agent) Run(ctx context.Context) {
 			log.Printf("[cache] expected state unavailable for initial Traefik attribution: %v", err)
 		}
 	}
-	if a.Config.RegistryURL != "" && a.Config.RegistryUsername != "" && a.Config.RegistryPassword != "" {
-		if err := container.Login(a.Config.RegistryURL, a.Config.RegistryUsername, a.Config.RegistryPassword, a.Config.RegistryInsecure); err != nil {
-			log.Printf("[registry] login failed: %v", err)
-		} else {
-			log.Printf("[registry] logged in to %s", a.Config.RegistryURL)
-		}
-	}
-
 	ticker := time.NewTicker(TickInterval)
 	defer ticker.Stop()
 
@@ -78,6 +69,7 @@ func (a *Agent) Run(ctx context.Context) {
 
 	go a.StatusReportLoop(ctx)
 	go a.WorkQueueWakeLoop(ctx)
+	go a.RegistrySyncLoop(ctx)
 
 	a.Tick()
 
@@ -106,6 +98,21 @@ func (a *Agent) Run(ctx context.Context) {
 			a.CollectLogs()
 		case <-cleanupTickerC:
 			go a.RunBuildCleanup()
+		}
+	}
+}
+
+func (a *Agent) RegistrySyncLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := a.RegistryAuth.Sync(ctx); err != nil {
+				log.Printf("[registry] fallback sync failed: %v", err)
+			}
 		}
 	}
 }

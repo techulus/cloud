@@ -21,11 +21,25 @@ The registry runs as a Docker container alongside the control plane, available a
 
 | Variable | Description |
 | --- | --- |
+| `REGISTRY_HOST` / `REGISTRY_URL` | Registry endpoint aliases (an optional `http://` or `https://` scheme is accepted; paths are not) |
 | `REGISTRY_USERNAME` | Basic auth username |
 | `REGISTRY_PASSWORD` | Basic auth password |
+| `REGISTRY_INSECURE` | Set to `true` to disable TLS certificate verification on agents |
 | `REGISTRY_HTTP_SECRET` | Internal HTTP signing secret |
 
-Agents receive registry credentials automatically during [registration](/agents/setup#registration).
+The built-in credentials are included in the same encrypted registry bundle as custom credentials. Registered agents fetch that complete bundle over a signed, non-cacheable endpoint; registration itself does not return registry passwords.
+
+## Global custom registries
+
+Administrators can add private registry credentials under **Settings → Registries**. A registry host (including an explicit port, when required) is globally unique and cannot include a scheme or path. Docker Hub aliases are treated as the same host, and hosts used by the built-in registry configuration are reserved.
+
+Registry changes are transactionally queued for every registered agent, including offline agents. Registry entries cannot be edited after creation. To change a username, password, or TLS setting, delete the registry and add it again. Deleting an entry removes it from the next complete bundle. Use pull-only robot or service-account tokens wherever possible.
+
+Passwords are write-only in the control plane UI. The control plane validates image reference syntax but neither decrypts custom registry passwords nor contacts registries to test them. An agent's actual image pull is the authoritative credential and image availability check.
+
+TLS certificate verification is enabled by default. Disable it only for a deliberately trusted registry using a private or self-signed certificate: doing so allows credential interception if the network is compromised.
+
+The TLS setting applies to agent-managed Podman pulls, build exports, and manifest operations. Dockerfile `FROM` pulls are resolved by the separate BuildKit daemon; using an insecure registry there also requires configuring that host in BuildKit's daemon configuration. Credentials for TLS-verified registries are forwarded to BuildKit automatically.
 
 ## Storage
 

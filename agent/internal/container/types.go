@@ -28,7 +28,8 @@ type BuildLogFunc func(stream string, message string)
 type DeployConfig struct {
 	Name              string
 	Image             string
-	RegistryInsecure  bool
+	AuthFile          string
+	TLSVerify         bool
 	ServiceID         string
 	ServiceName       string
 	DeploymentID      string
