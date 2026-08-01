@@ -81,38 +81,6 @@ export async function createRegistryCredential(input: RegistryCredentialInput) {
 	});
 }
 
-export async function updateRegistryCredential(
-	id: string,
-	input: { username: string; password?: string; tlsVerify: boolean },
-) {
-	await requireAdmin();
-	validateUsername(input.username);
-	return mutateAndFanout(async (tx) => {
-		const existing = await tx
-			.select()
-			.from(registryCredentials)
-			.where(eq(registryCredentials.id, id))
-			.then((rows) => rows[0]);
-		if (!existing) throw new Error("Registry credential not found");
-		await tx
-			.update(registryCredentials)
-			.set({
-				username: input.username,
-				tlsVerify: input.tlsVerify,
-				...(input.password
-					? {
-							encryptedPassword: await encryptRegistryPassword(
-								input.password,
-								id,
-								existing.host,
-							),
-						}
-					: {}),
-			})
-			.where(eq(registryCredentials.id, id));
-	});
-}
-
 export async function deleteRegistryCredential(id: string) {
 	await requireAdmin();
 	return mutateAndFanout(async (tx) => {

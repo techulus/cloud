@@ -33,7 +33,7 @@ The built-in credentials are included in the same encrypted registry bundle as c
 
 Administrators can add private registry credentials under **Settings → Registries**. A registry host (including an explicit port, when required) is globally unique and cannot include a scheme or path. Docker Hub aliases are treated as the same host, and hosts used by the built-in registry configuration are reserved.
 
-Registry changes are transactionally queued for every registered agent, including offline agents. Rotating a password replaces the encrypted credential while preserving the host; deleting an entry removes it from the next complete bundle. Use pull-only robot or service-account tokens wherever possible.
+Registry changes are transactionally queued for every registered agent, including offline agents. Registry entries cannot be edited after creation. To change a username, password, or TLS setting, delete the registry and add it again. Deleting an entry removes it from the next complete bundle. Use pull-only robot or service-account tokens wherever possible.
 
 Passwords are write-only in the control plane UI. The control plane validates image reference syntax but neither decrypts custom registry passwords nor contacts registries to test them. An agent's actual image pull is the authoritative credential and image availability check.
 

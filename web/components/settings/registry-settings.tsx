@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
 	createRegistryCredential,
 	deleteRegistryCredential,
-	updateRegistryCredential,
 } from "@/actions/registry-credentials";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +43,8 @@ export function RegistrySettings({
 					<h3 className="font-medium">Add registry credentials</h3>
 					<p className="text-sm text-muted-foreground">
 						Credentials are distributed globally to every registered agent. The
-						password is write-only.
+						password is write-only. To change credentials later, delete the
+						registry and add it again.
 					</p>
 				</div>
 				<div className="grid gap-4 md:grid-cols-3">
@@ -111,9 +111,6 @@ export function RegistrySettings({
 }
 
 function RegistryRow({ registry }: { registry: RegistryMetadata }) {
-	const [username, setUsername] = useState(registry.username);
-	const [password, setPassword] = useState("");
-	const [tlsVerify, setTlsVerify] = useState(registry.tlsVerify);
 	const [busy, setBusy] = useState(false);
 	if (registry.system)
 		return (
@@ -130,23 +127,6 @@ function RegistryRow({ registry }: { registry: RegistryMetadata }) {
 				</div>
 			</div>
 		);
-	async function save() {
-		setBusy(true);
-		try {
-			await updateRegistryCredential(registry.id, {
-				username,
-				password: password || undefined,
-				tlsVerify,
-			});
-			toast.success("Registry updated");
-			window.location.reload();
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to update registry",
-			);
-			setBusy(false);
-		}
-	}
 	async function remove() {
 		if (
 			!window.confirm(
@@ -167,46 +147,26 @@ function RegistryRow({ registry }: { registry: RegistryMetadata }) {
 		}
 	}
 	return (
-		<div className="rounded-lg border p-4 space-y-3">
-			<p className="font-mono font-medium">{registry.host}</p>
-			<div className="grid gap-3 md:grid-cols-2">
-				<Input
-					aria-label={`Username for ${registry.host}`}
-					value={username}
-					onChange={(event) => setUsername(event.target.value)}
-				/>
-				<Input
-					aria-label={`New password for ${registry.host}`}
-					type="password"
-					placeholder="New password (leave blank to preserve)"
-					value={password}
-					onChange={(event) => setPassword(event.target.value)}
-				/>
-			</div>
-			<label className="flex items-center gap-2 text-sm">
-				<input
-					type="checkbox"
-					checked={tlsVerify}
-					onChange={(event) => setTlsVerify(event.target.checked)}
-				/>{" "}
-				Verify TLS certificates
-			</label>
-			{!tlsVerify && (
-				<p className="text-sm text-destructive">
-					TLS verification is disabled.
-				</p>
-			)}
-			<div className="flex gap-2">
-				<Button size="sm" disabled={busy} onClick={save}>
-					Save
-				</Button>
+		<div className="rounded-lg border p-4">
+			<div className="flex items-start justify-between gap-4">
+				<div>
+					<p className="font-mono font-medium">{registry.host}</p>
+					<p className="text-sm text-muted-foreground">
+						{registry.username} · TLS verification{" "}
+						{registry.tlsVerify ? "enabled" : "disabled"}
+					</p>
+					<p className="mt-2 text-xs text-muted-foreground">
+						Delete and add this registry again to change its credentials or TLS
+						setting.
+					</p>
+				</div>
 				<Button
 					size="sm"
 					variant="destructive"
 					disabled={busy}
 					onClick={remove}
 				>
-					Delete
+					{busy ? "Deleting..." : "Delete"}
 				</Button>
 			</div>
 		</div>
