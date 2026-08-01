@@ -122,6 +122,8 @@ async function deleteTag(
 	repository: string,
 	tag: string,
 ) {
+	// Registry 3.1.1 supports exact-tag deletion. Resolving and deleting the
+	// digest would also remove retained aliases that point to the same manifest.
 	const response = await fetch(manifestUrl(registryUrl, repository, tag), {
 		method: "DELETE",
 		headers: { Accept: MANIFEST_ACCEPT, Authorization: authorization },
