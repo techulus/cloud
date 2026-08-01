@@ -2,7 +2,16 @@
 
 import { randomUUID } from "node:crypto";
 import cronstrue from "cronstrue";
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	or,
+	sql,
+} from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { ZodError, z } from "zod";
 import { db } from "@/db";
@@ -40,6 +49,10 @@ import { validateDockerImageInternal } from "@/lib/docker-image";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
+import {
+	cleanupRegistryArtifactsForService,
+	prepareRegistryArtifactCleanup,
+} from "@/lib/registry-retention";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -129,24 +142,27 @@ export async function deleteProject(
 		}
 	}
 
-	await deleteBackupsForServices(projectServices.map((service) => service.id));
-	await db.delete(projects).where(eq(projects.id, id));
+	for (const service of projectServices) {
+		await hardDeleteService(service.id);
+	}
+	await db.transaction(async (tx) => {
+		const locked = await tx.execute(
+			sql`select id from projects where id = ${id} for update`,
+		);
+		if (locked.rows.length === 0) throw new Error("Project not found");
+		const remainingServices = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(eq(services.projectId, id))
+			.limit(1);
+		if (remainingServices.length > 0) {
+			throw new Error(
+				"Project services changed during deletion; retry deletion",
+			);
+		}
+		await tx.delete(projects).where(eq(projects.id, id));
+	});
 	return { success: true };
-}
-
-async function deleteBackupsForServices(serviceIds: string[]) {
-	if (serviceIds.length === 0) {
-		return;
-	}
-
-	const backups = await db
-		.select({ id: volumeBackups.id })
-		.from(volumeBackups)
-		.where(inArray(volumeBackups.serviceId, serviceIds));
-
-	for (const backup of backups) {
-		await deleteBackup(backup.id, { revalidate: false });
-	}
 }
 
 export async function updateProjectName(projectId: string, name: string) {
@@ -240,8 +256,26 @@ export async function deleteEnvironment(environmentId: string) {
 		.from(services)
 		.where(eq(services.environmentId, environmentId));
 
-	await deleteBackupsForServices(envServices.map((service) => service.id));
-	await db.delete(environments).where(eq(environments.id, environmentId));
+	for (const service of envServices) {
+		await hardDeleteService(service.id);
+	}
+	await db.transaction(async (tx) => {
+		const locked = await tx.execute(
+			sql`select id from environments where id = ${environmentId} for update`,
+		);
+		if (locked.rows.length === 0) throw new Error("Environment not found");
+		const remainingServices = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(eq(services.environmentId, environmentId))
+			.limit(1);
+		if (remainingServices.length > 0) {
+			throw new Error(
+				"Environment services changed during deletion; retry deletion",
+			);
+		}
+		await tx.delete(environments).where(eq(environments.id, environmentId));
+	});
 	return { success: true };
 }
 
@@ -368,14 +402,51 @@ export async function createService(input: CreateServiceInput) {
 }
 
 async function hardDeleteService(serviceId: string) {
-	const service = await db
-		.select()
-		.from(services)
-		.where(eq(services.id, serviceId))
-		.then((r) => r[0]);
+	const service = await db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const freshService = await tx
+			.select()
+			.from(services)
+			.where(
+				and(
+					eq(services.id, serviceId),
+					or(
+						isNull(services.deletionStatus),
+						eq(services.deletionStatus, "failed"),
+					),
+				),
+			)
+			.then((rows) => rows[0]);
+		if (!freshService) return undefined;
+		const now = new Date();
+		const claimed = await tx
+			.update(services)
+			.set({
+				deletedAt: now,
+				purgeAfter: now,
+				deletionStatus: "deleting",
+				deletionError: null,
+			})
+			.where(eq(services.id, serviceId))
+			.returning()
+			.then((rows) => rows[0]);
+		if (!claimed) return undefined;
+		return {
+			service: claimed,
+			registryCleanupReady: await prepareRegistryArtifactCleanup(tx, serviceId),
+		};
+	});
 	if (!service) {
-		throw new Error("Service not found");
+		throw new Error(
+			"Service not found or another service operation is in progress",
+		);
 	}
+	if (!service.registryCleanupReady) {
+		throw new Error(
+			"Service deletion deferred while registry manifest work is processing",
+		);
+	}
+	const claimedService = service.service;
 
 	const allDeployments = await db
 		.select()
@@ -397,14 +468,14 @@ async function hardDeleteService(serviceId: string) {
 
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 
-	if (service.stateful && service.lockedServerId) {
+	if (claimedService.stateful && claimedService.lockedServerId) {
 		const volumes = await db
 			.select()
 			.from(serviceVolumes)
 			.where(eq(serviceVolumes.serviceId, serviceId));
 
 		if (volumes.length > 0) {
-			await enqueueWork(service.lockedServerId, "cleanup_volumes", {
+			await enqueueWork(claimedService.lockedServerId, "cleanup_volumes", {
 				serviceId,
 			});
 		}
@@ -419,6 +490,7 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
+	await cleanupRegistryArtifactsForService(serviceId);
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
@@ -507,10 +579,29 @@ export async function deleteService(
 		}
 	}
 
-	await db
-		.update(services)
-		.set({ deletionStatus: "backing_up", deletionError: null })
-		.where(eq(services.id, serviceId));
+	const claimed = await db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		return tx
+			.update(services)
+			.set({ deletionStatus: "backing_up", deletionError: null })
+			.where(
+				and(
+					eq(services.id, serviceId),
+					isNull(services.deletedAt),
+					or(
+						isNull(services.deletionStatus),
+						eq(services.deletionStatus, "failed"),
+					),
+				),
+			)
+			.returning({ id: services.id })
+			.then((rows) => rows[0]);
+	});
+	if (!claimed) {
+		throw new Error(
+			"Deletion cannot start while another service operation is in progress",
+		);
+	}
 
 	try {
 		await inngest.send(
@@ -618,14 +709,35 @@ export async function restoreDeletedService(serviceId: string) {
 		}
 	}
 
-	await db
-		.update(services)
-		.set({
-			deletionStatus: "restoring",
-			deletionError: null,
-			lockedServerId: targetServerId ?? service.lockedServerId,
-		})
-		.where(eq(services.id, serviceId));
+	await db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const current = await tx
+			.select({ id: services.id })
+			.from(services)
+			.where(
+				and(
+					eq(services.id, serviceId),
+					isNotNull(services.deletedAt),
+					or(
+						isNull(services.deletionStatus),
+						eq(services.deletionStatus, "failed"),
+					),
+				),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (!current) {
+			throw new Error("A deletion or restore operation is already in progress");
+		}
+		await tx
+			.update(services)
+			.set({
+				deletionStatus: "restoring",
+				deletionError: null,
+				lockedServerId: targetServerId ?? service.lockedServerId,
+			})
+			.where(eq(services.id, serviceId));
+	});
 
 	try {
 		await inngest.send(

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => query),
 			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
+			limit: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
@@ -41,6 +42,8 @@ const mocks = vi.hoisted(() => {
 		db: {
 			select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
 			update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
+			execute: vi.fn().mockResolvedValue({ rows: [] }),
+			transaction: vi.fn(async (callback) => callback(mocks.db)),
 		},
 		verifyAgentRequest: vi.fn(),
 		enqueueWork: vi.fn(),
@@ -74,6 +77,9 @@ import { POST } from "@/app/api/v1/agent/builds/[id]/status/route";
 
 const commitSha = "0123456789abcdef0123456789abcdef01234567";
 const finalImage = "registry.test/project-1/service-1:revision-revision-1";
+const repository = "registry.test/project-1/service-1";
+const amd64Image = `${repository}@sha256:${"a".repeat(64)}`;
+const arm64Image = `${repository}@sha256:${"b".repeat(64)}`;
 
 const specification = {
 	schemaVersion: 2,
@@ -121,11 +127,16 @@ function build(status: string, overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function post(status: string) {
+function post(
+	status: string,
+	imageUri: string | null | undefined = status === "completed"
+		? amd64Image
+		: undefined,
+) {
 	return POST(
 		new Request("http://localhost/api/v1/agent/builds/build-amd64/status", {
 			method: "POST",
-			body: JSON.stringify({ status, resolvedCommitSha: commitSha }),
+			body: JSON.stringify({ status, resolvedCommitSha: commitSha, imageUri }),
 		}) as NextRequest,
 		{ params: Promise.resolve({ id: "build-amd64" }) },
 	);
@@ -137,6 +148,8 @@ describe("agent build status transitions", () => {
 		mocks.selectResults.length = 0;
 		mocks.updateResults.length = 0;
 		mocks.updateSets.length = 0;
+		mocks.db.transaction.mockClear();
+		mocks.db.execute.mockClear();
 		mocks.verifyAgentRequest.mockResolvedValue({
 			success: true,
 			serverId: "server-1",
@@ -186,7 +199,7 @@ describe("agent build status transitions", () => {
 
 	it("stores completion and the platform artifact atomically", async () => {
 		const completedBuild = build("completed", {
-			imageUri: `${finalImage}-amd64`,
+			imageUri: amd64Image,
 		});
 		const githubSpecification = {
 			...specification,
@@ -209,9 +222,10 @@ describe("agent build status transitions", () => {
 				build("completed", {
 					id: "build-arm64",
 					targetPlatform: "linux/arm64",
-					imageUri: `${finalImage}-arm64`,
+					imageUri: arm64Image,
 				}),
 			],
+			[{ id: "service-1" }],
 		);
 		mocks.updateResults.push([completedBuild]);
 
@@ -221,20 +235,20 @@ describe("agent build status transitions", () => {
 		expect(mocks.updateSets).toHaveLength(1);
 		expect(mocks.updateSets[0]).toMatchObject({
 			status: "completed",
-			imageUri: `${finalImage}-amd64`,
+			imageUri: amd64Image,
 			completedAt: expect.any(Date),
 		});
 		expect(mocks.enqueueWork).toHaveBeenCalledWith(
 			"server-1",
 			"create_manifest",
 			{
-				images: [`${finalImage}-amd64`, `${finalImage}-arm64`],
+				images: [amd64Image, arm64Image],
 				finalImageUri: finalImage,
 				serviceId: "service-1",
 				serviceRevisionId: "revision-1",
 				buildGroupId: "group-1",
 			},
-			{ id: "manifest-work-group-1" },
+			{ id: "manifest-work-group-1", tx: mocks.db },
 		);
 		expect(mocks.createBuildCompleted).toHaveBeenCalledWith(
 			expect.objectContaining({ status: "success" }),
@@ -251,6 +265,27 @@ describe("agent build status transitions", () => {
 				environmentUrl:
 					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
 			},
+		);
+	});
+
+	it("does not enqueue manifest work after the service is deleted", async () => {
+		const completedBuild = build("completed", { imageUri: amd64Image });
+		mocks.selectResults.push(
+			[build("pushing")],
+			[{ specification }],
+			[completedBuild],
+			[],
+		);
+		mocks.updateResults.push([completedBuild]);
+
+		const response = await post("completed");
+
+		expect(response.status).toBe(200);
+		expect(mocks.db.transaction).toHaveBeenCalledOnce();
+		expect(mocks.enqueueWork).not.toHaveBeenCalled();
+		expect(mocks.createBuildCompleted).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "success" }),
+			{ id: "build-completed-build-amd64" },
 		);
 	});
 
@@ -272,7 +307,7 @@ describe("agent build status transitions", () => {
 
 	it("rejects reversal of a completed build to failed", async () => {
 		const completedBuild = build("completed", {
-			imageUri: `${finalImage}-amd64`,
+			imageUri: amd64Image,
 		});
 		mocks.selectResults.push(
 			[completedBuild],
@@ -286,5 +321,53 @@ describe("agent build status transitions", () => {
 		expect(response.status).toBe(409);
 		expect(mocks.enqueueWork).not.toHaveBeenCalled();
 		expect(mocks.send).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["missing", null],
+		["malformed", `${repository}@sha256:ABC`],
+	])("rejects a %s completion digest before persistence", async (_case, imageUri) => {
+		mocks.selectResults.push([build("pushing")], [{ specification }]);
+
+		const response = await post("completed", imageUri);
+
+		expect(response.status).toBe(400);
+		expect(mocks.db.update).not.toHaveBeenCalled();
+	});
+
+	it("rejects a completion digest for another repository", async () => {
+		mocks.selectResults.push([build("pushing")], [{ specification }]);
+
+		const response = await post(
+			"completed",
+			`registry.test/other/service@sha256:${"c".repeat(64)}`,
+		);
+
+		expect(response.status).toBe(409);
+		expect(mocks.db.update).not.toHaveBeenCalled();
+	});
+
+	it("accepts only an identical digest when replaying completion", async () => {
+		const completedBuild = build("completed", { imageUri: amd64Image });
+		mocks.selectResults.push(
+			[completedBuild],
+			[{ specification }],
+			[completedBuild],
+			[completedBuild],
+		);
+		mocks.updateResults.push([]);
+
+		expect((await post("completed", amd64Image)).status).toBe(200);
+
+		mocks.selectResults.push(
+			[completedBuild],
+			[{ specification }],
+			[completedBuild],
+		);
+		mocks.updateResults.push([]);
+		expect(
+			(await post("completed", `${repository}@sha256:${"d".repeat(64)}`))
+				.status,
+		).toBe(409);
 	});
 });

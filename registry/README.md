@@ -29,8 +29,14 @@ Should only be accessible via WireGuard mesh - not exposed publicly.
 
 Garbage collection removes blobs that are no longer referenced by a manifest.
 It does not choose which tagged images to retain: delete unwanted tags first,
-then run garbage collection to reclaim their storage. This repository does not
-install or schedule garbage collection automatically.
+then run garbage collection to reclaim their storage. Registry 3 is required
+because its `--delete-untagged` behavior safely preserves manifests referenced
+by retained multi-platform indexes.
+
+Failed or interrupted builds can leave digest-only artifacts. These remain
+until the next weekly garbage-collection run (between 0 and 7 days). This
+repository does not install or schedule garbage collection automatically; the
+offline weekly cron remains a manual host setup step.
 
 ### Dry run
 
@@ -43,7 +49,7 @@ docker exec "$REGISTRY" \
   /bin/registry garbage-collect \
   --dry-run \
   --delete-untagged \
-  /etc/docker/registry/config.yml
+  /etc/distribution/config.yml
 ```
 
 `--delete-untagged` removes untagged manifests so that their unreferenced blobs
@@ -54,7 +60,12 @@ can also be collected.
 Garbage collection must not race with image pushes. The following maintenance
 script stops the registry while collecting, so the registry is briefly
 unavailable. It also prevents overlapping runs and restarts the registry if
-garbage collection fails.
+garbage collection fails. Builds that overlap this offline window may fail.
+Transient platform manifests that have been pushed but are not yet referenced
+by a multi-platform index can be collected; retry the build after maintenance.
+
+Snapshot the registry storage volume before the first Registry 3 garbage
+collection run.
 
 Install it as `/usr/local/sbin/techulus-registry-gc`:
 
@@ -83,7 +94,7 @@ trap 'exit 1' HUP INT TERM
     "$IMAGE" \
     garbage-collect \
     --delete-untagged \
-    /etc/docker/registry/config.yml
+    /etc/distribution/config.yml
 
 restart_registry
 trap - EXIT HUP INT TERM
@@ -118,10 +129,15 @@ journalctl -t techulus-registry-gc
 
 ### Verify
 
-After garbage collection, wait for the registry to report `healthy` and check
-its storage usage:
+After garbage collection, wait for the registry to report `healthy`. Pull a
+known retained multi-platform tag on every supported platform and verify its
+index still references the expected platform manifest digests. Finally, check
+storage usage:
 
 ```bash
 docker inspect --format '{{.State.Health.Status}}' techulus-cloud-registry-1
+docker pull --platform linux/amd64 REGISTRY/IMAGE:TAG
+docker pull --platform linux/arm64 REGISTRY/IMAGE:TAG
+docker buildx imagetools inspect REGISTRY/IMAGE:TAG
 docker run --rm --volumes-from techulus-cloud-registry-1 alpine du -sh /var/lib/registry
 ```

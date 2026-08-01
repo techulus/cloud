@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -59,6 +60,7 @@ type dockerfileConfig struct {
 
 var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
 var windowsAbsoluteRootPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+var imageDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	return &Builder{
@@ -67,11 +69,11 @@ func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	}
 }
 
-func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func() bool, onStatusChange func(status string)) error {
+func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func() bool, onStatusChange func(status string)) (string, error) {
 	buildDir := filepath.Join(b.dataDir, "builds", config.BuildID)
 
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return fmt.Errorf("failed to create build directory: %w", err)
+		return "", fmt.Errorf("failed to create build directory: %w", err)
 	}
 
 	defer func() {
@@ -80,31 +82,27 @@ func (b *Builder) Build(ctx context.Context, config *Config, checkCancelled func
 	}()
 
 	if checkCancelled() {
-		return fmt.Errorf("build cancelled")
+		return "", fmt.Errorf("build cancelled")
 	}
 
 	if err := b.clone(ctx, config, buildDir); err != nil {
-		return fmt.Errorf("clone failed: %w", err)
-	}
-
-	if config.CommitSha == "HEAD" && config.ImageRepository != "" && config.ResolvedCommitSha != "" {
-		config.ImageURI = fmt.Sprintf("%s:%s", config.ImageRepository, config.ResolvedCommitSha)
-		b.sendLog(config, fmt.Sprintf("Resolved image tag %s", config.ImageURI))
+		return "", fmt.Errorf("clone failed: %w", err)
 	}
 
 	if checkCancelled() {
-		return fmt.Errorf("build cancelled")
+		return "", fmt.Errorf("build cancelled")
 	}
 
 	if onStatusChange != nil {
 		onStatusChange("building")
 	}
 
-	if err := b.buildAndPush(ctx, config, buildDir); err != nil {
-		return fmt.Errorf("build failed: %w", err)
+	artifact, err := b.buildAndPush(ctx, config, buildDir)
+	if err != nil {
+		return "", fmt.Errorf("build failed: %w", err)
 	}
 
-	return nil
+	return artifact, nil
 }
 
 func truncateStr(s string, maxLen int) string {
@@ -224,10 +222,10 @@ func (b *Builder) resolveCommitSha(ctx context.Context, config *Config, buildDir
 	return resolvedCommitSha, nil
 }
 
-func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir string) error {
+func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir string) (string, error) {
 	contextDir, err := resolveBuildContext(buildDir, config.RootDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if config.RootDir != "" {
 		b.sendLog(config, fmt.Sprintf("Using root directory: %s", config.RootDir))
@@ -235,8 +233,12 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 
 	dockerfile, err := resolveDockerfile(contextDir, config.Secrets)
 	if err != nil {
-		return err
+		return "", err
 	}
+	if config.ImageRepository == "" {
+		return "", fmt.Errorf("image repository is required")
+	}
+	metadataPath := filepath.Join(buildDir, "build-metadata.json")
 
 	buildkitAddr := os.Getenv("BUILDKIT_HOST")
 	if buildkitAddr == "" {
@@ -257,10 +259,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 	if len(config.TargetPlatforms) > 0 {
 		platform = config.TargetPlatforms[0]
 	}
-	arch := strings.Split(platform, "/")[1]
-
-	archImageUri := config.ImageURI + "-" + arch
-	archOutputFlag := fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", archImageUri)
+	outputFlag := fmt.Sprintf("type=image,name=%s,push=true,push-by-digest=true,registry.insecure=true", config.ImageRepository)
 
 	if dockerfile.found {
 		log.Printf("[build:%s] building with Dockerfile via buildctl for %s", truncateStr(config.BuildID, 8), platform)
@@ -269,7 +268,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		} else {
 			b.sendLog(config, "Using existing Dockerfile")
 		}
-		b.sendLog(config, fmt.Sprintf("Building and pushing %s", archImageUri))
+		b.sendLog(config, fmt.Sprintf("Building and pushing %s", config.ImageRepository))
 
 		args := []string{
 			"--addr", buildkitAddr,
@@ -279,7 +278,8 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--local", fmt.Sprintf("dockerfile=%s", dockerfile.directory),
 			"--opt", fmt.Sprintf("filename=%s", dockerfile.filename),
 			"--opt", fmt.Sprintf("platform=%s", platform),
-			"--output", archOutputFlag,
+			"--output", outputFlag,
+			"--metadata-file", metadataPath,
 		}
 		args = append(args, secretArgs...)
 
@@ -290,7 +290,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed with output: %s", truncateStr(config.BuildID, 8), output)
 			b.sendLog(config, fmt.Sprintf("Build error: %s", output))
-			return fmt.Errorf("buildctl build failed:\n%s", tailLines(output, 20))
+			return "", fmt.Errorf("buildctl build failed:\n%s", tailLines(output, 20))
 		}
 	} else {
 		log.Printf("[build:%s] building with Railpack via buildctl for %s", truncateStr(config.BuildID, 8), platform)
@@ -308,7 +308,7 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] railpack prepare failed with output: %s", truncateStr(config.BuildID, 8), output)
 			b.sendLog(config, fmt.Sprintf("Railpack prepare error: %s", output))
-			return fmt.Errorf("railpack prepare failed:\n%s", tailLines(output, 20))
+			return "", fmt.Errorf("railpack prepare failed:\n%s", tailLines(output, 20))
 		}
 
 		b.sendLog(config, fmt.Sprintf("Building for %s...", platform))
@@ -322,7 +322,8 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 			"--local", "dockerfile=.",
 			"--opt", "filename=railpack-plan.json",
 			"--opt", fmt.Sprintf("platform=%s", platform),
-			"--output", archOutputFlag,
+			"--output", outputFlag,
+			"--metadata-file", metadataPath,
 		}
 
 		secretsHash := computeSecretsHash(config.Secrets)
@@ -338,12 +339,33 @@ func (b *Builder) buildAndPush(ctx context.Context, config *Config, buildDir str
 		if err != nil {
 			log.Printf("[build:%s] buildctl failed for %s: %s", truncateStr(config.BuildID, 8), platform, output)
 			b.sendLog(config, fmt.Sprintf("Build error (%s): %s", platform, output))
-			return fmt.Errorf("buildctl build failed for %s:\n%s", platform, tailLines(output, 20))
+			return "", fmt.Errorf("buildctl build failed for %s:\n%s", platform, tailLines(output, 20))
 		}
 	}
 
+	digest, err := readImageDigest(metadataPath)
+	if err != nil {
+		return "", err
+	}
 	b.sendLog(config, "Build completed")
-	return nil
+	return fmt.Sprintf("%s@%s", config.ImageRepository, digest), nil
+}
+
+func readImageDigest(metadataPath string) (string, error) {
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read build metadata: %w", err)
+	}
+	var metadata struct {
+		Digest string `json:"containerimage.digest"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return "", fmt.Errorf("failed to parse build metadata: %w", err)
+	}
+	if !imageDigestPattern.MatchString(metadata.Digest) {
+		return "", fmt.Errorf("build metadata contains invalid containerimage.digest")
+	}
+	return metadata.Digest, nil
 }
 
 func resolveBuildContext(buildDir, rootDir string) (string, error) {
