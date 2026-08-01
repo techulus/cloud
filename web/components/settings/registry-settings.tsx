@@ -155,10 +155,6 @@ function RegistryRow({ registry }: { registry: RegistryMetadata }) {
 						{registry.username} · TLS verification{" "}
 						{registry.tlsVerify ? "enabled" : "disabled"}
 					</p>
-					<p className="mt-2 text-xs text-muted-foreground">
-						Delete and add this registry again to change its credentials or TLS
-						setting.
-					</p>
 				</div>
 				<Button
 					size="sm"
