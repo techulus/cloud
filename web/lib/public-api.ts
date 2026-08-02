@@ -280,7 +280,7 @@ function sanitizeSpec(specification: unknown) {
 	const replicas = getServiceRevisionTotalReplicas(spec);
 	const placement =
 		spec.placement.mode === "automatic"
-			? { mode: "automatic" as const, replicas }
+			? { mode: "automatic" as const, replicas, autoscaling: spec.autoscaling }
 			: { mode: "manual" as const, placements: spec.placements, replicas };
 	return {
 		source:
@@ -380,7 +380,17 @@ export async function safeConfiguration(service: NestedService) {
 	});
 	const placement =
 		service.placementMode === "automatic"
-			? { mode: "automatic" as const, replicas: replicaCount }
+			? {
+					mode: "automatic" as const,
+					replicas: replicaCount,
+					autoscaling: service.autoscalingEnabled
+						? {
+								enabled: true as const,
+								minReplicas: service.autoscalingMinReplicas,
+								maxReplicas: service.autoscalingMaxReplicas,
+							}
+						: undefined,
+				}
 			: {
 					mode: "manual" as const,
 					placements: sortedPlacements,
@@ -551,10 +561,24 @@ const hostnameSchema = z
 		/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
 		"hostname must contain only lowercase letters, numbers, and hyphens",
 	);
-export const placementSchema = z.discriminatedUnion("mode", [
+const autoscalingRangeSchema = z
+	.strictObject({
+		enabled: z.literal(true).optional(),
+		minReplicas: z.number().int().min(1).max(32),
+		maxReplicas: z.number().int().min(1).max(32),
+	})
+	.refine((value) => value.minReplicas <= value.maxReplicas, {
+		message: "Minimum replicas cannot exceed maximum replicas",
+	});
+export const placementSchema = z.union([
 	z.strictObject({
 		mode: z.literal("automatic"),
 		replicas: z.number().int().min(1).max(32),
+	}),
+	z.strictObject({
+		mode: z.literal("automatic"),
+		replicas: z.number().int().min(1).max(32).optional(),
+		autoscaling: autoscalingRangeSchema,
 	}),
 	z
 		.strictObject({
@@ -684,7 +708,15 @@ function canonicalReplacementState(
 			),
 		placement:
 			service.placementMode === "automatic"
-				? { mode: "automatic" as const, replicas: service.replicas }
+				? service.autoscalingEnabled
+					? {
+							mode: "automatic" as const,
+							autoscaling: {
+								minReplicas: service.autoscalingMinReplicas,
+								maxReplicas: service.autoscalingMaxReplicas,
+							},
+						}
+					: { mode: "automatic" as const, replicas: service.replicas }
 				: {
 						mode: "manual" as const,
 						placements: placements
@@ -721,7 +753,15 @@ export function canonicalDesired(input: ReplacementInput) {
 							a.serverId.localeCompare(b.serverId, "en"),
 						),
 					}
-				: input.placement,
+				: "autoscaling" in input.placement
+					? {
+							mode: "automatic" as const,
+							autoscaling: {
+								minReplicas: input.placement.autoscaling.minReplicas,
+								maxReplicas: input.placement.autoscaling.maxReplicas,
+							},
+						}
+					: input.placement,
 	};
 }
 
@@ -896,6 +936,23 @@ async function replaceConfigurationInternal(
 				"AUTOMATIC_PLACEMENT_UNSUPPORTED",
 				400,
 			);
+		}
+		if (
+			input.placement.mode === "automatic" &&
+			"autoscaling" in input.placement
+		) {
+			if (effectiveServerlessEnabled)
+				domainError(
+					"Autoscaling is not supported for serverless services",
+					"AUTOSCALING_UNSUPPORTED",
+					400,
+				);
+			if (input.resources?.cpuCores == null || input.resources.memoryMb == null)
+				domainError(
+					"Autoscaling requires both CPU and memory limits",
+					"AUTOSCALING_RESOURCE_LIMITS_REQUIRED",
+					400,
+				);
 		}
 		const blockers = getManagementBlockers({
 			service: persisted,
@@ -1087,9 +1144,27 @@ async function replaceConfigurationInternal(
 			set.image = input.source.image;
 		}
 		if (input.placement) {
+			const requestedPlacement =
+				input.placement.mode === "automatic" && "autoscaling" in input.placement
+					? {
+							mode: "automatic" as const,
+							autoscaling: {
+								minReplicas: input.placement.autoscaling.minReplicas,
+								maxReplicas: input.placement.autoscaling.maxReplicas,
+							},
+						}
+					: input.placement;
 			const desiredReplicas =
 				input.placement.mode === "automatic"
-					? input.placement.replicas
+					? "autoscaling" in input.placement
+						? Math.min(
+								input.placement.autoscaling.maxReplicas,
+								Math.max(
+									input.placement.autoscaling.minReplicas,
+									persisted.replicas,
+								),
+							)
+						: input.placement.replicas
 					: input.placement.placements.reduce(
 							(sum, item) => sum + item.count,
 							0,
@@ -1098,25 +1173,46 @@ async function replaceConfigurationInternal(
 				changed(
 					"placement",
 					persisted.placementMode === "automatic"
-						? { mode: "automatic", replicas: persisted.replicas }
+						? persisted.autoscalingEnabled
+							? {
+									mode: "automatic",
+									autoscaling: {
+										minReplicas: persisted.autoscalingMinReplicas,
+										maxReplicas: persisted.autoscalingMaxReplicas,
+									},
+								}
+							: { mode: "automatic", replicas: persisted.replicas }
 						: {
 								mode: "manual",
 								placements: placements
 									.map(({ serverId, count }) => ({ serverId, count }))
 									.toSorted((a, b) => a.serverId.localeCompare(b.serverId)),
 							},
-					input.placement.mode === "manual"
+					requestedPlacement.mode === "manual"
 						? {
-								...input.placement,
-								placements: input.placement.placements.toSorted((a, b) =>
+								...requestedPlacement,
+								placements: requestedPlacement.placements.toSorted((a, b) =>
 									a.serverId.localeCompare(b.serverId),
 								),
 							}
-						: input.placement,
+						: requestedPlacement,
 				)
 			) {
 				set.placementMode = input.placement.mode;
 				set.replicas = desiredReplicas;
+				set.autoscalingEnabled =
+					input.placement.mode === "automatic" &&
+					"autoscaling" in input.placement;
+				set.autoscalingMinReplicas =
+					input.placement.mode === "automatic" &&
+					"autoscaling" in input.placement
+						? input.placement.autoscaling.minReplicas
+						: desiredReplicas;
+				set.autoscalingMaxReplicas =
+					input.placement.mode === "automatic" &&
+					"autoscaling" in input.placement
+						? input.placement.autoscaling.maxReplicas
+						: desiredReplicas;
 				await tx
 					.delete(serviceReplicas)
 					.where(eq(serviceReplicas.serviceId, service.id));

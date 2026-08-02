@@ -496,6 +496,13 @@ function ServiceConfigPanel({
 					{hasResourceLimits ? (
 						<ConfigRow label="Resources">{formatResources(service)}</ConfigRow>
 					) : null}
+					{service.activeConfig?.placement?.autoscaling?.enabled ? (
+						<ConfigRow label="Autoscaling">
+							{service.activeConfig.placement.autoscaling.minReplicas}-
+							{service.activeConfig.placement.autoscaling.maxReplicas} ·{" "}
+							{overview.runningDeployments} active
+						</ConfigRow>
+					) : null}
 				</div>
 
 				<div className="space-y-1.5 px-3 py-2.5">

@@ -14,6 +14,7 @@ import {
 	MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 	rebalanceAutomaticServices,
 	recoverInvalidAutomaticPlacements,
+	runAutoscalingController,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
 
@@ -44,6 +45,17 @@ export const staleServerCheck = inngest.createFunction(
 				),
 			);
 		});
+	},
+);
+
+export const autoscalingCheck = inngest.createFunction(
+	{
+		id: "cron-autoscaling-check",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("evaluate-autoscaling-services", runAutoscalingController);
 	},
 );
 

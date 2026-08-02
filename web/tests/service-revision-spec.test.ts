@@ -258,6 +258,38 @@ describe("service revision specification", () => {
 		});
 	});
 
+	it("snapshots an eligible autoscaling policy and clamps its concrete target", () => {
+		const input = draft({ volumes: [] });
+		Object.assign(input.service, {
+			placementMode: "automatic",
+			replicas: 20,
+			autoscalingEnabled: true,
+			autoscalingMinReplicas: 2,
+			autoscalingMaxReplicas: 8,
+			resourceCpuLimit: 1,
+			resourceMemoryLimitMb: 512,
+		});
+
+		expect(buildServiceRevisionSpec(input)).toMatchObject({
+			placement: { mode: "automatic", replicas: 8 },
+			autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8 },
+		});
+	});
+
+	it("rejects ineligible autoscaling policies", () => {
+		const input = draft({ volumes: [] });
+		Object.assign(input.service, {
+			placementMode: "automatic",
+			replicas: 2,
+			autoscalingEnabled: true,
+			autoscalingMinReplicas: 2,
+			autoscalingMaxReplicas: 8,
+		});
+		expect(() => buildServiceRevisionSpec(input)).toThrow(
+			"Autoscaling requires both CPU and memory limits",
+		);
+	});
+
 	it("rejects more than 32 automatic replicas", () => {
 		const input = draft({ volumes: [] });
 		input.service.placementMode = "automatic";

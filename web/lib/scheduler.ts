@@ -1,5 +1,15 @@
 import { CronExpressionParser } from "cron-parser";
-import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import {
+	and,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	lt,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deployments,
@@ -9,6 +19,10 @@ import {
 	services,
 	workQueue,
 } from "@/db/schema";
+import {
+	calculateAutoscalingRecommendation,
+	queryAutoscalingMetrics,
+} from "@/lib/autoscaling";
 import {
 	DAY_IN_MILLISECONDS,
 	isDateAfter,
@@ -24,7 +38,11 @@ import {
 import { notify } from "@/lib/notifications";
 import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { cloneActiveRevisionAndQueueSystemRollout } from "@/lib/service-revisions";
+import {
+	AUTOSCALE_ATTEMPT_COOLDOWN_MS,
+	cloneActiveRevisionAndQueueSystemRollout,
+	cloneActiveRevisionForAutoscaling,
+} from "@/lib/service-revisions";
 import {
 	WORK_QUEUE_LEASE_DURATION_MS,
 	WORK_QUEUE_MAX_ATTEMPTS,
@@ -34,6 +52,186 @@ const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
 export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
 export const MAX_REBALANCES_PER_RUN = 5;
 export const MAX_AUTOMATIC_RECOVERIES_PER_RUN = 5;
+export const MAX_AUTOSCALING_CANDIDATES_PER_RUN = 25;
+export const MAX_AUTOSCALING_ROLLOUTS_PER_RUN = 5;
+
+export async function runAutoscalingController(
+	maxCreated = MAX_AUTOSCALING_ROLLOUTS_PER_RUN,
+): Promise<number> {
+	if (maxCreated <= 0) return 0;
+	const now = new Date();
+	const cooldownCutoff = new Date(
+		now.getTime() - AUTOSCALE_ATTEMPT_COOLDOWN_MS,
+	);
+	const candidates = await db
+		.select({
+			id: services.id,
+			name: services.name,
+			lastAutoscaleAttemptAt: services.lastAutoscaleAttemptAt,
+		})
+		.from(services)
+		.innerJoin(deployments, eq(deployments.serviceId, services.id))
+		.innerJoin(
+			serviceRevisions,
+			eq(serviceRevisions.id, deployments.serviceRevisionId),
+		)
+		.where(
+			and(
+				isNull(services.deletedAt),
+				or(
+					isNull(services.lastAutoscaleAttemptAt),
+					lt(services.lastAutoscaleAttemptAt, cooldownCutoff),
+				),
+				eq(deployments.trafficState, "active"),
+				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				eq(
+					sql<string>`${serviceRevisions.specification} -> 'autoscaling' ->> 'enabled'`,
+					"true",
+				),
+			),
+		)
+		.groupBy(services.id, services.name, services.lastAutoscaleAttemptAt)
+		.orderBy(sql`random()`)
+		.limit(MAX_AUTOSCALING_CANDIDATES_PER_RUN);
+	let created = 0;
+	for (const service of candidates) {
+		if (created >= maxCreated) break;
+		const skip = (reason: string) =>
+			console.log(`[autoscaling] skipping ${service.name}: ${reason}`);
+		try {
+			const [state, pending] = await Promise.all([
+				db
+					.select({
+						deploymentId: deployments.id,
+						revisionId: deployments.serviceRevisionId,
+						runtimeDesiredState: deployments.runtimeDesiredState,
+						observedPhase: deployments.observedPhase,
+						specification: serviceRevisions.specification,
+						migrationStatus: services.migrationStatus,
+						lastAutoscaleAttemptAt: services.lastAutoscaleAttemptAt,
+					})
+					.from(deployments)
+					.innerJoin(services, eq(services.id, deployments.serviceId))
+					.innerJoin(
+						serviceRevisions,
+						eq(serviceRevisions.id, deployments.serviceRevisionId),
+					)
+					.where(
+						and(
+							eq(deployments.serviceId, service.id),
+							eq(deployments.trafficState, "active"),
+							inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+						),
+					)
+					.orderBy(deployments.id),
+				db
+					.select({ id: rollouts.id })
+					.from(rollouts)
+					.where(
+						and(
+							eq(rollouts.serviceId, service.id),
+							inArray(rollouts.status, ["queued", "in_progress"]),
+						),
+					)
+					.limit(1)
+					.then((rows) => rows[0]),
+			]);
+			const first = state[0];
+			if (!first) {
+				skip("no active topology");
+				continue;
+			}
+			if (first.migrationStatus) {
+				skip("migration in progress");
+				continue;
+			}
+			if (pending) {
+				skip("rollout in progress");
+				continue;
+			}
+			if (state.some((item) => item.runtimeDesiredState === "stopped")) {
+				skip("active runtime is stopped");
+				continue;
+			}
+			if (
+				new Set(state.map((item) => item.revisionId)).size !== 1 ||
+				state.some(
+					(item) => !["healthy", "running"].includes(item.observedPhase),
+				)
+			) {
+				skip("active topology is not exactly one ready revision");
+				continue;
+			}
+			if (
+				first.lastAutoscaleAttemptAt &&
+				now.getTime() - first.lastAutoscaleAttemptAt.getTime() <
+					AUTOSCALE_ATTEMPT_COOLDOWN_MS
+			) {
+				skip("attempt cooldown");
+				continue;
+			}
+			const spec = parseServiceRevisionSpec(first.specification);
+			if (
+				spec.placement.mode !== "automatic" ||
+				!spec.autoscaling?.enabled ||
+				spec.stateful ||
+				spec.serverless.enabled ||
+				spec.volumes.length > 0 ||
+				spec.resourceLimits.cpuCores === null ||
+				spec.resourceLimits.memoryMb === null
+			) {
+				skip("active revision is unsupported");
+				continue;
+			}
+			const current = state.length;
+			if (spec.placement.replicas !== current) {
+				skip("active topology does not match revision target");
+				continue;
+			}
+			const outsideBounds =
+				current < spec.autoscaling.minReplicas ||
+				current > spec.autoscaling.maxReplicas;
+			const metrics = outsideBounds
+				? ({ status: "hold", reason: "incomplete-coverage" } as const)
+				: await queryAutoscalingMetrics({
+						serviceId: service.id,
+						deploymentIds: state.map((item) => item.deploymentId),
+						cpuLimitCores: spec.resourceLimits.cpuCores,
+						memoryLimitMb: spec.resourceLimits.memoryMb,
+						now,
+					});
+			const recommendation = calculateAutoscalingRecommendation({
+				currentReplicas: current,
+				minReplicas: spec.autoscaling.minReplicas,
+				maxReplicas: spec.autoscaling.maxReplicas,
+				metrics,
+			});
+			if (recommendation.status === "hold") {
+				skip(`recommendation held (${recommendation.reason})`);
+				continue;
+			}
+			const result = await cloneActiveRevisionForAutoscaling({
+				serviceId: service.id,
+				expectedRevisionId: first.revisionId,
+				expectedDeploymentIds: state.map((item) => item.deploymentId),
+				expectedDeploymentCount: state.length,
+				expectedMinReplicas: spec.autoscaling.minReplicas,
+				expectedMaxReplicas: spec.autoscaling.maxReplicas,
+				targetReplicas: recommendation.targetReplicas,
+				now,
+			});
+			if (!result.created) {
+				skip(`recommendation discarded (${result.reason})`);
+				continue;
+			}
+			created++;
+			await sendRolloutCreated(result.rolloutId, service.id);
+		} catch (error) {
+			console.error(`[autoscaling] failed to evaluate ${service.name}`, error);
+		}
+	}
+	return created;
+}
 
 export async function rebalanceAutomaticServices(
 	maxCreated = MAX_REBALANCES_PER_RUN,
