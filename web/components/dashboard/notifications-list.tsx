@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CircleAlert } from "lucide-react";
+import { Bell, Check, CircleAlert } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { mutate as mutateGlobal } from "swr";
@@ -152,13 +152,15 @@ export function NotificationsList() {
 						</div>
 						{!item.readAt && (
 							<Button
-								size="xs"
+								size="icon-xs"
 								variant="ghost"
 								className="self-center"
 								disabled={mutating !== null}
 								onClick={() => void markRead(item.id)}
+								aria-label="Mark notification as read"
+								title="Mark as read"
 							>
-								{mutating === item.id ? <Spinner /> : null} Mark read
+								{mutating === item.id ? <Spinner /> : <Check />}
 							</Button>
 						)}
 					</article>
