@@ -251,6 +251,15 @@ if ! podman --version &>/dev/null; then
 fi
 echo "✓ Podman verified"
 
+step "Enabling Podman API socket..."
+if ! systemctl enable --now podman.socket; then
+  error "Failed to enable the rootful Podman API socket"
+fi
+if ! systemctl is-active --quiet podman.socket || [ ! -S /run/podman/podman.sock ]; then
+  error "Podman API socket is unavailable at /run/podman/podman.sock"
+fi
+echo "✓ Podman API socket running"
+
 if [ "$IS_PROXY" = "true" ]; then
   step "Installing Traefik (proxy mode)..."
   TRAEFIK_VERSION="v3.6.6"
@@ -684,16 +693,16 @@ if [ "$IS_PROXY" = "true" ]; then
 fi
 
 if [ "$IS_PROXY" = "true" ]; then
-  AFTER_SERVICES="network-online.target crowdsec.service traefik.service buildkitd.service"
+  AFTER_SERVICES="network-online.target podman.socket crowdsec.service traefik.service buildkitd.service"
 else
-  AFTER_SERVICES="network-online.target buildkitd.service"
+  AFTER_SERVICES="network-online.target podman.socket buildkitd.service"
 fi
 
 cat > /etc/systemd/system/techulus-agent.service << EOF
 [Unit]
 Description=Techulus Cloud Agent
 After=${AFTER_SERVICES}
-Wants=network-online.target
+Wants=network-online.target podman.socket
 
 [Service]
 Type=simple

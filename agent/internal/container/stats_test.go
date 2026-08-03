@@ -1,45 +1,26 @@
 package container
 
 import (
+	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestParsePodmanStatsSample(t *testing.T) {
-	sample, err := parsePodmanStatsSample("abcdef123456\t1000000000\t2000000000\t64MiB / 512MiB\t12.50%\t1.5MB / 2.5MB")
-	if err != nil {
-		t.Fatalf("parse sample: %v", err)
-	}
-	if sample.containerID != "abcdef123456" || sample.cpuNano != 1_000_000_000 || sample.systemNano != 2_000_000_000 || !sample.cpuCountersValid {
-		t.Fatalf("unexpected sample: %#v", sample)
-	}
-}
-
-func TestParsePodmanStatsSamplesSkipsMalformedRows(t *testing.T) {
-	containerID := strings.Repeat("e", 64)
-	samples, err := parsePodmanStatsSamples([]byte("malformed\n" + statsLine(containerID, 100, 1000)))
-	if err != nil {
-		t.Fatalf("parse samples: %v", err)
-	}
-	if len(samples) != 1 || samples[0].containerID != containerID {
-		t.Fatalf("expected valid row to survive malformed peer, got %+v", samples)
-	}
-}
-
 func TestResourceStatsFromSamplesUsesRecentCPUInterval(t *testing.T) {
 	container := Container{ID: "container-1", ServiceID: "service-1", DeploymentID: "deployment-1"}
-	previous := podmanStatsSample{cpuNano: 1_000_000_000, systemNano: 10_000_000_000, cpuCountersValid: true}
+	previous := podmanStatsSample{CPUNano: 1_000_000_000, SystemNano: 10_000_000_000}
 	current := podmanStatsSample{
-		cpuNano:            1_500_000_000,
-		systemNano:         11_000_000_000,
-		cpuCountersValid:   true,
-		memoryUsage:        "64MiB / 512MiB",
-		memoryUsagePercent: "12.50%",
-		networkIO:          "1.5MB / 2.5MB",
+		CPUNano:    1_500_000_000,
+		SystemNano: 11_000_000_000,
+		MemUsage:   64 * 1024 * 1024,
+		MemPerc:    12.5,
+		NetInput:   1_500_000,
+		NetOutput:  2_500_000,
 	}
 
 	stats := resourceStatsFromSamples(container, previous, current)
@@ -52,39 +33,20 @@ func TestResourceStatsFromSamplesUsesRecentCPUInterval(t *testing.T) {
 	if !stats.MemoryUsageValid || stats.MemoryUsagePercent != 12.5 {
 		t.Fatalf("memory percent = %f, valid=%v", stats.MemoryUsagePercent, stats.MemoryUsageValid)
 	}
-	if stats.NetworkReceiveBytes != 1.5*1000*1000 || stats.NetworkTransmitBytes != 2.5*1000*1000 {
+	if stats.NetworkReceiveBytes != 1_500_000 || stats.NetworkTransmitBytes != 2_500_000 {
 		t.Fatalf("network stats = %f/%f", stats.NetworkReceiveBytes, stats.NetworkTransmitBytes)
-	}
-}
-
-func TestResourceStatsFromSamplesKeepsInvalidValuesMissing(t *testing.T) {
-	container := Container{ID: "container-1", ServiceID: "service-1", DeploymentID: "deployment-1"}
-	stats := resourceStatsFromSamples(container,
-		podmanStatsSample{cpuNano: 2, systemNano: 2, cpuCountersValid: true},
-		podmanStatsSample{
-			cpuNano:            1,
-			systemNano:         3,
-			cpuCountersValid:   true,
-			memoryUsage:        "-- / 512MiB",
-			memoryUsagePercent: "NaN%",
-			networkIO:          "-- / --",
-		},
-	)
-	if stats.CPUUsageValid || stats.MemoryUsageValid || stats.MemoryUsedValid {
-		t.Fatalf("invalid observations marked valid: %#v", stats)
 	}
 }
 
 func TestResourceStatsFromSamplesKeepsGenuineZeroValid(t *testing.T) {
 	container := Container{ID: "container-1", ServiceID: "service-1", DeploymentID: "deployment-1"}
 	stats := resourceStatsFromSamples(container,
-		podmanStatsSample{cpuNano: 1, systemNano: 1, cpuCountersValid: true},
+		podmanStatsSample{CPUNano: 1, SystemNano: 1},
 		podmanStatsSample{
-			cpuNano:            1,
-			systemNano:         2,
-			cpuCountersValid:   true,
-			memoryUsage:        "0B / 512MiB",
-			memoryUsagePercent: "0%",
+			CPUNano:    1,
+			SystemNano: 2,
+			MemUsage:   0,
+			MemPerc:    0,
 		},
 	)
 	if !stats.CPUUsageValid || !stats.MemoryUsageValid || !stats.MemoryUsedValid {
@@ -92,30 +54,103 @@ func TestResourceStatsFromSamplesKeepsGenuineZeroValid(t *testing.T) {
 	}
 }
 
-func TestParseByteQuantity(t *testing.T) {
-	tests := map[string]float64{
-		"42B":    42,
-		"1 kB":   1000,
-		"1KiB":   1024,
-		"1.5GB":  1.5 * 1000 * 1000 * 1000,
-		"2 MiB":  2 * 1024 * 1024,
-		"--":     0,
-		"broken": 0,
+func TestFetchPodmanStatsUsesVersionedEndpointAndContainerIDs(t *testing.T) {
+	containerIDs := []string{strings.Repeat("a", 64), strings.Repeat("b", 64)}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v4.0.0/libpod/containers/stats" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("stream") != "false" {
+			t.Errorf("stream = %q", r.URL.Query().Get("stream"))
+		}
+		if got := r.URL.Query()["containers"]; len(got) != 2 || got[0] != containerIDs[0] || got[1] != containerIDs[1] {
+			t.Errorf("containers = %#v", got)
+		}
+		writeStatsReport(t, w, []podmanStatsSample{{ContainerID: containerIDs[0], CPUNano: 100, SystemNano: 1_000}})
+	}))
+	defer server.Close()
+
+	samples, err := fetchPodmanStats(t.Context(), server.Client(), server.URL+"/v4.0.0/libpod/containers/stats", containerIDs)
+	if err != nil {
+		t.Fatalf("fetch stats: %v", err)
+	}
+	if len(samples) != 1 || samples[0].ContainerID != containerIDs[0] {
+		t.Fatalf("samples = %#v", samples)
+	}
+}
+
+func TestFetchPodmanStatsDecodesPodmanNetworkShapes(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantReceive  uint64
+		wantTransmit uint64
+	}{
+		{
+			name:         "Podman 4 aggregate fields",
+			body:         `{"Error":null,"Stats":[{"ContainerID":"container","NetInput":100,"NetOutput":200}]}`,
+			wantReceive:  100,
+			wantTransmit: 200,
+		},
+		{
+			name:         "Podman 5 per-interface fields",
+			body:         `{"Error":null,"Stats":[{"ContainerID":"container","Network":{"eth0":{"RxBytes":100,"TxBytes":200},"eth1":{"RxBytes":30,"TxBytes":40}}}]}`,
+			wantReceive:  130,
+			wantTransmit: 240,
+		},
 	}
 
-	for input, expected := range tests {
-		if actual := parseByteQuantity(input); actual != expected {
-			t.Fatalf("%q = %f, want %f", input, actual, expected)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			samples, err := fetchPodmanStats(t.Context(), server.Client(), server.URL, []string{"container"})
+			if err != nil {
+				t.Fatalf("fetch stats: %v", err)
+			}
+			receive, transmit := samples[0].networkTotals()
+			if receive != tt.wantReceive || transmit != tt.wantTransmit {
+				t.Fatalf("network totals = %d/%d, want %d/%d", receive, transmit, tt.wantReceive, tt.wantTransmit)
+			}
+		})
+	}
+}
+
+func TestFetchPodmanStatsRejectsInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "HTTP error", status: http.StatusInternalServerError, body: `{"cause":"failed"}`},
+		{name: "malformed JSON", status: http.StatusOK, body: `{`},
+		{name: "in-band error", status: http.StatusOK, body: `{"Error":{},"Stats":null}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			if _, err := fetchPodmanStats(t.Context(), server.Client(), server.URL, []string{"container"}); err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
 func TestCollectResourceStatsUsesCounterDeltas(t *testing.T) {
-	statsOutput := installFakeStatsPodman(t, []string{strings.Repeat("a", 64)})
-	resetPreviousResourceSamples(t)
 	containerID := strings.Repeat("a", 64)
+	api := installFakeStatsEnvironment(t, []string{containerID})
+	resetPreviousResourceSamples(t)
 
-	writeStatsOutput(t, statsOutput, statsLine(containerID, 1_000_000_000, 10_000_000_000))
+	api.setSamples(t, statsSample(containerID, 1_000_000_000, 10_000_000_000))
 	first, err := CollectResourceStats()
 	if err != nil {
 		t.Fatalf("first collection failed: %v", err)
@@ -130,7 +165,7 @@ func TestCollectResourceStatsUsesCounterDeltas(t *testing.T) {
 		t.Fatal("expected memory values to remain valid on first sample")
 	}
 
-	writeStatsOutput(t, statsOutput, statsLine(containerID, 2_000_000_000, 12_000_000_000))
+	api.setSamples(t, statsSample(containerID, 2_000_000_000, 12_000_000_000))
 	second, err := CollectResourceStats()
 	if err != nil {
 		t.Fatalf("second collection failed: %v", err)
@@ -141,8 +176,8 @@ func TestCollectResourceStatsUsesCounterDeltas(t *testing.T) {
 }
 
 func TestCollectResourceStatsRejectsInvalidCounterDeltas(t *testing.T) {
-	statsOutput := installFakeStatsPodman(t, []string{strings.Repeat("b", 64)})
 	containerID := strings.Repeat("b", 64)
+	api := installFakeStatsEnvironment(t, []string{containerID})
 	tests := []struct {
 		name       string
 		firstCPU   uint64
@@ -158,11 +193,11 @@ func TestCollectResourceStatsRejectsInvalidCounterDeltas(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resetPreviousResourceSamples(t)
-			writeStatsOutput(t, statsOutput, statsLine(containerID, tt.firstCPU, tt.firstTime))
+			api.setSamples(t, statsSample(containerID, tt.firstCPU, tt.firstTime))
 			if _, err := CollectResourceStats(); err != nil {
 				t.Fatalf("first collection failed: %v", err)
 			}
-			writeStatsOutput(t, statsOutput, statsLine(containerID, tt.secondCPU, tt.secondTime))
+			api.setSamples(t, statsSample(containerID, tt.secondCPU, tt.secondTime))
 			stats, err := CollectResourceStats()
 			if err != nil {
 				t.Fatalf("second collection failed: %v", err)
@@ -177,26 +212,21 @@ func TestCollectResourceStatsRejectsInvalidCounterDeltas(t *testing.T) {
 func TestCollectResourceStatsPreservesBaselinesAndPrunesStoppedContainers(t *testing.T) {
 	firstID := strings.Repeat("c", 64)
 	missingID := strings.Repeat("d", 64)
-	statsOutput := installFakeStatsPodman(t, []string{firstID, missingID})
+	api := installFakeStatsEnvironment(t, []string{firstID, missingID})
 	resetPreviousResourceSamples(t)
 
-	writeStatsOutput(t, statsOutput, statsLine(firstID, 100, 1000)+statsLine(missingID, 100, 1000))
+	api.setSamples(t, statsSample(firstID, 100, 1000), statsSample(missingID, 100, 1000))
 	if _, err := CollectResourceStats(); err != nil {
 		t.Fatalf("first collection failed: %v", err)
 	}
 
-	failPath := statsOutput + ".fail"
-	if err := os.WriteFile(failPath, nil, 0o600); err != nil {
-		t.Fatalf("create failure marker: %v", err)
-	}
+	api.status = http.StatusInternalServerError
 	if _, err := CollectResourceStats(); err == nil {
 		t.Fatal("expected Podman failure")
 	}
-	if err := os.Remove(failPath); err != nil {
-		t.Fatalf("remove failure marker: %v", err)
-	}
 
-	writeStatsOutput(t, statsOutput, statsLine(firstID, 300, 2000))
+	api.status = http.StatusOK
+	api.setSamples(t, statsSample(firstID, 300, 2000))
 	stats, err := CollectResourceStats()
 	if err != nil {
 		t.Fatalf("collection after failure failed: %v", err)
@@ -213,8 +243,8 @@ func TestCollectResourceStatsPreservesBaselinesAndPrunesStoppedContainers(t *tes
 		t.Fatalf("expected baselines for running containers to survive partial output: retained=%v missingRetained=%v", retained, missingRetained)
 	}
 
-	writeContainersOutput(t, filepath.Join(filepath.Dir(statsOutput), "containers-output"), []string{firstID})
-	writeStatsOutput(t, statsOutput, statsLine(firstID, 400, 3000))
+	writeContainersOutput(t, api.containersOutput, []string{firstID})
+	api.setSamples(t, statsSample(firstID, 400, 3000))
 	if _, err := CollectResourceStats(); err != nil {
 		t.Fatalf("collection after container removal failed: %v", err)
 	}
@@ -226,28 +256,62 @@ func TestCollectResourceStatsPreservesBaselinesAndPrunesStoppedContainers(t *tes
 	}
 }
 
-func installFakeStatsPodman(t *testing.T, containerIDs []string) string {
+type fakeStatsAPI struct {
+	server           *httptest.Server
+	status           int
+	body             []byte
+	containersOutput string
+}
+
+func installFakeStatsEnvironment(t *testing.T, containerIDs []string) *fakeStatsAPI {
 	t.Helper()
 	dir := t.TempDir()
-	statsOutput := filepath.Join(dir, "stats-output")
 	containersOutput := filepath.Join(dir, "containers-output")
 	script := `#!/bin/sh
 if [ "$1" = "ps" ]; then
   cat "$PODMAN_CONTAINERS_OUTPUT"
-elif [ -f "$PODMAN_STATS_OUTPUT.fail" ]; then
-  exit 1
 else
-  cat "$PODMAN_STATS_OUTPUT"
+  exit 1
 fi
 `
 	if err := os.WriteFile(filepath.Join(dir, "podman"), []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake podman: %v", err)
 	}
 	writeContainersOutput(t, containersOutput, containerIDs)
-	t.Setenv("PODMAN_STATS_OUTPUT", statsOutput)
 	t.Setenv("PODMAN_CONTAINERS_OUTPUT", containersOutput)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return statsOutput
+
+	api := &fakeStatsAPI{status: http.StatusOK, containersOutput: containersOutput}
+	api.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(api.status)
+		_, _ = w.Write(api.body)
+	}))
+	previousClient := podmanStatsClient
+	previousURL := podmanStatsURL
+	podmanStatsClient = api.server.Client()
+	podmanStatsURL = api.server.URL
+	t.Cleanup(func() {
+		podmanStatsClient = previousClient
+		podmanStatsURL = previousURL
+		api.server.Close()
+	})
+	return api
+}
+
+func (api *fakeStatsAPI) setSamples(t *testing.T, samples ...podmanStatsSample) {
+	t.Helper()
+	data, err := json.Marshal(podmanStatsReport{Stats: samples})
+	if err != nil {
+		t.Fatalf("marshal stats report: %v", err)
+	}
+	api.body = data
+}
+
+func writeStatsReport(t *testing.T, w http.ResponseWriter, samples []podmanStatsSample) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(podmanStatsReport{Stats: samples}); err != nil {
+		t.Fatalf("encode stats report: %v", err)
+	}
 }
 
 func writeContainersOutput(t *testing.T, path string, containerIDs []string) {
@@ -277,13 +341,14 @@ func resetPreviousResourceSamples(t *testing.T) {
 	})
 }
 
-func writeStatsOutput(t *testing.T, path, output string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(output), 0o600); err != nil {
-		t.Fatalf("write stats output: %v", err)
+func statsSample(containerID string, cpuNano, systemNano uint64) podmanStatsSample {
+	return podmanStatsSample{
+		ContainerID: containerID,
+		CPUNano:     cpuNano,
+		SystemNano:  systemNano,
+		MemUsage:    100_000_000,
+		MemPerc:     10,
+		NetInput:    1_000_000,
+		NetOutput:   2_000_000,
 	}
-}
-
-func statsLine(containerID string, cpuNano, systemNano uint64) string {
-	return containerID + "\t" + strconv.FormatUint(cpuNano, 10) + "\t" + strconv.FormatUint(systemNano, 10) + "\t100 MB / 1 GB\t10%\t1 MB / 2 MB\n"
 }

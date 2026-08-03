@@ -60,6 +60,7 @@ After registration, the token is invalidated. Subsequent runs do not require a t
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install wireguard wireguard-tools podman git -y
+sudo systemctl enable --now podman.socket
 
 # Install Railpack
 curl -sSL https://railpack.com/install.sh | sh
@@ -105,7 +106,8 @@ Create `/etc/systemd/system/techulus-agent.service`:
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target buildkitd.service
+After=network.target podman.socket buildkitd.service
+Wants=podman.socket
 
 [Service]
 Type=simple
@@ -123,7 +125,8 @@ WantedBy=multi-user.target
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target traefik.service buildkitd.service
+After=network.target podman.socket traefik.service buildkitd.service
+Wants=podman.socket
 
 [Service]
 Type=simple
@@ -146,6 +149,7 @@ sudo systemctl start techulus-agent
 
 <Note>
   `KillMode=process` ensures only the agent process is stopped on restart, not the containers it manages.
+  The rootful Podman API socket at `/run/podman/podman.sock` is required for container metrics collection.
 </Note>
 
 ## Troubleshooting

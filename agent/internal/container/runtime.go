@@ -366,6 +366,13 @@ func CheckPrerequisites() error {
 	if _, err := exec.LookPath("podman"); err != nil {
 		return fmt.Errorf("podman not found: %w", err)
 	}
+	socket, err := os.Stat(podmanSocketPath)
+	if err != nil {
+		return fmt.Errorf("podman API socket unavailable at %s; enable podman.socket: %w", podmanSocketPath, err)
+	}
+	if socket.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("podman API endpoint at %s is not a Unix socket", podmanSocketPath)
+	}
 	return nil
 }
 
