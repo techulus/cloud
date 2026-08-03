@@ -3,10 +3,9 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-	const deleteReturning = vi.fn();
-	const deleteWhere = vi.fn((_condition: SQL) => ({
-		returning: deleteReturning,
-	}));
+	const deleteWhere = vi.fn((_condition: SQL) =>
+		Promise.resolve({ rowCount: 0 }),
+	);
 	return {
 		send: vi.fn(),
 		create: vi.fn((data, options) => ({
@@ -20,7 +19,6 @@ const mocks = vi.hoisted(() => {
 		select: vi.fn(),
 		delete: vi.fn(() => ({ where: deleteWhere })),
 		deleteWhere,
-		deleteReturning,
 	};
 });
 
@@ -58,7 +56,7 @@ import {
 describe("notification pipeline", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.deleteReturning.mockResolvedValue([]);
+		mocks.deleteWhere.mockResolvedValue({ rowCount: 0 });
 	});
 
 	it("enqueues using the stable occurrence ID", async () => {
@@ -176,8 +174,8 @@ describe("notification pipeline", () => {
 		expect(mocks.select).not.toHaveBeenCalled();
 	});
 
-	it("deletes only read notifications created more than 30 days ago", async () => {
-		mocks.deleteReturning.mockResolvedValue([{ id: "one" }, { id: "two" }]);
+	it("deletes only notifications read more than 30 days ago", async () => {
+		mocks.deleteWhere.mockResolvedValue({ rowCount: 2 });
 		const now = new Date("2026-08-03T12:00:00.000Z");
 
 		await expect(cleanupReadNotifications(now)).resolves.toBe(2);
@@ -188,7 +186,7 @@ describe("notification pipeline", () => {
 			throw new Error("notification cleanup condition is missing");
 		const query = new PgDialect().sqlToQuery(condition);
 		expect(query.sql).toContain('"notifications"."read_at" is not null');
-		expect(query.sql).toContain('"notifications"."created_at" < $1');
+		expect(query.sql).toContain('"notifications"."read_at" < $1');
 		expect(query.params).toEqual(["2026-07-04T12:00:00.000Z"]);
 	});
 

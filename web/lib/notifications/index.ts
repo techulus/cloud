@@ -117,17 +117,17 @@ export async function deliverInAppNotification(event: NotificationEvent) {
 
 export async function cleanupReadNotifications(now = new Date()) {
 	const cutoff = subtractUtcDays(now, READ_NOTIFICATION_RETENTION_DAYS);
-	const deleted = await db
+	const result = await db
 		.delete(notifications)
 		.where(
-			and(isNotNull(notifications.readAt), lt(notifications.createdAt, cutoff)),
-		)
-		.returning({ id: notifications.id });
+			and(isNotNull(notifications.readAt), lt(notifications.readAt, cutoff)),
+		);
+	const deletedCount = result.rowCount ?? 0;
 
-	if (deleted.length > 0) {
+	if (deletedCount > 0) {
 		console.log(
-			`[notifications] deleted ${deleted.length} old read notifications`,
+			`[notifications] deleted ${deletedCount} old read notifications`,
 		);
 	}
-	return deleted.length;
+	return deletedCount;
 }
