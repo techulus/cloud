@@ -366,6 +366,40 @@ func CheckPrerequisites() error {
 	if _, err := exec.LookPath("podman"); err != nil {
 		return fmt.Errorf("podman not found: %w", err)
 	}
+	return ensurePodmanSocket(podmanSocketPath, func() ([]byte, error) {
+		return exec.Command("systemctl", "enable", "--now", "podman.socket").CombinedOutput()
+	})
+}
+
+func ensurePodmanSocket(socketPath string, enable func() ([]byte, error)) error {
+	if err := validatePodmanSocket(socketPath); err == nil {
+		return nil
+	}
+
+	output, err := enable()
+	if err != nil {
+		if len(output) > 4*1024 {
+			output = output[:4*1024]
+		}
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return fmt.Errorf("failed to enable podman.socket: %s: %w", detail, err)
+		}
+		return fmt.Errorf("failed to enable podman.socket: %w", err)
+	}
+	if err := validatePodmanSocket(socketPath); err != nil {
+		return fmt.Errorf("podman API socket unavailable after enabling podman.socket: %w", err)
+	}
+	return nil
+}
+
+func validatePodmanSocket(socketPath string) error {
+	socket, err := os.Stat(socketPath)
+	if err != nil {
+		return fmt.Errorf("podman API socket unavailable at %s: %w", socketPath, err)
+	}
+	if socket.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("podman API endpoint at %s is not a Unix socket", socketPath)
+	}
 	return nil
 }
 

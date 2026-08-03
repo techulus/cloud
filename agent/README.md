@@ -55,6 +55,7 @@ The agent downloads the release binary, verifies its checksum, installs it, and 
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install wireguard wireguard-tools podman -y
+sudo systemctl enable --now podman.socket
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
@@ -67,6 +68,7 @@ curl -sSL https://github.com/moby/buildkit/releases/download/v0.26.3/buildkit-v0
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install wireguard wireguard-tools podman -y
+sudo systemctl enable --now podman.socket
 
 curl -sSL https://railpack.com/install.sh | sh
 sudo ln -s ~/.railpack/bin/railpack /usr/local/bin/railpack
@@ -191,7 +193,8 @@ Worker node:
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target buildkitd.service
+After=network.target podman.socket buildkitd.service
+Wants=podman.socket
 
 [Service]
 Type=simple
@@ -208,7 +211,8 @@ Proxy node:
 ```ini
 [Unit]
 Description=Techulus Cloud Agent
-After=network.target traefik.service buildkitd.service
+After=network.target podman.socket traefik.service buildkitd.service
+Wants=podman.socket
 
 [Service]
 Type=simple
@@ -222,6 +226,7 @@ WantedBy=multi-user.target
 ```
 
 `KillMode=process` ensures only the agent process is killed on restart, not container processes.
+The rootful Podman API socket at `/run/podman/podman.sock` is required for container metrics collection.
 
 ```bash
 sudo systemctl daemon-reload
