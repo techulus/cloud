@@ -540,7 +540,10 @@ export async function completeRollout(
 
 		const serviceUpdate =
 			specification.placement.mode === "automatic"
-				? { lastAutomaticPlacementAt: new Date() }
+				? {
+						lastAutomaticPlacementAt: new Date(),
+						replicas: specification.placement.replicas,
+					}
 				: lockedServerId
 					? { lockedServerId }
 					: null;

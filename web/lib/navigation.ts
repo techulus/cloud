@@ -47,6 +47,14 @@ const pageItems: NavigationItem[] = [
 		keywords: ["home", "projects", "servers"],
 	},
 	{
+		id: "page:notifications",
+		kind: "page",
+		group: "Pages",
+		label: "Notifications",
+		href: "/dashboard/notifications",
+		keywords: ["alert", "inbox", "activity"],
+	},
+	{
 		id: "page:settings",
 		kind: "page",
 		group: "Pages",

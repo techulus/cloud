@@ -2,13 +2,16 @@ package container
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
-	"os/exec"
-	"strconv"
+	"net"
+	"net/http"
 	"strings"
-	"unicode"
+	"sync"
+	"time"
 )
 
 type ResourceStats struct {
@@ -16,103 +19,149 @@ type ResourceStats struct {
 	ServiceID            string
 	DeploymentID         string
 	CPUUsagePercent      float64
+	CPUUsageValid        bool
 	MemoryUsagePercent   float64
+	MemoryUsageValid     bool
 	MemoryUsedBytes      float64
+	MemoryUsedValid      bool
 	NetworkReceiveBytes  float64
 	NetworkTransmitBytes float64
 }
 
+type podmanStatsSample struct {
+	ContainerID string                         `json:"ContainerID"`
+	CPUNano     uint64                         `json:"CPUNano"`
+	SystemNano  uint64                         `json:"SystemNano"`
+	MemUsage    uint64                         `json:"MemUsage"`
+	MemPerc     float64                        `json:"MemPerc"`
+	NetInput    uint64                         `json:"NetInput"`
+	NetOutput   uint64                         `json:"NetOutput"`
+	Network     *map[string]podmanNetworkStats `json:"Network"`
+}
+
+type podmanNetworkStats struct {
+	RxBytes uint64 `json:"RxBytes"`
+	TxBytes uint64 `json:"TxBytes"`
+}
+
+type podmanStatsReport struct {
+	Error json.RawMessage     `json:"Error"`
+	Stats []podmanStatsSample `json:"Stats"`
+}
+
+const (
+	podmanSocketPath    = "/run/podman/podman.sock"
+	podmanStatsEndpoint = "http://podman/v4.0.0/libpod/containers/stats"
+)
+
+var (
+	podmanStatsClient = &http.Client{Transport: &http.Transport{
+		DisableCompression: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", podmanSocketPath)
+		},
+	}}
+	podmanStatsURL = podmanStatsEndpoint
+)
+
+var previousResourceSamples = struct {
+	sync.Mutex
+	byContainer map[string]podmanStatsSample
+}{byContainer: make(map[string]podmanStatsSample)}
+
+// resourceStatsCollectionMu ensures overlapping periodic and requested reports
+// compare CPU counters from snapshots collected in order.
+var resourceStatsCollectionMu sync.Mutex
+
 func CollectResourceStats() ([]ResourceStats, error) {
+	resourceStatsCollectionMu.Lock()
+	defer resourceStatsCollectionMu.Unlock()
+
 	containers, err := List()
 	if err != nil {
 		return nil, err
 	}
 
 	running := make([]Container, 0, len(containers))
-	args := []string{"stats", "--no-stream", "--format", "json"}
+	containerIDs := make([]string, 0, len(containers))
 	for _, c := range containers {
 		if c.State != "running" || c.ServiceID == "" || c.DeploymentID == "" {
 			continue
 		}
 		running = append(running, c)
-		args = append(args, c.ID)
+		containerIDs = append(containerIDs, c.ID)
 	}
 	if len(running) == 0 {
 		return nil, nil
 	}
 
-	cmd := exec.Command("podman", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to collect container stats: %s: %w", stderr.String(), err)
-	}
-
-	return parsePodmanStatsOutput(output, running)
-}
-
-func parsePodmanStatsOutput(output []byte, containers []Container) ([]ResourceStats, error) {
-	rows, err := parseStatsRows(output)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	samples, err := fetchPodmanStats(ctx, podmanStatsClient, podmanStatsURL, containerIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	stats := make([]ResourceStats, 0, len(rows))
-	for _, row := range rows {
-		containerID := firstRowString(row, "ID", "Id", "id", "ContainerID", "Container")
-		container := findStatsContainerByID(containerID, containers)
-		if container == nil {
-			name := firstRowString(row, "Name", "Names", "name")
-			container = findStatsContainerByName(name, containers)
+	previousResourceSamples.Lock()
+	defer previousResourceSamples.Unlock()
+	nextSamples := make(map[string]podmanStatsSample, len(samples))
+	for _, container := range running {
+		if previous, ok := previousResourceSamples.byContainer[container.ID]; ok {
+			nextSamples[container.ID] = previous
 		}
+	}
+	stats := make([]ResourceStats, 0, len(samples))
+	for _, sample := range samples {
+		container := findStatsContainerByID(sample.ContainerID, running)
 		if container == nil {
 			continue
 		}
-
-		rx, tx := parseNetIO(firstRowString(row, "NetIO", "NetIOBytes", "net_io"))
-		stats = append(stats, ResourceStats{
-			ContainerID:          container.ID,
-			ServiceID:            container.ServiceID,
-			DeploymentID:         container.DeploymentID,
-			CPUUsagePercent:      parsePercent(firstRowString(row, "CPUPerc", "CPU", "cpu_percent")),
-			MemoryUsagePercent:   parsePercent(firstRowString(row, "MemPerc", "MEMPerc", "mem_percent")),
-			MemoryUsedBytes:      parseMemUsed(firstRowString(row, "MemUsage", "MemUse", "mem_usage")),
-			NetworkReceiveBytes:  rx,
-			NetworkTransmitBytes: tx,
-		})
+		previous := previousResourceSamples.byContainer[container.ID]
+		stats = append(stats, resourceStatsFromSamples(*container, previous, sample))
+		nextSamples[container.ID] = sample
 	}
-
+	previousResourceSamples.byContainer = nextSamples
 	return stats, nil
 }
 
-func parseStatsRows(output []byte) ([]map[string]interface{}, error) {
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
-		return nil, nil
+func fetchPodmanStats(ctx context.Context, client *http.Client, endpoint string, containerIDs []string) ([]podmanStatsSample, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container stats request: %w", err)
+	}
+	query := req.URL.Query()
+	query.Set("stream", "false")
+	for _, containerID := range containerIDs {
+		query.Add("containers", containerID)
+	}
+	req.URL.RawQuery = query.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect container stats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, fmt.Errorf("failed to collect container stats: podman returned %s: %s", resp.Status, strings.TrimSpace(string(message)))
 	}
 
-	if strings.HasPrefix(trimmed, "[") {
-		var rows []map[string]interface{}
-		if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
-			return nil, fmt.Errorf("failed to parse podman stats JSON array: %w", err)
-		}
-		return rows, nil
+	var report podmanStatsReport
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&report); err != nil {
+		return nil, fmt.Errorf("failed to decode container stats: %w", err)
 	}
-
-	var rows []map[string]interface{}
-	for _, line := range strings.Split(trimmed, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("failed to decode container stats: unexpected additional response")
 		}
-		var row map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			return nil, fmt.Errorf("failed to parse podman stats JSON row: %w", err)
-		}
-		rows = append(rows, row)
+		return nil, fmt.Errorf("failed to decode container stats: %w", err)
 	}
-	return rows, nil
+	if value := bytes.TrimSpace(report.Error); len(value) > 0 && !bytes.Equal(value, []byte("null")) {
+		return nil, fmt.Errorf("failed to collect container stats: podman report error: %.1024s", value)
+	}
+	return report.Stats, nil
 }
 
 func findStatsContainerByID(value string, containers []Container) *Container {
@@ -133,113 +182,46 @@ func findStatsContainerByID(value string, containers []Container) *Container {
 	return nil
 }
 
-func findStatsContainerByName(value string, containers []Container) *Container {
-	value = strings.TrimPrefix(strings.TrimSpace(value), "/")
-	if value == "" {
-		return nil
+func resourceStatsFromSamples(container Container, previous, current podmanStatsSample) ResourceStats {
+	cpuUsagePercent := 0.0
+	// Podman SystemNano is a wall-clock timestamp, so CPU nanoseconds divided
+	// by its delta yields used cores; the metrics sender converts percent to cores.
+	cpuUsageValid :=
+		previous.SystemNano > 0 &&
+			current.CPUNano >= previous.CPUNano &&
+			current.SystemNano > previous.SystemNano
+	if cpuUsageValid {
+		cpuUsagePercent = 100 * float64(current.CPUNano-previous.CPUNano) /
+			float64(current.SystemNano-previous.SystemNano)
+		cpuUsageValid = isFinite(cpuUsagePercent)
 	}
-
-	for i := range containers {
-		containerName := strings.TrimPrefix(strings.TrimSpace(containers[i].Name), "/")
-		if value == containerName {
-			return &containers[i]
-		}
-	}
-	return nil
-}
-
-func firstRowString(row map[string]interface{}, keys ...string) string {
-	for _, key := range keys {
-		value, ok := row[key]
-		if !ok || value == nil {
-			continue
-		}
-		switch v := value.(type) {
-		case string:
-			return v
-		case []interface{}:
-			if len(v) > 0 {
-				return fmt.Sprint(v[0])
-			}
-		default:
-			return fmt.Sprint(v)
-		}
-	}
-	return ""
-}
-
-func parsePercent(value string) float64 {
-	value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
-	if value == "" || value == "--" {
-		return 0
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || !isFinite(parsed) {
-		return 0
-	}
-	return parsed
-}
-
-func parseMemUsed(value string) float64 {
-	parts := strings.Split(value, "/")
-	if len(parts) == 0 {
-		return 0
-	}
-	return parseByteQuantity(parts[0])
-}
-
-func parseNetIO(value string) (float64, float64) {
-	parts := strings.Split(value, "/")
-	if len(parts) != 2 {
-		return 0, 0
-	}
-	return parseByteQuantity(parts[0]), parseByteQuantity(parts[1])
-}
-
-func parseByteQuantity(value string) float64 {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "--" {
-		return 0
-	}
-
-	compact := strings.ReplaceAll(value, " ", "")
-	splitAt := len(compact)
-	for i, r := range compact {
-		if !(unicode.IsDigit(r) || r == '.' || r == '-') {
-			splitAt = i
-			break
-		}
-	}
-
-	numberText := compact[:splitAt]
-	unit := strings.ToLower(compact[splitAt:])
-	parsed, err := strconv.ParseFloat(numberText, 64)
-	if err != nil || !isFinite(parsed) {
-		return 0
-	}
-
-	switch unit {
-	case "", "b":
-		return parsed
-	case "kb", "k", "kib", "ki":
-		return parsed * unitMultiplier(unit, 1)
-	case "mb", "m", "mib", "mi":
-		return parsed * unitMultiplier(unit, 2)
-	case "gb", "g", "gib", "gi":
-		return parsed * unitMultiplier(unit, 3)
-	case "tb", "t", "tib", "ti":
-		return parsed * unitMultiplier(unit, 4)
-	default:
-		return parsed
+	networkReceiveBytes, networkTransmitBytes := current.networkTotals()
+	return ResourceStats{
+		ContainerID:          container.ID,
+		ServiceID:            container.ServiceID,
+		DeploymentID:         container.DeploymentID,
+		CPUUsagePercent:      cpuUsagePercent,
+		CPUUsageValid:        cpuUsageValid,
+		MemoryUsagePercent:   current.MemPerc,
+		MemoryUsageValid:     isFinite(current.MemPerc),
+		MemoryUsedBytes:      float64(current.MemUsage),
+		MemoryUsedValid:      true,
+		NetworkReceiveBytes:  float64(networkReceiveBytes),
+		NetworkTransmitBytes: float64(networkTransmitBytes),
 	}
 }
 
-func unitMultiplier(unit string, power float64) float64 {
-	base := 1000.0
-	if strings.Contains(unit, "i") {
-		base = 1024.0
+func (sample podmanStatsSample) networkTotals() (uint64, uint64) {
+	if sample.Network == nil {
+		return sample.NetInput, sample.NetOutput
 	}
-	return math.Pow(base, power)
+
+	var receive, transmit uint64
+	for _, network := range *sample.Network {
+		receive += network.RxBytes
+		transmit += network.TxBytes
+	}
+	return receive, transmit
 }
 
 func isFinite(value float64) bool {

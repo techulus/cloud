@@ -155,6 +155,12 @@ describe("public API placement schema", () => {
 
 	it.each([
 		{ mode: "automatic", replicas: 32 },
+		{ mode: "automatic", autoscaling: { minReplicas: 2, maxReplicas: 8 } },
+		{
+			mode: "automatic",
+			replicas: 4,
+			autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8 },
+		},
 		{ mode: "automatic", replicas: 3 },
 		{ mode: "manual", placements: [{ serverId: "server-1", count: 32 }] },
 		{ mode: "manual", placements: [{ serverId: "server-1", count: 2 }] },
@@ -168,6 +174,8 @@ describe("public API placement schema", () => {
 	it.each([
 		{ mode: "automatic", replicas: 0 },
 		{ mode: "automatic", replicas: 33 },
+		{ mode: "automatic", autoscaling: { minReplicas: 9, maxReplicas: 8 } },
+		{ mode: "automatic", autoscaling: { minReplicas: 0, maxReplicas: 8 } },
 		{ mode: "manual", placements: [] },
 		{
 			mode: "manual",

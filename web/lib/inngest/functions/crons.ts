@@ -5,6 +5,7 @@ import {
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
+import { cleanupReadNotifications } from "@/lib/notifications";
 import { cleanupRegistryArtifactsDaily } from "@/lib/registry-retention";
 import {
 	checkAndRecoverStaleServers,
@@ -14,6 +15,7 @@ import {
 	MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 	rebalanceAutomaticServices,
 	recoverInvalidAutomaticPlacements,
+	runAutoscalingController,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
 
@@ -44,6 +46,17 @@ export const staleServerCheck = inngest.createFunction(
 				),
 			);
 		});
+	},
+);
+
+export const autoscalingCheck = inngest.createFunction(
+	{
+		id: "cron-autoscaling-check",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("evaluate-autoscaling-services", runAutoscalingController);
 	},
 );
 
@@ -169,5 +182,16 @@ export const registryArtifactRetention = inngest.createFunction(
 			console.log("[cron] cleaning up registry artifacts");
 			await cleanupRegistryArtifactsDaily();
 		});
+	},
+);
+
+export const notificationRetention = inngest.createFunction(
+	{
+		id: "cron-notification-retention",
+		triggers: [cron("0 6 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		await step.run("cleanup-read-notifications", cleanupReadNotifications);
 	},
 );

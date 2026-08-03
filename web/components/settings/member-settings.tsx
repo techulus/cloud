@@ -74,9 +74,7 @@ export function MemberSettings({ initialMembers, initialInvitations }: Props) {
 			}
 
 			setEmail("");
-			toast.success(
-				result.emailSent ? "Invitation sent" : "Invitation created",
-			);
+			toast.success("Invitation created and email delivery queued");
 			await copyInviteLink(result.inviteUrl);
 			router.refresh();
 		} catch (error) {

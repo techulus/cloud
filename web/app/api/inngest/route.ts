@@ -2,6 +2,7 @@ import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
 import {
 	agentUpgradeTimeoutCheck,
+	autoscalingCheck,
 	backupWorkflow,
 	buildTriggerWorkflow,
 	buildWorkflow,
@@ -10,6 +11,8 @@ import {
 	controlPlaneUpdateCheck,
 	expiredDeletedServicesPurge,
 	migrationWorkflow,
+	notificationDelivery,
+	notificationRetention,
 	oldBackupsCleanup,
 	onDeploymentFailed,
 	onRestoreFailed,
@@ -28,6 +31,7 @@ import {
 export const { GET, POST, PUT } = serve({
 	client: inngest,
 	functions: [
+		autoscalingCheck,
 		rolloutWorkflow,
 		onDeploymentFailed,
 		staleServerCheck,
@@ -50,5 +54,7 @@ export const { GET, POST, PUT } = serve({
 		serviceDeletionWorkflow,
 		serviceRestoreWorkflow,
 		expiredDeletedServicesPurge,
+		notificationDelivery,
+		notificationRetention,
 	],
 });

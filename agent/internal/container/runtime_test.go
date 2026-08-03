@@ -1,7 +1,12 @@
 package container
 
 import (
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -103,4 +108,71 @@ func TestBuildPodmanRunArgsDoesNotPublishStaticIPPortsByDefault(t *testing.T) {
 	if slices.Contains(args, "-p") {
 		t.Fatalf("args unexpectedly publish ports: %+v", args)
 	}
+}
+
+func TestEnsurePodmanSocketDoesNotEnableExistingSocket(t *testing.T) {
+	socketPath := testPodmanSocketPath(t)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on test socket: %v", err)
+	}
+	defer listener.Close()
+
+	called := false
+	err = ensurePodmanSocket(socketPath, func() ([]byte, error) {
+		called = true
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("ensure socket: %v", err)
+	}
+	if called {
+		t.Fatal("activation called for an existing socket")
+	}
+}
+
+func TestEnsurePodmanSocketRepairsMissingSocket(t *testing.T) {
+	socketPath := testPodmanSocketPath(t)
+	var listener net.Listener
+	err := ensurePodmanSocket(socketPath, func() ([]byte, error) {
+		var err error
+		listener, err = net.Listen("unix", socketPath)
+		return nil, err
+	})
+	if listener != nil {
+		defer listener.Close()
+	}
+	if err != nil {
+		t.Fatalf("ensure socket: %v", err)
+	}
+}
+
+func TestEnsurePodmanSocketReportsActivationFailure(t *testing.T) {
+	socketPath := testPodmanSocketPath(t)
+	err := ensurePodmanSocket(socketPath, func() ([]byte, error) {
+		return []byte("permission denied"), errors.New("exit status 1")
+	})
+	if err == nil || !strings.Contains(err.Error(), "failed to enable podman.socket: permission denied") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsurePodmanSocketReportsInvalidSocketAfterActivation(t *testing.T) {
+	socketPath := testPodmanSocketPath(t)
+	err := ensurePodmanSocket(socketPath, func() ([]byte, error) {
+		return nil, os.WriteFile(socketPath, nil, 0o600)
+	})
+	if err == nil || !strings.Contains(err.Error(), "is not a Unix socket") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func testPodmanSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "podman-socket-")
+	if err != nil {
+		t.Fatalf("create socket test directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "podman.sock")
 }

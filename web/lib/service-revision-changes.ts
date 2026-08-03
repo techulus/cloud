@@ -49,6 +49,16 @@ const serviceRevisionSpecFields = {
 		cpuCores: z.number().nullable(),
 		memoryMb: z.number().nullable(),
 	}),
+	autoscaling: z
+		.discriminatedUnion("enabled", [
+			z.strictObject({ enabled: z.literal(false) }),
+			z.strictObject({
+				enabled: z.literal(true),
+				minReplicas: z.number().int().min(1).max(32),
+				maxReplicas: z.number().int().min(1).max(32),
+			}),
+		])
+		.optional(),
 	placements: z.array(
 		z.strictObject({ serverId: z.string(), count: z.number() }),
 	),
@@ -106,6 +116,34 @@ const serviceRevisionSpecSchema = z
 				code: "custom",
 				message: "Stateful services cannot use automatic placement",
 			});
+		if (spec.autoscaling?.enabled) {
+			if (spec.autoscaling.minReplicas > spec.autoscaling.maxReplicas)
+				context.addIssue({
+					code: "custom",
+					message: "Autoscaling minimum cannot exceed maximum",
+				});
+			if (
+				spec.placement.mode !== "automatic" ||
+				spec.stateful ||
+				spec.serverless.enabled ||
+				spec.volumes.length > 0 ||
+				spec.resourceLimits.cpuCores === null ||
+				spec.resourceLimits.memoryMb === null
+			)
+				context.addIssue({
+					code: "custom",
+					message: "Revision is not eligible for autoscaling",
+				});
+			if (
+				spec.placement.mode === "automatic" &&
+				(spec.placement.replicas < spec.autoscaling.minReplicas ||
+					spec.placement.replicas > spec.autoscaling.maxReplicas)
+			)
+				context.addIssue({
+					code: "custom",
+					message: "Concrete replica target must be within autoscaling bounds",
+				});
+		}
 	});
 
 export type ServiceRevisionChange = {
@@ -302,6 +340,17 @@ export function diffServiceRevisionSpecs(
 		"Placement mode",
 		previous.placement.mode === "automatic" ? "Automatic" : "Manual",
 		current.placement.mode === "automatic" ? "Automatic" : "Manual",
+	);
+	const autoscalingDescription = (
+		policy: ServiceRevisionSpec["autoscaling"],
+	) =>
+		policy?.enabled
+			? `Enabled (${policy.minReplicas}-${policy.maxReplicas} replicas)`
+			: "Disabled";
+	add(
+		"Autoscaling",
+		autoscalingDescription(previous.autoscaling),
+		autoscalingDescription(current.autoscaling),
 	);
 	if (
 		previous.placement.mode === "automatic" &&

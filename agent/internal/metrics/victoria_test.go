@@ -139,24 +139,38 @@ func TestSendContainerStatsAggregatesStableServiceLabels(t *testing.T) {
 			ServiceID:          "svc-a",
 			DeploymentID:       "dep-a",
 			CPUUsagePercent:    10,
+			CPUUsageValid:      true,
 			MemoryUsagePercent: 1.5,
+			MemoryUsageValid:   true,
 			MemoryUsedBytes:    1024,
+			MemoryUsedValid:    true,
 		},
 		{
 			ContainerID:        "container-b",
 			ServiceID:          "svc-a",
 			DeploymentID:       "dep-b",
 			CPUUsagePercent:    20,
+			CPUUsageValid:      true,
 			MemoryUsagePercent: 2.5,
+			MemoryUsageValid:   true,
 			MemoryUsedBytes:    2048,
+			MemoryUsedValid:    true,
 		},
 	}, time.UnixMilli(1_700_000_000_000))
 	if err != nil {
 		t.Fatalf("send container stats: %v", err)
 	}
 
-	if strings.Contains(gotBody, "container_id") || strings.Contains(gotBody, "deployment_id") {
-		t.Fatalf("unexpected churn labels in body:\n%s", gotBody)
+	for _, line := range strings.Split(strings.TrimSpace(gotBody), "\n") {
+		if strings.HasPrefix(line, "techulus_service_") && strings.Contains(line, "deployment_id") {
+			t.Fatalf("unexpected deployment label in aggregate metric: %s", line)
+		}
+	}
+	if !strings.Contains(gotBody, `techulus_deployment_cpu_usage_cores{deployment_id="dep-a",server_id="server-1",service_id="svc-a"} 0.100000 1700000000000`) {
+		t.Fatalf("missing deployment CPU metric:\n%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `techulus_deployment_memory_used_bytes{deployment_id="dep-b",server_id="server-1",service_id="svc-a"} 2048.000000 1700000000000`) {
+		t.Fatalf("missing deployment memory metric:\n%s", gotBody)
 	}
 	if !strings.Contains(gotBody, `techulus_service_cpu_usage_percent{server_id="server-1",service_id="svc-a"} 30.000000 1700000000000`) {
 		t.Fatalf("missing aggregated CPU metric:\n%s", gotBody)
@@ -166,5 +180,39 @@ func TestSendContainerStatsAggregatesStableServiceLabels(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `techulus_service_memory_used_bytes{server_id="server-1",service_id="svc-a"} 3072.000000 1700000000000`) {
 		t.Fatalf("missing aggregated memory bytes metric:\n%s", gotBody)
+	}
+}
+
+func TestSendContainerStatsOmitsInvalidDeploymentMetrics(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	sender := NewVictoriaMetricsSender(server.URL, "server-1")
+	err := sender.SendContainerStats([]container.ResourceStats{{
+		ServiceID:          "svc-a",
+		DeploymentID:       "dep-a",
+		CPUUsagePercent:    0,
+		CPUUsageValid:      true,
+		MemoryUsedBytes:    0,
+		MemoryUsedValid:    false,
+		MemoryUsagePercent: 0,
+	}}, time.UnixMilli(1_700_000_000_000))
+	if err != nil {
+		t.Fatalf("send container stats: %v", err)
+	}
+
+	if !strings.Contains(gotBody, `techulus_deployment_cpu_usage_cores{deployment_id="dep-a",server_id="server-1",service_id="svc-a"} 0.000000 1700000000000`) {
+		t.Fatalf("missing genuine zero CPU metric:\n%s", gotBody)
+	}
+	if strings.Contains(gotBody, "techulus_deployment_memory_used_bytes") {
+		t.Fatalf("invalid memory metric was emitted:\n%s", gotBody)
+	}
+	if strings.Contains(gotBody, "techulus_service_memory_used_bytes") || strings.Contains(gotBody, "techulus_service_memory_usage_percent") {
+		t.Fatalf("invalid aggregate memory metric was emitted:\n%s", gotBody)
 	}
 }

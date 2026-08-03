@@ -7,6 +7,7 @@ type ServeOptions = {
 const mocks = vi.hoisted(() => {
 	const functions = {
 		agentUpgradeTimeoutCheck: { id: "agent-upgrade-timeout-check" },
+		autoscalingCheck: { id: "autoscaling-check" },
 		backupWorkflow: { id: "backup-workflow" },
 		buildTriggerWorkflow: { id: "build-trigger-workflow" },
 		buildWorkflow: { id: "build-workflow" },
@@ -15,6 +16,8 @@ const mocks = vi.hoisted(() => {
 		controlPlaneUpdateCheck: { id: "control-plane-update-check" },
 		expiredDeletedServicesPurge: { id: "expired-deleted-services-purge" },
 		migrationWorkflow: { id: "migration-workflow" },
+		notificationDelivery: { id: "notification-delivery" },
+		notificationRetention: { id: "notification-retention" },
 		oldBackupsCleanup: { id: "old-backups-cleanup" },
 		onDeploymentFailed: { id: "on-deployment-failed" },
 		onRestoreFailed: { id: "on-restore-failed" },

@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
 		enqueueWork: vi.fn(),
 		send: vi.fn(),
 		updateGitHubDeploymentStatus: vi.fn(),
+		notify: vi.fn(),
 		createBuildCompleted: vi.fn((data, options) => ({
 			name: "build/completed",
 			data,
@@ -61,7 +62,7 @@ vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/agent-auth", () => ({
 	verifyAgentRequest: mocks.verifyAgentRequest,
 }));
-vi.mock("@/lib/email", () => ({ sendBuildFailureAlert: vi.fn() }));
+vi.mock("@/lib/notifications", () => ({ notify: mocks.notify }));
 vi.mock("@/lib/github", () => ({
 	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
 }));
@@ -157,6 +158,23 @@ describe("agent build status transitions", () => {
 		mocks.enqueueWork.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
 		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
+		mocks.notify.mockResolvedValue(undefined);
+	});
+
+	it("enqueues one deterministic notification for a new failed transition", async () => {
+		const failedBuild = build("failed");
+		mocks.selectResults.push([build("building")], [{ specification }]);
+		mocks.updateResults.push([failedBuild]);
+
+		expect((await post("failed")).status).toBe(200);
+		expect(mocks.notify).toHaveBeenCalledOnce();
+		expect(mocks.notify).toHaveBeenCalledWith({
+			kind: "build.failed",
+			occurrenceId: "build-amd64",
+			serviceId: "service-1",
+			buildId: "build-amd64",
+			error: undefined,
+		});
 	});
 
 	it("keeps the service details link on GitHub deployment statuses", async () => {

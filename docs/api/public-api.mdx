@@ -206,6 +206,23 @@ Use automatic placement for stateless services:
 { "mode": "automatic", "replicas": 3 }
 ```
 
+To autoscale an eligible service, replace fixed `replicas` with a range:
+
+```json
+{
+  "mode": "automatic",
+  "autoscaling": { "minReplicas": 2, "maxReplicas": 8 }
+}
+```
+
+Autoscaling requires automatic placement, a stateless non-serverless service
+without volumes, and both CPU and memory limits. Minimum and maximum values must
+be from 1 through 32, with minimum no greater than maximum. CPU and memory use
+fixed 60% targets. Configuration responses expose the mutable policy in
+`current.placement` and the deployed policy plus concrete active target in
+`active.placement`. Policy changes participate in plan/apply fingerprints.
+To disable autoscaling, send the fixed automatic-placement form with `replicas`.
+
 Use manual placement to choose exact servers:
 
 ```json
@@ -218,6 +235,10 @@ Use manual placement to choose exact servers:
 ```
 
 Manual placement requires online servers with WireGuard configured. Serverless services require proxy servers, including when automatic placement is used. A replacement that removes the final public HTTP domain can move the service to worker placement because the same update disables serverless. Automatic placement is not available for stateful or volume-backed services. Submit replica changes through `placement`; the API rejects a top-level `replicas` field.
+
+CLI manifests remain fixed-replica only in V1. Configure autoscaling through the
+dashboard or public configuration API. `tc apply` continues to send the fixed
+replica manifest contract.
 
 The API only manages stateless services with HTTP ports. Existing volumes, stateful mode, TCP or UDP ports, TLS passthrough, or invalid resource limits return a conflict with an actionable code.
 

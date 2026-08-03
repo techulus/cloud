@@ -3,9 +3,11 @@ export { buildTriggerWorkflow } from "./build-trigger-workflow";
 export { buildWorkflow } from "./build-workflow";
 export {
 	agentUpgradeTimeoutCheck,
+	autoscalingCheck,
 	certificateRenewal,
 	challengeCleanup,
 	controlPlaneUpdateCheck,
+	notificationRetention,
 	oldBackupsCleanup,
 	registryArtifactRetention,
 	scheduledBackupsCheck,
@@ -14,6 +16,7 @@ export {
 	staleServerCheck,
 } from "./crons";
 export { migrationWorkflow } from "./migration-workflow";
+export { notificationDelivery } from "./notification-delivery";
 export { onDeploymentFailed } from "./on-deployment-failed";
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
 export { onRestoreFailed, restoreWorkflow } from "./restore-workflow";

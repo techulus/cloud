@@ -10,10 +10,10 @@ import {
 } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { revisionRepositoryFullName } from "@/lib/build-revision-source";
-import { sendBuildFailureAlert } from "@/lib/email";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { notify } from "@/lib/notifications";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -312,13 +312,15 @@ export async function POST(
 
 	if (update.status === "failed") {
 		if (!replayingTerminalUpdate) {
-			sendBuildFailureAlert({
+			notify({
+				kind: "build.failed",
+				occurrenceId: buildId,
 				serviceId: build.serviceId,
 				buildId,
 				error: update.error,
 			}).catch((error) => {
 				console.error(
-					"[build:status] failed to send build failure alert:",
+					"[build:status] failed to enqueue build failure notification:",
 					error,
 				);
 			});

@@ -67,6 +67,45 @@ describe("configuration plan protocol", () => {
 		expect(result.changes).toEqual([]);
 	});
 
+	it("treats an echoed autoscaling placement as a no-op", () => {
+		const current = {
+			name: "web",
+			source: { type: "image" as const, image: "nginx" },
+			hostname: "web",
+			ports: [],
+			placement: {
+				mode: "automatic" as const,
+				autoscaling: { minReplicas: 2, maxReplicas: 8 },
+			},
+			healthCheck: null,
+			startCommand: null,
+			resources: { cpuCores: 1, memoryMb: 512 },
+			serverless: { enabled: false },
+		};
+		const result = planCanonicalConfiguration(current, {
+			name: current.name,
+			source: current.source,
+			hostname: current.hostname,
+			ports: current.ports,
+			placement: {
+				mode: "automatic",
+				replicas: 4,
+				autoscaling: {
+					enabled: true,
+					minReplicas: 2,
+					maxReplicas: 8,
+				},
+			},
+			healthCheck: current.healthCheck,
+			startCommand: current.startCommand,
+			resources: current.resources,
+		});
+
+		expect(result.action).toBe("noop");
+		expect(result.changes).toEqual([]);
+		expect(result.desiredVersion).toBe(result.currentVersion);
+	});
+
 	it("sorts ports and manual placements deterministically", () => {
 		const desired = canonicalDesired({
 			name: "web",

@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
 	Server as ServerType,
@@ -27,6 +28,7 @@ type ServerInfo = Pick<
 	"id" | "name" | "isProxy" | "status" | "wireguardIp"
 >;
 type PlacementMode = "manual" | "automatic";
+type ReplicaManagement = "fixed" | "autoscaled";
 
 const fetcher = async (url: string): Promise<ServerInfo[]> => {
 	const servers = await fetchJson<ServerInfo[]>(url);
@@ -59,6 +61,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 		service.placementMode,
 	);
 	const [desiredReplicas, setDesiredReplicas] = useState(service.replicas);
+	const [replicaManagement, setReplicaManagement] = useState<ReplicaManagement>(
+		service.autoscalingEnabled ? "autoscaled" : "fixed",
+	);
+	const [autoscalingRange, setAutoscalingRange] = useState<readonly number[]>([
+		service.autoscalingMinReplicas,
+		service.autoscalingMaxReplicas,
+	]);
 	const [isEditing, setIsEditing] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 
@@ -91,6 +100,11 @@ export const ReplicasSection = memo(function ReplicasSection({
 			setLocalReplicas(replicaMap);
 			setPlacementMode(service.placementMode);
 			setDesiredReplicas(service.replicas);
+			setReplicaManagement(service.autoscalingEnabled ? "autoscaled" : "fixed");
+			setAutoscalingRange([
+				service.autoscalingMinReplicas,
+				service.autoscalingMaxReplicas,
+			]);
 		}
 	}, [
 		servers,
@@ -99,6 +113,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 		service.lockedServerId,
 		service.placementMode,
 		service.replicas,
+		service.autoscalingEnabled,
+		service.autoscalingMinReplicas,
+		service.autoscalingMaxReplicas,
 		isEditing,
 	]);
 
@@ -118,8 +135,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 			placementMode !== service.placementMode
 		)
 			return;
-		if (placementMode === "automatic" && desiredReplicas === service.replicas) {
-			setIsEditing(false);
+		if (placementMode === "automatic") {
+			const autoscalingMatches =
+				(replicaManagement === "autoscaled") === service.autoscalingEnabled &&
+				(replicaManagement !== "autoscaled" ||
+					(autoscalingRange[0] === service.autoscalingMinReplicas &&
+						autoscalingRange[1] === service.autoscalingMaxReplicas));
+			if (desiredReplicas === service.replicas && autoscalingMatches) {
+				setIsEditing(false);
+			}
 			return;
 		}
 		if (placementMode === "manual") {
@@ -141,11 +165,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 	}, [
 		configuredReplicas,
 		desiredReplicas,
+		replicaManagement,
+		autoscalingRange,
 		isEditing,
 		localReplicas,
 		placementMode,
 		service.placementMode,
 		service.replicas,
+		service.autoscalingEnabled,
+		service.autoscalingMinReplicas,
+		service.autoscalingMaxReplicas,
 		service.stateful,
 	]);
 
@@ -157,7 +186,13 @@ export const ReplicasSection = memo(function ReplicasSection({
 		}
 		if (placementMode !== service.placementMode) return true;
 		if (placementMode === "automatic") {
-			return desiredReplicas !== service.replicas;
+			return (
+				desiredReplicas !== service.replicas ||
+				(replicaManagement === "autoscaled") !== service.autoscalingEnabled ||
+				(replicaManagement === "autoscaled" &&
+					(autoscalingRange[0] !== service.autoscalingMinReplicas ||
+						autoscalingRange[1] !== service.autoscalingMaxReplicas))
+			);
 		}
 
 		const configuredMap = new Map(
@@ -171,10 +206,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 	}, [
 		configuredReplicas,
 		desiredReplicas,
+		replicaManagement,
+		autoscalingRange,
 		localReplicas,
 		placementMode,
 		service.placementMode,
 		service.replicas,
+		service.autoscalingEnabled,
+		service.autoscalingMinReplicas,
+		service.autoscalingMaxReplicas,
 		service.stateful,
 		selectedServerId,
 	]);
@@ -236,7 +276,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 				return;
 			} else {
 				await updateServiceConfig(service.id, {
-					placement: { mode: "automatic", replicas: desiredReplicas },
+					placement:
+						replicaManagement === "autoscaled"
+							? {
+									mode: "automatic",
+									autoscaling: {
+										minReplicas: autoscalingRange[0],
+										maxReplicas: autoscalingRange[1],
+									},
+								}
+							: { mode: "automatic", replicas: desiredReplicas },
 				});
 				onUpdate();
 				return;
@@ -270,6 +319,14 @@ export const ReplicasSection = memo(function ReplicasSection({
 	};
 
 	const manualTotalIsValid = totalReplicas >= 1 && totalReplicas <= 32;
+	const autoscalingIneligibility = service.serverlessEnabled
+		? "Disable serverless before enabling autoscaling."
+		: service.volumes && service.volumes.length > 0
+			? "Remove volumes before enabling autoscaling."
+			: service.resourceCpuLimit == null ||
+					service.resourceMemoryLimitMb == null
+				? "Set both CPU and memory limits before enabling autoscaling."
+				: null;
 
 	if (service.stateful) {
 		return (
@@ -385,7 +442,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 	return (
 		<ConfigSection
 			title="Replicas"
-			summary={`${service.placementMode === "automatic" ? "Automatic" : "Manual"} · ${service.replicas} desired`}
+			summary={`${service.placementMode === "automatic" ? "Automatic" : "Manual"} · ${service.autoscalingEnabled ? `${service.autoscalingMinReplicas}-${service.autoscalingMaxReplicas} autoscaled` : `${service.replicas} fixed`}`}
 			summaryMuted={service.replicas === 0}
 		>
 			<div className="space-y-4">
@@ -402,39 +459,99 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
-						<div className="flex max-w-xl items-start justify-between gap-4">
+						<div className="flex max-w-xl items-center justify-between gap-6">
 							<div className="space-y-1">
-								<p className="text-sm font-medium">Desired replicas</p>
+								<p className="text-sm font-medium">Autoscaling</p>
 								<p className="text-sm text-muted-foreground">
-									The control plane distributes replicas evenly across healthy
-									{service.serverlessEnabled ? " proxy nodes" : " nodes"} and
-									moves them after failures.
+									Adjusts replicas within your selected range using average CPU
+									and memory usage. Uses fixed 60% targets.
 								</p>
 							</div>
-							<span className="shrink-0 text-sm font-medium tabular-nums">
-								{desiredReplicas}
-							</span>
-						</div>
-						<div className="max-w-xl space-y-2 py-1">
-							<Slider
-								aria-label="Desired replicas"
-								min={1}
-								max={32}
-								step={1}
-								value={desiredReplicas}
-								onValueChange={(value) => {
+							<Switch
+								checked={replicaManagement === "autoscaled"}
+								onCheckedChange={(checked) => {
 									setIsEditing(true);
-									setDesiredReplicas(value);
+									setReplicaManagement(checked ? "autoscaled" : "fixed");
 								}}
+								aria-label="Enable autoscaling"
 							/>
-							<div className="flex justify-between text-center text-xs text-muted-foreground">
-								<span className="w-4 shrink-0">1</span>
-								<span className="w-4 shrink-0">32</span>
-							</div>
 						</div>
+						{replicaManagement === "autoscaled" && autoscalingIneligibility ? (
+							<p className="text-sm text-amber-600 dark:text-amber-400">
+								{autoscalingIneligibility}
+							</p>
+						) : null}
+						{replicaManagement === "autoscaled" ? (
+							<div className="max-w-xl space-y-3">
+								<div className="flex justify-between text-sm font-medium">
+									<span>Replica range</span>
+									<span>
+										{autoscalingRange[0]}-{autoscalingRange[1]}
+									</span>
+								</div>
+								<Slider
+									min={1}
+									max={32}
+									step={1}
+									value={autoscalingRange}
+									getThumbAriaLabel={(index) =>
+										index === 0 ? "Minimum replicas" : "Maximum replicas"
+									}
+									onValueChange={(value) => {
+										setIsEditing(true);
+										setAutoscalingRange(value);
+									}}
+								/>
+								<p className="text-sm text-muted-foreground">
+									Scaling changes perform a rolling full-fleet replacement.
+								</p>
+							</div>
+						) : (
+							<div className="max-w-xl space-y-4">
+								<div className="flex items-start justify-between gap-4">
+									<div className="space-y-1">
+										<p className="text-sm font-medium">Desired replicas</p>
+										<p className="text-sm text-muted-foreground">
+											The control plane distributes replicas evenly across
+											healthy
+											{service.serverlessEnabled ? " proxy nodes" : " nodes"}{" "}
+											and moves them after failures.
+										</p>
+									</div>
+									<span className="shrink-0 text-sm font-medium tabular-nums">
+										{desiredReplicas}
+									</span>
+								</div>
+								<div className="space-y-2 py-1">
+									<Slider
+										aria-label="Desired replicas"
+										min={1}
+										max={32}
+										step={1}
+										value={desiredReplicas}
+										onValueChange={(value) => {
+											setIsEditing(true);
+											setDesiredReplicas(value);
+										}}
+									/>
+									<div className="flex justify-between text-center text-xs text-muted-foreground">
+										<span className="w-4 shrink-0">1</span>
+										<span className="w-4 shrink-0">32</span>
+									</div>
+								</div>
+							</div>
+						)}
 						{hasChanges ? (
 							<div className="pt-3 border-t">
-								<Button onClick={handleSave} disabled={isSaving} size="sm">
+								<Button
+									onClick={handleSave}
+									disabled={
+										isSaving ||
+										(replicaManagement === "autoscaled" &&
+											!!autoscalingIneligibility)
+									}
+									size="sm"
+								>
 									{isSaving ? "Saving..." : "Save"}
 								</Button>
 							</div>

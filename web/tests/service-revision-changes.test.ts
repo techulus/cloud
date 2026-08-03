@@ -147,6 +147,25 @@ describe("diffServiceRevisionSpecs", () => {
 		]);
 	});
 
+	it("reports autoscaling policy changes", () => {
+		const previous = spec();
+		previous.placement = { mode: "automatic", replicas: 2 };
+		previous.placements = [];
+		previous.volumes = [];
+		previous.resourceLimits = { cpuCores: 1, memoryMb: 512 };
+		const current = structuredClone(previous);
+		current.autoscaling = { enabled: true, minReplicas: 2, maxReplicas: 8 };
+
+		expect(diffServiceRevisionSpecs(previous, current)).toContainEqual({
+			field: "Autoscaling",
+			from: "Disabled",
+			to: "Enabled (2-8 replicas)",
+		});
+		expect(parseServiceRevisionSpec(current).autoscaling).toEqual(
+			current.autoscaling,
+		);
+	});
+
 	it("accepts persisted automatic serverless revisions", () => {
 		const automatic = spec();
 		automatic.placement = { mode: "automatic", replicas: 1 };

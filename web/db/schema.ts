@@ -213,6 +213,41 @@ export const memberInvitations = pgTable(
 	],
 );
 
+export const notifications = pgTable(
+	"notifications",
+	{
+		id: text("id").primaryKey(),
+		eventId: text("event_id").notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		kind: text("kind").notNull(),
+		title: text("title").notNull(),
+		body: text("body").notNull(),
+		href: text("href"),
+		readAt: timestamp("read_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("notifications_user_read_created_idx").on(
+			table.userId,
+			table.readAt,
+			table.createdAt,
+		),
+		index("notifications_user_created_id_idx").on(
+			table.userId,
+			table.createdAt,
+			table.id,
+		),
+		uniqueIndex("notifications_event_user_unique_idx").on(
+			table.eventId,
+			table.userId,
+		),
+	],
+);
+
 export const userRelations = relations(user, ({ many, one }) => ({
 	sessions: many(session),
 	accounts: many(account),
@@ -224,6 +259,14 @@ export const userRelations = relations(user, ({ many, one }) => ({
 	}),
 	acceptedMemberInvitations: many(memberInvitations, {
 		relationName: "acceptedMemberInvitations",
+	}),
+	notifications: many(notifications),
+}));
+
+export const notificationRelations = relations(notifications, ({ one }) => ({
+	user: one(user, {
+		fields: [notifications.userId],
+		references: [user.id],
 	}),
 }));
 
@@ -423,6 +466,13 @@ export const services = pgTable(
 		githubBranch: text("github_branch").default("main"),
 		githubRootDir: text("github_root_dir"),
 		replicas: integer("replicas").notNull().default(1),
+		autoscalingEnabled: boolean("autoscaling_enabled").notNull().default(false),
+		autoscalingMinReplicas: integer("autoscaling_min_replicas")
+			.notNull()
+			.default(1),
+		autoscalingMaxReplicas: integer("autoscaling_max_replicas")
+			.notNull()
+			.default(1),
 		placementMode: text("placement_mode", { enum: ["manual", "automatic"] })
 			.notNull()
 			.default("manual"),
@@ -433,6 +483,9 @@ export const services = pgTable(
 			"last_automatic_recovery_attempt_at",
 			{ withTimezone: true },
 		),
+		lastAutoscaleAttemptAt: timestamp("last_autoscale_attempt_at", {
+			withTimezone: true,
+		}),
 		stateful: boolean("stateful").notNull().default(false),
 		lockedServerId: text("locked_server_id").references(() => servers.id, {
 			onDelete: "set null",
@@ -496,6 +549,9 @@ export const services = pgTable(
 			table.environmentId,
 		),
 		index("services_environment_id_idx").on(table.environmentId),
+		index("services_last_autoscale_attempt_idx").on(
+			table.lastAutoscaleAttemptAt,
+		),
 	],
 );
 
@@ -710,6 +766,11 @@ export const deployments = pgTable(
 		index("deployments_container_id_idx").on(table.containerId),
 		index("deployments_rollout_id_idx").on(table.rolloutId),
 		index("deployments_service_id_idx").on(table.serviceId),
+		index("deployments_service_traffic_runtime_idx").on(
+			table.serviceId,
+			table.trafficState,
+			table.runtimeDesiredState,
+		),
 		index("deployments_service_revision_id_idx").on(table.serviceRevisionId),
 		index("deployments_server_id_idx").on(table.serverId),
 		uniqueIndex("deployments_server_id_ip_address_unique_idx")
@@ -751,6 +812,7 @@ export const rollouts = pgTable(
 			table.serviceId,
 			table.createdAt,
 		),
+		index("rollouts_service_status_idx").on(table.serviceId, table.status),
 		uniqueIndex("rollouts_service_revision_id_unique_idx").on(
 			table.serviceRevisionId,
 		),

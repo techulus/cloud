@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { and, eq, inArray } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { revalidatePath } from "next/cache";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -30,34 +30,37 @@ export async function POST(request: NextRequest) {
 	const { serverId } = auth;
 
 	const backup = await db
-		.select()
-		.from(volumeBackups)
-		.where(
-			and(eq(volumeBackups.id, backupId), eq(volumeBackups.serverId, serverId)),
-		)
-		.then((r) => r[0]);
-
-	if (!backup) {
-		return NextResponse.json({ error: "Backup not found" }, { status: 404 });
-	}
-
-	await db
 		.update(volumeBackups)
 		.set({
 			status: "failed",
 			errorMessage: error || "Unknown error",
 		})
-		.where(eq(volumeBackups.id, backupId));
+		.where(
+			and(
+				eq(volumeBackups.id, backupId),
+				eq(volumeBackups.serverId, serverId),
+				inArray(volumeBackups.status, ["pending", "uploading"]),
+			),
+		)
+		.returning({ serviceId: volumeBackups.serviceId })
+		.then((rows) => rows[0]);
+
+	if (!backup) {
+		return NextResponse.json({ ok: true });
+	}
 
 	revalidatePath("/dashboard/projects");
 
 	await inngest.send(
-		inngestEvents.resourceStatusChanged.create({
-			type: "backup",
-			id: backupId,
-			parentType: "service",
-			parentId: backup.serviceId,
-		}),
+		inngestEvents.resourceStatusChanged.create(
+			{
+				type: "backup",
+				id: backupId,
+				parentType: "service",
+				parentId: backup.serviceId,
+			},
+			{ id: `backup-failed-${backupId}` },
+		),
 	);
 	return NextResponse.json({ ok: true });
 }

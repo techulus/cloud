@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
 import { inngest } from "../client";
@@ -12,16 +12,19 @@ export const backupWorkflow = inngest.createFunction(
 	async ({ event, step, group }) => {
 		const { backupId } = event.data;
 
-		const initialBackup = await step.run("check-backup-before-wait", async () => {
-			return db
-				.select({
-					status: volumeBackups.status,
-					errorMessage: volumeBackups.errorMessage,
-				})
-				.from(volumeBackups)
-				.where(eq(volumeBackups.id, backupId))
-				.then((r) => r[0]);
-		});
+		const initialBackup = await step.run(
+			"check-backup-before-wait",
+			async () => {
+				return db
+					.select({
+						status: volumeBackups.status,
+						errorMessage: volumeBackups.errorMessage,
+					})
+					.from(volumeBackups)
+					.where(eq(volumeBackups.id, backupId))
+					.then((r) => r[0]);
+			},
+		);
 
 		if (initialBackup?.status === "completed") {
 			return { status: "completed", backupId };
@@ -74,7 +77,12 @@ export const backupWorkflow = inngest.createFunction(
 						status: "failed",
 						errorMessage: "Backup timed out after 30 minutes",
 					})
-					.where(eq(volumeBackups.id, backupId));
+					.where(
+						and(
+							eq(volumeBackups.id, backupId),
+							inArray(volumeBackups.status, ["pending", "uploading"]),
+						),
+					);
 			});
 
 			return { status: "failed", reason: "timeout", backupId };
