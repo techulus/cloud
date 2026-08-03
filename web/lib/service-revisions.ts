@@ -12,6 +12,7 @@ import {
 	services,
 	serviceVolumes,
 } from "@/db/schema";
+import { isObservedReady } from "@/lib/deployment-status";
 import { resolvePersistedSourceFromRows } from "@/lib/public-api";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
@@ -430,6 +431,150 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 			currentStage: "queued",
 		});
 		return { rolloutId, created: true };
+	});
+}
+
+export const AUTOSCALE_ATTEMPT_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Compare the sampled active fleet under the service lock before scaling it. */
+export async function cloneActiveRevisionForAutoscaling(input: {
+	serviceId: string;
+	expectedRevisionId: string;
+	expectedDeploymentIds: string[];
+	expectedDeploymentCount: number;
+	expectedMinReplicas: number;
+	expectedMaxReplicas: number;
+	targetReplicas: number;
+	now?: Date;
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${input.serviceId}))`,
+		);
+		const service = await tx
+			.select({
+				id: services.id,
+				deletedAt: services.deletedAt,
+				migrationStatus: services.migrationStatus,
+				lastAutoscaleAttemptAt: services.lastAutoscaleAttemptAt,
+			})
+			.from(services)
+			.where(eq(services.id, input.serviceId))
+			.then((rows) => rows[0]);
+		if (!service || service.deletedAt || service.migrationStatus)
+			return { created: false, reason: "service-unavailable" } as const;
+		const now = input.now ?? new Date();
+		if (
+			service.lastAutoscaleAttemptAt &&
+			now.getTime() - service.lastAutoscaleAttemptAt.getTime() <
+				AUTOSCALE_ATTEMPT_COOLDOWN_MS
+		)
+			return { created: false, reason: "cooldown" } as const;
+		const pending = await tx
+			.select({ id: rollouts.id })
+			.from(rollouts)
+			.where(
+				and(
+					eq(rollouts.serviceId, input.serviceId),
+					inArray(rollouts.status, ["queued", "in_progress"]),
+				),
+			)
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (pending) return { created: false, reason: "pending-rollout" } as const;
+		const active = await tx
+			.select({
+				id: deployments.id,
+				revisionId: deployments.serviceRevisionId,
+				runtimeDesiredState: deployments.runtimeDesiredState,
+				observedPhase: deployments.observedPhase,
+				specification: serviceRevisions.specification,
+			})
+			.from(deployments)
+			.innerJoin(
+				serviceRevisions,
+				eq(serviceRevisions.id, deployments.serviceRevisionId),
+			)
+			.where(
+				and(
+					eq(deployments.serviceId, input.serviceId),
+					eq(deployments.trafficState, "active"),
+					inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
+				),
+			)
+			.orderBy(deployments.id);
+		const expectedIds = new Set(input.expectedDeploymentIds);
+		if (
+			expectedIds.size !== input.expectedDeploymentCount ||
+			active.length !== expectedIds.size ||
+			active.some(
+				(deployment) =>
+					!expectedIds.has(deployment.id) ||
+					deployment.revisionId !== input.expectedRevisionId ||
+					deployment.runtimeDesiredState !== "running" ||
+					!isObservedReady(deployment.observedPhase),
+			)
+		)
+			return { created: false, reason: "stale-topology" } as const;
+		const source = active[0];
+		if (!source) return { created: false, reason: "stale-topology" } as const;
+		const specification = parseServiceRevisionSpec(source.specification);
+		const autoscaling = specification.autoscaling;
+		const targetDelta = input.targetReplicas - active.length;
+		const scalesUpWithinPolicy =
+			autoscaling?.enabled === true &&
+			targetDelta > 0 &&
+			input.targetReplicas <= autoscaling.maxReplicas &&
+			(active.length >= autoscaling.minReplicas ||
+				input.targetReplicas >= autoscaling.minReplicas);
+		const scalesDownOne =
+			autoscaling?.enabled === true &&
+			targetDelta === -1 &&
+			active.length <= autoscaling.maxReplicas &&
+			input.targetReplicas >= autoscaling.minReplicas;
+		const clampsToMaximum =
+			autoscaling?.enabled === true &&
+			active.length > autoscaling.maxReplicas &&
+			input.targetReplicas === autoscaling.maxReplicas;
+		if (
+			specification.placement.mode !== "automatic" ||
+			!autoscaling?.enabled ||
+			autoscaling.minReplicas !== input.expectedMinReplicas ||
+			autoscaling.maxReplicas !== input.expectedMaxReplicas ||
+			specification.placement.replicas !== active.length ||
+			input.targetReplicas < 1 ||
+			input.targetReplicas > 32 ||
+			(!scalesUpWithinPolicy && !scalesDownOne && !clampsToMaximum)
+		)
+			return { created: false, reason: "stale-policy" } as const;
+
+		// Cool down capacity/preflight failures as well as successful creations.
+		await tx
+			.update(services)
+			.set({ lastAutoscaleAttemptAt: now })
+			.where(eq(services.id, input.serviceId));
+		const revisionId = randomUUID();
+		await tx.insert(serviceRevisions).values({
+			id: revisionId,
+			serviceId: input.serviceId,
+			specification: {
+				...specification,
+				placement: {
+					...specification.placement,
+					replicas: input.targetReplicas,
+				},
+			},
+			actor: { type: "system" },
+		});
+		const rolloutId = randomUUID();
+		await tx.insert(rollouts).values({
+			id: rolloutId,
+			serviceId: input.serviceId,
+			serviceRevisionId: revisionId,
+			status: "queued",
+			currentStage: "queued",
+		});
+		return { created: true, rolloutId, revisionId } as const;
 	});
 }
 

@@ -7,6 +7,7 @@ type ServeOptions = {
 const mocks = vi.hoisted(() => {
 	const functions = {
 		agentUpgradeTimeoutCheck: { id: "agent-upgrade-timeout-check" },
+		autoscalingCheck: { id: "autoscaling-check" },
 		backupWorkflow: { id: "backup-workflow" },
 		buildTriggerWorkflow: { id: "build-trigger-workflow" },
 		buildWorkflow: { id: "build-workflow" },

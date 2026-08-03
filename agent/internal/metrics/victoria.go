@@ -24,8 +24,11 @@ type VictoriaMetricsSender struct {
 type serviceResourceStats struct {
 	ServiceID            string
 	CPUUsagePercent      float64
+	CPUUsageValid        bool
 	MemoryUsagePercent   float64
+	MemoryUsageValid     bool
 	MemoryUsedBytes      float64
+	MemoryUsedValid      bool
 	NetworkReceiveBytes  float64
 	NetworkTransmitBytes float64
 }
@@ -100,14 +103,33 @@ func (v *VictoriaMetricsSender) SendContainerStats(stats []container.ResourceSta
 	serverID := escapeLabelValue(v.serverID)
 
 	var buf bytes.Buffer
+	for _, stat := range stats {
+		labels := map[string]string{
+			"deployment_id": escapeLabelValue(stat.DeploymentID),
+			"server_id":     serverID,
+			"service_id":    escapeLabelValue(stat.ServiceID),
+		}
+		if stat.CPUUsageValid {
+			writeGaugeWithLabels(&buf, "techulus_deployment_cpu_usage_cores", labels, stat.CPUUsagePercent/100, timestampMs)
+		}
+		if stat.MemoryUsedValid {
+			writeGaugeWithLabels(&buf, "techulus_deployment_memory_used_bytes", labels, stat.MemoryUsedBytes, timestampMs)
+		}
+	}
 	for _, stat := range aggregates {
 		labels := map[string]string{
 			"server_id":  serverID,
 			"service_id": escapeLabelValue(stat.ServiceID),
 		}
-		writeGaugeWithLabels(&buf, "techulus_service_cpu_usage_percent", labels, stat.CPUUsagePercent, timestampMs)
-		writeGaugeWithLabels(&buf, "techulus_service_memory_usage_percent", labels, stat.MemoryUsagePercent, timestampMs)
-		writeGaugeWithLabels(&buf, "techulus_service_memory_used_bytes", labels, stat.MemoryUsedBytes, timestampMs)
+		if stat.CPUUsageValid {
+			writeGaugeWithLabels(&buf, "techulus_service_cpu_usage_percent", labels, stat.CPUUsagePercent, timestampMs)
+		}
+		if stat.MemoryUsageValid {
+			writeGaugeWithLabels(&buf, "techulus_service_memory_usage_percent", labels, stat.MemoryUsagePercent, timestampMs)
+		}
+		if stat.MemoryUsedValid {
+			writeGaugeWithLabels(&buf, "techulus_service_memory_used_bytes", labels, stat.MemoryUsedBytes, timestampMs)
+		}
 		writeGaugeWithLabels(&buf, "techulus_service_network_receive_bytes_total", labels, stat.NetworkReceiveBytes, timestampMs)
 		writeGaugeWithLabels(&buf, "techulus_service_network_transmit_bytes_total", labels, stat.NetworkTransmitBytes, timestampMs)
 	}
@@ -123,12 +145,22 @@ func aggregateContainerStats(stats []container.ResourceStats) []serviceResourceS
 		}
 		aggregate := byService[stat.ServiceID]
 		if aggregate == nil {
-			aggregate = &serviceResourceStats{ServiceID: stat.ServiceID}
+			// Resource values are sums, so partial coverage must omit the aggregate
+			// rather than report a lower, misleading service value.
+			aggregate = &serviceResourceStats{
+				ServiceID:        stat.ServiceID,
+				CPUUsageValid:    true,
+				MemoryUsageValid: true,
+				MemoryUsedValid:  true,
+			}
 			byService[stat.ServiceID] = aggregate
 		}
 		aggregate.CPUUsagePercent += stat.CPUUsagePercent
+		aggregate.CPUUsageValid = aggregate.CPUUsageValid && stat.CPUUsageValid
 		aggregate.MemoryUsagePercent += stat.MemoryUsagePercent
+		aggregate.MemoryUsageValid = aggregate.MemoryUsageValid && stat.MemoryUsageValid
 		aggregate.MemoryUsedBytes += stat.MemoryUsedBytes
+		aggregate.MemoryUsedValid = aggregate.MemoryUsedValid && stat.MemoryUsedValid
 		aggregate.NetworkReceiveBytes += stat.NetworkReceiveBytes
 		aggregate.NetworkTransmitBytes += stat.NetworkTransmitBytes
 	}

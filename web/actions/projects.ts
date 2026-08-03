@@ -1010,6 +1010,12 @@ export async function updateServiceResourceLimits(
 	if (!service) {
 		throw new Error("Service not found");
 	}
+	if (
+		service.autoscalingEnabled &&
+		(validated.cpuCores === null || validated.memoryMb === null)
+	) {
+		throw new Error("Disable autoscaling before removing resource limits");
+	}
 
 	await db.transaction(async (tx) => {
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
@@ -1086,6 +1092,9 @@ export async function updateServiceServerlessSettings(
 		}
 
 		if (validated.enabled) {
+			if (service.autoscalingEnabled) {
+				throw new Error("Disable autoscaling before enabling serverless");
+			}
 			const publicHttpPorts = await tx
 				.select({ id: servicePorts.id })
 				.from(servicePorts)
@@ -1172,15 +1181,33 @@ export type ServiceConfigUpdate = {
 	placement?:
 		| { mode: "automatic"; replicas: number }
 		| {
+				mode: "automatic";
+				autoscaling: { minReplicas: number; maxReplicas: number };
+		  }
+		| {
 				mode: "manual";
 				placements: { serverId: string; count: number }[];
 		  };
 };
 
-const placementInputSchema = z.discriminatedUnion("mode", [
+const autoscalingRangeSchema = z
+	.strictObject({
+		minReplicas: z.number().int().min(1).max(32),
+		maxReplicas: z.number().int().min(1).max(32),
+	})
+	.refine((value) => value.minReplicas <= value.maxReplicas, {
+		message: "Minimum replicas cannot exceed maximum replicas",
+		path: ["minReplicas"],
+	});
+
+const placementInputSchema = z.union([
 	z.strictObject({
 		mode: z.literal("automatic"),
 		replicas: z.number().int().min(1).max(32),
+	}),
+	z.strictObject({
+		mode: z.literal("automatic"),
+		autoscaling: autoscalingRangeSchema,
 	}),
 	z
 		.strictObject({
@@ -1407,6 +1434,8 @@ export async function updateServiceConfig(
 					serverlessEnabled: services.serverlessEnabled,
 					stateful: services.stateful,
 					placementMode: services.placementMode,
+					resourceCpuLimit: services.resourceCpuLimit,
+					resourceMemoryLimitMb: services.resourceMemoryLimitMb,
 				})
 				.from(services)
 				.where(eq(services.id, serviceId))
@@ -1423,9 +1452,39 @@ export async function updateServiceConfig(
 					throw new Error(
 						"Automatic placement is not supported for stateful services or services with volumes",
 					);
+				if ("autoscaling" in placement) {
+					if (currentService.serverlessEnabled)
+						throw new Error("Disable serverless before enabling autoscaling");
+					if (
+						currentService.resourceCpuLimit === null ||
+						currentService.resourceMemoryLimitMb === null
+					)
+						throw new Error(
+							"Set both CPU and memory limits before enabling autoscaling",
+						);
+				}
+				const replicas =
+					"autoscaling" in placement
+						? Math.min(
+								placement.autoscaling.maxReplicas,
+								Math.max(placement.autoscaling.minReplicas, service.replicas),
+							)
+						: placement.replicas;
 				await tx
 					.update(services)
-					.set({ placementMode: "automatic", replicas: placement.replicas })
+					.set({
+						placementMode: "automatic",
+						replicas,
+						autoscalingEnabled: "autoscaling" in placement,
+						autoscalingMinReplicas:
+							"autoscaling" in placement
+								? placement.autoscaling.minReplicas
+								: replicas,
+						autoscalingMaxReplicas:
+							"autoscaling" in placement
+								? placement.autoscaling.maxReplicas
+								: replicas,
+					})
 					.where(eq(services.id, serviceId));
 				await tx
 					.delete(serviceReplicas)
@@ -1470,6 +1529,7 @@ export async function updateServiceConfig(
 				.set({
 					placementMode: "manual",
 					replicas: replicas.reduce((sum, replica) => sum + replica.count, 0),
+					autoscalingEnabled: false,
 				})
 				.where(eq(services.id, serviceId));
 			await tx

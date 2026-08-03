@@ -100,7 +100,7 @@ const METRIC_NAMES = {
 	diskUsedBytes: "techulus_node_disk_used_bytes",
 } as const;
 
-function getQueryEndpoint(): EndpointConfig | undefined {
+export function getQueryEndpoint(): EndpointConfig | undefined {
 	const endpoint =
 		process.env.VICTORIA_METRICS_PRIVATE_URL ||
 		process.env.VICTORIA_METRICS_URL;
@@ -577,7 +577,7 @@ async function queryRangeMetric(
 		}))
 		.filter((point) => Number.isFinite(point.value));
 }
-async function queryRangePromQL(
+export async function queryRangePromQL(
 	endpoint: EndpointConfig,
 	options: {
 		query: string;
@@ -744,7 +744,7 @@ function normalizeHTTPStatusFamily(code: string | undefined): string {
 	return `${code.charAt(0)}xx`;
 }
 
-function escapePromQL(value: string) {
+export function escapePromQL(value: string) {
 	return value
 		.replace(/\\/g, "\\\\")
 		.replace(/"/g, '\\"')

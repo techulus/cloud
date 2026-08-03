@@ -35,6 +35,10 @@ export type ServiceRevisionPlacementIntent =
 	| { mode: "manual" }
 	| { mode: "automatic"; replicas: number };
 
+export type ServiceAutoscalingPolicy =
+	| { enabled: false }
+	| { enabled: true; minReplicas: number; maxReplicas: number };
+
 export type ServiceRevisionPort = {
 	containerPort: number;
 	isPublic: boolean;
@@ -167,6 +171,7 @@ export type ServiceRevisionSpec = {
 		memoryMb: number | null;
 	};
 	placement: ServiceRevisionPlacementIntent;
+	autoscaling?: ServiceAutoscalingPolicy;
 	placements: ServiceRevisionPlacement[];
 	ports: ServiceRevisionPort[];
 	secrets: ServiceRevisionSecret[];
@@ -193,6 +198,9 @@ export type ServiceRevisionDraft = {
 		resourceMemoryLimitMb: number | null;
 		placementMode?: "manual" | "automatic" | null;
 		replicas?: number;
+		autoscalingEnabled?: boolean | null;
+		autoscalingMinReplicas?: number | null;
+		autoscalingMaxReplicas?: number | null;
 	};
 	placements: Array<{ serverId: string; count: number }>;
 	ports: Array<{
@@ -241,6 +249,33 @@ function validateServiceRevisionSpec(
 	if (totalReplicas > 32) {
 		throw new Error("Maximum 32 replicas allowed");
 	}
+	if (specification.autoscaling?.enabled) {
+		const { minReplicas, maxReplicas } = specification.autoscaling;
+		if (
+			!Number.isInteger(minReplicas) ||
+			!Number.isInteger(maxReplicas) ||
+			minReplicas < 1 ||
+			maxReplicas > 32 ||
+			minReplicas > maxReplicas
+		) {
+			throw new Error(
+				"Autoscaling range must satisfy 1 <= minimum <= maximum <= 32",
+			);
+		}
+		if (specification.placement.mode !== "automatic")
+			throw new Error("Autoscaling requires automatic placement");
+		if (specification.stateful)
+			throw new Error("Autoscaling is not supported for stateful services");
+		if (specification.serverless.enabled)
+			throw new Error("Autoscaling is not supported for serverless services");
+		if (specification.volumes.length > 0)
+			throw new Error("Autoscaling is not supported for services with volumes");
+		if (
+			specification.resourceLimits.cpuCores === null ||
+			specification.resourceLimits.memoryMb === null
+		)
+			throw new Error("Autoscaling requires both CPU and memory limits");
+	}
 	if (
 		specification.placement.mode === "automatic" &&
 		specification.placements.length
@@ -285,6 +320,19 @@ export function buildServiceRevisionSpec(
 ): ServiceRevisionSpec {
 	const { service } = draft;
 	const image = overrides.image?.trim() || service.image.trim();
+	const autoscaling = service.autoscalingEnabled
+		? {
+				enabled: true as const,
+				minReplicas: service.autoscalingMinReplicas ?? 1,
+				maxReplicas: service.autoscalingMaxReplicas ?? 1,
+			}
+		: undefined;
+	const replicas = autoscaling
+		? Math.min(
+				autoscaling.maxReplicas,
+				Math.max(autoscaling.minReplicas, service.replicas ?? 1),
+			)
+		: (service.replicas ?? 1);
 
 	const specification: ServiceRevisionSpec = {
 		schemaVersion: SERVICE_REVISION_SCHEMA_VERSION,
@@ -318,8 +366,9 @@ export function buildServiceRevisionSpec(
 		},
 		placement:
 			service.placementMode === "automatic"
-				? { mode: "automatic", replicas: service.replicas ?? 1 }
+				? { mode: "automatic", replicas }
 				: { mode: "manual" },
+		autoscaling,
 		placements: (service.placementMode === "automatic" ? [] : draft.placements)
 			.filter((placement) => placement.count > 0)
 			.map((placement) => ({

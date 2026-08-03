@@ -9,6 +9,33 @@ Each service can run multiple replicas across your cluster. Configure how many r
 
 Replica count ranges from 1 to 32 per service.
 
+Automatic placement supports two replica-management modes:
+
+- **Fixed** keeps the configured replica count running.
+- **Autoscaled** keeps the active count within a configured minimum and maximum
+  from 1 through 32. CPU and memory each use a fixed 60% target; thresholds are
+  not configurable.
+
+Autoscaling is available only for automatic-placement, stateless,
+non-serverless services without volumes. Both CPU and memory limits must be
+configured because utilization is measured against those limits. Saving stages
+the policy; deploying snapshots it into the immutable revision and activates it.
+
+The controller evaluates trailing three-minute CPU and memory averages every
+minute. Scale-down additionally requires five minutes of complete low-usage
+observations. Missing or stale metrics hold the current count. A scaling attempt
+starts a ten-minute cooldown, including failed attempts.
+
+Autoscaling V1 scales up directly to the CPU- or memory-based recommendation.
+After stabilization, it scales down one replica at a time. Each change uses the
+normal rolling full-fleet replacement. Existing containers remain active until
+the complete replacement fleet is healthy and routing has converged, but this
+can temporarily require both the old and replacement capacity and can reset
+long-lived connections.
+
+Changing the configured range clamps an active count outside the new bounds
+directly to the nearest bound in one rollout.
+
 ## Serverless scaling
 
 Public HTTP services can be configured to sleep when idle on proxy nodes. A
@@ -42,9 +69,9 @@ Serverless services require at least one configured replica.
 ## Placement
 
 Stateless services support automatic and manual placement. Automatic placement
-stores the desired replica count and distributes replicas across online,
-configured nodes during rollout. Manual placement selects exact target servers
-and replica counts.
+stores either a fixed count or an autoscaling range and distributes the concrete
+replica target across online, configured nodes during rollout. Manual placement
+selects exact target servers and replica counts.
 
 Serverless services support automatic placement across online, configured proxy
 nodes. Public ingress must use health checks to avoid proxy nodes that do not

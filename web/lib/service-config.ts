@@ -1,5 +1,6 @@
 import {
 	getServiceRevisionTotalReplicas,
+	type ServiceAutoscalingPolicy,
 	type ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
 
@@ -55,6 +56,7 @@ export type ResourceLimitsConfig = {
 export type PlacementConfig = {
 	mode?: "manual" | "automatic";
 	replicas: number;
+	autoscaling?: ServiceAutoscalingPolicy;
 };
 
 export type ServerlessConfig = {
@@ -128,6 +130,9 @@ export function buildCurrentConfig(
 		resourceMemoryLimitMb: number | null;
 		replicas: number;
 		placementMode?: "manual" | "automatic" | null;
+		autoscalingEnabled?: boolean | null;
+		autoscalingMinReplicas?: number | null;
+		autoscalingMaxReplicas?: number | null;
 		stateful?: boolean | null;
 		serverlessEnabled?: boolean | null;
 		serverlessSleepAfterSeconds?: number | null;
@@ -161,6 +166,13 @@ export function buildCurrentConfig(
 		placement: {
 			mode: placementMode,
 			replicas: replicaCount,
+			autoscaling: service.autoscalingEnabled
+				? {
+						enabled: true,
+						minReplicas: service.autoscalingMinReplicas ?? 1,
+						maxReplicas: service.autoscalingMaxReplicas ?? 1,
+					}
+				: undefined,
 		},
 		replicas: replicas.map((r) => ({
 			serverId: r.serverId,
@@ -411,6 +423,21 @@ export function diffConfigs(
 		deployedPlacementMode === "automatic" &&
 		currentPlacementMode === "automatic"
 	) {
+		const deployedAutoscaling = deployed.placement?.autoscaling;
+		const currentAutoscaling = current.placement?.autoscaling;
+		if (
+			JSON.stringify(deployedAutoscaling) !== JSON.stringify(currentAutoscaling)
+		) {
+			const describe = (policy: ServiceAutoscalingPolicy | undefined) =>
+				policy?.enabled
+					? `${policy.minReplicas}-${policy.maxReplicas}`
+					: "Disabled";
+			changes.push({
+				field: "Autoscaling",
+				from: describe(deployedAutoscaling),
+				to: describe(currentAutoscaling),
+			});
+		}
 		if (deployed.placement?.replicas !== current.placement?.replicas) {
 			changes.push({
 				field: "Desired replicas",
@@ -706,6 +733,7 @@ export function revisionSpecToDeployedConfig(
 		placement: {
 			mode: specification.placement.mode,
 			replicas: replicaCount,
+			autoscaling: specification.autoscaling,
 		},
 		replicas: specification.placements.map((placement) => ({
 			serverId: placement.serverId,

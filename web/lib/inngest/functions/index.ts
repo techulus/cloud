@@ -3,6 +3,7 @@ export { buildTriggerWorkflow } from "./build-trigger-workflow";
 export { buildWorkflow } from "./build-workflow";
 export {
 	agentUpgradeTimeoutCheck,
+	autoscalingCheck,
 	certificateRenewal,
 	challengeCleanup,
 	controlPlaneUpdateCheck,

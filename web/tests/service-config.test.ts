@@ -301,6 +301,25 @@ describe("service config", () => {
 		});
 	});
 
+	it("reports autoscaling policy changes as pending config", () => {
+		const fixed = deployedConfig({
+			placement: { mode: "automatic", replicas: 2 },
+		});
+		const autoscaled = deployedConfig({
+			placement: {
+				mode: "automatic",
+				replicas: 2,
+				autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8 },
+			},
+		});
+
+		expect(diffConfigs(fixed, autoscaled)).toContainEqual({
+			field: "Autoscaling",
+			from: "Disabled",
+			to: "2-8",
+		});
+	});
+
 	it("requires a build when the Dockerfile path is added, updated, or removed", () => {
 		const dockerfileSecret = {
 			key: TECHULUS_DOCKERFILE_PATH,

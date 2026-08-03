@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 
-import { safeConfiguration } from "@/lib/public-api";
+import { placementSchema, safeConfiguration } from "@/lib/public-api";
 
 describe("public API configuration state", () => {
 	beforeEach(() => {
@@ -119,5 +119,41 @@ describe("public API configuration state", () => {
 		});
 		expect(configuration.current.replicas).toBe(4);
 		expect(configuration.current.placements).toEqual([]);
+	});
+
+	it("serializes autoscaling placement that the replacement schema accepts", async () => {
+		mocks.rows.push([], [], [], [], []);
+		const configuration = await safeConfiguration({
+			id: "service-1",
+			name: "Autoscaled",
+			sourceType: "image",
+			image: "nginx",
+			hostname: null,
+			stateful: false,
+			placementMode: "automatic",
+			replicas: 4,
+			autoscalingEnabled: true,
+			autoscalingMinReplicas: 2,
+			autoscalingMaxReplicas: 8,
+			healthCheckCmd: null,
+			startCommand: null,
+			resourceCpuLimit: 1,
+			resourceMemoryLimitMb: 512,
+			serverlessEnabled: false,
+			serverlessSleepAfterSeconds: 300,
+			serverlessWakeTimeoutSeconds: 300,
+			deploymentSchedule: null,
+			backupEnabled: false,
+			backupSchedule: null,
+		} as never);
+
+		expect(configuration.current.placement).toEqual({
+			mode: "automatic",
+			replicas: 4,
+			autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8 },
+		});
+		expect(
+			placementSchema.safeParse(configuration.current.placement).success,
+		).toBe(true);
 	});
 });
