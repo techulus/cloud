@@ -13,7 +13,7 @@ export default function NotificationsPage() {
 			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
 				<div>
 					<h1 className="text-2xl font-semibold">Notifications</h1>
-					<p className="text-muted-foreground">
+					<p className="text-sm text-muted-foreground">
 						Operational alerts for your infrastructure
 					</p>
 				</div>

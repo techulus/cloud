@@ -107,6 +107,7 @@ export function NotificationsList() {
 			<div className="flex justify-end">
 				<Button
 					variant="outline"
+					size="sm"
 					disabled={!unreadCount || mutating !== null}
 					onClick={() => void markRead()}
 				>
@@ -124,7 +125,7 @@ export function NotificationsList() {
 					>
 						<span
 							className={cn(
-								"mt-1 size-2 shrink-0 rounded-full",
+								"mt-1.5 size-2 shrink-0 rounded-full",
 								item.readAt ? "bg-muted" : "bg-primary",
 							)}
 						/>
@@ -133,12 +134,12 @@ export function NotificationsList() {
 								<Link
 									href={item.href}
 									onClick={() => !item.readAt && void markRead(item.id)}
-									className="font-medium hover:underline"
+									className="text-sm font-medium hover:underline"
 								>
 									{item.title}
 								</Link>
 							) : (
-								<p className="font-medium">{item.title}</p>
+								<p className="text-sm font-medium">{item.title}</p>
 							)}
 							<p className="text-sm text-muted-foreground">{item.body}</p>
 							<time
@@ -151,8 +152,9 @@ export function NotificationsList() {
 						</div>
 						{!item.readAt && (
 							<Button
-								size="sm"
+								size="xs"
 								variant="ghost"
+								className="self-center"
 								disabled={mutating !== null}
 								onClick={() => void markRead(item.id)}
 							>
@@ -166,6 +168,7 @@ export function NotificationsList() {
 				<div className="flex justify-center">
 					<Button
 						variant="outline"
+						size="sm"
 						disabled={isValidating}
 						onClick={() => void setSize(size + 1)}
 					>
