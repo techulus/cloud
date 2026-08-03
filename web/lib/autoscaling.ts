@@ -11,6 +11,7 @@ const STABILIZATION_MINUTES = 5;
 
 export type AutoscalingHoldReason =
 	| "metrics-disabled"
+	| "metrics-not-queried"
 	| "no-active-deployments"
 	| "provider-error"
 	| "unexpected-series"
@@ -144,7 +145,7 @@ export function calculateAutoscalingRecommendation(options: {
 	currentReplicas: number;
 	minReplicas: number;
 	maxReplicas: number;
-	metrics: AutoscalingMetricResult;
+	metrics?: AutoscalingMetricResult;
 }): AutoscalingRecommendation {
 	const { currentReplicas, minReplicas, maxReplicas } = options;
 	if (currentReplicas < minReplicas)
@@ -158,9 +159,11 @@ export function calculateAutoscalingRecommendation(options: {
 		return {
 			status: "scale",
 			direction: "down",
-			targetReplicas: currentReplicas - 1,
+			targetReplicas: maxReplicas,
 			reason: "above-maximum",
 		};
+	if (!options.metrics)
+		return { status: "hold", reason: "metrics-not-queried" };
 	if (options.metrics.status === "hold") return options.metrics;
 	const recommendations = options.metrics.points.map((point) => ({
 		cpu: resourceRecommendation(currentReplicas, point.cpuUtilizationPercent),
@@ -208,11 +211,14 @@ function toSeriesMap(
 	results: MatrixResult[],
 ): Map<string, Map<number, number>> {
 	const output = new Map<string, Map<number, number>>();
+	const duplicates = new Set<string>();
 	for (const result of results) {
 		const deploymentId = result.metric.deployment_id;
 		if (!deploymentId) continue;
+		if (duplicates.has(deploymentId)) continue;
 		if (output.has(deploymentId)) {
 			output.delete(deploymentId);
+			duplicates.add(deploymentId);
 			continue;
 		}
 		output.set(

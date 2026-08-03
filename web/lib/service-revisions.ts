@@ -530,8 +530,12 @@ export async function cloneActiveRevisionForAutoscaling(input: {
 		const scalesDownOne =
 			autoscaling?.enabled === true &&
 			targetDelta === -1 &&
-			(active.length > autoscaling.maxReplicas ||
-				input.targetReplicas >= autoscaling.minReplicas);
+			active.length <= autoscaling.maxReplicas &&
+			input.targetReplicas >= autoscaling.minReplicas;
+		const clampsToMaximum =
+			autoscaling?.enabled === true &&
+			active.length > autoscaling.maxReplicas &&
+			input.targetReplicas === autoscaling.maxReplicas;
 		if (
 			specification.placement.mode !== "automatic" ||
 			!autoscaling?.enabled ||
@@ -540,7 +544,7 @@ export async function cloneActiveRevisionForAutoscaling(input: {
 			specification.placement.replicas !== active.length ||
 			input.targetReplicas < 1 ||
 			input.targetReplicas > 32 ||
-			(!scalesUpWithinPolicy && !scalesDownOne)
+			(!scalesUpWithinPolicy && !scalesDownOne && !clampsToMaximum)
 		)
 			return { created: false, reason: "stale-policy" } as const;
 

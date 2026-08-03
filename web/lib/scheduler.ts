@@ -192,7 +192,7 @@ export async function runAutoscalingController(
 				current < spec.autoscaling.minReplicas ||
 				current > spec.autoscaling.maxReplicas;
 			const metrics = outsideBounds
-				? ({ status: "hold", reason: "incomplete-coverage" } as const)
+				? undefined
 				: await queryAutoscalingMetrics({
 						serviceId: service.id,
 						deploymentIds: state.map((item) => item.deploymentId),

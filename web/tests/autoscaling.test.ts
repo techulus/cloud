@@ -57,14 +57,12 @@ describe("calculateAutoscalingRecommendation", () => {
 		);
 	});
 
-	it("jumps to the minimum but converges down from above the maximum one replica at a time", () => {
-		const metrics = { status: "hold", reason: "provider-error" } as const;
+	it("clamps directly to policy bounds without metrics", () => {
 		expect(
 			calculateAutoscalingRecommendation({
 				currentReplicas: 1,
 				minReplicas: 4,
 				maxReplicas: 8,
-				metrics,
 			}),
 		).toMatchObject({ targetReplicas: 4, reason: "below-minimum" });
 		expect(
@@ -72,9 +70,18 @@ describe("calculateAutoscalingRecommendation", () => {
 				currentReplicas: 10,
 				minReplicas: 2,
 				maxReplicas: 8,
-				metrics,
 			}),
-		).toMatchObject({ targetReplicas: 9, reason: "above-maximum" });
+		).toMatchObject({ targetReplicas: 8, reason: "above-maximum" });
+	});
+
+	it("reports when metrics were not queried within policy bounds", () => {
+		expect(
+			calculateAutoscalingRecommendation({
+				currentReplicas: 4,
+				minReplicas: 2,
+				maxReplicas: 8,
+			}),
+		).toEqual({ status: "hold", reason: "metrics-not-queried" });
 	});
 
 	it("clamps direct scale-up recommendations to the maximum", () => {
@@ -265,5 +272,44 @@ describe("queryAutoscalingMetrics", () => {
 				now: new Date("2026-08-02T12:00:00Z"),
 			}),
 		).resolves.toEqual({ status: "hold", reason });
+	});
+
+	it("holds coverage after any number of duplicate deployment series", async () => {
+		process.env.VICTORIA_METRICS_URL = "http://metrics.test";
+		const end = Date.parse("2026-08-02T12:00:00Z") / 1000;
+		const times = Array.from(
+			{ length: 6 },
+			(_, index) => end - 300 + index * 60,
+		);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL) => {
+				const query = new URL(String(input)).searchParams.get("query") ?? "";
+				const timestampQuery = query.startsWith("tlast_over_time");
+				return new Response(
+					JSON.stringify({
+						status: "success",
+						data: {
+							result: Array.from({ length: 3 }, () => ({
+								metric: { deployment_id: "dep" },
+								values: times.map((time) => [
+									time,
+									String(timestampQuery ? time : 1),
+								]),
+							})),
+						},
+					}),
+				);
+			}),
+		);
+		await expect(
+			queryAutoscalingMetrics({
+				serviceId: "svc",
+				deploymentIds: ["dep"],
+				cpuLimitCores: 1,
+				memoryLimitMb: 100,
+				now: new Date("2026-08-02T12:00:00Z"),
+			}),
+		).resolves.toEqual({ status: "hold", reason: "incomplete-coverage" });
 	});
 });
