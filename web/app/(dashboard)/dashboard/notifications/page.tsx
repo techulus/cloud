@@ -10,7 +10,7 @@ export default function NotificationsPage() {
 					{ label: "Notifications", href: "/dashboard/notifications" },
 				]}
 			/>
-			<div className="container mx-auto max-w-4xl space-y-6 px-4 py-6">
+			<div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
 				<div>
 					<h1 className="text-2xl font-semibold">Notifications</h1>
 					<p className="text-muted-foreground">
