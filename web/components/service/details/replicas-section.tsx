@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
 	Server as ServerType,
@@ -134,8 +135,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 			placementMode !== service.placementMode
 		)
 			return;
-		if (placementMode === "automatic" && desiredReplicas === service.replicas) {
-			setIsEditing(false);
+		if (placementMode === "automatic") {
+			const autoscalingMatches =
+				(replicaManagement === "autoscaled") === service.autoscalingEnabled &&
+				(replicaManagement !== "autoscaled" ||
+					(autoscalingRange[0] === service.autoscalingMinReplicas &&
+						autoscalingRange[1] === service.autoscalingMaxReplicas));
+			if (desiredReplicas === service.replicas && autoscalingMatches) {
+				setIsEditing(false);
+			}
 			return;
 		}
 		if (placementMode === "manual") {
@@ -157,11 +165,16 @@ export const ReplicasSection = memo(function ReplicasSection({
 	}, [
 		configuredReplicas,
 		desiredReplicas,
+		replicaManagement,
+		autoscalingRange,
 		isEditing,
 		localReplicas,
 		placementMode,
 		service.placementMode,
 		service.replicas,
+		service.autoscalingEnabled,
+		service.autoscalingMinReplicas,
+		service.autoscalingMaxReplicas,
 		service.stateful,
 	]);
 
@@ -446,24 +459,24 @@ export const ReplicasSection = memo(function ReplicasSection({
 
 				{placementMode === "automatic" ? (
 					<div className="space-y-4">
-						<Tabs
-							value={replicaManagement}
-							onValueChange={(value) => {
-								setIsEditing(true);
-								setReplicaManagement(value as ReplicaManagement);
-							}}
-						>
-							<TabsList aria-label="Replica management">
-								<TabsTrigger value="fixed">Fixed</TabsTrigger>
-								<TabsTrigger
-									value="autoscaled"
-									disabled={!!autoscalingIneligibility}
-								>
-									Autoscaled
-								</TabsTrigger>
-							</TabsList>
-						</Tabs>
-						{autoscalingIneligibility ? (
+						<div className="flex max-w-xl items-center justify-between gap-6">
+							<div className="space-y-1">
+								<p className="text-sm font-medium">Autoscaling</p>
+								<p className="text-sm text-muted-foreground">
+									Adjusts replicas within your selected range using average CPU
+									and memory usage. Uses fixed 60% targets.
+								</p>
+							</div>
+							<Switch
+								checked={replicaManagement === "autoscaled"}
+								onCheckedChange={(checked) => {
+									setIsEditing(true);
+									setReplicaManagement(checked ? "autoscaled" : "fixed");
+								}}
+								aria-label="Enable autoscaling"
+							/>
+						</div>
+						{replicaManagement === "autoscaled" && autoscalingIneligibility ? (
 							<p className="text-sm text-amber-600 dark:text-amber-400">
 								{autoscalingIneligibility}
 							</p>
@@ -490,8 +503,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 									}}
 								/>
 								<p className="text-sm text-muted-foreground">
-									Scales at fixed 60% CPU and memory targets. Each change
-									performs a rolling full-fleet replacement.
+									Scaling changes perform a rolling full-fleet replacement.
 								</p>
 							</div>
 						) : (
@@ -531,7 +543,15 @@ export const ReplicasSection = memo(function ReplicasSection({
 						)}
 						{hasChanges ? (
 							<div className="pt-3 border-t">
-								<Button onClick={handleSave} disabled={isSaving} size="sm">
+								<Button
+									onClick={handleSave}
+									disabled={
+										isSaving ||
+										(replicaManagement === "autoscaled" &&
+											!!autoscalingIneligibility)
+									}
+									size="sm"
+								>
 									{isSaving ? "Saving..." : "Save"}
 								</Button>
 							</div>
