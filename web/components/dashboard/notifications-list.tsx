@@ -152,8 +152,8 @@ export function NotificationsList() {
 						</div>
 						{!item.readAt && (
 							<Button
-								size="icon-xs"
-								variant="ghost"
+								size="icon-sm"
+								variant="outline"
 								className="self-center"
 								disabled={mutating !== null}
 								onClick={() => void markRead(item.id)}
