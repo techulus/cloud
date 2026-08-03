@@ -125,7 +125,7 @@ export function NotificationsList() {
 					>
 						<span
 							className={cn(
-								"mt-1.5 size-2 shrink-0 rounded-full",
+								"mt-2 size-2 shrink-0 rounded-full",
 								item.readAt ? "bg-muted" : "bg-primary",
 							)}
 						/>
