@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { getEmailAlertsConfig } from "@/db/queries";
 import {
 	environments,
 	notifications,
@@ -8,9 +9,12 @@ import {
 	services,
 	user,
 } from "@/db/schema";
+import { subtractUtcDays } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import type { NotificationEvent } from "@/lib/inngest/events/notification";
+
+const READ_NOTIFICATION_RETENTION_DAYS = 30;
 
 export async function notify(event: NotificationEvent) {
 	return inngest.send(
@@ -18,6 +22,22 @@ export async function notify(event: NotificationEvent) {
 			id: `notification-${event.kind}-${event.occurrenceId}`,
 		}),
 	);
+}
+
+export async function notificationEventIsEnabled(event: NotificationEvent) {
+	if (event.kind === "member.invited") return true;
+
+	const config = await getEmailAlertsConfig();
+	switch (event.kind) {
+		case "server.offline":
+			return config?.serverOfflineAlert !== false;
+		case "manual_recovery.required":
+			return config?.deploymentMovedAlert !== false;
+		case "build.failed":
+			return config?.buildFailure !== false;
+		case "deployment.failed":
+			return config?.deploymentFailure !== false;
+	}
 }
 
 async function serviceContext(serviceId: string) {
@@ -71,6 +91,7 @@ export async function renderInAppNotification(event: NotificationEvent) {
 }
 
 export async function deliverInAppNotification(event: NotificationEvent) {
+	if (!(await notificationEventIsEnabled(event))) return;
 	const rendered = await renderInAppNotification(event);
 	if (!rendered) return;
 	const recipients = await db
@@ -92,4 +113,21 @@ export async function deliverInAppNotification(event: NotificationEvent) {
 		.onConflictDoNothing({
 			target: [notifications.eventId, notifications.userId],
 		});
+}
+
+export async function cleanupReadNotifications(now = new Date()) {
+	const cutoff = subtractUtcDays(now, READ_NOTIFICATION_RETENTION_DAYS);
+	const result = await db
+		.delete(notifications)
+		.where(
+			and(isNotNull(notifications.readAt), lt(notifications.readAt, cutoff)),
+		);
+	const deletedCount = result.rowCount ?? 0;
+
+	if (deletedCount > 0) {
+		console.log(
+			`[notifications] deleted ${deletedCount} old read notifications`,
+		);
+	}
+	return deletedCount;
 }

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 		expiredDeletedServicesPurge: { id: "expired-deleted-services-purge" },
 		migrationWorkflow: { id: "migration-workflow" },
 		notificationDelivery: { id: "notification-delivery" },
+		notificationRetention: { id: "notification-retention" },
 		oldBackupsCleanup: { id: "old-backups-cleanup" },
 		onDeploymentFailed: { id: "on-deployment-failed" },
 		onRestoreFailed: { id: "on-restore-failed" },
