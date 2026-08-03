@@ -31,22 +31,23 @@ const ALERT_SETTINGS: AlertSetting[] = [
 	{
 		field: "serverOfflineAlert",
 		label: "Server Offline Alert",
-		description: "Receive an email when a server goes offline",
+		description: "Receive a notification when a server goes offline",
 	},
 	{
 		field: "buildFailure",
 		label: "Build Failure Alert",
-		description: "Receive an email when a build fails",
+		description: "Receive a notification when a build fails",
 	},
 	{
 		field: "deploymentFailure",
 		label: "Deployment Failure Alert",
-		description: "Receive an email when a deployment fails",
+		description: "Receive a notification when a deployment fails",
 	},
 	{
 		field: "deploymentMovedAlert",
 		label: "Manual Recovery Alert",
-		description: "Receive an email when offline replicas need manual recovery",
+		description:
+			"Receive a notification when offline replicas need manual recovery",
 	},
 ];
 
@@ -134,8 +135,8 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 				</Item>
 				<div className="p-4 space-y-4">
 					<p className="text-sm text-muted-foreground">
-						Configure which email notifications you want to receive. SMTP
-						settings are configured via environment variables.
+						Configure which notifications you want to receive. Email delivery
+						requires SMTP settings configured via environment variables.
 					</p>
 
 					<div className="space-y-4">

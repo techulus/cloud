@@ -7,6 +7,7 @@ export {
 	certificateRenewal,
 	challengeCleanup,
 	controlPlaneUpdateCheck,
+	notificationRetention,
 	oldBackupsCleanup,
 	registryArtifactRetention,
 	scheduledBackupsCheck,

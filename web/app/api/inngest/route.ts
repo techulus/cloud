@@ -12,6 +12,7 @@ import {
 	expiredDeletedServicesPurge,
 	migrationWorkflow,
 	notificationDelivery,
+	notificationRetention,
 	oldBackupsCleanup,
 	onDeploymentFailed,
 	onRestoreFailed,
@@ -54,5 +55,6 @@ export const { GET, POST, PUT } = serve({
 		serviceRestoreWorkflow,
 		expiredDeletedServicesPurge,
 		notificationDelivery,
+		notificationRetention,
 	],
 });

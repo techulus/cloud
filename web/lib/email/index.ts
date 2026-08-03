@@ -4,7 +4,7 @@ import type { Transporter } from "nodemailer";
 import nodemailer from "nodemailer";
 import type { ReactElement } from "react";
 import { db } from "@/db";
-import { getEmailAlertsConfig, getSmtpConfig } from "@/db/queries";
+import { getSmtpConfig } from "@/db/queries";
 import {
 	environments,
 	memberInvitations,
@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { formatDateTimeUtc } from "@/lib/date";
 import type { NotificationEvent } from "@/lib/inngest/events/notification";
+import { notificationEventIsEnabled } from "@/lib/notifications";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { Alert } from "./templates/alert";
 import { MemberInvitation } from "./templates/member-invitation";
@@ -360,16 +361,9 @@ export async function getNotificationEmailRecipients(
 
 	if (event.kind === "member.invited") return [event.to];
 
-	const alertsConfig = await getEmailAlertsConfig();
-	const enabled =
-		(event.kind === "server.offline" &&
-			alertsConfig?.serverOfflineAlert !== false) ||
-		(event.kind === "manual_recovery.required" &&
-			alertsConfig?.deploymentMovedAlert !== false) ||
-		(event.kind === "build.failed" && alertsConfig?.buildFailure !== false) ||
-		(event.kind === "deployment.failed" &&
-			alertsConfig?.deploymentFailure !== false);
-	return enabled ? parseAlertEmails(config.alertEmails) : [];
+	return (await notificationEventIsEnabled(event))
+		? parseAlertEmails(config.alertEmails)
+		: [];
 }
 
 async function invitationIsDeliverable(event: NotificationEvent) {
