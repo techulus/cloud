@@ -19,6 +19,7 @@ export function NotificationBell() {
 		<Button
 			variant="ghost"
 			size="icon"
+			nativeButton={false}
 			className="relative"
 			render={<Link href="/dashboard/notifications" />}
 			aria-label={
