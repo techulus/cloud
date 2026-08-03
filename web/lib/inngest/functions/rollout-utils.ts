@@ -2,7 +2,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
-import { sendDeploymentFailureAlert } from "@/lib/email";
+import { notify } from "@/lib/notifications";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
@@ -84,13 +84,15 @@ export async function handleRolloutFailure(
 	if (!applied) return;
 
 	if (rolloutDeployments.length === 0) {
-		sendDeploymentFailureAlert({
+		notify({
+			kind: "deployment.failed",
+			occurrenceId: rolloutId,
 			serviceId,
 			serverId: null,
 			failedStage: reason,
 		}).catch((error) => {
 			console.error(
-				"[rollout:failure] failed to send deployment failure alert:",
+				"[rollout:failure] failed to enqueue deployment failure notification:",
 				error,
 			);
 		});
@@ -99,13 +101,15 @@ export async function handleRolloutFailure(
 
 	const serverId = rolloutDeployments[0].serverId;
 
-	sendDeploymentFailureAlert({
+	notify({
+		kind: "deployment.failed",
+		occurrenceId: rolloutId,
 		serviceId,
 		serverId,
 		failedStage: reason,
 	}).catch((error) => {
 		console.error(
-			"[rollout:failure] failed to send deployment failure alert:",
+			"[rollout:failure] failed to enqueue deployment failure notification:",
 			error,
 		);
 	});

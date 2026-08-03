@@ -1,12 +1,19 @@
 import { render } from "@react-email/render";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import type { Transporter } from "nodemailer";
 import nodemailer from "nodemailer";
 import type { ReactElement } from "react";
 import { db } from "@/db";
 import { getEmailAlertsConfig, getSmtpConfig } from "@/db/queries";
-import { environments, projects, servers, services } from "@/db/schema";
+import {
+	environments,
+	memberInvitations,
+	projects,
+	servers,
+	services,
+} from "@/db/schema";
 import { formatDateTimeUtc } from "@/lib/date";
+import type { NotificationEvent } from "@/lib/inngest/events/notification";
 import type { SmtpConfig } from "@/lib/settings-keys";
 import { Alert } from "./templates/alert";
 import { MemberInvitation } from "./templates/member-invitation";
@@ -67,7 +74,7 @@ type MemberInviteEmailOptions = {
 	inviteUrl: string;
 };
 
-export async function sendMemberInviteEmail(
+async function sendMemberInviteEmail(
 	options: MemberInviteEmailOptions,
 ): Promise<boolean> {
 	const config = getSmtpConfig();
@@ -103,6 +110,7 @@ function parseAlertEmails(alertEmails: string): string[] {
 }
 
 type AlertOptions = {
+	to: string;
 	subject: string;
 	template: ReactElement;
 };
@@ -110,40 +118,22 @@ type AlertOptions = {
 async function sendAlert(options: AlertOptions): Promise<void> {
 	const config = getSmtpConfig();
 
-	if (!config?.enabled || !config.alertEmails) {
+	if (!config?.enabled) {
 		return;
 	}
 
-	const recipients = parseAlertEmails(config.alertEmails);
-	if (recipients.length === 0) {
-		return;
-	}
-
-	await Promise.all(
-		recipients.map((email) =>
-			sendEmail(config, {
-				to: email,
-				subject: options.subject,
-				template: options.template,
-			}),
-		),
-	);
+	await sendEmail(config, options);
 }
 
 type ServerOfflineAlertOptions = {
+	to: string;
 	serverName: string;
 	serverIp?: string;
 };
 
-export async function sendServerOfflineAlert(
+async function sendServerOfflineAlert(
 	options: ServerOfflineAlertOptions,
 ): Promise<void> {
-	const alertsConfig = await getEmailAlertsConfig();
-
-	if (alertsConfig?.serverOfflineAlert === false) {
-		return;
-	}
-
 	const baseUrl = getAppBaseUrl();
 	const dashboardUrl = baseUrl ? `${baseUrl}/dashboard` : undefined;
 
@@ -156,6 +146,7 @@ export async function sendServerOfflineAlert(
 	];
 
 	await sendAlert({
+		to: options.to,
 		subject: `Alert: Server "${options.serverName}" is offline`,
 		template: Alert({
 			bannerText: "SERVER OFFLINE",
@@ -171,6 +162,7 @@ export async function sendServerOfflineAlert(
 }
 
 type ManualRecoveryRequiredAlertOptions = {
+	to: string;
 	serverId: string;
 	serverName: string;
 	serverIp?: string;
@@ -178,15 +170,9 @@ type ManualRecoveryRequiredAlertOptions = {
 	serviceNames: string[];
 };
 
-export async function sendManualRecoveryRequiredAlert(
+async function sendManualRecoveryRequiredAlert(
 	options: ManualRecoveryRequiredAlertOptions,
 ): Promise<void> {
-	const alertsConfig = await getEmailAlertsConfig();
-
-	if (alertsConfig?.deploymentMovedAlert === false) {
-		return;
-	}
-
 	const baseUrl = getAppBaseUrl();
 	const serverUrl = baseUrl
 		? `${baseUrl}/dashboard/servers/${options.serverId}`
@@ -207,6 +193,7 @@ export async function sendManualRecoveryRequiredAlert(
 	];
 
 	await sendAlert({
+		to: options.to,
 		subject: `Manual recovery required for "${options.serverName}"`,
 		template: Alert({
 			bannerText: "MANUAL RECOVERY REQUIRED",
@@ -221,20 +208,15 @@ export async function sendManualRecoveryRequiredAlert(
 }
 
 type BuildFailureAlertOptions = {
+	to: string;
 	serviceId: string;
 	buildId: string;
 	error?: string;
 };
 
-export async function sendBuildFailureAlert(
+async function sendBuildFailureAlert(
 	options: BuildFailureAlertOptions,
 ): Promise<void> {
-	const alertsConfig = await getEmailAlertsConfig();
-
-	if (alertsConfig?.buildFailure === false) {
-		return;
-	}
-
 	const [result] = await db
 		.select({
 			serviceName: services.name,
@@ -264,6 +246,7 @@ export async function sendBuildFailureAlert(
 	];
 
 	await sendAlert({
+		to: options.to,
 		subject: `Build Failed: ${result.serviceName}`,
 		template: Alert({
 			bannerText: "BUILD FAILED",
@@ -278,20 +261,15 @@ export async function sendBuildFailureAlert(
 }
 
 type DeploymentFailureAlertOptions = {
+	to: string;
 	serviceId: string;
 	serverId: string | null;
 	failedStage?: string;
 };
 
-export async function sendDeploymentFailureAlert(
+async function sendDeploymentFailureAlert(
 	options: DeploymentFailureAlertOptions,
 ): Promise<void> {
-	const alertsConfig = await getEmailAlertsConfig();
-
-	if (alertsConfig?.deploymentFailure === false) {
-		return;
-	}
-
 	let serviceName: string;
 	let projectName: string;
 	let projectSlug: string;
@@ -360,6 +338,7 @@ export async function sendDeploymentFailureAlert(
 	];
 
 	await sendAlert({
+		to: options.to,
 		subject: `Deployment Failed: ${serviceName}`,
 		template: Alert({
 			bannerText: "DEPLOYMENT FAILED",
@@ -371,4 +350,63 @@ export async function sendDeploymentFailureAlert(
 			baseUrl,
 		}),
 	});
+}
+
+export async function getNotificationEmailRecipients(
+	event: NotificationEvent,
+): Promise<string[]> {
+	const config = getSmtpConfig();
+	if (!config?.enabled) return [];
+
+	if (event.kind === "member.invited") return [event.to];
+
+	const alertsConfig = await getEmailAlertsConfig();
+	const enabled =
+		(event.kind === "server.offline" &&
+			alertsConfig?.serverOfflineAlert !== false) ||
+		(event.kind === "manual_recovery.required" &&
+			alertsConfig?.deploymentMovedAlert !== false) ||
+		(event.kind === "build.failed" && alertsConfig?.buildFailure !== false) ||
+		(event.kind === "deployment.failed" &&
+			alertsConfig?.deploymentFailure !== false);
+	return enabled ? parseAlertEmails(config.alertEmails) : [];
+}
+
+async function invitationIsDeliverable(event: NotificationEvent) {
+	if (event.kind !== "member.invited") return true;
+	const [pendingInvitation] = await db
+		.select({ id: memberInvitations.id })
+		.from(memberInvitations)
+		.where(
+			and(
+				eq(memberInvitations.id, event.occurrenceId),
+				eq(memberInvitations.status, "pending"),
+				gt(memberInvitations.expiresAt, new Date()),
+			),
+		)
+		.limit(1);
+	return Boolean(pendingInvitation);
+}
+
+export async function deliverNotificationEmail(
+	event: NotificationEvent,
+	to: string,
+): Promise<void> {
+	switch (event.kind) {
+		case "member.invited":
+			if (!(await invitationIsDeliverable(event))) return;
+			await sendMemberInviteEmail({ ...event, to });
+			return;
+		case "server.offline":
+			await sendServerOfflineAlert({ ...event, to });
+			return;
+		case "manual_recovery.required":
+			await sendManualRecoveryRequiredAlert({ ...event, to });
+			return;
+		case "build.failed":
+			await sendBuildFailureAlert({ ...event, to });
+			return;
+		case "deployment.failed":
+			await sendDeploymentFailureAlert({ ...event, to });
+	}
 }

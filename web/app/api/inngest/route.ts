@@ -10,6 +10,7 @@ import {
 	controlPlaneUpdateCheck,
 	expiredDeletedServicesPurge,
 	migrationWorkflow,
+	notificationDelivery,
 	oldBackupsCleanup,
 	onDeploymentFailed,
 	onRestoreFailed,
@@ -50,5 +51,6 @@ export const { GET, POST, PUT } = serve({
 		serviceDeletionWorkflow,
 		serviceRestoreWorkflow,
 		expiredDeletedServicesPurge,
+		notificationDelivery,
 	],
 });

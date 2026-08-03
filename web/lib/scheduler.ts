@@ -18,13 +18,10 @@ import {
 } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
-	sendManualRecoveryRequiredAlert,
-	sendServerOfflineAlert,
-} from "@/lib/email";
-import {
 	distributeReplicas,
 	resolveRevisionPlacements,
 } from "@/lib/inngest/functions/rollout-helpers";
+import { notify } from "@/lib/notifications";
 import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { cloneActiveRevisionAndQueueSystemRollout } from "@/lib/service-revisions";
@@ -305,9 +302,10 @@ export async function recoverInvalidAutomaticPlacements(
 }
 
 async function triggerRecoveryForOfflineServers(
-	offlineServerIds: string[],
+	offlineServers: Array<{ id: string; occurrenceIdentity: string }>,
 	maxCreated: number,
 ): Promise<number> {
+	const offlineServerIds = offlineServers.map((server) => server.id);
 	if (offlineServerIds.length === 0 || maxCreated <= 0) return 0;
 
 	const affectedDeployments = await db
@@ -426,7 +424,13 @@ async function triggerRecoveryForOfflineServers(
 		console.log(
 			`[scheduler] server ${impact.serverName} went offline with ${impact.impactedReplicas} active replica(s); manual recovery required`,
 		);
-		sendManualRecoveryRequiredAlert({
+		const occurrenceIdentity = offlineServers.find(
+			(server) => server.id === serverId,
+		)?.occurrenceIdentity;
+		if (!occurrenceIdentity) continue;
+		notify({
+			kind: "manual_recovery.required",
+			occurrenceId: `manual-recovery-${occurrenceIdentity}`,
 			serverId,
 			serverName: impact.serverName,
 			serverIp: impact.serverIp,
@@ -434,7 +438,7 @@ async function triggerRecoveryForOfflineServers(
 			serviceNames: [...impact.serviceNames],
 		}).catch((error) => {
 			console.error(
-				`[scheduler] failed to send manual recovery alert for ${impact.serverName}:`,
+				`[scheduler] failed to enqueue manual recovery notification for ${impact.serverName}:`,
 				error,
 			);
 		});
@@ -465,29 +469,37 @@ export async function checkAndRecoverStaleServers(
 			name: servers.name,
 			publicIp: servers.publicIp,
 			wireguardIp: servers.wireguardIp,
+			lastHeartbeat: servers.lastHeartbeat,
 		});
 
 	if (markedOffline.length === 0) return 0;
 
-	const offlineIds = markedOffline.map((s) => s.id);
+	const offlineServers = markedOffline.map((server) => ({
+		id: server.id,
+		occurrenceIdentity: `${server.id}-${server.lastHeartbeat?.toISOString() ?? "unknown"}`,
+	}));
 	console.log(
-		`[scheduler] marked ${offlineIds.length} stale servers offline, triggering recovery`,
+		`[scheduler] marked ${offlineServers.length} stale servers offline, triggering recovery`,
 	);
 
 	for (const server of markedOffline) {
-		sendServerOfflineAlert({
+		const occurrenceIdentity = `${server.id}-${server.lastHeartbeat?.toISOString() ?? "unknown"}`;
+		notify({
+			kind: "server.offline",
+			occurrenceId: `server-offline-${occurrenceIdentity}`,
+			serverId: server.id,
 			serverName: server.name,
 			serverIp: server.wireguardIp || server.publicIp || undefined,
 		}).catch((error) => {
 			console.error(
-				`[scheduler] failed to send offline alert for ${server.name}:`,
+				`[scheduler] failed to enqueue offline notification for ${server.name}:`,
 				error,
 			);
 		});
 	}
 
 	return triggerRecoveryForOfflineServers(
-		offlineIds,
+		offlineServers,
 		MAX_AUTOMATIC_RECOVERIES_PER_RUN,
 	);
 }

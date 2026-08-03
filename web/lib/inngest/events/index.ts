@@ -3,6 +3,7 @@ import { eventType, staticSchema } from "inngest";
 export type { BackupEvents } from "./backup";
 export type { BuildEvents } from "./build";
 export type { MigrationEvents } from "./migration";
+export type { NotificationEvent, NotificationEvents } from "./notification";
 export type { ResourceEvents } from "./resource";
 export type { RestoreEvents } from "./restore";
 export type { RolloutEvents } from "./rollout";
@@ -11,6 +12,7 @@ export type { ServiceDeletionEvents } from "./service-deletion";
 import type { BackupEvents } from "./backup";
 import type { BuildEvents } from "./build";
 import type { MigrationEvents } from "./migration";
+import type { NotificationEvents } from "./notification";
 import type { ResourceEvents } from "./resource";
 import type { RestoreEvents } from "./restore";
 import type { RolloutEvents } from "./rollout";
@@ -22,7 +24,8 @@ export type Events = RolloutEvents &
 	RestoreEvents &
 	BuildEvents &
 	ServiceDeletionEvents &
-	ResourceEvents;
+	ResourceEvents &
+	NotificationEvents;
 
 type EventName = keyof Events & string;
 type EventData<TName extends EventName> = Events[TName]["data"];
@@ -57,4 +60,5 @@ export const inngestEvents = {
 	buildCompleted: defineEvent("build/completed"),
 	manifestCompleted: defineEvent("manifest/completed"),
 	manifestFailed: defineEvent("manifest/failed"),
+	notificationRequested: defineEvent("notification/requested"),
 };

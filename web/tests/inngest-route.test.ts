@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
 		controlPlaneUpdateCheck: { id: "control-plane-update-check" },
 		expiredDeletedServicesPurge: { id: "expired-deleted-services-purge" },
 		migrationWorkflow: { id: "migration-workflow" },
+		notificationDelivery: { id: "notification-delivery" },
 		oldBackupsCleanup: { id: "old-backups-cleanup" },
 		onDeploymentFailed: { id: "on-deployment-failed" },
 		onRestoreFailed: { id: "on-restore-failed" },

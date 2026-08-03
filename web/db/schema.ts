@@ -213,6 +213,41 @@ export const memberInvitations = pgTable(
 	],
 );
 
+export const notifications = pgTable(
+	"notifications",
+	{
+		id: text("id").primaryKey(),
+		eventId: text("event_id").notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		kind: text("kind").notNull(),
+		title: text("title").notNull(),
+		body: text("body").notNull(),
+		href: text("href"),
+		readAt: timestamp("read_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("notifications_user_read_created_idx").on(
+			table.userId,
+			table.readAt,
+			table.createdAt,
+		),
+		index("notifications_user_created_id_idx").on(
+			table.userId,
+			table.createdAt,
+			table.id,
+		),
+		uniqueIndex("notifications_event_user_unique_idx").on(
+			table.eventId,
+			table.userId,
+		),
+	],
+);
+
 export const userRelations = relations(user, ({ many, one }) => ({
 	sessions: many(session),
 	accounts: many(account),
@@ -224,6 +259,14 @@ export const userRelations = relations(user, ({ many, one }) => ({
 	}),
 	acceptedMemberInvitations: many(memberInvitations, {
 		relationName: "acceptedMemberInvitations",
+	}),
+	notifications: many(notifications),
+}));
+
+export const notificationRelations = relations(notifications, ({ one }) => ({
+	user: one(user, {
+		fields: [notifications.userId],
+		references: [user.id],
 	}),
 }));
 
