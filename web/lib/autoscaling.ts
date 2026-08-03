@@ -151,7 +151,7 @@ export function calculateAutoscalingRecommendation(options: {
 		return {
 			status: "scale",
 			direction: "up",
-			targetReplicas: currentReplicas + 1,
+			targetReplicas: minReplicas,
 			reason: "below-minimum",
 		};
 	if (currentReplicas > maxReplicas)
@@ -176,7 +176,7 @@ export function calculateAutoscalingRecommendation(options: {
 		return {
 			status: "scale",
 			direction: "up",
-			targetReplicas: Math.min(maxReplicas, currentReplicas + 1),
+			targetReplicas: Math.min(maxReplicas, desiredUp),
 			reason: "utilization",
 		};
 	if (latest.cpu >= currentReplicas || latest.memory >= currentReplicas)

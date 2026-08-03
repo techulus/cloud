@@ -519,24 +519,28 @@ export async function cloneActiveRevisionForAutoscaling(input: {
 		const source = active[0];
 		if (!source) return { created: false, reason: "stale-topology" } as const;
 		const specification = parseServiceRevisionSpec(source.specification);
+		const autoscaling = specification.autoscaling;
+		const targetDelta = input.targetReplicas - active.length;
+		const scalesUpWithinPolicy =
+			autoscaling?.enabled === true &&
+			targetDelta > 0 &&
+			input.targetReplicas <= autoscaling.maxReplicas &&
+			(active.length >= autoscaling.minReplicas ||
+				input.targetReplicas >= autoscaling.minReplicas);
+		const scalesDownOne =
+			autoscaling?.enabled === true &&
+			targetDelta === -1 &&
+			(active.length > autoscaling.maxReplicas ||
+				input.targetReplicas >= autoscaling.minReplicas);
 		if (
 			specification.placement.mode !== "automatic" ||
-			!specification.autoscaling?.enabled ||
-			specification.autoscaling.minReplicas !== input.expectedMinReplicas ||
-			specification.autoscaling.maxReplicas !== input.expectedMaxReplicas ||
+			!autoscaling?.enabled ||
+			autoscaling.minReplicas !== input.expectedMinReplicas ||
+			autoscaling.maxReplicas !== input.expectedMaxReplicas ||
 			specification.placement.replicas !== active.length ||
 			input.targetReplicas < 1 ||
 			input.targetReplicas > 32 ||
-			Math.abs(input.targetReplicas - active.length) !== 1 ||
-			(active.length < specification.autoscaling.minReplicas &&
-				input.targetReplicas <= active.length) ||
-			(active.length > specification.autoscaling.maxReplicas &&
-				input.targetReplicas >= active.length) ||
-			(active.length >= specification.autoscaling.minReplicas &&
-				active.length <= specification.autoscaling.maxReplicas &&
-				(input.targetReplicas < specification.autoscaling.minReplicas ||
-					input.targetReplicas > specification.autoscaling.maxReplicas)) ||
-			input.targetReplicas === specification.placement.replicas
+			(!scalesUpWithinPolicy && !scalesDownOne)
 		)
 			return { created: false, reason: "stale-policy" } as const;
 

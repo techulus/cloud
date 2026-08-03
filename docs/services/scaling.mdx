@@ -26,7 +26,8 @@ minute. Scale-down additionally requires five minutes of complete low-usage
 observations. Missing or stale metrics hold the current count. A scaling attempt
 starts a ten-minute cooldown, including failed attempts.
 
-Autoscaling V1 changes the concrete target one replica at a time through the
+Autoscaling V1 scales up directly to the CPU- or memory-based recommendation.
+After stabilization, it scales down one replica at a time. Each change uses the
 normal rolling full-fleet replacement. Existing containers remain active until
 the complete replacement fleet is healthy and routing has converged, but this
 can temporarily require both the old and replacement capacity and can reset

@@ -29,7 +29,7 @@ describe("calculateAutoscalingRecommendation", () => {
 				maxReplicas: 10,
 				metrics: ready(30, 90),
 			}),
-		).toMatchObject({ status: "scale", direction: "up", targetReplicas: 5 });
+		).toMatchObject({ status: "scale", direction: "up", targetReplicas: 6 });
 		expect(
 			calculateAutoscalingRecommendation({
 				currentReplicas: 4,
@@ -57,7 +57,7 @@ describe("calculateAutoscalingRecommendation", () => {
 		);
 	});
 
-	it("converges bounds without metrics and changes only one replica", () => {
+	it("jumps to the minimum but converges down from above the maximum one replica at a time", () => {
 		const metrics = { status: "hold", reason: "provider-error" } as const;
 		expect(
 			calculateAutoscalingRecommendation({
@@ -66,7 +66,7 @@ describe("calculateAutoscalingRecommendation", () => {
 				maxReplicas: 8,
 				metrics,
 			}),
-		).toMatchObject({ targetReplicas: 2, reason: "below-minimum" });
+		).toMatchObject({ targetReplicas: 4, reason: "below-minimum" });
 		expect(
 			calculateAutoscalingRecommendation({
 				currentReplicas: 10,
@@ -75,6 +75,28 @@ describe("calculateAutoscalingRecommendation", () => {
 				metrics,
 			}),
 		).toMatchObject({ targetReplicas: 9, reason: "above-maximum" });
+	});
+
+	it("clamps direct scale-up recommendations to the maximum", () => {
+		expect(
+			calculateAutoscalingRecommendation({
+				currentReplicas: 4,
+				minReplicas: 1,
+				maxReplicas: 8,
+				metrics: ready(200, 30),
+			}),
+		).toMatchObject({ status: "scale", direction: "up", targetReplicas: 8 });
+	});
+
+	it("continues scaling down only one replica after stabilization", () => {
+		expect(
+			calculateAutoscalingRecommendation({
+				currentReplicas: 8,
+				minReplicas: 1,
+				maxReplicas: 10,
+				metrics: ready(30, 30),
+			}),
+		).toMatchObject({ status: "scale", direction: "down", targetReplicas: 7 });
 	});
 
 	it("clamps utilization actions and propagates incomplete coverage", () => {
