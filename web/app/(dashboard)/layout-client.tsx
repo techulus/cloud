@@ -11,6 +11,7 @@ import {
 } from "@/components/core/breadcrumb-data";
 import { DashboardCommandMenu } from "@/components/dashboard/dashboard-command-menu";
 import { DashboardPageSkeleton } from "@/components/dashboard/dashboard-page-skeleton";
+import { NotificationBell } from "@/components/dashboard/notification-bell";
 import { OfflineServersBanner } from "@/components/server/offline-servers-banner";
 import {
 	DropdownMenu,
@@ -108,6 +109,7 @@ function DashboardHeader({ email, name }: { email: string; name: string }) {
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<DashboardCommandMenu />
+					<NotificationBell />
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							className="flex items-center rounded-md p-2 hover:bg-accent transition-colors cursor-pointer"

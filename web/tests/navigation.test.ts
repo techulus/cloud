@@ -19,10 +19,11 @@ describe("dashboard navigation catalog", () => {
 			[{ id: "server-1", name: "edge-01" }],
 		);
 
-		expect(items).toHaveLength(18);
+		expect(items).toHaveLength(19);
 		expect(items.map((item) => item.href)).toEqual(
 			expect.arrayContaining([
 				"/dashboard",
+				"/dashboard/notifications",
 				"/dashboard/settings",
 				"/dashboard/projects/acme/settings",
 				"/dashboard/projects/acme/production",
@@ -42,6 +43,12 @@ describe("dashboard navigation catalog", () => {
 				"/dashboard/servers/server-1/settings",
 			]),
 		);
+		expect(
+			items.find((item) => item.id === "page:notifications"),
+		).toMatchObject({
+			label: "Notifications",
+			keywords: ["alert", "inbox", "activity"],
+		});
 
 		const serviceLogs = items.find(
 			(item) => item.id === "service:service-1:logs",

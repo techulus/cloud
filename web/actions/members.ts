@@ -12,12 +12,12 @@ import { account, memberInvitations, user } from "@/db/schema";
 import type { InvitableMemberRole } from "@/db/types";
 import { requireAdminRole } from "@/lib/auth";
 import { addMilliseconds, DAY_IN_MILLISECONDS, isExpired } from "@/lib/date";
-import { sendMemberInviteEmail } from "@/lib/email";
 import {
 	createInviteToken,
 	hashInviteToken,
 	isInvitableMemberRole,
 } from "@/lib/members";
+import { notify } from "@/lib/notifications";
 
 const INVITE_EXPIRY_MS = 7 * DAY_IN_MILLISECONDS;
 
@@ -168,8 +168,9 @@ export async function inviteMember(input: {
 	const inviteUrl = `${baseUrl}/invite/${encodeURIComponent(token)}`;
 	const expiresAt = addMilliseconds(new Date(), INVITE_EXPIRY_MS);
 
+	const invitationId = randomUUID();
 	await db.insert(memberInvitations).values({
-		id: randomUUID(),
+		id: invitationId,
 		email,
 		role: parsed.data.role,
 		tokenHash: hashInviteToken(token),
@@ -178,7 +179,9 @@ export async function inviteMember(input: {
 		expiresAt,
 	});
 
-	const emailSent = await sendMemberInviteEmail({
+	await notify({
+		kind: "member.invited",
+		occurrenceId: invitationId,
 		to: email,
 		inviterName: session.user.name,
 		role: parsed.data.role,
@@ -186,7 +189,7 @@ export async function inviteMember(input: {
 	});
 
 	revalidatePath("/dashboard/settings");
-	return { success: true as const, inviteUrl, emailSent };
+	return { success: true as const, inviteUrl, deliveryQueued: true as const };
 }
 
 export async function revokeInvitation(invitationId: string) {
