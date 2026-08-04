@@ -3,7 +3,13 @@ import { notFound } from "next/navigation";
 import { BuildDetails } from "@/components/builds/build-details";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { db } from "@/db";
-import { builds, projects, serviceRevisions, services } from "@/db/schema";
+import {
+	builds,
+	projects,
+	servers,
+	serviceRevisions,
+	services,
+} from "@/db/schema";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 async function getBuild(
@@ -27,13 +33,18 @@ async function getBuild(
 
 	if (!service) return null;
 
-	const build = await db
-		.select()
+	const buildData = await db
+		.select({
+			build: builds,
+			server: { id: servers.id, name: servers.name },
+		})
 		.from(builds)
+		.leftJoin(servers, eq(builds.claimedBy, servers.id))
 		.where(and(eq(builds.id, buildId), eq(builds.serviceId, serviceId)))
 		.then((r) => r[0]);
 
-	if (!build) return null;
+	if (!buildData) return null;
+	const { build, server } = buildData;
 
 	const revision = await db
 		.select({ specification: serviceRevisions.specification })
@@ -63,6 +74,7 @@ async function getBuild(
 		project,
 		service,
 		build,
+		server,
 		githubRepo,
 	};
 }
@@ -108,6 +120,7 @@ export default async function BuildPage({
 				envName={env}
 				service={data.service}
 				build={data.build}
+				server={data.server}
 				githubRepo={data.githubRepo}
 			/>
 		</>

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds } from "@/db/schema";
+import { builds, servers } from "@/db/schema";
 
 export async function GET(
 	_: NextRequest,
@@ -9,11 +9,18 @@ export async function GET(
 ) {
 	const { buildId } = await params;
 
-	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
+	const [buildData] = await db
+		.select({
+			build: builds,
+			server: { id: servers.id, name: servers.name },
+		})
+		.from(builds)
+		.leftJoin(servers, eq(builds.claimedBy, servers.id))
+		.where(eq(builds.id, buildId));
 
-	if (!build) {
+	if (!buildData) {
 		return NextResponse.json({ error: "Build not found" }, { status: 404 });
 	}
 
-	return NextResponse.json({ build });
+	return NextResponse.json(buildData);
 }
