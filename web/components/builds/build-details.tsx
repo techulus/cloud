@@ -42,6 +42,8 @@ type BuildWithDates = Omit<
 	claimedAt: string | Date | null;
 };
 
+type BuildServer = { id: string; name: string };
+
 const STATUS_CONFIG: Record<
 	BuildStatus,
 	{
@@ -97,28 +99,31 @@ export function BuildDetails({
 	envName,
 	service,
 	build: initialBuild,
+	server: initialServer,
 	githubRepo,
 }: {
 	projectSlug: string;
 	envName: string;
 	service: Pick<Service, "id" | "name">;
 	build: BuildWithDates;
+	server: BuildServer | null;
 	githubRepo: { repoFullName: string } | null;
 }) {
 	const router = useRouter();
 	const [isCancelling, setIsCancelling] = useState(false);
 	const [isRetrying, setIsRetrying] = useState(false);
 
-	const { data } = useSWR<{ build: BuildWithDates }>(
-		`/api/builds/${initialBuild.id}`,
-		fetcher,
-		{
-			fallbackData: { build: initialBuild },
-			refreshInterval: isActiveBuild(initialBuild.status) ? 1500 : 0,
-		},
-	);
+	const { data } = useSWR<{
+		build: BuildWithDates;
+		server: BuildServer | null;
+	}>(`/api/builds/${initialBuild.id}`, fetcher, {
+		fallbackData: { build: initialBuild, server: initialServer },
+		refreshInterval: (latestData) =>
+			isActiveBuild(latestData?.build.status ?? initialBuild.status) ? 1500 : 0,
+	});
 
 	const build = data?.build || initialBuild;
+	const server = data ? data.server : initialServer;
 	const config = STATUS_CONFIG[build.status];
 	const isAnimated = ["cloning", "building", "pushing"].includes(build.status);
 
@@ -244,12 +249,23 @@ export function BuildDetails({
 						<ItemDescription>
 							{build.commitMessage?.split("\n")[0] || "No message"}
 						</ItemDescription>
-						<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+						<div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
 							<span className="flex items-center gap-1">
 								<GitBranch className="size-3" />
 								{build.branch}
 							</span>
 							{build.author && <span>by {build.author}</span>}
+							{server && (
+								<span>
+									on{" "}
+									<Link
+										href={`/dashboard/servers/${server.id}`}
+										className="hover:text-foreground hover:underline"
+									>
+										{server.name}
+									</Link>
+								</span>
+							)}
 						</div>
 					</ItemContent>
 				</Item>
