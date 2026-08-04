@@ -2,11 +2,15 @@ import { desc, eq, getTableColumns } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { builds, servers } from "@/db/schema";
+import { requireRequestSession } from "@/lib/api-auth";
 
 export async function GET(
-	_request: NextRequest,
+	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
+	const sessionResult = await requireRequestSession(request);
+	if (!sessionResult.ok) return sessionResult.response;
+
 	const { id: serviceId } = await params;
 
 	const buildsList = await db
