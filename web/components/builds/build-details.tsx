@@ -249,12 +249,23 @@ export function BuildDetails({
 						<ItemDescription>
 							{build.commitMessage?.split("\n")[0] || "No message"}
 						</ItemDescription>
-						<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+						<div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
 							<span className="flex items-center gap-1">
 								<GitBranch className="size-3" />
 								{build.branch}
 							</span>
 							{build.author && <span>by {build.author}</span>}
+							{server && (
+								<span>
+									on{" "}
+									<Link
+										href={`/dashboard/servers/${server.id}`}
+										className="hover:text-foreground hover:underline"
+									>
+										{server.name}
+									</Link>
+								</span>
+							)}
 						</div>
 					</ItemContent>
 				</Item>
@@ -262,17 +273,6 @@ export function BuildDetails({
 				<Item variant="outline">
 					<ItemContent>
 						<ItemDescription as="div" className="space-y-1">
-							{server && (
-								<div className="flex justify-between">
-									<span>Build server</span>
-									<Link
-										href={`/dashboard/servers/${server.id}`}
-										className="text-foreground hover:underline"
-									>
-										{server.name}
-									</Link>
-								</div>
-							)}
 							<div className="flex justify-between">
 								<span>Created</span>
 								<span>{formatRelativeTime(build.createdAt)}</span>
