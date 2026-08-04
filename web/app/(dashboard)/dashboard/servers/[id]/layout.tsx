@@ -25,7 +25,7 @@ export default async function ServerLayout({
 					{ label: server.name, href: `/dashboard/servers/${id}` },
 				]}
 			/>
-			<ServerTabs serverId={id} />
+			<ServerTabs serverId={id} isProxy={server.isProxy} />
 			{children}
 		</>
 	);
