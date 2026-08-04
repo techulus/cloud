@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
 	type AgentHealth,
 	type ContainerHealth,
+	type CrowdSecHealth,
 	deployments,
 	type NetworkHealth,
 	rollouts,
@@ -654,6 +655,7 @@ export type StatusReport = {
 	networkHealth?: NetworkHealth;
 	containerHealth?: ContainerHealth;
 	agentHealth?: AgentHealth;
+	crowdsecHealth?: CrowdSecHealth;
 	deploymentErrors?: DeploymentError[];
 };
 
@@ -695,6 +697,9 @@ export async function applyStatusReport(
 	}
 	if (report.containerHealth) {
 		updateData.containerHealth = report.containerHealth;
+	}
+	if (report.crowdsecHealth) {
+		updateData.crowdsecHealth = report.crowdsecHealth;
 	}
 	if (report.agentHealth) {
 		updateData.agentHealth = report.agentHealth;

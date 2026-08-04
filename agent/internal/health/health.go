@@ -1,6 +1,10 @@
 package health
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -54,6 +58,64 @@ type AgentHealthInfo struct {
 	UptimeSecs      int64  `json:"uptimeSecs"`
 	LastSyncSuccess bool   `json:"lastSyncSuccess"`
 	LastSyncAt      string `json:"lastSyncAt"`
+}
+
+type CrowdSecHealth struct {
+	CheckedAt string                   `json:"checkedAt"`
+	LAPI      CrowdSecAvailability     `json:"lapi"`
+	Metrics   CrowdSecMetrics          `json:"metrics"`
+	Bouncer   CrowdSecBouncer          `json:"bouncer"`
+	Decisions CrowdSecDecisionSnapshot `json:"decisions"`
+	Alerts    CrowdSecAlertSnapshot    `json:"alerts"`
+}
+
+type CrowdSecAvailability struct {
+	Available bool `json:"available"`
+}
+
+type CrowdSecMetrics struct {
+	Available bool  `json:"available"`
+	Reads     int64 `json:"reads"`
+	Parsed    int64 `json:"parsed"`
+	Unparsed  int64 `json:"unparsed"`
+}
+
+type CrowdSecBouncer struct {
+	Available  bool   `json:"available"`
+	Error      string `json:"error,omitempty"`
+	Registered bool   `json:"registered"`
+	Revoked    bool   `json:"revoked"`
+	LastPullAt string `json:"lastPullAt,omitempty"`
+}
+
+type CrowdSecDecision struct {
+	Scope     string `json:"scope"`
+	Value     string `json:"value"`
+	Action    string `json:"action"`
+	Reason    string `json:"reason"`
+	Origin    string `json:"origin"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+}
+
+type CrowdSecDecisionSnapshot struct {
+	Available bool               `json:"available"`
+	Truncated bool               `json:"truncated"`
+	Records   []CrowdSecDecision `json:"records"`
+}
+
+type CrowdSecAlert struct {
+	ID         int64  `json:"id"`
+	DetectedAt string `json:"detectedAt"`
+	Scenario   string `json:"scenario"`
+	SourceIP   string `json:"sourceIp"`
+	Country    string `json:"country"`
+	EventCount int64  `json:"eventCount"`
+}
+
+type CrowdSecAlertSnapshot struct {
+	Available bool            `json:"available"`
+	Truncated bool            `json:"truncated"`
+	Records   []CrowdSecAlert `json:"records"`
 }
 
 var (
@@ -269,4 +331,189 @@ func CollectContainerHealth() *ContainerHealth {
 	}
 
 	return health
+}
+
+const crowdSecCollectionTimeout = 10 * time.Second
+
+func CollectCrowdSecHealth() *CrowdSecHealth {
+	health := &CrowdSecHealth{
+		CheckedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Decisions: CrowdSecDecisionSnapshot{Records: []CrowdSecDecision{}},
+		Alerts:    CrowdSecAlertSnapshot{Records: []CrowdSecAlert{}},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), crowdSecCollectionTimeout)
+	defer cancel()
+
+	_, err := runCrowdSec(ctx, "lapi", "status")
+	health.LAPI.Available = err == nil
+
+	if output, err := runCrowdSec(ctx, "metrics", "-o", "json"); err == nil {
+		parseCrowdSecMetrics(output, &health.Metrics)
+	}
+	if output, err := runCrowdSec(ctx, "bouncers", "list", "-o", "json"); err != nil {
+		health.Bouncer.Error = "command_failed"
+	} else if !parseCrowdSecBouncer(output, &health.Bouncer) {
+		health.Bouncer.Error = "invalid_output"
+	}
+	if output, err := runCrowdSec(ctx, "decisions", "list", "--no-simu", "--limit", "51", "-o", "json"); err == nil {
+		parseCrowdSecDecisions(output, &health.Decisions)
+	}
+	if output, err := runCrowdSec(ctx, "alerts", "list", "--since", "24h", "--limit", "21", "-o", "json"); err == nil {
+		parseCrowdSecAlerts(output, &health.Alerts)
+	}
+	return health
+}
+
+type cappedBuffer struct {
+	bytes.Buffer
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	const limit = 1024 * 1024
+	remaining := limit - b.Len()
+	if remaining <= 0 {
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		_, _ = b.Buffer.Write(p[:remaining])
+		return len(p), nil
+	}
+	return b.Buffer.Write(p)
+}
+
+func runCrowdSec(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "cscli", args...)
+	var output cappedBuffer
+	cmd.Stdout = &output
+	cmd.Stderr = io.Discard
+	err := cmd.Run()
+	return output.Bytes(), err
+}
+
+func parseCrowdSecMetrics(data []byte, result *CrowdSecMetrics) {
+	type acquisitionMetrics struct {
+		Reads    int64 `json:"reads"`
+		Parsed   int64 `json:"parsed"`
+		Unparsed int64 `json:"unparsed"`
+	}
+	var root struct {
+		Acquisition json.RawMessage `json:"acquisition"`
+	}
+	if json.Unmarshal(data, &root) != nil || len(root.Acquisition) == 0 {
+		return
+	}
+
+	var acquisitions map[string]acquisitionMetrics
+	if json.Unmarshal(root.Acquisition, &acquisitions) == nil {
+		for source, metrics := range acquisitions {
+			if strings.Contains(strings.ToLower(source), "traefik") {
+				result.Available = true
+				result.Reads += metrics.Reads
+				result.Parsed += metrics.Parsed
+				result.Unparsed += metrics.Unparsed
+			}
+		}
+		return
+	}
+
+	// Older CrowdSec releases exposed acquisition metrics as table-like rows.
+	var rows []struct {
+		Source  string `json:"source"`
+		Name    string `json:"name"`
+		Metrics struct {
+			Reads    int64 `json:"lines_read"`
+			Parsed   int64 `json:"lines_parsed"`
+			Unparsed int64 `json:"lines_unparsed"`
+		} `json:"metrics"`
+	}
+	if json.Unmarshal(root.Acquisition, &rows) != nil {
+		return
+	}
+	for _, acquisition := range rows {
+		if strings.Contains(strings.ToLower(acquisition.Source+" "+acquisition.Name), "traefik") {
+			result.Available = true
+			result.Reads += acquisition.Metrics.Reads
+			result.Parsed += acquisition.Metrics.Parsed
+			result.Unparsed += acquisition.Metrics.Unparsed
+		}
+	}
+}
+
+func parseCrowdSecBouncer(data []byte, result *CrowdSecBouncer) bool {
+	var bouncers []struct {
+		Name     string  `json:"name"`
+		Revoked  bool    `json:"revoked"`
+		LastPull *string `json:"last_pull"`
+	}
+	if json.Unmarshal(data, &bouncers) != nil {
+		return false
+	}
+	result.Available = true
+	for _, bouncer := range bouncers {
+		if bouncer.Name == "traefik-bouncer" {
+			result.Registered = true
+			result.Revoked = bouncer.Revoked
+			if bouncer.LastPull != nil {
+				result.LastPullAt = *bouncer.LastPull
+			}
+			break
+		}
+	}
+	return true
+}
+
+func parseCrowdSecDecisions(data []byte, result *CrowdSecDecisionSnapshot) {
+	var alerts []struct {
+		Decisions []struct {
+			Scope     string `json:"scope"`
+			Value     string `json:"value"`
+			Type      string `json:"type"`
+			Scenario  string `json:"scenario"`
+			Origin    string `json:"origin"`
+			Until     string `json:"until"`
+			ExpiresAt string `json:"expires_at"`
+		} `json:"decisions"`
+	}
+	if json.Unmarshal(data, &alerts) != nil {
+		return
+	}
+	result.Available = true
+	result.Truncated = len(alerts) >= 51
+	for _, alert := range alerts {
+		for _, decision := range alert.Decisions {
+			if len(result.Records) == 50 {
+				result.Truncated = true
+				return
+			}
+			expiresAt := decision.ExpiresAt
+			if expiresAt == "" {
+				expiresAt = decision.Until
+			}
+			result.Records = append(result.Records, CrowdSecDecision{Scope: decision.Scope, Value: decision.Value, Action: decision.Type, Reason: decision.Scenario, Origin: decision.Origin, ExpiresAt: expiresAt})
+		}
+	}
+}
+
+func parseCrowdSecAlerts(data []byte, result *CrowdSecAlertSnapshot) {
+	var alerts []struct {
+		ID          int64  `json:"id"`
+		CreatedAt   string `json:"created_at"`
+		Scenario    string `json:"scenario"`
+		EventsCount int64  `json:"events_count"`
+		Source      struct {
+			IP      string `json:"ip"`
+			Country string `json:"cn"`
+		} `json:"source"`
+	}
+	if json.Unmarshal(data, &alerts) != nil {
+		return
+	}
+	result.Available = true
+	result.Truncated = len(alerts) > 20
+	for _, alert := range alerts {
+		if len(result.Records) == 20 {
+			break
+		}
+		result.Records = append(result.Records, CrowdSecAlert{ID: alert.ID, DetectedAt: alert.CreatedAt, Scenario: alert.Scenario, SourceIP: alert.Source.IP, Country: alert.Source.Country, EventCount: alert.EventsCount})
+	}
 }

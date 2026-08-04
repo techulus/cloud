@@ -352,6 +352,52 @@ export type AgentHealth = {
 	capabilities?: string[];
 };
 
+export type CrowdSecDecision = {
+	scope: string;
+	value: string;
+	action: string;
+	reason: string;
+	origin: string;
+	expiresAt?: string;
+};
+
+export type CrowdSecAlert = {
+	id: number;
+	detectedAt: string;
+	scenario: string;
+	sourceIp: string;
+	country: string;
+	eventCount: number;
+};
+
+export type CrowdSecHealth = {
+	checkedAt: string;
+	lapi: { available: boolean };
+	metrics: {
+		available: boolean;
+		reads: number;
+		parsed: number;
+		unparsed: number;
+	};
+	bouncer: {
+		available: boolean;
+		error?: string;
+		registered: boolean;
+		revoked: boolean;
+		lastPullAt?: string;
+	};
+	decisions: {
+		available: boolean;
+		truncated: boolean;
+		records: CrowdSecDecision[];
+	};
+	alerts: {
+		available: boolean;
+		truncated: boolean;
+		records: CrowdSecAlert[];
+	};
+};
+
 export type AgentUpgradeStatus =
 	| "idle"
 	| "queued"
@@ -380,6 +426,7 @@ export const servers = pgTable("servers", {
 	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
 	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
 	agentHealth: jsonb("agent_health").$type<AgentHealth>(),
+	crowdsecHealth: jsonb("crowdsec_health").$type<CrowdSecHealth>(),
 	agentUpgradeTargetVersion: text("agent_upgrade_target_version"),
 	agentUpgradeStatus: text("agent_upgrade_status", {
 		enum: ["idle", "queued", "upgrading", "succeeded", "failed"],

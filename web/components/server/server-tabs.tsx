@@ -4,13 +4,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-export function ServerTabs({ serverId }: { serverId: string }) {
+export function ServerTabs({
+	serverId,
+	isProxy,
+}: {
+	serverId: string;
+	isProxy: boolean;
+}) {
 	const pathname = usePathname();
 	const basePath = `/dashboard/servers/${serverId}`;
 	const tabs = [
 		{ name: "Overview", href: basePath },
 		{ name: "Metrics", href: `${basePath}/metrics` },
 		{ name: "Logs", href: `${basePath}/logs` },
+		...(isProxy ? [{ name: "Security", href: `${basePath}/security` }] : []),
 		{ name: "Settings", href: `${basePath}/settings` },
 	];
 

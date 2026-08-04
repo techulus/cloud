@@ -72,6 +72,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		}
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
+		if a.IsProxy {
+			report.CrowdSecHealth = health.CollectCrowdSecHealth()
+		}
 		lastHealthCollect = time.Now()
 		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
 			systemStats.CpuUsagePercent, systemStats.MemoryUsagePercent,
