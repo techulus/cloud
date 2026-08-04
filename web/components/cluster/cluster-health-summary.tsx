@@ -7,8 +7,6 @@ type ClusterHealthData = {
 	summary: {
 		totalServers: number;
 		onlineServers: number;
-		avgCpuUsage: number;
-		avgMemoryUsage: number;
 		networkHealthy: number;
 		containerHealthy: number;
 	};
