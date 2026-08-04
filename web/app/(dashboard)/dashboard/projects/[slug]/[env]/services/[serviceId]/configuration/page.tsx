@@ -164,11 +164,12 @@ export default function ConfigurationPage() {
 											<>
 												<br />
 												<br />
-												<span className="font-medium text-destructive">
-													No completed backup is available for every volume.
+												<span className="font-medium text-foreground">
+													This service is not currently running.
 												</span>{" "}
-												Delete will fail unless the service is running so a
-												fresh deletion backup can be created.
+												{service.lockedServerId
+													? "A fresh backup will be created from its stopped volumes before deletion."
+													: "No server or completed backup is available for its volumes, so deletion cannot start."}
 											</>
 										)}
 								</>
