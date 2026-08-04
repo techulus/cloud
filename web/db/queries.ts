@@ -171,7 +171,6 @@ export async function getClusterHealth() {
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
-			crowdsecHealth: servers.crowdsecHealth,
 			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
 			agentUpgradeStatus: servers.agentUpgradeStatus,
 			agentUpgradeStartedAt: servers.agentUpgradeStartedAt,

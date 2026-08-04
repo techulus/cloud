@@ -92,6 +92,8 @@ type Agent struct {
 	currentBuildID               string
 	IsProxy                      bool
 	serverlessGatewayRunning     atomic.Bool
+	crowdSecHealth               atomic.Pointer[health.CrowdSecHealth]
+	crowdSecHealthCollecting     atomic.Bool
 	DisableDNS                   bool
 }
 

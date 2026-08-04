@@ -32,12 +32,9 @@ import { fetcher } from "@/lib/fetcher";
 type ServerStatus = "pending" | "online" | "offline" | "unknown";
 type HealthState = "healthy" | "degraded" | "stale" | "not-reported";
 
-type ClusterHealthResponse = {
-	servers: Array<{
-		id: string;
-		status: ServerStatus;
-		crowdsecHealth: CrowdSecHealth | null;
-	}>;
+type SecurityStatusResponse = {
+	status: ServerStatus;
+	crowdsecHealth: CrowdSecHealth | null;
 };
 
 const STALE_AFTER_MS = 120_000;
@@ -154,6 +151,17 @@ function DateValue({ value }: { value?: string }) {
 	);
 }
 
+function formatBouncerError(error: string) {
+	switch (error) {
+		case "command_failed":
+			return "CrowdSec status command failed";
+		case "invalid_output":
+			return "CrowdSec returned an invalid status response";
+		default:
+			return "CrowdSec bouncer status is unavailable";
+	}
+}
+
 export function ServerSecurityPage({
 	serverId,
 	initialServerStatus,
@@ -163,14 +171,13 @@ export function ServerSecurityPage({
 	initialServerStatus: ServerStatus;
 	initialHealth: CrowdSecHealth | null;
 }) {
-	const { data } = useSWR<ClusterHealthResponse>(
-		"/api/cluster-health",
+	const { data } = useSWR<SecurityStatusResponse>(
+		`/api/servers/${serverId}/security`,
 		fetcher,
 		{ refreshInterval: 10_000 },
 	);
-	const liveServer = data?.servers.find((server) => server.id === serverId);
-	const status = liveServer?.status ?? initialServerStatus;
-	const health = liveServer?.crowdsecHealth ?? initialHealth;
+	const status = data === undefined ? initialServerStatus : data.status;
+	const health = data === undefined ? initialHealth : data.crowdsecHealth;
 	const [now, setNow] = useState<number | null>(null);
 	useEffect(() => {
 		const refreshNow = () => setNow(Date.now());
@@ -178,6 +185,8 @@ export function ServerSecurityPage({
 		const interval = window.setInterval(refreshNow, 10_000);
 		return () => window.clearInterval(interval);
 	}, []);
+	// Match the snapshot on the server render; the client clock takes over after
+	// hydration so stale state advances without creating a hydration mismatch.
 	const currentTime = now ?? getTimestamp(health?.checkedAt, 0);
 	const overallState = getOverallState(status, health, currentTime);
 	const bouncerAvailable = Boolean(
@@ -258,7 +267,9 @@ export function ServerSecurityPage({
 							</dd>
 						</div>
 						{health?.bouncer.error && (
-							<div className="text-destructive">{health.bouncer.error}</div>
+							<div className="text-destructive">
+								{formatBouncerError(health.bouncer.error)}
+							</div>
 						)}
 					</dl>
 				</ComponentCard>
