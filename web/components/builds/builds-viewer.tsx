@@ -13,6 +13,7 @@ import {
 	RotateCcw,
 	XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -61,6 +62,7 @@ type BuildListItem = Pick<
 	createdAt: string;
 	startedAt: string | null;
 	completedAt: string | null;
+	server: { id: string; name: string } | null;
 };
 
 type Commit = {
@@ -411,8 +413,20 @@ export function BuildsViewer({
 										{build.branch}
 									</span>
 									{build.author && (
-										<span className="ml-3 max-sm:hidden">
+										<span className="ml-1 max-sm:hidden">
 											by {build.author}
+										</span>
+									)}
+									{build.server && (
+										<span className="ml-1 max-sm:hidden">
+											on{" "}
+											<Link
+												href={`/dashboard/servers/${build.server.id}`}
+												className="hover:text-foreground hover:underline"
+												onClick={(event) => event.stopPropagation()}
+											>
+												{build.server.name}
+											</Link>
 										</span>
 									)}
 									<span className="ml-3">

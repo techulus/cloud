@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
 	const selectResults: unknown[][] = [];
+	const updateData: unknown[] = [];
 
 	function createQuery(result: unknown[] = []) {
 		const query = {
 			from: vi.fn(() => query),
-			set: vi.fn(() => query),
+			set: vi.fn((data: unknown) => {
+				updateData.push(data);
+				return query;
+			}),
 			where: vi.fn(() => query),
 			returning: vi.fn(() => query),
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
@@ -21,6 +25,7 @@ const mocks = vi.hoisted(() => {
 
 	return {
 		selectResults,
+		updateData,
 		db: {
 			select: vi.fn(() => createQuery(selectResults.shift() ?? [])),
 			update: vi.fn(() => createQuery()),
@@ -57,9 +62,70 @@ import { inngest } from "@/lib/inngest/client";
 
 beforeEach(() => {
 	mocks.selectResults.length = 0;
+	mocks.updateData.length = 0;
 	mocks.db.select.mockClear();
 	mocks.db.update.mockClear();
 	mocks.db.delete.mockClear();
+});
+
+describe("agent status CrowdSec health", () => {
+	it("persists a supplied snapshot unchanged and preserves it when omitted", async () => {
+		const crowdsecHealth = {
+			checkedAt: "2026-08-04T12:00:00Z",
+			lapi: { available: true },
+			metrics: {
+				available: true,
+				reads: 120,
+				parsed: 115,
+				unparsed: 5,
+			},
+			bouncer: {
+				available: true,
+				registered: true,
+				revoked: false,
+				lastPullAt: "2026-08-04T11:59:00Z",
+			},
+			decisions: {
+				available: true,
+				truncated: false,
+				records: [
+					{
+						scope: "Ip",
+						value: "192.0.2.1",
+						action: "ban",
+						reason: "test-scenario",
+						origin: "crowdsec",
+						expiresAt: "2026-08-04T13:00:00Z",
+					},
+				],
+			},
+			alerts: {
+				available: true,
+				truncated: false,
+				records: [
+					{
+						id: 42,
+						detectedAt: "2026-08-04T11:58:00Z",
+						scenario: "test-scenario",
+						sourceIp: "192.0.2.1",
+						country: "US",
+						eventCount: 3,
+					},
+				],
+			},
+		};
+
+		await applyStatusReport("server_1", { containers: [], crowdsecHealth });
+
+		expect(mocks.updateData[0]).toEqual(
+			expect.objectContaining({ crowdsecHealth }),
+		);
+
+		mocks.updateData.length = 0;
+		await applyStatusReport("server_1", { containers: [] });
+
+		expect(mocks.updateData[0]).not.toHaveProperty("crowdsecHealth");
+	});
 });
 
 describe("agent status serverless attachment", () => {

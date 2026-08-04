@@ -353,6 +353,7 @@ type StatusReport struct {
 	RoutingSyncedRolloutIds []string                `json:"routingSyncedRolloutIds,omitempty"`
 	NetworkHealth           *health.NetworkHealth   `json:"networkHealth,omitempty"`
 	ContainerHealth         *health.ContainerHealth `json:"containerHealth,omitempty"`
+	CrowdSecHealth          *health.CrowdSecHealth  `json:"crowdsecHealth,omitempty"`
 	AgentHealth             *AgentHealth            `json:"agentHealth,omitempty"`
 }
 

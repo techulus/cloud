@@ -41,14 +41,6 @@ export type DeploymentStatus = NonNullable<Deployment["observedPhase"]>;
 export type RolloutStatus = NonNullable<Rollout["status"]>;
 export type BuildStatus = NonNullable<Build["status"]>;
 
-export type HealthStats = {
-	cpuUsagePercent: number;
-	memoryUsagePercent: number;
-	memoryUsedMb: number;
-	diskUsagePercent: number;
-	diskUsedGb: number;
-};
-
 export type ServiceWithDetails = Service & {
 	activeConfig?: DeployedConfig | null;
 	currentSource: SourceConfig;

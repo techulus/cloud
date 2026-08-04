@@ -8,7 +8,7 @@ import {
 	ServerIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,6 +69,7 @@ export function DashboardCommandMenu() {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
 	const [search, setSearch] = useState("");
+	const commandListRef = useRef<HTMLDivElement>(null);
 	const { data, error, isLoading, mutate } = useSWR<NavigationResponse>(
 		open ? "/api/navigation" : null,
 		fetcher,
@@ -95,6 +96,11 @@ export function DashboardCommandMenu() {
 	const handleOpenChange = (nextOpen: boolean) => {
 		setOpen(nextOpen);
 		if (!nextOpen) setSearch("");
+	};
+
+	const handleSearchChange = (value: string) => {
+		if (commandListRef.current) commandListRef.current.scrollTop = 0;
+		setSearch(value);
 	};
 
 	const handleSelect = (href: string) => {
@@ -130,10 +136,10 @@ export function DashboardCommandMenu() {
 				<Command loop>
 					<CommandInput
 						value={search}
-						onValueChange={setSearch}
+						onValueChange={handleSearchChange}
 						placeholder="Search pages, projects, services, and servers…"
 					/>
-					<CommandList>
+					<CommandList ref={commandListRef}>
 						{isLoading ? (
 							<div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
 								<Spinner />

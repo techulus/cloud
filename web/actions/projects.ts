@@ -555,6 +555,7 @@ export async function deleteService(
 	const reusableBackupIds: string[] = [];
 
 	if (!runningDeployment || !runningDeployment.containerId) {
+		const latestBackupIds: string[] = [];
 		for (const volume of volumes) {
 			const latestBackup = await db
 				.select({ id: volumeBackups.id })
@@ -569,17 +570,19 @@ export async function deleteService(
 				.limit(1)
 				.then((r) => r[0]);
 
-			if (!latestBackup) {
-				throw new Error(
-					"Stateful service must be running long enough to create a recoverable backup before deletion",
-				);
-			}
+			if (latestBackup) latestBackupIds.push(latestBackup.id);
+		}
 
+		if (latestBackupIds.length === volumes.length) {
 			await db
 				.update(volumeBackups)
 				.set({ isDeletionBackup: true })
-				.where(eq(volumeBackups.id, latestBackup.id));
-			reusableBackupIds.push(latestBackup.id);
+				.where(inArray(volumeBackups.id, latestBackupIds));
+			reusableBackupIds.push(...latestBackupIds);
+		} else if (!service.lockedServerId) {
+			throw new Error(
+				"Stateful service must have a locked server or completed backups before deletion",
+			);
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"techulus/cloud-agent/internal/container"
+	"techulus/cloud-agent/internal/health"
 	agenthttp "techulus/cloud-agent/internal/http"
 )
 
@@ -81,6 +82,27 @@ func TestBuildStatusReportAlwaysIncludesAgentHealth(t *testing.T) {
 	}
 	if !slices.Contains(report.AgentHealth.Capabilities, serverlessGatewayCapability) {
 		t.Fatalf("capabilities = %v, want %s", report.AgentHealth.Capabilities, serverlessGatewayCapability)
+	}
+}
+
+func TestBuildStatusReportUsesCachedCrowdSecHealthForProxyOnly(t *testing.T) {
+	previousLastHealthCollect := lastHealthCollect
+	lastHealthCollect = time.Now()
+	t.Cleanup(func() {
+		lastHealthCollect = previousLastHealthCollect
+	})
+
+	snapshot := &health.CrowdSecHealth{CheckedAt: "2026-08-04T12:00:00Z"}
+	proxy := &Agent{IsProxy: true}
+	proxy.crowdSecHealth.Store(snapshot)
+	if got := proxy.BuildStatusReport(false).CrowdSecHealth; got != snapshot {
+		t.Fatalf("proxy CrowdSec health = %p, want cached snapshot %p", got, snapshot)
+	}
+
+	worker := &Agent{}
+	worker.crowdSecHealth.Store(snapshot)
+	if got := worker.BuildStatusReport(false).CrowdSecHealth; got != nil {
+		t.Fatalf("worker reported CrowdSec health: %+v", got)
 	}
 }
 

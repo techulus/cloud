@@ -117,9 +117,16 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 				const createdBackupIds = await step.run(
 					"start-delete-backups",
 					async () => {
-						const deployment = setup.runningDeployment;
-						if (!deployment?.containerId) {
-							throw new Error("No active deployment found for deletion backup");
+						const backupTarget = setup.runningDeployment?.containerId
+							? setup.runningDeployment
+							: setup.service.lockedServerId
+								? {
+										serverId: setup.service.lockedServerId,
+										containerId: null,
+									}
+								: null;
+						if (!backupTarget) {
+							throw new Error("No server found for deletion backup");
 						}
 
 						const ids: string[] = [];
@@ -133,16 +140,16 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 								volumeId: volume.id,
 								volumeName: volume.name,
 								serviceId,
-								serverId: deployment.serverId,
+								serverId: backupTarget.serverId,
 								status: "pending",
 								storagePath,
 								isDeletionBackup: true,
 							});
 
-							await enqueueWork(deployment.serverId, "backup_volume", {
+							await enqueueWork(backupTarget.serverId, "backup_volume", {
 								backupId,
 								serviceId,
-								containerId: deployment.containerId,
+								containerId: backupTarget.containerId,
 								volumeName: volume.name,
 								storagePath,
 								storageConfig: {

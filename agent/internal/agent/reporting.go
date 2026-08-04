@@ -39,6 +39,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 			Capabilities: a.agentCapabilities(),
 		},
 	}
+	if a.IsProxy {
+		report.CrowdSecHealth = a.crowdSecHealth.Load()
+	}
 
 	if includeResources {
 		report.Resources = GetSystemStats()
@@ -72,6 +75,9 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 		}
 		report.NetworkHealth = health.CollectNetworkHealth("wg0")
 		report.ContainerHealth = health.CollectContainerHealth()
+		if a.IsProxy {
+			a.collectCrowdSecHealthAsync()
+		}
 		lastHealthCollect = time.Now()
 		log.Printf("[health] collected: cpu=%.1f%%, mem=%.1f%%, disk=%.1f%%, network=%v, containers=%d running",
 			systemStats.CpuUsagePercent, systemStats.MemoryUsagePercent,
@@ -130,6 +136,18 @@ func (a *Agent) BuildStatusReport(includeResources bool) *agenthttp.StatusReport
 	report.RoutingSyncedRolloutIds = a.routingSyncedRolloutIds()
 
 	return report
+}
+
+func (a *Agent) collectCrowdSecHealthAsync() {
+	if !a.crowdSecHealthCollecting.CompareAndSwap(false, true) {
+		return
+	}
+
+	go func() {
+		defer a.crowdSecHealthCollecting.Store(false)
+		a.crowdSecHealth.Store(health.CollectCrowdSecHealth())
+		a.RequestStatusReport("CrowdSec health collected")
+	}()
 }
 
 func (a *Agent) agentCapabilities() []string {

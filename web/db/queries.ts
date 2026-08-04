@@ -17,7 +17,6 @@ import {
 	services,
 	settings,
 } from "@/db/schema";
-import type { HealthStats } from "@/db/types";
 import type {
 	ControlPlaneUpdateState,
 	ControlPlaneUpgradeState,
@@ -33,10 +32,6 @@ import {
 	DEFAULT_SMTP_PORT,
 	DEFAULT_SMTP_TIMEOUT,
 } from "@/lib/settings-keys";
-import {
-	type NodeMetricsSnapshot,
-	queryNodeMetricsSnapshots,
-} from "@/lib/victoria-metrics";
 
 export async function listProjects() {
 	const [projectList, serviceCounts, onlineCounts, environmentCounts] =
@@ -149,6 +144,7 @@ export const getServerDetails = cache(async (id: string) => {
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
+			crowdsecHealth: servers.crowdsecHealth,
 			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
 			agentUpgradeStatus: servers.agentUpgradeStatus,
 			agentUpgradeStartedAt: servers.agentUpgradeStartedAt,
@@ -165,49 +161,14 @@ export async function getClusterHealth() {
 	const allServers = await db
 		.select({
 			id: servers.id,
-			name: servers.name,
 			status: servers.status,
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
-			agentUpgradeTargetVersion: servers.agentUpgradeTargetVersion,
-			agentUpgradeStatus: servers.agentUpgradeStatus,
-			agentUpgradeStartedAt: servers.agentUpgradeStartedAt,
-			agentUpgradeError: servers.agentUpgradeError,
 		})
 		.from(servers);
 
 	const onlineServers = allServers.filter((s) => s.status === "online");
-	const metricsByServer = await queryNodeMetricsSnapshots(
-		onlineServers.map((server) => server.id),
-	).catch((error) => {
-		console.error("[cluster-health] failed to query metrics:", error);
-		return new Map<string, NodeMetricsSnapshot>();
-	});
-
-	const serversWithHealth = allServers.map((server) => ({
-		...server,
-		healthStats: metricSnapshotToHealthStats(metricsByServer.get(server.id)),
-	}));
-	const serversWithCurrentMetrics = serversWithHealth.filter(
-		(server) => server.status === "online" && server.healthStats,
-	);
-
-	let avgCpuUsage = 0;
-	let avgMemoryUsage = 0;
-
-	if (serversWithCurrentMetrics.length > 0) {
-		const cpuSum = serversWithCurrentMetrics.reduce(
-			(sum, s) => sum + (s.healthStats?.cpuUsagePercent ?? 0),
-			0,
-		);
-		const memSum = serversWithCurrentMetrics.reduce(
-			(sum, s) => sum + (s.healthStats?.memoryUsagePercent ?? 0),
-			0,
-		);
-		avgCpuUsage = cpuSum / serversWithCurrentMetrics.length;
-		avgMemoryUsage = memSum / serversWithCurrentMetrics.length;
-	}
 
 	const networkHealthy = onlineServers.filter(
 		(s) => s.networkHealth?.tunnelUp,
@@ -220,44 +181,15 @@ export async function getClusterHealth() {
 		summary: {
 			totalServers: allServers.length,
 			onlineServers: onlineServers.length,
-			avgCpuUsage,
-			avgMemoryUsage,
 			networkHealthy,
 			containerHealthy,
 		},
-		servers: serversWithHealth,
-	};
-}
-
-export function metricSnapshotToHealthStats(
-	snapshot:
-		| {
-				cpuUsagePercent: number | null;
-				memoryUsagePercent: number | null;
-				memoryUsedBytes: number | null;
-				diskUsagePercent: number | null;
-				diskUsedBytes: number | null;
-		  }
-		| null
-		| undefined,
-): HealthStats | null {
-	if (!snapshot) return null;
-	if (
-		snapshot.cpuUsagePercent === null &&
-		snapshot.memoryUsagePercent === null &&
-		snapshot.memoryUsedBytes === null &&
-		snapshot.diskUsagePercent === null &&
-		snapshot.diskUsedBytes === null
-	) {
-		return null;
-	}
-
-	return {
-		cpuUsagePercent: snapshot.cpuUsagePercent ?? 0,
-		memoryUsagePercent: snapshot.memoryUsagePercent ?? 0,
-		memoryUsedMb: Math.round((snapshot.memoryUsedBytes ?? 0) / 1024 / 1024),
-		diskUsagePercent: snapshot.diskUsagePercent ?? 0,
-		diskUsedGb: Math.round((snapshot.diskUsedBytes ?? 0) / 1024 / 1024 / 1024),
+		servers: allServers.map((server) => ({
+			id: server.id,
+			networkHealth: server.networkHealth,
+			containerHealth: server.containerHealth,
+			agentHealth: server.agentHealth,
+		})),
 	};
 }
 
