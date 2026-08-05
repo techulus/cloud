@@ -227,7 +227,7 @@ export default function CommandsPage() {
 					/>
 					<div className="flex items-center justify-between gap-4">
 						<span className="text-xs text-muted-foreground">
-							{command.length}/4096 · 60 second timeout
+							{command.length}/4096 · 60 second foreground timeout
 						</span>
 						<Button
 							onClick={() => void runCommand()}

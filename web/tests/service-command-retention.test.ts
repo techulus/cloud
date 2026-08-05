@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-	const returning = vi.fn().mockResolvedValue([{ id: "command-1" }]);
-	const where = vi.fn(() => ({ returning }));
+	const where = vi.fn().mockResolvedValue({ rowCount: 3 });
 	const deleteCommand = vi.fn(() => ({ where }));
 	return {
 		db: { delete: deleteCommand },
 		deleteCommand,
 		where,
-		returning,
 		subtractMilliseconds: vi.fn(),
 	};
 });
@@ -29,7 +27,7 @@ describe("service command retention", () => {
 	beforeEach(() => {
 		mocks.deleteCommand.mockClear();
 		mocks.where.mockClear();
-		mocks.returning.mockClear();
+		mocks.where.mockResolvedValue({ rowCount: 3 });
 		mocks.subtractMilliseconds.mockReset();
 		mocks.subtractMilliseconds.mockReturnValue(
 			new Date("2026-05-07T00:00:00Z"),
@@ -47,6 +45,7 @@ describe("service command retention", () => {
 			90 * 86_400_000,
 		);
 		expect(mocks.deleteCommand).toHaveBeenCalledWith(serviceCommands);
-		expect(deleted).toEqual([{ id: "command-1" }]);
+		expect(deleted).toBe(3);
+		expect(mocks.where.mock.results[0]?.value).not.toHaveProperty("returning");
 	});
 });

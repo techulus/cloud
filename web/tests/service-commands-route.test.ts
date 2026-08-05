@@ -116,6 +116,7 @@ describe("service commands route", () => {
 		const response = await post({
 			deploymentId: "deployment-1",
 			command: "printf hello",
+			serviceId: "attacker-controlled-service",
 		});
 		const body = (await response.json()) as { id: string; status: string };
 
@@ -136,6 +137,7 @@ describe("service commands route", () => {
 			"command",
 			{
 				commandRunId: body.id,
+				serviceId: "service-1",
 				deploymentId: "deployment-1",
 				containerId: "container-1",
 				command: "printf hello",

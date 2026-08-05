@@ -165,6 +165,7 @@ export async function POST(
 			"command",
 			{
 				commandRunId: commandId,
+				serviceId,
 				deploymentId: target.deploymentId,
 				containerId,
 				command: body.command as string,

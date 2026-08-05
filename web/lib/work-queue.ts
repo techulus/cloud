@@ -36,6 +36,7 @@ type ReconcileWorkPayload = {
 export type WorkPayloadByType = {
 	command: {
 		commandRunId: string;
+		serviceId: string;
 		deploymentId: string;
 		containerId: string;
 		command: string;
