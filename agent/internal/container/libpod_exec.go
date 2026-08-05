@@ -147,7 +147,7 @@ func execPreflight() error {
 	defer cancel()
 	resp, err := libpodRequest(ctx, http.MethodGet, libpodExecBasePath+"/version", nil)
 	if err != nil {
-		return fmt.Errorf("Podman 4.8 exec API preflight failed: %w", err)
+		return fmt.Errorf("podman 4.8 exec API preflight failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if err := requireSuccess(resp, "Podman 4.8 exec API preflight"); err != nil {
@@ -235,7 +235,7 @@ func libpodJSON(method, path string, requestBody, responseBody any) error {
 			return err
 		}
 		if len(data) > libpodBodyLimit {
-			return fmt.Errorf("Podman response exceeds limit")
+			return fmt.Errorf("podman response exceeds limit")
 		}
 		return nil
 	}
@@ -245,7 +245,7 @@ func libpodJSON(method, path string, requestBody, responseBody any) error {
 		return err
 	}
 	if len(data) > libpodBodyLimit {
-		return fmt.Errorf("Podman response exceeds limit")
+		return fmt.Errorf("podman response exceeds limit")
 	}
 	if err := json.Unmarshal(data, responseBody); err != nil {
 		return fmt.Errorf("invalid Podman response: %w", err)
@@ -344,7 +344,7 @@ func copyMultiplexedOutput(reader io.Reader, output io.Writer) error {
 			if _, err := io.CopyN(io.Discard, reader, int64(remaining-messageLength)); err != nil {
 				return fmt.Errorf("invalid multiplexed error frame: %w", err)
 			}
-			return fmt.Errorf("Podman exec stream failed: %s", strings.TrimSpace(string(message)))
+			return fmt.Errorf("podman exec stream failed: %s", strings.TrimSpace(string(message)))
 		}
 		if header[0] != 0 && header[0] != 1 && header[0] != 2 {
 			return fmt.Errorf("invalid multiplexed stream %d", header[0])
