@@ -26,6 +26,7 @@
 		"@bprogress/next": "^3.2.12",
 		"@react-email/components": "^1.0.4",
 		"@react-email/render": "^2.0.2",
+		"@sentry/nextjs": "^10.68.0",
 		"acme-client": "^5.4.0",
 		"better-auth": "1.6.23",
 		"class-variance-authority": "^0.7.1",
