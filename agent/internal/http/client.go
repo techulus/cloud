@@ -358,10 +358,14 @@ type StatusReport struct {
 }
 
 type CompletedWorkItem struct {
-	ID      string `json:"id"`
-	Attempt int    `json:"attempt"`
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
+	ID              string `json:"id"`
+	Attempt         int    `json:"attempt"`
+	Status          string `json:"status"`
+	Error           string `json:"error,omitempty"`
+	Output          string `json:"output,omitempty"`
+	ExitCode        *int   `json:"exitCode,omitempty"`
+	OutputTruncated bool   `json:"outputTruncated,omitempty"`
+	TimedOut        bool   `json:"timedOut,omitempty"`
 }
 
 type ActiveWorkItem struct {

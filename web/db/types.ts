@@ -12,6 +12,7 @@ import type {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceCommands,
 	services,
 	serviceVolumes,
 	user,
@@ -25,6 +26,7 @@ export type Service = typeof services.$inferSelect;
 export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;
 export type ServiceReplica = typeof serviceReplicas.$inferSelect;
+export type ServiceCommand = typeof serviceCommands.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
@@ -50,7 +52,7 @@ export type ServiceWithDetails = Service & {
 	>;
 	deployments: Array<
 		Deployment & {
-			server: Pick<Server, "name" | "wireguardIp"> | null;
+			server: Pick<Server, "name" | "wireguardIp" | "status"> | null;
 			ports: Array<
 				Pick<DeploymentPort, "id" | "hostPort"> & { containerPort: number }
 			>;

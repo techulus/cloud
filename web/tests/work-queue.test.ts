@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const mocks = vi.hoisted(() => {
 	const state = {
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => {
 		persistedStatus: "processing",
 		pendingStatus: null as string | null,
 		updateMatched: false,
+		updates: [] as Record<string, unknown>[],
 	};
 
 	function createQuery(result: unknown[]) {
@@ -28,6 +30,7 @@ const mocks = vi.hoisted(() => {
 	function createUpdateQuery() {
 		const query = {
 			set: vi.fn((values: { status?: string }) => {
+				state.updates.push(values);
 				state.pendingStatus = values.status ?? null;
 				return query;
 			}),
@@ -71,6 +74,7 @@ const mocks = vi.hoisted(() => {
 				},
 			),
 			select: vi.fn(() => createQuery(state.rejectionRows)),
+			execute: vi.fn().mockResolvedValue({ rows: [] }),
 		},
 		send: vi.fn(),
 	};
@@ -109,7 +113,7 @@ vi.mock("@/lib/work-queue-notifications", () => ({
 	notifyWorkAvailable: vi.fn(),
 }));
 
-import { completeWorkItemResults } from "@/lib/work-queue";
+import { claimNextWorkItem, completeWorkItemResults } from "@/lib/work-queue";
 
 function restoreWorkItem(id: string, overrides: Record<string, unknown> = {}) {
 	return {
@@ -129,6 +133,19 @@ function restoreWorkItem(id: string, overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function commandWorkItem(id: string) {
+	return {
+		id,
+		serverId: "server-1",
+		type: "command",
+		payload: JSON.stringify({ commandRunId: id }),
+		status: "completed",
+		attempts: 1,
+		createdAt: new Date(),
+		startedAt: new Date(),
+	};
+}
+
 beforeEach(() => {
 	mocks.state.updatedRows = [restoreWorkItem("work-1")];
 	mocks.state.backupRows = [{ volumeId: "volume-1", serviceId: "service-1" }];
@@ -136,12 +153,88 @@ beforeEach(() => {
 	mocks.state.persistedStatus = "processing";
 	mocks.state.pendingStatus = null;
 	mocks.state.updateMatched = false;
+	mocks.state.updates = [];
 	mocks.tx.update.mockClear();
 	mocks.tx.select.mockClear();
 	mocks.db.transaction.mockClear();
 	mocks.db.select.mockClear();
+	mocks.db.execute.mockClear();
 	mocks.send.mockReset();
 	mocks.send.mockResolvedValue(undefined);
+});
+
+describe("command work completion", () => {
+	it("does not re-lease a processing command", async () => {
+		await claimNextWorkItem("server-1");
+
+		const condition = mocks.db.execute.mock.calls[0]?.[0];
+		const query = new PgDialect().sqlToQuery(condition);
+		expect(query.sql).toContain("type <> 'command'");
+	});
+
+	it("persists successful command output", async () => {
+		mocks.state.updatedRows = [commandWorkItem("command-1")];
+
+		const result = await completeWorkItemResults("server-1", [
+			{
+				id: "command-1",
+				attempt: 1,
+				status: "completed",
+				output: "hello\n",
+				exitCode: 0,
+				outputTruncated: false,
+			},
+		]);
+
+		expect(result).toEqual({ accepted: ["command-1"], rejected: [] });
+		expect(mocks.state.updates).toContainEqual(
+			expect.objectContaining({
+				status: "succeeded",
+				output: "hello\n",
+				exitCode: 0,
+				outputTruncated: false,
+			}),
+		);
+	});
+
+	it("persists command timeouts distinctly", async () => {
+		mocks.state.updatedRows = [commandWorkItem("command-1")];
+
+		await completeWorkItemResults("server-1", [
+			{
+				id: "command-1",
+				attempt: 1,
+				status: "failed",
+				error: "command timed out after 60 seconds",
+				exitCode: 124,
+				timedOut: true,
+			},
+		]);
+
+		expect(mocks.state.updates).toContainEqual(
+			expect.objectContaining({ status: "timed_out", exitCode: 124 }),
+		);
+	});
+
+	it("rejects oversized command output without terminating the work item", async () => {
+		mocks.state.updatedRows = [commandWorkItem("command-1")];
+
+		const result = await completeWorkItemResults("server-1", [
+			{
+				id: "command-1",
+				attempt: 1,
+				status: "completed",
+				output: "x".repeat(65537),
+				exitCode: 0,
+			},
+		]);
+
+		expect(result).toEqual({
+			accepted: [],
+			rejected: [{ id: "command-1", reason: "invalid_result" }],
+		});
+		expect(mocks.db.transaction).not.toHaveBeenCalled();
+	});
 });
 
 describe("restore work completion", () => {

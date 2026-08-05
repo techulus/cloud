@@ -8,7 +8,51 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestExecCommand(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = inspect ]; then echo '[{"State":{"Running":true}}]'; exit 0; fi
+case "$5" in
+ success) printf 'hello';;
+ failure) printf 'bad'; exit 7;;
+ exact) head -c 65536 /dev/zero | tr '\0' x;;
+ large) head -c 70000 /dev/zero | tr '\0' x;;
+ timeout) sleep 1;;
+esac`
+	if err := os.WriteFile(filepath.Join(dir, "podman"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	tests := []struct {
+		name                string
+		exit                int
+		truncated, timedOut bool
+	}{
+		{"success", 0, false, false}, {"failure", 7, false, false}, {"exact", 0, false, false}, {"large", 0, true, false}, {"timeout", 124, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := commandTimeout
+			if tt.timedOut {
+				commandTimeout = 10 * time.Millisecond
+			}
+			defer func() { commandTimeout = old }()
+			result, err := ExecCommand("container", tt.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.ExitCode != tt.exit || result.Truncated != tt.truncated || result.TimedOut != tt.timedOut {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+			if len(result.Output) > CommandOutputLimit {
+				t.Fatalf("output exceeded limit: %d", len(result.Output))
+			}
+		})
+	}
+}
 
 func TestBuildPodmanPullArgs(t *testing.T) {
 	tests := []struct {

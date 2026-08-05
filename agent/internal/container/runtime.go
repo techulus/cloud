@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,11 +10,94 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"techulus/cloud-agent/internal/retry"
 	"techulus/cloud-agent/internal/wireguard"
 )
+
+const CommandOutputLimit = 64 * 1024
+
+var commandTimeout = 60 * time.Second
+
+type CommandResult struct {
+	Output    string
+	ExitCode  int
+	Truncated bool
+	TimedOut  bool
+}
+
+type limitedBuffer struct {
+	mutex     sync.Mutex
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *limitedBuffer) snapshot() (string, bool) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	return b.buffer.String(), b.truncated
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	n := len(p)
+	remaining := CommandOutputLimit - b.buffer.Len()
+	if remaining > 0 {
+		writeLength := min(remaining, len(p))
+		_, _ = b.buffer.Write(p[:writeLength])
+		if writeLength < len(p) {
+			b.truncated = true
+		}
+	} else if len(p) > 0 {
+		b.truncated = true
+	}
+	return n, nil
+}
+
+func ExecCommand(containerID, command string) (CommandResult, error) {
+	running, err := IsContainerRunning(containerID)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if !running {
+		return CommandResult{}, fmt.Errorf("container is not running")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "podman", "exec", containerID, "/bin/sh", "-c", command)
+	var output limitedBuffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	err = cmd.Run()
+	outputText, truncated := output.snapshot()
+	outputText = strings.ToValidUTF8(outputText, "�")
+	if len(outputText) > CommandOutputLimit {
+		outputText = outputText[:CommandOutputLimit]
+		for !utf8.ValidString(outputText) {
+			outputText = outputText[:len(outputText)-1]
+		}
+		truncated = true
+	}
+	result := CommandResult{Output: outputText, Truncated: truncated}
+	if ctx.Err() == context.DeadlineExceeded {
+		result.TimedOut = true
+		result.ExitCode = 124
+		return result, nil
+	}
+	if err == nil {
+		return result, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+		return result, nil
+	}
+	return result, fmt.Errorf("failed to execute command: %w", err)
+}
 
 func ContainerExists(containerID string) (bool, error) {
 	cmd := exec.Command("podman", "inspect", "--format", "json", containerID)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"techulus/cloud-agent/internal/container"
 	agenthttp "techulus/cloud-agent/internal/http"
 )
 
@@ -93,7 +94,19 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	status := "completed"
 	errorMsg := ""
 	restartAfterReport := false
-	if err := a.ProcessWorkItem(item); err != nil {
+	var commandResult *container.CommandResult
+	var processErr error
+	if item.Type == "command" {
+		result, err := a.ProcessCommand(item)
+		processErr = err
+		if err == nil {
+			commandResult = &result
+		}
+	} else {
+		processErr = a.ProcessWorkItem(item)
+	}
+	if processErr != nil {
+		err := processErr
 		if errors.Is(err, errAgentUpgradeRestartNeeded) {
 			restartAfterReport = true
 		} else {
@@ -109,12 +122,25 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 	if !restartAfterReport && a.activeWorkItem != nil && a.activeWorkItem.ID == item.ID && a.activeWorkItem.Attempt == item.Attempt {
 		a.activeWorkItem = nil
 	}
-	a.pendingWorkResults = append(a.pendingWorkResults, agenthttp.CompletedWorkItem{
+	completed := agenthttp.CompletedWorkItem{
 		ID:      item.ID,
 		Attempt: item.Attempt,
 		Status:  status,
 		Error:   errorMsg,
-	})
+	}
+	if commandResult != nil {
+		completed.Output = commandResult.Output
+		completed.ExitCode = &commandResult.ExitCode
+		completed.OutputTruncated = commandResult.Truncated
+		if commandResult.TimedOut {
+			completed.Status = "failed"
+			completed.Error = "command timed out after 60 seconds"
+			completed.TimedOut = true
+		} else if commandResult.ExitCode != 0 {
+			completed.Status = "failed"
+		}
+	}
+	a.pendingWorkResults = append(a.pendingWorkResults, completed)
 	a.workMutex.Unlock()
 
 	a.RequestStatusReport("work item " + status)

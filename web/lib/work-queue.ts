@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, servers, volumeBackups, workQueue } from "@/db/schema";
+import {
+	deployments,
+	servers,
+	serviceCommands,
+	volumeBackups,
+	workQueue,
+} from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
@@ -28,6 +34,12 @@ type ReconcileWorkPayload = {
 };
 
 export type WorkPayloadByType = {
+	command: {
+		commandRunId: string;
+		deploymentId: string;
+		containerId: string;
+		command: string;
+	};
 	deploy: ReconcileWorkPayload;
 	reconcile: ReconcileWorkPayload;
 	stop: { deploymentId: string; containerId: string | null };
@@ -78,6 +90,10 @@ export type WorkItemResult = {
 	attempt: number;
 	status: "completed" | "failed";
 	error?: string;
+	output?: string;
+	exitCode?: number;
+	outputTruncated?: boolean;
+	timedOut?: boolean;
 };
 
 export type ActiveWorkItem = {
@@ -179,6 +195,19 @@ export async function completeWorkItemResults(
 	const rejected: RejectedWorkItemResult[] = [];
 
 	for (const result of results) {
+		if (
+			(result.output !== undefined &&
+				(typeof result.output !== "string" ||
+					Buffer.byteLength(result.output) > 65536)) ||
+			(result.exitCode !== undefined &&
+				(!Number.isInteger(result.exitCode) || result.exitCode < -1)) ||
+			(result.outputTruncated !== undefined &&
+				typeof result.outputTruncated !== "boolean") ||
+			(result.timedOut !== undefined && typeof result.timedOut !== "boolean")
+		) {
+			rejected.push({ id: result.id, reason: "invalid_result" });
+			continue;
+		}
 		const item = await db.transaction(async (tx) => {
 			const updated = await tx
 				.update(workQueue)
@@ -198,6 +227,23 @@ export async function completeWorkItemResults(
 
 			if (item.type === "restore_volume") {
 				await publishRestoreWorkResult(tx, item, result);
+			}
+			if (item.type === "command") {
+				await tx
+					.update(serviceCommands)
+					.set({
+						status: result.timedOut
+							? "timed_out"
+							: result.status === "completed" && result.exitCode === 0
+								? "succeeded"
+								: "failed",
+						output: result.output ?? "",
+						exitCode: result.exitCode,
+						outputTruncated: result.outputTruncated ?? false,
+						errorMessage: result.error ?? null,
+						completedAt: new Date(),
+					})
+					.where(eq(serviceCommands.id, item.id));
 			}
 
 			return item;
@@ -290,6 +336,12 @@ export async function claimNextWorkItem(
 
 	const row = rows[0];
 	if (!row) return null;
+	if (row.type === "command") {
+		await db
+			.update(serviceCommands)
+			.set({ status: "running", startedAt: new Date() })
+			.where(eq(serviceCommands.id, row.id));
+	}
 	if (row.type === "upgrade_agent") {
 		await markAgentUpgradeStarted(serverId, row.payload);
 	}
@@ -324,6 +376,7 @@ function claimableWorkCondition(serverId: string, staleThreshold: Date) {
 			status = 'pending'
 			OR (
 				status = 'processing'
+				AND type <> 'command'
 				AND started_at < ${staleThreshold}
 				AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
 			)
