@@ -23,7 +23,8 @@ An open container deployment platform. See README.md for architecture.
 
 - Web tests: `cd web && pnpm test`
 - Web typecheck: `cd web && ./node_modules/.bin/tsc --noEmit`
-- Web lint/format: `cd web && npx biome check --write <files>`
+- Web lint: `cd web && pnpm lint`
+- Web format: `cd web && pnpm exec oxfmt --write <files>`
 - Go (agent/cli): `go build ./...`, `go test ./...`, `gofmt -l .`
 - After deleting or renaming a Next.js route, stale generated types in
   `web/.next/types` can fail the typecheck — delete them; they regenerate.

@@ -114,8 +114,8 @@ export const NetworkingSection = memo(function NetworkingSection({
 	const port = Number(newPort);
 	const isValidDomain = Boolean(
 		normalizedDomain &&
-			normalizedDomain.length <= 253 &&
-			isFQDN(normalizedDomain),
+		normalizedDomain.length <= 253 &&
+		isFQDN(normalizedDomain),
 	);
 	const isValidPort =
 		/^\d+$/.test(newPort) &&

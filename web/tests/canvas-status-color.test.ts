@@ -6,12 +6,12 @@ import {
 
 describe("canvas status colors", () => {
 	it("uses a distinct color for sleeping deployments", () => {
-		expect(getStatusColorFromDeployments([{ observedPhase: "sleeping" }])).toEqual(
-			getStatusColor("sleeping"),
-		);
-		expect(getStatusColorFromDeployments([{ observedPhase: "sleeping" }])).not.toEqual(
-			getStatusColor("stopped"),
-		);
+		expect(
+			getStatusColorFromDeployments([{ observedPhase: "sleeping" }]),
+		).toEqual(getStatusColor("sleeping"));
+		expect(
+			getStatusColorFromDeployments([{ observedPhase: "sleeping" }]),
+		).not.toEqual(getStatusColor("stopped"));
 	});
 
 	it("keeps active and failed states higher priority than sleeping", () => {

@@ -186,9 +186,9 @@ export function ServerSecurityPage({
 	const overallState = getOverallState(status, health, currentTime);
 	const bouncerAvailable = Boolean(
 		health?.bouncer.available &&
-			health.bouncer.registered &&
-			!health.bouncer.revoked &&
-			!isOlderThan(health.bouncer.lastPullAt, currentTime),
+		health.bouncer.registered &&
+		!health.bouncer.revoked &&
+		!isOlderThan(health.bouncer.lastPullAt, currentTime),
 	);
 	const bouncerRegistration = health?.bouncer.revoked
 		? "Revoked"

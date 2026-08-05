@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
 			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
 			limit: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
 			}),
 			where: vi.fn(() => query),
 			returning: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
@@ -344,14 +344,17 @@ describe("agent build status transitions", () => {
 	it.each([
 		["missing", null],
 		["malformed", `${repository}@sha256:ABC`],
-	])("rejects a %s completion digest before persistence", async (_case, imageUri) => {
-		mocks.selectResults.push([build("pushing")], [{ specification }]);
+	])(
+		"rejects a %s completion digest before persistence",
+		async (_case, imageUri) => {
+			mocks.selectResults.push([build("pushing")], [{ specification }]);
 
-		const response = await post("completed", imageUri);
+			const response = await post("completed", imageUri);
 
-		expect(response.status).toBe(400);
-		expect(mocks.db.update).not.toHaveBeenCalled();
-	});
+			expect(response.status).toBe(400);
+			expect(mocks.db.update).not.toHaveBeenCalled();
+		},
+	);
 
 	it("rejects a completion digest for another repository", async () => {
 		mocks.selectResults.push([build("pushing")], [{ specification }]);

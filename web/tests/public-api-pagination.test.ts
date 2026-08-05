@@ -40,17 +40,14 @@ describe("public API named keyset pagination", () => {
 		).toEqual(expect.any(String));
 	});
 
-	it.each([
-		"0",
-		"101",
-		"1.5",
-		"NaN",
-		"",
-	])("rejects an invalid limit of %j", (limit) => {
-		expect(() => namedPage(pageUrl(`?limit=${limit}`))).toThrow(
-			"limit must be an integer from 1 to 100",
-		);
-	});
+	it.each(["0", "101", "1.5", "NaN", ""])(
+		"rejects an invalid limit of %j",
+		(limit) => {
+			expect(() => namedPage(pageUrl(`?limit=${limit}`))).toThrow(
+				"limit must be an integer from 1 to 100",
+			);
+		},
+	);
 
 	it("accepts limit boundaries and defaults to 100", () => {
 		expect(namedPage(pageUrl()).limit).toBe(100);
@@ -117,14 +114,17 @@ describe("public API timestamp keyset pagination", () => {
 		"2026-01-01T24:00:00Z",
 		"2026-01-01T00:00:60Z",
 		"2026-01-01T00:00:00+14:01",
-	])("rejects an invalid timestamp without sending it to PostgreSQL: %s", (createdAt) => {
-		const cursor = Buffer.from(
-			JSON.stringify({ id: "rollout-1", createdAt }),
-		).toString("base64url");
-		expect(() => timestampPage(pageUrl(`?cursor=${cursor}`))).toThrow(
-			"Invalid cursor",
-		);
-	});
+	])(
+		"rejects an invalid timestamp without sending it to PostgreSQL: %s",
+		(createdAt) => {
+			const cursor = Buffer.from(
+				JSON.stringify({ id: "rollout-1", createdAt }),
+			).toString("base64url");
+			expect(() => timestampPage(pageUrl(`?cursor=${cursor}`))).toThrow(
+				"Invalid cursor",
+			);
+		},
+	);
 
 	it.each([
 		"not+base64url",

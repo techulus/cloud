@@ -92,13 +92,57 @@ function BackupCodes({
 	);
 }
 
+function SetupQrCode({ totpURI }: { totpURI: string }) {
+	const [dataUrl, setDataUrl] = useState("");
+
+	useEffect(() => {
+		let shouldUseResult = true;
+
+		QRCode.toDataURL(totpURI, {
+			errorCorrectionLevel: "M",
+			margin: 2,
+			width: 192,
+			color: {
+				dark: "#000000",
+				light: "#ffffff",
+			},
+		})
+			.then((result) => {
+				if (shouldUseResult) setDataUrl(result);
+			})
+			.catch(() => {
+				if (shouldUseResult) setDataUrl("");
+			});
+
+		return () => {
+			shouldUseResult = false;
+		};
+	}, [totpURI]);
+
+	return (
+		<div className="flex size-48 shrink-0 items-center justify-center rounded-md border bg-white p-3">
+			{dataUrl ? (
+				<Image
+					src={dataUrl}
+					alt="Authenticator setup QR code"
+					width={168}
+					height={168}
+					unoptimized
+					className="size-full object-contain"
+				/>
+			) : (
+				<Spinner className="size-5 text-muted-foreground" />
+			)}
+		</div>
+	);
+}
+
 export function TwoFactorSettings() {
 	const { data: session, refetch } = useSession();
 	const sessionUser = session?.user as TwoFactorSessionUser | undefined;
 	const [setupPassword, setSetupPassword] = useState("");
 	const [verificationCode, setVerificationCode] = useState("");
 	const [pendingSetup, setPendingSetup] = useState<PendingSetup | null>(null);
-	const [setupQrCode, setSetupQrCode] = useState("");
 	const [backupPassword, setBackupPassword] = useState("");
 	const [disablePassword, setDisablePassword] = useState("");
 	const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -114,35 +158,6 @@ export function TwoFactorSettings() {
 		() => normalizeTwoFactorCode(verificationCode),
 		[verificationCode],
 	);
-
-	useEffect(() => {
-		if (!pendingSetup?.totpURI) {
-			setSetupQrCode("");
-			return;
-		}
-
-		let shouldUseResult = true;
-
-		QRCode.toDataURL(pendingSetup.totpURI, {
-			errorCorrectionLevel: "M",
-			margin: 2,
-			width: 192,
-			color: {
-				dark: "#000000",
-				light: "#ffffff",
-			},
-		})
-			.then((dataUrl) => {
-				if (shouldUseResult) setSetupQrCode(dataUrl);
-			})
-			.catch(() => {
-				if (shouldUseResult) setSetupQrCode("");
-			});
-
-		return () => {
-			shouldUseResult = false;
-		};
-	}, [pendingSetup?.totpURI]);
 
 	function refreshSession() {
 		return refetch({ query: { disableCookieCache: true } });
@@ -229,7 +244,10 @@ export function TwoFactorSettings() {
 
 			if (response.error || !response.data?.backupCodes) {
 				throw new Error(
-					getAuthErrorMessage(response.error, "Failed to generate backup codes"),
+					getAuthErrorMessage(
+						response.error,
+						"Failed to generate backup codes",
+					),
 				);
 			}
 
@@ -311,20 +329,10 @@ export function TwoFactorSettings() {
 
 							<div className="grid gap-3">
 								<div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center">
-									<div className="flex size-48 shrink-0 items-center justify-center rounded-md border bg-white p-3">
-										{setupQrCode ? (
-											<Image
-												src={setupQrCode}
-												alt="Authenticator setup QR code"
-												width={168}
-												height={168}
-												unoptimized
-												className="size-full object-contain"
-											/>
-										) : (
-											<Spinner className="size-5 text-muted-foreground" />
-										)}
-									</div>
+									<SetupQrCode
+										key={pendingSetup.totpURI}
+										totpURI={pendingSetup.totpURI}
+									/>
 									<div className="space-y-1">
 										<p className="text-sm font-medium">Scan QR code</p>
 										<p className="text-sm text-muted-foreground">

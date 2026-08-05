@@ -45,17 +45,20 @@ describe("calculateAutoscalingRecommendation", () => {
 		[54, "hold"],
 		[66, "hold"],
 		[66.1, "up"],
-	] as const)("applies the inclusive deadband at %s", (utilization, expected) => {
-		const result = calculateAutoscalingRecommendation({
-			currentReplicas: 20,
-			minReplicas: 1,
-			maxReplicas: 32,
-			metrics: ready(utilization, utilization),
-		});
-		expect(result.status === "scale" ? result.direction : result.status).toBe(
-			expected,
-		);
-	});
+	] as const)(
+		"applies the inclusive deadband at %s",
+		(utilization, expected) => {
+			const result = calculateAutoscalingRecommendation({
+				currentReplicas: 20,
+				minReplicas: 1,
+				maxReplicas: 32,
+				metrics: ready(utilization, utilization),
+			});
+			expect(result.status === "scale" ? result.direction : result.status).toBe(
+				expected,
+			);
+		},
+	);
 
 	it("clamps directly to policy bounds without metrics", () => {
 		expect(

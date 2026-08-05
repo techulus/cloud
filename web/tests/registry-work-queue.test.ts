@@ -18,7 +18,7 @@ type RegistrySyncTransaction = Parameters<
 
 function awaitable<T>(value: T) {
 	return {
-		// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+		// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 		then: <TResult1 = T, TResult2 = never>(
 			resolve?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
 			reject?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
