@@ -8,14 +8,12 @@ RUN pnpm install --frozen-lockfile
 FROM node:24-slim AS builder
 WORKDIR /app
 ARG APP_VERSION=dev
-ARG NEXT_PUBLIC_SENTRY_DSN
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV DATABASE_URL=postgres://build:build@localhost:5432/build
 ENV BETTER_AUTH_SECRET=build-secret
 ENV BETTER_AUTH_URL=http://localhost:3000
 ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
-ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 RUN npx next build
 
 FROM node:24-slim AS drizzle

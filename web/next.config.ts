@@ -15,6 +15,5 @@ export default withSentryConfig(nextConfig, {
 	routeManifestInjection: false,
 	silent: true,
 	sourcemaps: { disable: true },
-	suppressOnRouterTransitionStartWarning: true,
 	telemetry: false,
 });
