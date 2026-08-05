@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"techulus/cloud-agent/internal/build"
 	"techulus/cloud-agent/internal/container"
@@ -18,6 +19,23 @@ import (
 	"techulus/cloud-agent/internal/paths"
 	"techulus/cloud-agent/internal/registryauth"
 )
+
+func (a *Agent) ProcessCommand(item agenthttp.WorkQueueItem) (container.CommandResult, error) {
+	var payload struct {
+		CommandRunID string `json:"commandRunId"`
+		ServiceID    string `json:"serviceId"`
+		DeploymentID string `json:"deploymentId"`
+		ContainerID  string `json:"containerId"`
+		Command      string `json:"command"`
+	}
+	if err := json.Unmarshal([]byte(item.Payload), &payload); err != nil {
+		return container.CommandResult{}, fmt.Errorf("failed to parse command payload: %w", err)
+	}
+	if payload.CommandRunID != item.ID || payload.ServiceID == "" || payload.DeploymentID == "" || payload.ContainerID == "" || payload.Command == "" || utf8.RuneCountInString(payload.Command) > 4096 {
+		return container.CommandResult{}, fmt.Errorf("invalid command payload")
+	}
+	return container.ExecCommand(payload.ContainerID, payload.ServiceID, payload.DeploymentID, payload.Command)
+}
 
 func (a *Agent) ProcessRestart(item agenthttp.WorkQueueItem) error {
 	var payload struct {

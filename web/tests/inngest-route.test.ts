@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
 		rolloutWorkflow: { id: "rollout-workflow" },
 		scheduledBackupsCheck: { id: "scheduled-backups-check" },
 		scheduledDeploymentsCheck: { id: "scheduled-deployments-check" },
+		serviceCommandRetention: { id: "service-command-retention" },
 		serviceDeletionWorkflow: { id: "service-deletion-workflow" },
 		serviceRestoreWorkflow: { id: "service-restore-workflow" },
 		staleItemsCleanup: { id: "stale-items-cleanup" },

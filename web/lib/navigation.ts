@@ -96,6 +96,12 @@ const servicePages = [
 	{ key: "metrics", label: "Metrics", suffix: "/metrics", aliases: ["usage"] },
 	{ key: "logs", label: "Logs", suffix: "/logs", aliases: ["output"] },
 	{
+		key: "commands",
+		label: "Commands",
+		suffix: "/commands",
+		aliases: ["shell", "exec"],
+	},
+	{
 		key: "requests",
 		label: "Requests",
 		suffix: "/requests",

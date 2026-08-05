@@ -910,6 +910,7 @@ export const workQueue = pgTable(
 				"create_manifest",
 				"upgrade_agent",
 				"sync_registries",
+				"command",
 			],
 		}).notNull(),
 		payload: text("payload").notNull(),
@@ -940,6 +941,44 @@ export const workQueue = pgTable(
 			.where(
 				sql`${table.type} = 'sync_registries' AND ${table.status} = 'pending'`,
 			),
+	],
+);
+
+export const serviceCommands = pgTable(
+	"service_commands",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		deploymentId: text("deployment_id").notNull(),
+		serverId: text("server_id").notNull(),
+		serverName: text("server_name").notNull(),
+		containerId: text("container_id").notNull(),
+		actor: jsonb("actor").$type<{ id: string; name: string }>().notNull(),
+		command: text("command").notNull(),
+		status: text("status", {
+			enum: ["pending", "running", "succeeded", "failed", "timed_out"],
+		})
+			.notNull()
+			.default("pending"),
+		output: text("output"),
+		exitCode: integer("exit_code"),
+		outputTruncated: boolean("output_truncated").notNull().default(false),
+		errorMessage: text("error_message"),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		startedAt: timestamp("started_at", { withTimezone: true }),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("service_commands_service_created_id_idx").on(
+			table.serviceId,
+			table.createdAt,
+			table.id,
+		),
+		index("service_commands_created_at_idx").on(table.createdAt),
 	],
 );
 

@@ -7,6 +7,7 @@ import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
 import { cleanupReadNotifications } from "@/lib/notifications";
 import { cleanupRegistryArtifactsDaily } from "@/lib/registry-retention";
+import { cleanupOldServiceCommands } from "@/lib/service-command-retention";
 import {
 	checkAndRecoverStaleServers,
 	checkAndRunScheduledDeployments,
@@ -194,4 +195,14 @@ export const notificationRetention = inngest.createFunction(
 	async ({ step }) => {
 		await step.run("cleanup-read-notifications", cleanupReadNotifications);
 	},
+);
+
+export const serviceCommandRetention = inngest.createFunction(
+	{
+		id: "cron-service-command-retention",
+		triggers: [cron("0 7 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) =>
+		step.run("cleanup-service-commands", cleanupOldServiceCommands),
 );
