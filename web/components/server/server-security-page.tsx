@@ -2,12 +2,8 @@
 
 import {
 	AlertTriangle,
-	Ban,
 	CheckCircle2,
 	Clock3,
-	Database,
-	type LucideIcon,
-	Radio,
 	ShieldCheck,
 	XCircle,
 } from "lucide-react";
@@ -106,33 +102,23 @@ function getOverallState(
 function ComponentStatus({
 	title,
 	available,
-	icon: Icon,
-	children,
 }: {
 	title: string;
 	available: boolean;
-	icon: LucideIcon;
-	children?: React.ReactNode;
 }) {
 	return (
-		<section className="space-y-2 p-3">
-			<div className="flex items-center justify-between gap-3">
-				<h3 className="flex items-center gap-2 font-medium">
-					<Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-					{title}
-				</h3>
-				<StatusBadge
-					icon={available ? CheckCircle2 : XCircle}
-					label={available ? "Available" : "Unavailable"}
-					className={
-						available
-							? "text-emerald-600 dark:text-emerald-400"
-							: "text-destructive"
-					}
-					size="sm"
-				/>
-			</div>
-			{children}
+		<section className="flex items-center justify-between gap-3 p-3">
+			<h3 className="font-medium">{title}</h3>
+			<StatusBadge
+				icon={available ? CheckCircle2 : XCircle}
+				label={available ? "Available" : "Unavailable"}
+				className={
+					available
+						? "text-emerald-600 dark:text-emerald-400"
+						: "text-destructive"
+				}
+				size="sm"
+			/>
 		</section>
 	);
 }
@@ -144,17 +130,6 @@ function DateValue({ value }: { value?: string }) {
 			{formatRelativeTime(value)} ({formatDateTime(value)})
 		</time>
 	);
-}
-
-function formatBouncerError(error: string) {
-	switch (error) {
-		case "command_failed":
-			return "CrowdSec status command failed";
-		case "invalid_output":
-			return "CrowdSec returned an invalid status response";
-		default:
-			return "CrowdSec bouncer status is unavailable";
-	}
 }
 
 export function ServerSecurityPage({
@@ -190,16 +165,11 @@ export function ServerSecurityPage({
 		!health.bouncer.revoked &&
 		!isOlderThan(health.bouncer.lastPullAt, currentTime),
 	);
-	const bouncerRegistration = health?.bouncer.revoked
-		? "Revoked"
-		: health?.bouncer.registered
-			? "Registered"
-			: "Missing";
 
 	return (
 		<div className="space-y-4">
-			<Card>
-				<CardHeader className="flex-row items-start justify-between gap-4">
+			<Card className="gap-0 py-0">
+				<CardHeader className="flex-row items-start justify-between gap-4 py-4">
 					<div className="space-y-1">
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<ShieldCheck className="size-5" aria-hidden="true" />
@@ -211,58 +181,19 @@ export function ServerSecurityPage({
 					</div>
 					<Status state={overallState} />
 				</CardHeader>
-			</Card>
-
-			<Card size="sm" className="gap-0 py-0">
-				<CardContent className="grid divide-y p-0 md:grid-cols-3 md:divide-x md:divide-y-0">
+				<CardContent className="grid divide-y border-t p-0 md:grid-cols-3 md:divide-x md:divide-y-0">
 					<ComponentStatus
 						title="LAPI"
 						available={health?.lapi.available ?? false}
-						icon={Database}
 					/>
 					<ComponentStatus
 						title="Traefik acquisition"
 						available={health?.metrics.available ?? false}
-						icon={Radio}
-					>
-						<dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-							{[
-								["Read", health?.metrics.reads],
-								["Parsed", health?.metrics.parsed],
-								["Unparsed", health?.metrics.unparsed],
-							].map(([label, value]) => (
-								<div key={label} className="flex gap-1.5">
-									<dt className="text-muted-foreground">{label}</dt>
-									<dd className="font-mono font-medium tabular-nums">
-										{value ?? "—"}
-									</dd>
-								</div>
-							))}
-						</dl>
-					</ComponentStatus>
+					/>
 					<ComponentStatus
 						title="Traefik bouncer"
 						available={bouncerAvailable}
-						icon={Ban}
-					>
-						<dl className="space-y-1 text-xs">
-							<div className="flex justify-between gap-2">
-								<dt className="text-muted-foreground">Registration</dt>
-								<dd>{bouncerRegistration}</dd>
-							</div>
-							<div className="flex justify-between gap-2">
-								<dt className="text-muted-foreground">Last decision pull</dt>
-								<dd className="text-right">
-									<DateValue value={health?.bouncer.lastPullAt} />
-								</dd>
-							</div>
-							{health?.bouncer.error && (
-								<div className="text-destructive">
-									{formatBouncerError(health.bouncer.error)}
-								</div>
-							)}
-						</dl>
-					</ComponentStatus>
+					/>
 				</CardContent>
 			</Card>
 
