@@ -188,6 +188,7 @@ export default function CommandsPage() {
 					)}
 					<Textarea
 						aria-label="Command"
+						className="font-mono"
 						value={command}
 						onChange={(event) => setCommand(event.target.value)}
 						maxLength={4096}
