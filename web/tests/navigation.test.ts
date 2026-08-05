@@ -19,7 +19,7 @@ describe("dashboard navigation catalog", () => {
 			[{ id: "server-1", name: "edge-01" }],
 		);
 
-		expect(items).toHaveLength(19);
+		expect(items).toHaveLength(20);
 		expect(items.map((item) => item.href)).toEqual(
 			expect.arrayContaining([
 				"/dashboard",
@@ -33,6 +33,7 @@ describe("dashboard navigation catalog", () => {
 				"/dashboard/projects/acme/production/services/service-1/configuration",
 				"/dashboard/projects/acme/production/services/service-1/metrics",
 				"/dashboard/projects/acme/production/services/service-1/logs",
+				"/dashboard/projects/acme/production/services/service-1/commands",
 				"/dashboard/projects/acme/production/services/service-1/requests",
 				"/dashboard/projects/acme/production/services/service-1/builds",
 				"/dashboard/projects/acme/production/services/service-1/backups",

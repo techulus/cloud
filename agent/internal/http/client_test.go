@@ -41,6 +41,28 @@ func TestSignedJSONRequests(t *testing.T) {
 	}
 }
 
+func TestCompletedWorkItemCommandResultJSON(t *testing.T) {
+	exitCode := 0
+	encoded, err := json.Marshal(CompletedWorkItem{
+		ID:      "command-1",
+		Attempt: 1,
+		Status:  "completed",
+		Result: CommandWorkItemResult{
+			Type:     "command",
+			Output:   "hello\n",
+			ExitCode: &exitCode,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const expected = `{"id":"command-1","attempt":1,"status":"completed","result":{"type":"command","output":"hello\n","exitCode":0}}`
+	if string(encoded) != expected {
+		t.Fatalf("unexpected completion JSON: %s", encoded)
+	}
+}
+
 func TestUpdateBuildStatusImageURI(t *testing.T) {
 	keyPair, err := crypto.GenerateKeyPair()
 	if err != nil {

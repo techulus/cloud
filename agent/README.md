@@ -15,7 +15,7 @@ The agent supports two modes:
 
 ### All Nodes
 - WireGuard (`wg` and `wg-quick` commands)
-- Podman
+- Podman 4.8 or newer (required for command execution cleanup)
 - BuildKit + buildctl
 - Railpack
 
@@ -226,7 +226,7 @@ WantedBy=multi-user.target
 ```
 
 `KillMode=process` ensures only the agent process is killed on restart, not container processes.
-The rootful Podman API socket at `/run/podman/podman.sock` is required for container metrics collection.
+The rootful Podman API socket at `/run/podman/podman.sock` is required for container metrics collection and command execution. Command timeouts force-remove the foreground exec session; deliberately backgrounded descendants are not guaranteed to be removed.
 
 ```bash
 sudo systemctl daemon-reload

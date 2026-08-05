@@ -1,20 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import {
-	applyStatusReport,
-	type StatusReport,
-} from "@/lib/agent-status";
+import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimNextWorkItem,
 	completeWorkItemResults,
+	type CompletedWorkItem,
 	renewActiveWorkItems,
-	type WorkItemResult,
 } from "@/lib/work-queue";
 
 type StatusRequestBody = {
 	statusReport?: StatusReport;
-	completedWorkItems?: WorkItemResult[];
+	completedWorkItems?: CompletedWorkItem[];
 	activeWorkItems?: ActiveWorkItem[];
 	serverlessTransitions?: unknown[];
 };
@@ -79,16 +76,18 @@ export async function POST(request: NextRequest) {
 	});
 }
 
-function isValidWorkItemResult(value: unknown): value is WorkItemResult {
+function isValidWorkItemResult(value: unknown): value is CompletedWorkItem {
 	if (!value || typeof value !== "object") return false;
 
-	const candidate = value as WorkItemResult;
+	const candidate = value as CompletedWorkItem;
 	return (
 		typeof candidate.id === "string" &&
 		Number.isInteger(candidate.attempt) &&
 		candidate.attempt > 0 &&
 		(candidate.status === "completed" || candidate.status === "failed") &&
-		(candidate.error === undefined || typeof candidate.error === "string")
+		(candidate.error === undefined || typeof candidate.error === "string") &&
+		(candidate.result === undefined ||
+			(Boolean(candidate.result) && typeof candidate.result === "object"))
 	);
 }
 

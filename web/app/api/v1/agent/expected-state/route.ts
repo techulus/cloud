@@ -1,8 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import {
-	buildAgentExpectedState,
-	getServer,
-} from "@/lib/agent/expected-state";
+import { buildAgentExpectedState, getServer } from "@/lib/agent/expected-state";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 
 export async function GET(request: NextRequest) {

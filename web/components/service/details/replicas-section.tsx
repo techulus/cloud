@@ -324,7 +324,7 @@ export const ReplicasSection = memo(function ReplicasSection({
 		: service.volumes && service.volumes.length > 0
 			? "Remove volumes before enabling autoscaling."
 			: service.resourceCpuLimit == null ||
-					service.resourceMemoryLimitMb == null
+				  service.resourceMemoryLimitMb == null
 				? "Set both CPU and memory limits before enabling autoscaling."
 				: null;
 
@@ -514,7 +514,9 @@ export const ReplicasSection = memo(function ReplicasSection({
 										<p className="text-sm text-muted-foreground">
 											The control plane distributes replicas evenly across
 											healthy
-											{service.serverlessEnabled ? " proxy nodes" : " nodes"}{" "}
+											{service.serverlessEnabled
+												? " proxy nodes"
+												: " nodes"}{" "}
 											and moves them after failures.
 										</p>
 									</div>

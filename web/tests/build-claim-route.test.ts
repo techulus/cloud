@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
 		const query = {
 			from: vi.fn(() => query),
 			where: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
 			}),
 			where: vi.fn(() => query),
 			returning: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
@@ -82,10 +82,7 @@ describe("agent build claim", () => {
 
 	it("does not overwrite cancellation when claim validation fails", async () => {
 		mocks.updateResults.push([build], []);
-		mocks.selectResults.push(
-			[{ id: "service-1", projectId: "project-1" }],
-			[],
-		);
+		mocks.selectResults.push([{ id: "service-1", projectId: "project-1" }], []);
 
 		const response = await POST(
 			new Request("http://localhost/api/v1/agent/builds/build-amd64", {

@@ -49,19 +49,19 @@ type podmanStatsReport struct {
 	Stats []podmanStatsSample `json:"Stats"`
 }
 
-const (
-	podmanSocketPath    = "/run/podman/podman.sock"
-	podmanStatsEndpoint = "http://podman/v4.0.0/libpod/containers/stats"
-)
+const podmanSocketPath = "/run/podman/podman.sock"
 
 var (
-	podmanStatsClient = &http.Client{Transport: &http.Transport{
+	podmanBaseURL     = "http://podman"
+	podmanDialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", podmanSocketPath)
+	}
+	podmanHTTPClient = &http.Client{Transport: &http.Transport{
 		DisableCompression: true,
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", podmanSocketPath)
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return podmanDialContext(ctx, network, address)
 		},
 	}}
-	podmanStatsURL = podmanStatsEndpoint
 )
 
 var previousResourceSamples = struct {
@@ -97,7 +97,7 @@ func CollectResourceStats() ([]ResourceStats, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	samples, err := fetchPodmanStats(ctx, podmanStatsClient, podmanStatsURL, containerIDs)
+	samples, err := fetchPodmanStats(ctx, podmanHTTPClient, podmanBaseURL+"/v4.0.0/libpod/containers/stats", containerIDs)
 	if err != nil {
 		return nil, err
 	}

@@ -44,14 +44,10 @@ describe("public API GitHub sources", () => {
 		expect(() => canonicalGitHubRepository(url)).toThrow();
 	});
 
-	it.each([
-		"app",
-		"packages/web",
-		"packages\\web",
-		".",
-		"a/./b",
-	])("accepts safe repository root %s", (rootDir) =>
-		expect(isSafeRepositoryRoot(rootDir)).toBe(true));
+	it.each(["app", "packages/web", "packages\\web", ".", "a/./b"])(
+		"accepts safe repository root %s",
+		(rootDir) => expect(isSafeRepositoryRoot(rootDir)).toBe(true),
+	);
 
 	it.each([
 		"",

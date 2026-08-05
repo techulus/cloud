@@ -11,14 +11,19 @@ export type DeploymentState = {
 	observedPhase: ObservedPhase;
 };
 
-export const runtimeExpectedStates = ["running", "stopped"] as const satisfies
-	readonly RuntimeDesiredState[];
+export const runtimeExpectedStates = [
+	"running",
+	"stopped",
+] as const satisfies readonly RuntimeDesiredState[];
 
-export const activeTrafficStates = ["active"] as const satisfies
-	readonly TrafficState[];
+export const activeTrafficStates = [
+	"active",
+] as const satisfies readonly TrafficState[];
 
-export const observedReadyPhases = ["healthy", "running"] as const satisfies
-	readonly ObservedPhase[];
+export const observedReadyPhases = [
+	"healthy",
+	"running",
+] as const satisfies readonly ObservedPhase[];
 
 export const observedStartingPhases = [
 	"pending",

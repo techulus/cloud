@@ -34,7 +34,9 @@ export function DeviceApprovalPage() {
 			return;
 		}
 
-		router.replace(`/?redirect=${encodeURIComponent(`/device/approve?user_code=${userCode}`)}`);
+		router.replace(
+			`/?redirect=${encodeURIComponent(`/device/approve?user_code=${userCode}`)}`,
+		);
 	}, [isPending, router, session, userCode]);
 
 	useEffect(() => {
@@ -78,7 +80,9 @@ export function DeviceApprovalPage() {
 				setSuccessMessage("Device denied. You can close this page.");
 			}
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to update device request");
+			setError(
+				err instanceof Error ? err.message : "Failed to update device request",
+			);
 		} finally {
 			setIsProcessing(false);
 		}

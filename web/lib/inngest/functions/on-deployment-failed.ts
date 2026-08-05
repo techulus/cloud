@@ -7,7 +7,10 @@ import { inngestEvents } from "../events";
 import { handleRolloutFailure } from "./rollout-utils";
 
 export const onDeploymentFailed = inngest.createFunction(
-	{ id: "on-deployment-failed", triggers: [inngestEvents.resourceStatusChanged] },
+	{
+		id: "on-deployment-failed",
+		triggers: [inngestEvents.resourceStatusChanged],
+	},
 	async ({ event, step }) => {
 		if (event.data.type !== "deployment") return;
 
@@ -25,10 +28,7 @@ export const onDeploymentFailed = inngest.createFunction(
 				.then((r) => r[0]);
 		});
 
-		if (
-			!deployment?.rolloutId ||
-			deployment.observedPhase !== "failed"
-		) {
+		if (!deployment?.rolloutId || deployment.observedPhase !== "failed") {
 			return;
 		}
 

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deployments, servers, volumeBackups, workQueue } from "@/db/schema";
+import {
+	deployments,
+	servers,
+	serviceCommands,
+	volumeBackups,
+	workQueue,
+} from "@/db/schema";
 import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
@@ -28,6 +34,13 @@ type ReconcileWorkPayload = {
 };
 
 export type WorkPayloadByType = {
+	command: {
+		commandRunId: string;
+		serviceId: string;
+		deploymentId: string;
+		containerId: string;
+		command: string;
+	};
 	deploy: ReconcileWorkPayload;
 	reconcile: ReconcileWorkPayload;
 	stop: { deploymentId: string; containerId: string | null };
@@ -74,10 +87,19 @@ export type WorkPayloadByType = {
 };
 
 export type WorkItemResult = {
+	type: "command";
+	output?: string;
+	exitCode?: number;
+	outputTruncated?: boolean;
+	timedOut?: boolean;
+};
+
+export type CompletedWorkItem = {
 	id: string;
 	attempt: number;
 	status: "completed" | "failed";
 	error?: string;
+	result?: WorkItemResult;
 };
 
 export type ActiveWorkItem = {
@@ -170,7 +192,7 @@ export async function enqueueRegistrySyncForAllRegisteredServers(
 
 export async function completeWorkItemResults(
 	serverId: string,
-	results: WorkItemResult[],
+	results: CompletedWorkItem[],
 ): Promise<{
 	accepted: string[];
 	rejected: RejectedWorkItemResult[];
@@ -179,29 +201,66 @@ export async function completeWorkItemResults(
 	const rejected: RejectedWorkItemResult[] = [];
 
 	for (const result of results) {
-		const item = await db.transaction(async (tx) => {
-			const updated = await tx
-				.update(workQueue)
-				.set({ status: result.status })
-				.where(
-					and(
-						eq(workQueue.id, result.id),
-						eq(workQueue.serverId, serverId),
-						eq(workQueue.status, "processing"),
-						eq(workQueue.attempts, result.attempt),
-					),
-				)
-				.returning();
+		if (!isValidWorkItemResult(result.result)) {
+			rejected.push({ id: result.id, reason: "invalid_result" });
+			continue;
+		}
+		let item: WorkQueue | null;
+		try {
+			item = await db.transaction(async (tx) => {
+				const updated = await tx
+					.update(workQueue)
+					.set({ status: result.status })
+					.where(
+						and(
+							eq(workQueue.id, result.id),
+							eq(workQueue.serverId, serverId),
+							eq(workQueue.status, "processing"),
+							eq(workQueue.attempts, result.attempt),
+						),
+					)
+					.returning();
 
-			const item = updated[0];
-			if (!item) return null;
+				const item = updated[0];
+				if (!item) return null;
 
-			if (item.type === "restore_volume") {
-				await publishRestoreWorkResult(tx, item, result);
+				if (result.result && item.type !== result.result.type) {
+					throw new WorkItemResultTypeMismatchError();
+				}
+				if (item.type === "restore_volume") {
+					await publishRestoreWorkResult(tx, item, result);
+				}
+				if (item.type === "command") {
+					const commandResult = result.result;
+					if (result.status === "completed" && !commandResult) {
+						throw new WorkItemResultTypeMismatchError();
+					}
+					await tx
+						.update(serviceCommands)
+						.set({
+							status: commandResult?.timedOut
+								? "timed_out"
+								: result.status === "completed" && commandResult?.exitCode === 0
+									? "succeeded"
+									: "failed",
+							output: commandResult?.output ?? "",
+							exitCode: commandResult?.exitCode,
+							outputTruncated: commandResult?.outputTruncated ?? false,
+							errorMessage: result.error ?? null,
+							completedAt: new Date(),
+						})
+						.where(eq(serviceCommands.id, item.id));
+				}
+
+				return item;
+			});
+		} catch (error) {
+			if (error instanceof WorkItemResultTypeMismatchError) {
+				rejected.push({ id: result.id, reason: "invalid_result" });
+				continue;
 			}
-
-			return item;
-		});
+			throw error;
+		}
 
 		if (!item) {
 			rejected.push({
@@ -218,6 +277,23 @@ export async function completeWorkItemResults(
 	}
 
 	return { accepted, rejected };
+}
+
+class WorkItemResultTypeMismatchError extends Error {}
+
+function isValidWorkItemResult(result: WorkItemResult | undefined): boolean {
+	if (result === undefined) return true;
+	return (
+		result.type === "command" &&
+		(result.output === undefined ||
+			(typeof result.output === "string" &&
+				Buffer.byteLength(result.output) <= 65536)) &&
+		(result.exitCode === undefined ||
+			(Number.isInteger(result.exitCode) && result.exitCode >= -1)) &&
+		(result.outputTruncated === undefined ||
+			typeof result.outputTruncated === "boolean") &&
+		(result.timedOut === undefined || typeof result.timedOut === "boolean")
+	);
 }
 
 export async function renewActiveWorkItems(
@@ -290,6 +366,12 @@ export async function claimNextWorkItem(
 
 	const row = rows[0];
 	if (!row) return null;
+	if (row.type === "command") {
+		await db
+			.update(serviceCommands)
+			.set({ status: "running", startedAt: new Date() })
+			.where(eq(serviceCommands.id, row.id));
+	}
 	if (row.type === "upgrade_agent") {
 		await markAgentUpgradeStarted(serverId, row.payload);
 	}
@@ -324,6 +406,7 @@ function claimableWorkCondition(serverId: string, staleThreshold: Date) {
 			status = 'pending'
 			OR (
 				status = 'processing'
+				AND type <> 'command'
 				AND started_at < ${staleThreshold}
 				AND attempts < ${WORK_QUEUE_MAX_ATTEMPTS}
 			)
@@ -382,7 +465,7 @@ async function getRejectionReason(
 async function publishRestoreWorkResult(
 	tx: WorkQueueTransaction,
 	item: WorkQueue,
-	result: WorkItemResult,
+	result: CompletedWorkItem,
 ): Promise<void> {
 	let value: unknown;
 	try {
@@ -492,7 +575,7 @@ async function publishRestoreWorkResult(
 
 async function runWorkItemCompletionSideEffects(
 	item: WorkQueue,
-	result: WorkItemResult,
+	result: CompletedWorkItem,
 ): Promise<void> {
 	if (item.type === "force_cleanup" && item.payload) {
 		await runForceCleanupCompletionSideEffects(item, result);
@@ -560,7 +643,7 @@ async function runWorkItemCompletionSideEffects(
 
 async function runAgentUpgradeCompletionSideEffects(
 	item: WorkQueue,
-	result: WorkItemResult,
+	result: CompletedWorkItem,
 ): Promise<void> {
 	try {
 		const payload = JSON.parse(item.payload) as { targetVersion?: string };
@@ -614,7 +697,7 @@ async function runAgentUpgradeCompletionSideEffects(
 
 async function runForceCleanupCompletionSideEffects(
 	item: WorkQueue,
-	result: WorkItemResult,
+	result: CompletedWorkItem,
 ): Promise<void> {
 	try {
 		const payload = JSON.parse(item.payload) as {

@@ -17,6 +17,7 @@ import {
 	servers,
 	serviceRevisions,
 	services,
+	serviceCommands,
 	workQueue,
 } from "@/db/schema";
 import {
@@ -838,17 +839,38 @@ export async function cleanupStaleItems(): Promise<void> {
 
 	// Pending work is intentionally retained so commands can run when an agent
 	// reconnects. Only exhausted processing attempts are failed here.
-	const staleWorkItems = await db
-		.update(workQueue)
-		.set({ status: "failed" })
-		.where(
-			and(
-				eq(workQueue.status, "processing"),
-				lt(workQueue.startedAt, workItemLeaseThreshold),
-				sql`${workQueue.attempts} >= ${WORK_QUEUE_MAX_ATTEMPTS}`,
-			),
-		)
-		.returning({ id: workQueue.id });
+	const staleWorkItems = await db.transaction(async (tx) => {
+		const items = await tx
+			.update(workQueue)
+			.set({ status: "failed" })
+			.where(
+				and(
+					eq(workQueue.status, "processing"),
+					lt(workQueue.startedAt, workItemLeaseThreshold),
+					or(
+						eq(workQueue.type, "command"),
+						sql`${workQueue.attempts} >= ${WORK_QUEUE_MAX_ATTEMPTS}`,
+					),
+				),
+			)
+			.returning({ id: workQueue.id });
+		if (items.length > 0) {
+			await tx
+				.update(serviceCommands)
+				.set({
+					status: "failed",
+					errorMessage: "Agent did not report a result",
+					completedAt: new Date(),
+				})
+				.where(
+					inArray(
+						serviceCommands.id,
+						items.map((item) => item.id),
+					),
+				);
+		}
+		return items;
+	});
 
 	if (staleWorkItems.length > 0) {
 		console.log(

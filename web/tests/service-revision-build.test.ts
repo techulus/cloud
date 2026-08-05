@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
 		const query = {
 			from: vi.fn(() => query),
 			where: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => {
 			}),
 			onConflictDoNothing: vi.fn(() => query),
 			returning: vi.fn(() => query),
-			// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,

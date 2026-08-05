@@ -14,7 +14,8 @@ describe("registry references", () => {
 		["registry-1.docker.io", "docker.io"],
 		["docker.io", "docker.io"],
 	])("canonicalizes %s", (input, expected) =>
-		expect(canonicalizeRegistryHost(input)).toBe(expected));
+		expect(canonicalizeRegistryHost(input)).toBe(expected),
+	);
 	it.each([
 		"https://example.com/path",
 		"user@example.com",
@@ -25,7 +26,8 @@ describe("registry references", () => {
 		"a.b-.example",
 		`${"a".repeat(64)}.example`,
 	])("rejects endpoint decorations in %s", (input) =>
-		expect(() => parseRegistryEndpoint(input)).toThrow());
+		expect(() => parseRegistryEndpoint(input)).toThrow(),
+	);
 	it("accepts an optional built-in endpoint scheme", () =>
 		expect(parseRegistryEndpoint("https://REGISTRY.example:5443")).toBe(
 			"registry.example:5443",
@@ -43,5 +45,6 @@ describe("registry references", () => {
 		["index.docker.io/acme/api:v1", "docker.io/acme/api:v1"],
 		["ghcr.io/acme/api", "ghcr.io/acme/api"],
 	])("normalizes image %s", (input, expected) =>
-		expect(normalizeImageReference(input)).toBe(expected));
+		expect(normalizeImageReference(input)).toBe(expected),
+	);
 });

@@ -50,7 +50,7 @@ export const onRestoreFailed = inngest.createFunction(
 		id: "on-restore-failed",
 		triggers: [inngestEvents.restoreFailed],
 	},
-	async ({ event, step }) => {
+	async ({ event }) => {
 		const { backupId, error } = event.data;
 		return { status: "failed", backupId, error };
 	},

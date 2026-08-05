@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => {
 		from: vi.fn(),
 		where: vi.fn(),
 		limit: vi.fn(),
-		// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+		// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 		then: (resolve: (rows: unknown[]) => unknown) =>
 			Promise.resolve(selectRows).then(resolve),
 	};
@@ -109,34 +109,34 @@ describe("registry retention", () => {
 	it.each([
 		{ processingRows: [], ready: true },
 		{ processingRows: [{ id: "manifest-1" }], ready: false },
-	])("fails pending manifest work and reports processing readiness as $ready", async ({
-		processingRows,
-		ready,
-	}) => {
-		const update = {
-			set: vi.fn(),
-			where: vi.fn().mockResolvedValue(undefined),
-		};
-		update.set.mockReturnValue(update);
-		const select = {
-			from: vi.fn(),
-			where: vi.fn(),
-			limit: vi.fn().mockResolvedValue(processingRows),
-		};
-		select.from.mockReturnValue(select);
-		select.where.mockReturnValue(select);
-		const tx = {
-			update: vi.fn(() => update),
-			select: vi.fn(() => select),
-		} as never;
+	])(
+		"fails pending manifest work and reports processing readiness as $ready",
+		async ({ processingRows, ready }) => {
+			const update = {
+				set: vi.fn(),
+				where: vi.fn().mockResolvedValue(undefined),
+			};
+			update.set.mockReturnValue(update);
+			const select = {
+				from: vi.fn(),
+				where: vi.fn(),
+				limit: vi.fn().mockResolvedValue(processingRows),
+			};
+			select.from.mockReturnValue(select);
+			select.where.mockReturnValue(select);
+			const tx = {
+				update: vi.fn(() => update),
+				select: vi.fn(() => select),
+			} as never;
 
-		await expect(prepareRegistryArtifactCleanup(tx, "service-1")).resolves.toBe(
-			ready,
-		);
-		expect(update.set).toHaveBeenCalledWith({ status: "failed" });
-		expect(update.where).toHaveBeenCalledOnce();
-		expect(select.limit).toHaveBeenCalledWith(1);
-	});
+			await expect(
+				prepareRegistryArtifactCleanup(tx, "service-1"),
+			).resolves.toBe(ready);
+			expect(update.set).toHaveBeenCalledWith({ status: "failed" });
+			expect(update.where).toHaveBeenCalledOnce();
+			expect(select.limit).toHaveBeenCalledWith(1);
+		},
+	);
 
 	it("does not delete an old revision artifact shared with a protected newer revision", async () => {
 		mocks.execute.mockResolvedValue({
@@ -226,17 +226,18 @@ describe("registry retention", () => {
 		expect(mocks.db.update).toHaveBeenCalledOnce();
 	});
 
-	it.each([
-		405, 500,
-	])("does not mark when registry tag deletion returns %s", async (status) => {
-		vi.spyOn(globalThis, "fetch").mockResolvedValue(response(status));
-		await expect(
-			cleanupRevisionArtifact(
-				githubRevision("registry.example.com:5443/team/app:final"),
-			),
-		).rejects.toThrow("DELETE failed");
-		expect(mocks.db.update).not.toHaveBeenCalled();
-	});
+	it.each([405, 500])(
+		"does not mark when registry tag deletion returns %s",
+		async (status) => {
+			vi.spyOn(globalThis, "fetch").mockResolvedValue(response(status));
+			await expect(
+				cleanupRevisionArtifact(
+					githubRevision("registry.example.com:5443/team/app:final"),
+				),
+			).rejects.toThrow("DELETE failed");
+			expect(mocks.db.update).not.toHaveBeenCalled();
+		},
+	);
 
 	it("rejects a digest-addressed final image without network access", async () => {
 		const fetchMock = vi.spyOn(globalThis, "fetch");

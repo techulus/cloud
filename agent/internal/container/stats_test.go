@@ -286,13 +286,13 @@ fi
 		w.WriteHeader(api.status)
 		_, _ = w.Write(api.body)
 	}))
-	previousClient := podmanStatsClient
-	previousURL := podmanStatsURL
-	podmanStatsClient = api.server.Client()
-	podmanStatsURL = api.server.URL
+	previousClient := podmanHTTPClient
+	previousBaseURL := podmanBaseURL
+	podmanHTTPClient = api.server.Client()
+	podmanBaseURL = api.server.URL
 	t.Cleanup(func() {
-		podmanStatsClient = previousClient
-		podmanStatsURL = previousURL
+		podmanHTTPClient = previousClient
+		podmanBaseURL = previousBaseURL
 		api.server.Close()
 	})
 	return api

@@ -144,7 +144,8 @@ export function ServiceLayoutClient({
 		pathname.includes("/configuration") ||
 		pathname.includes("/changelog") ||
 		pathname.includes("/builds") ||
-		pathname.includes("/backups");
+		pathname.includes("/backups") ||
+		pathname.includes("/commands");
 
 	const hasPublicPorts = service?.ports?.some((p) => p.isPublic);
 
@@ -153,6 +154,7 @@ export function ServiceLayoutClient({
 		{ name: "Configuration", href: `${basePath}/configuration` },
 		{ name: "Metrics", href: `${basePath}/metrics` },
 		{ name: "Logs", href: `${basePath}/logs` },
+		{ name: "Commands", href: `${basePath}/commands` },
 		...(hasPublicPorts
 			? [{ name: "Requests", href: `${basePath}/requests` }]
 			: []),

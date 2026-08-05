@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
 		from: vi.fn(),
 		innerJoin: vi.fn(),
 		where: vi.fn(),
-		// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+		// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 		then: (resolve: (value: unknown[]) => unknown) =>
 			Promise.resolve([queryResult]).then(resolve),
 	};

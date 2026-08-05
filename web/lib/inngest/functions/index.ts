@@ -8,6 +8,7 @@ export {
 	challengeCleanup,
 	controlPlaneUpdateCheck,
 	notificationRetention,
+	serviceCommandRetention,
 	oldBackupsCleanup,
 	registryArtifactRetention,
 	scheduledBackupsCheck,

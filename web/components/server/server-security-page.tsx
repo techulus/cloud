@@ -1,13 +1,9 @@
 "use client";
 
 import {
-	type Activity,
 	AlertTriangle,
-	Ban,
 	CheckCircle2,
 	Clock3,
-	Database,
-	Radio,
 	ShieldCheck,
 	XCircle,
 } from "lucide-react";
@@ -103,42 +99,27 @@ function getOverallState(
 	return "healthy";
 }
 
-function ComponentCard({
+function ComponentStatus({
 	title,
-	description,
 	available,
-	icon: Icon,
-	children,
 }: {
 	title: string;
-	description: string;
 	available: boolean;
-	icon: typeof Activity;
-	children?: React.ReactNode;
 }) {
 	return (
-		<Card size="sm">
-			<CardHeader className="flex-row items-start justify-between gap-3">
-				<div>
-					<CardTitle className="flex items-center gap-2">
-						<Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-						{title}
-					</CardTitle>
-					<CardDescription className="mt-1">{description}</CardDescription>
-				</div>
-				<StatusBadge
-					icon={available ? CheckCircle2 : XCircle}
-					label={available ? "Available" : "Unavailable"}
-					className={
-						available
-							? "text-emerald-600 dark:text-emerald-400"
-							: "text-destructive"
-					}
-					size="sm"
-				/>
-			</CardHeader>
-			{children && <CardContent>{children}</CardContent>}
-		</Card>
+		<section className="flex items-center justify-between gap-3 p-3">
+			<h3 className="font-medium">{title}</h3>
+			<StatusBadge
+				icon={available ? CheckCircle2 : XCircle}
+				label={available ? "Available" : "Unavailable"}
+				className={
+					available
+						? "text-emerald-600 dark:text-emerald-400"
+						: "text-destructive"
+				}
+				size="sm"
+			/>
+		</section>
 	);
 }
 
@@ -149,17 +130,6 @@ function DateValue({ value }: { value?: string }) {
 			{formatRelativeTime(value)} ({formatDateTime(value)})
 		</time>
 	);
-}
-
-function formatBouncerError(error: string) {
-	switch (error) {
-		case "command_failed":
-			return "CrowdSec status command failed";
-		case "invalid_output":
-			return "CrowdSec returned an invalid status response";
-		default:
-			return "CrowdSec bouncer status is unavailable";
-	}
 }
 
 export function ServerSecurityPage({
@@ -191,20 +161,15 @@ export function ServerSecurityPage({
 	const overallState = getOverallState(status, health, currentTime);
 	const bouncerAvailable = Boolean(
 		health?.bouncer.available &&
-			health.bouncer.registered &&
-			!health.bouncer.revoked &&
-			!isOlderThan(health.bouncer.lastPullAt, currentTime),
+		health.bouncer.registered &&
+		!health.bouncer.revoked &&
+		!isOlderThan(health.bouncer.lastPullAt, currentTime),
 	);
-	const bouncerRegistration = health?.bouncer.revoked
-		? "Revoked"
-		: health?.bouncer.registered
-			? "Registered"
-			: "Missing";
 
 	return (
 		<div className="space-y-4">
-			<Card>
-				<CardHeader className="flex-row items-start justify-between gap-4">
+			<Card className="gap-0 py-0">
+				<CardHeader className="flex-row items-start justify-between gap-4 py-4">
 					<div className="space-y-1">
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<ShieldCheck className="size-5" aria-hidden="true" />
@@ -216,64 +181,21 @@ export function ServerSecurityPage({
 					</div>
 					<Status state={overallState} />
 				</CardHeader>
-				<CardContent className="text-sm text-muted-foreground">
-					Last checked: <DateValue value={health?.checkedAt} />
+				<CardContent className="grid divide-y border-t p-0 md:grid-cols-3 md:divide-x md:divide-y-0">
+					<ComponentStatus
+						title="LAPI"
+						available={health?.lapi.available ?? false}
+					/>
+					<ComponentStatus
+						title="Traefik acquisition"
+						available={health?.metrics.available ?? false}
+					/>
+					<ComponentStatus
+						title="Traefik bouncer"
+						available={bouncerAvailable}
+					/>
 				</CardContent>
 			</Card>
-
-			<div className="grid gap-4 md:grid-cols-3">
-				<ComponentCard
-					title="LAPI"
-					description="CrowdSec local API connectivity"
-					available={health?.lapi.available ?? false}
-					icon={Database}
-				/>
-				<ComponentCard
-					title="Traefik acquisition"
-					description="Access-log ingestion counters"
-					available={health?.metrics.available ?? false}
-					icon={Radio}
-				>
-					<dl className="grid grid-cols-3 gap-2 text-center">
-						{[
-							["Read", health?.metrics.reads],
-							["Parsed", health?.metrics.parsed],
-							["Unparsed", health?.metrics.unparsed],
-						].map(([label, value]) => (
-							<div key={label} className="rounded-md bg-muted/50 p-2">
-								<dt className="text-xs text-muted-foreground">{label}</dt>
-								<dd className="mt-1 font-mono font-semibold tabular-nums">
-									{value ?? "—"}
-								</dd>
-							</div>
-						))}
-					</dl>
-				</ComponentCard>
-				<ComponentCard
-					title="Traefik bouncer"
-					description="Automated decision enforcement"
-					available={bouncerAvailable}
-					icon={Ban}
-				>
-					<dl className="space-y-2 text-xs">
-						<div className="flex justify-between gap-2">
-							<dt className="text-muted-foreground">Registration</dt>
-							<dd>{bouncerRegistration}</dd>
-						</div>
-						<div className="flex justify-between gap-2">
-							<dt className="text-muted-foreground">Last decision pull</dt>
-							<dd className="text-right">
-								<DateValue value={health?.bouncer.lastPullAt} />
-							</dd>
-						</div>
-						{health?.bouncer.error && (
-							<div className="text-destructive">
-								{formatBouncerError(health.bouncer.error)}
-							</div>
-						)}
-					</dl>
-				</ComponentCard>
-			</div>
 
 			<SecurityList
 				title="Active blocks"
@@ -350,10 +272,10 @@ function SecurityList(props: SecurityListProps) {
 
 function DecisionRows({ records }: { records: CrowdSecDecision[] }) {
 	return (
-		<div className="overflow-x-auto">
+		<div className="overflow-x-auto rounded-lg border">
 			<table className="w-full min-w-3xl text-left text-sm">
 				<caption className="sr-only">Active CrowdSec blocks</caption>
-				<thead className="border-b text-xs text-muted-foreground">
+				<thead className="border-b bg-muted/50 text-xs text-muted-foreground">
 					<tr>
 						<th className="px-2 py-2 font-medium">Target</th>
 						<th className="px-2 py-2 font-medium">Action</th>
@@ -365,16 +287,16 @@ function DecisionRows({ records }: { records: CrowdSecDecision[] }) {
 				<tbody className="divide-y">
 					{records.map((record, index) => (
 						<tr key={`${record.scope}-${record.value}-${index}`}>
-							<td className="px-2 py-3">
+							<td className="px-2 py-2">
 								<span className="text-xs text-muted-foreground">
 									{record.scope}
 								</span>
 								<div className="font-mono">{record.value}</div>
 							</td>
-							<td className="px-2 py-3">{record.action}</td>
-							<td className="px-2 py-3">{record.reason || "—"}</td>
-							<td className="px-2 py-3">{record.origin || "—"}</td>
-							<td className="px-2 py-3">
+							<td className="px-2 py-2">{record.action}</td>
+							<td className="px-2 py-2">{record.reason || "—"}</td>
+							<td className="px-2 py-2">{record.origin || "—"}</td>
+							<td className="px-2 py-2">
 								<DateValue value={record.expiresAt} />
 							</td>
 						</tr>
@@ -387,10 +309,10 @@ function DecisionRows({ records }: { records: CrowdSecDecision[] }) {
 
 function AlertRows({ records }: { records: CrowdSecAlert[] }) {
 	return (
-		<div className="overflow-x-auto">
+		<div className="overflow-x-auto rounded-lg border">
 			<table className="w-full min-w-3xl text-left text-sm">
 				<caption className="sr-only">Recent CrowdSec threats</caption>
-				<thead className="border-b text-xs text-muted-foreground">
+				<thead className="border-b bg-muted/50 text-xs text-muted-foreground">
 					<tr>
 						<th className="px-2 py-2 font-medium">Detected</th>
 						<th className="px-2 py-2 font-medium">Scenario</th>
@@ -402,13 +324,13 @@ function AlertRows({ records }: { records: CrowdSecAlert[] }) {
 				<tbody className="divide-y">
 					{records.map((record) => (
 						<tr key={record.id}>
-							<td className="px-2 py-3">
+							<td className="px-2 py-2">
 								<DateValue value={record.detectedAt} />
 							</td>
-							<td className="px-2 py-3">{record.scenario || "—"}</td>
-							<td className="px-2 py-3 font-mono">{record.sourceIp || "—"}</td>
-							<td className="px-2 py-3">{record.country || "—"}</td>
-							<td className="px-2 py-3 text-right font-mono tabular-nums">
+							<td className="px-2 py-2">{record.scenario || "—"}</td>
+							<td className="px-2 py-2 font-mono">{record.sourceIp || "—"}</td>
+							<td className="px-2 py-2">{record.country || "—"}</td>
+							<td className="px-2 py-2 text-right font-mono tabular-nums">
 								{record.eventCount}
 							</td>
 						</tr>

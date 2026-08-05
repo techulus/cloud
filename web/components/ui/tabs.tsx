@@ -15,10 +15,7 @@ function Tabs({ className, ...props }: TabsPrimitive.Root.Props) {
 	);
 }
 
-function TabsList({
-	className,
-	...props
-}: TabsPrimitive.List.Props) {
+function TabsList({ className, ...props }: TabsPrimitive.List.Props) {
 	return (
 		<TabsPrimitive.List
 			data-slot="tabs-list"

@@ -29,7 +29,9 @@ describe("revision-backed GitHub clone authentication", () => {
 	});
 
 	it("never falls back to an anonymous clone when App authentication fails", async () => {
-		const getToken = vi.fn().mockRejectedValue(new Error("installation removed"));
+		const getToken = vi
+			.fn()
+			.mockRejectedValue(new Error("installation removed"));
 
 		await expect(
 			cloneUrlForRevisionSource(
