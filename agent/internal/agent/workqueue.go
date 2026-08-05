@@ -129,13 +129,16 @@ func (a *Agent) processLeasedWorkItem(item agenthttp.WorkQueueItem) {
 		Error:   errorMsg,
 	}
 	if commandResult != nil {
-		completed.Output = commandResult.Output
-		completed.ExitCode = &commandResult.ExitCode
-		completed.OutputTruncated = commandResult.Truncated
+		completed.Result = agenthttp.CommandWorkItemResult{
+			Type:            "command",
+			Output:          commandResult.Output,
+			ExitCode:        &commandResult.ExitCode,
+			OutputTruncated: commandResult.Truncated,
+			TimedOut:        commandResult.TimedOut,
+		}
 		if commandResult.TimedOut {
 			completed.Status = "failed"
 			completed.Error = "command timed out after 60 seconds"
-			completed.TimedOut = true
 		} else if commandResult.ExitCode != 0 {
 			completed.Status = "failed"
 		}

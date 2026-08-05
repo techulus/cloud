@@ -180,9 +180,12 @@ describe("command work completion", () => {
 				id: "command-1",
 				attempt: 1,
 				status: "completed",
-				output: "hello\n",
-				exitCode: 0,
-				outputTruncated: false,
+				result: {
+					type: "command",
+					output: "hello\n",
+					exitCode: 0,
+					outputTruncated: false,
+				},
 			},
 		]);
 
@@ -206,8 +209,11 @@ describe("command work completion", () => {
 				attempt: 1,
 				status: "failed",
 				error: "command timed out after 60 seconds",
-				exitCode: 124,
-				timedOut: true,
+				result: {
+					type: "command",
+					exitCode: 124,
+					timedOut: true,
+				},
 			},
 		]);
 
@@ -224,8 +230,11 @@ describe("command work completion", () => {
 				id: "command-1",
 				attempt: 1,
 				status: "completed",
-				output: "x".repeat(65537),
-				exitCode: 0,
+				result: {
+					type: "command",
+					output: "x".repeat(65537),
+					exitCode: 0,
+				},
 			},
 		]);
 
@@ -234,6 +243,37 @@ describe("command work completion", () => {
 			rejected: [{ id: "command-1", reason: "invalid_result" }],
 		});
 		expect(mocks.db.transaction).not.toHaveBeenCalled();
+	});
+
+	it("rejects a successful command completion without a typed result", async () => {
+		mocks.state.updatedRows = [commandWorkItem("command-1")];
+
+		const result = await completeWorkItemResults("server-1", [
+			{ id: "command-1", attempt: 1, status: "completed" },
+		]);
+
+		expect(result).toEqual({
+			accepted: [],
+			rejected: [{ id: "command-1", reason: "invalid_result" }],
+		});
+		expect(mocks.state.persistedStatus).toBe("processing");
+	});
+
+	it("rejects command result data for a different work type", async () => {
+		const result = await completeWorkItemResults("server-1", [
+			{
+				id: "work-1",
+				attempt: 1,
+				status: "failed",
+				result: { type: "command", exitCode: 1 },
+			},
+		]);
+
+		expect(result).toEqual({
+			accepted: [],
+			rejected: [{ id: "work-1", reason: "invalid_result" }],
+		});
+		expect(mocks.state.persistedStatus).toBe("processing");
 	});
 });
 
