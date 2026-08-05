@@ -1,10 +1,9 @@
 "use client";
 
-import { Loader2, Terminal, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Terminal, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import useSWRInfinite from "swr/infinite";
 import { useService } from "@/components/service/service-layout-client";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,13 +13,26 @@ import {
 	EmptyTitle,
 } from "@/components/ui/empty";
 import {
+	Item,
+	ItemContent,
+	ItemDescription,
+	ItemGroup,
+	ItemTitle,
+} from "@/components/ui/item";
+import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDateTime, formatRelativeTime } from "@/lib/date";
+import {
+	formatDateTime,
+	formatElapsedDurationBetween,
+	formatRelativeTime,
+} from "@/lib/date";
 import { isObservedReady } from "@/lib/deployment-status";
 import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
 
 type CommandStatus =
 	| "pending"
@@ -50,26 +62,43 @@ type CommandHistory = {
 	nextCursor: string | null;
 };
 
-const STATUS_LABELS: Record<CommandStatus, string> = {
-	pending: "Queued",
-	running: "Running",
-	succeeded: "Succeeded",
-	failed: "Failed",
-	timed_out: "Timed out",
+const STATUS_CONFIG: Record<
+	CommandStatus,
+	{ label: string; icon: typeof Clock; className: string }
+> = {
+	pending: { label: "Queued", icon: Clock, className: "text-slate-500" },
+	running: { label: "Running", icon: Loader2, className: "text-blue-500" },
+	succeeded: {
+		label: "Succeeded",
+		icon: CheckCircle2,
+		className: "text-green-500",
+	},
+	failed: { label: "Failed", icon: XCircle, className: "text-red-500" },
+	timed_out: {
+		label: "Timed out",
+		icon: Clock,
+		className: "text-orange-500",
+	},
 };
 
-function CommandStatusBadge({ command }: { command: CommandRun }) {
-	const failed = command.status === "failed" || command.status === "timed_out";
+function CommandStatusBadge({
+	status,
+	className,
+	size,
+}: {
+	status: CommandStatus;
+	className?: string;
+	size?: "default" | "sm";
+}) {
+	const config = STATUS_CONFIG[status];
 	return (
-		<Badge
-			variant={failed ? "destructive" : "secondary"}
-			className={
-				command.status === "succeeded" ? "text-emerald-700" : undefined
-			}
-		>
-			{STATUS_LABELS[command.status]}
-			{command.exitCode !== null ? ` · exit ${command.exitCode}` : null}
-		</Badge>
+		<StatusBadge
+			icon={config.icon}
+			label={config.label}
+			isAnimated={status === "running"}
+			className={cn(config.className, className)}
+			size={size}
+		/>
 	);
 }
 
@@ -243,54 +272,76 @@ export default function CommandsPage() {
 						</EmptyDescription>
 					</Empty>
 				) : (
-					<div className="space-y-3">
+					<ItemGroup>
 						{history.map((item) => (
-							<Card key={item.id}>
-								<CardContent className="space-y-3 pt-6">
-									<div className="flex items-start justify-between gap-4">
-										<code className="break-all text-sm">$ {item.command}</code>
-										<CommandStatusBadge command={item} />
-									</div>
-									<p className="text-xs text-muted-foreground">
-										{item.actor.name} · {item.serverName} ·{" "}
-										{item.containerId.slice(0, 12)} ·{" "}
-										<time title={formatDateTime(item.createdAt)}>
+							<Item key={item.id} variant="outline" className="items-start">
+								<CommandStatusBadge
+									status={item.status}
+									className="w-28 max-sm:hidden"
+								/>
+								<ItemContent>
+									<ItemTitle>
+										<code
+											className="truncate font-mono text-xs"
+											title={item.command}
+										>
+											$ {item.command}
+										</code>
+									</ItemTitle>
+									<ItemDescription as="div" className="line-clamp-none">
+										<CommandStatusBadge
+											status={item.status}
+											size="sm"
+											className="mr-3 sm:hidden"
+										/>
+										<span>
+											{item.actor.name} · {item.serverName} ·{" "}
+											{item.containerId.slice(0, 12)}
+										</span>
+										<span
+											className="ml-3"
+											title={formatDateTime(item.createdAt)}
+										>
 											{formatRelativeTime(item.createdAt)}
-										</time>
-									</p>
-									{item.startedAt || item.completedAt ? (
-										<p className="text-xs text-muted-foreground">
-											{item.startedAt
-												? `Started ${formatDateTime(item.startedAt)}`
+										</span>
+										{item.exitCode !== null ? (
+											<span className="ml-3">Exit: {item.exitCode}</span>
+										) : null}
+										{item.startedAt ? (
+											<span
+												className="ml-3"
+												title={`Started ${formatDateTime(item.startedAt)}${item.completedAt ? ` · Completed ${formatDateTime(item.completedAt)}` : ""}`}
+											>
+												<span className="max-sm:hidden">Duration: </span>
+												{formatElapsedDurationBetween(
+													item.startedAt,
+													item.completedAt,
+												)}
+											</span>
+										) : null}
+									</ItemDescription>
+								</ItemContent>
+								{item.output || item.errorMessage ? (
+									<details className="w-full border-t pt-2">
+										<summary className="cursor-pointer text-sm">
+											Combined output
+										</summary>
+										<pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
+											{item.output}
+											{item.errorMessage
+												? `${item.output ? "\n" : ""}${item.errorMessage}`
 												: null}
-											{item.startedAt && item.completedAt ? " · " : null}
-											{item.completedAt
-												? `Completed ${formatDateTime(item.completedAt)}`
-												: null}
-										</p>
-									) : null}
-									{item.output || item.errorMessage ? (
-										<details open>
-											<summary className="cursor-pointer text-sm">
-												Combined output
-											</summary>
-											<pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
-												{item.output}
-												{item.errorMessage
-													? `${item.output ? "\n" : ""}${item.errorMessage}`
-													: null}
-											</pre>
-											{item.outputTruncated ? (
-												<p className="mt-1 text-xs text-amber-600">
-													Output was truncated at 64 KiB.
-												</p>
-											) : null}
-										</details>
-									) : null}
-								</CardContent>
-							</Card>
+										</pre>
+										{item.outputTruncated ? (
+											<p className="mt-1 text-xs text-amber-600">
+												Output was truncated at 64 KiB.
+											</p>
+										) : null}
+									</details>
+								) : null}
+							</Item>
 						))}
-					</div>
+					</ItemGroup>
 				)}
 
 				{hasMore ? (
