@@ -47,7 +47,7 @@ function Slider<Value extends number | readonly number[]>({
 						aria-label={getThumbAriaLabel ? undefined : ariaLabel}
 						getAriaLabel={getThumbAriaLabel}
 						index={index}
-						// biome-ignore lint/suspicious/noArrayIndexKey: Slider thumbs are identified by their value index.
+						// oxlint-disable-next-line react/no-array-index-key -- Slider thumbs are identified by their value index.
 						key={index}
 						className="relative block size-4 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
 					/>

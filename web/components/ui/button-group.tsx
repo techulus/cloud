@@ -1,9 +1,6 @@
 import { cn } from "@/lib/utils";
 
-function ButtonGroup({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
+function ButtonGroup({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			role="group"

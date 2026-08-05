@@ -221,16 +221,13 @@ function useDebouncedValue(value: string, delay: number): string {
 	const [debouncedValue, setDebouncedValue] = useState(value);
 
 	useEffect(() => {
-		if (!value) {
-			setDebouncedValue("");
-			return;
-		}
+		if (!value) return;
 
 		const timeout = window.setTimeout(() => setDebouncedValue(value), delay);
 		return () => window.clearTimeout(timeout);
 	}, [value, delay]);
 
-	return debouncedValue;
+	return value ? debouncedValue : "";
 }
 
 function TimeRangeFilter({
@@ -799,7 +796,6 @@ export function LogViewer(props: LogViewerProps) {
 		paginationAbortRef.current?.abort();
 		paginationAbortRef.current = null;
 		scrollRestorationRef.current = null;
-		setLoadingOlderKey(null);
 
 		return () => paginationAbortRef.current?.abort();
 	}, [paginationKey]);

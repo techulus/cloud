@@ -48,29 +48,29 @@ mutable tags such as `latest` or `tip`.
 
 ## Services
 
-| Service | Endpoint |
-|---------|----------|
-| Web | `https://${ROOT_DOMAIN}` |
-| Registry | `https://registry.${ROOT_DOMAIN}` |
-| Logs | `https://logs.${ROOT_DOMAIN}` |
-| PostgreSQL | Internal only |
+| Service    | Endpoint                          |
+| ---------- | --------------------------------- |
+| Web        | `https://${ROOT_DOMAIN}`          |
+| Registry   | `https://registry.${ROOT_DOMAIN}` |
+| Logs       | `https://logs.${ROOT_DOMAIN}`     |
+| PostgreSQL | Internal only                     |
 
 ## Environment Variables
 
 ### Required
 
-| Variable | Description |
-|----------|-------------|
-| `ROOT_DOMAIN` | Your domain (e.g., `example.com`) |
-| `ACME_EMAIL` | Email for Let's Encrypt certificates |
-| `POSTGRES_USER` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | PostgreSQL password |
-| `POSTGRES_DB` | PostgreSQL database name |
-| `DATABASE_URL` | Full connection string (e.g., `postgres://user:pass@postgres:5432/db`) |
-| `BETTER_AUTH_SECRET` | Secret key for authentication |
-| `ENCRYPTION_KEY` | 32 bytes as 64-character hex string. Required unless AWS KMS BYOK is configured. |
-| `ENCRYPTION_KMS_KEY_ARN` | Optional full ARN of a symmetric AWS KMS key. Enables BYOK. |
-| `AWS_REGION` | Required with `ENCRYPTION_KMS_KEY_ARN`. |
+| Variable                 | Description                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `ROOT_DOMAIN`            | Your domain (e.g., `example.com`)                                                |
+| `ACME_EMAIL`             | Email for Let's Encrypt certificates                                             |
+| `POSTGRES_USER`          | PostgreSQL username                                                              |
+| `POSTGRES_PASSWORD`      | PostgreSQL password                                                              |
+| `POSTGRES_DB`            | PostgreSQL database name                                                         |
+| `DATABASE_URL`           | Full connection string (e.g., `postgres://user:pass@postgres:5432/db`)           |
+| `BETTER_AUTH_SECRET`     | Secret key for authentication                                                    |
+| `ENCRYPTION_KEY`         | 32 bytes as 64-character hex string. Required unless AWS KMS BYOK is configured. |
+| `ENCRYPTION_KMS_KEY_ARN` | Optional full ARN of a symmetric AWS KMS key. Enables BYOK.                      |
+| `AWS_REGION`             | Required with `ENCRYPTION_KMS_KEY_ARN`.                                          |
 
 For KMS BYOK, run the dedicated control plane in AWS with an instance profile or task role. The role needs `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey`. Do not put static AWS credentials in `.env`.
 
@@ -80,43 +80,45 @@ On a fresh KMS installation, omit `ENCRYPTION_KEY`. To migrate existing data, co
 
 ### Victoria Logs
 
-| Variable | Description |
-|----------|-------------|
-| `VL_USERNAME` | Logs service username |
-| `VL_PASSWORD` | Logs service password |
+| Variable       | Description                          |
+| -------------- | ------------------------------------ |
+| `VL_USERNAME`  | Logs service username                |
+| `VL_PASSWORD`  | Logs service password                |
 | `VL_RETENTION` | Log retention period (default: `7d`) |
 
 ### Victoria Metrics
 
-| Variable | Description |
-|----------|-------------|
-| `VM_USERNAME` | Metrics service username |
-| `VM_PASSWORD` | Metrics service password |
+| Variable       | Description                               |
+| -------------- | ----------------------------------------- |
+| `VM_USERNAME`  | Metrics service username                  |
+| `VM_PASSWORD`  | Metrics service password                  |
 | `VM_RETENTION` | Metrics retention period (default: `30d`) |
 
 ### Registry
 
-| Variable | Description |
-|----------|-------------|
-| `REGISTRY_AUTH` | htpasswd format auth string |
-| `REGISTRY_URL` | Registry URL for agents |
-| `REGISTRY_USERNAME` | Registry username for agents |
-| `REGISTRY_PASSWORD` | Registry password for agents |
+| Variable            | Description                         |
+| ------------------- | ----------------------------------- |
+| `REGISTRY_AUTH`     | htpasswd format auth string         |
+| `REGISTRY_URL`      | Registry URL for agents             |
+| `REGISTRY_USERNAME` | Registry username for agents        |
+| `REGISTRY_PASSWORD` | Registry password for agents        |
 | `REGISTRY_INSECURE` | Set to `true` for insecure registry |
 
 Generate registry auth:
+
 ```bash
 htpasswd -nB admin
 ```
+
 Escape `$` as `$$` in the `.env` file.
 
 ### GitHub Integration (Optional)
 
-| Variable | Description |
-|----------|-------------|
-| `GITHUB_APP_ID` | GitHub App ID |
+| Variable                 | Description            |
+| ------------------------ | ---------------------- |
+| `GITHUB_APP_ID`          | GitHub App ID          |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key |
-| `GITHUB_WEBHOOK_SECRET` | Webhook secret |
+| `GITHUB_WEBHOOK_SECRET`  | Webhook secret         |
 
 ## Commands
 

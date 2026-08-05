@@ -32,24 +32,24 @@ describe("log routes", () => {
 			params: { range: "30d" },
 			message: "Invalid log range",
 		},
-	])("rejects $name before querying VictoriaLogs", async ({
-		params,
-		message,
-	}) => {
-		const { GET, queryLogsByService } = await loadServiceLogsRoute();
-		const url = new URL("http://localhost/api/services/service-1/logs");
-		for (const [key, value] of Object.entries(params)) {
-			url.searchParams.set(key, value);
-		}
+	])(
+		"rejects $name before querying VictoriaLogs",
+		async ({ params, message }) => {
+			const { GET, queryLogsByService } = await loadServiceLogsRoute();
+			const url = new URL("http://localhost/api/services/service-1/logs");
+			for (const [key, value] of Object.entries(params)) {
+				url.searchParams.set(key, value);
+			}
 
-		const response = await GET(new Request(url), {
-			params: Promise.resolve({ id: "service-1" }),
-		});
+			const response = await GET(new Request(url), {
+				params: Promise.resolve({ id: "service-1" }),
+			});
 
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ message });
-		expect(queryLogsByService).not.toHaveBeenCalled();
-	});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({ message });
+			expect(queryLogsByService).not.toHaveBeenCalled();
+		},
+	);
 
 	it("returns a gateway error when VictoriaLogs fails", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => undefined);

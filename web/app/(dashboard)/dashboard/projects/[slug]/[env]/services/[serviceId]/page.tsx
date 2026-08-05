@@ -82,9 +82,9 @@ export default function DeploymentsPage() {
 					: typeof error === "string"
 						? error
 						: error &&
-								typeof error === "object" &&
-								"message" in error &&
-								typeof error.message === "string"
+							  typeof error === "object" &&
+							  "message" in error &&
+							  typeof error.message === "string"
 							? error.message
 							: "An error occurred";
 			toast.error(errorMessage);

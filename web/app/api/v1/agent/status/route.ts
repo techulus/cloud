@@ -1,9 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
-import {
-	applyStatusReport,
-	type StatusReport,
-} from "@/lib/agent-status";
+import { applyStatusReport, type StatusReport } from "@/lib/agent-status";
 import {
 	type ActiveWorkItem,
 	claimNextWorkItem,

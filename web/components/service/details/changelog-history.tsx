@@ -242,7 +242,7 @@ export function ChangelogHistory({
 										{revision.comparison.kind === "initial"
 											? "Initial revision"
 											: revision.comparison.kind === "changes" &&
-													revision.comparison.changes.length === 0
+												  revision.comparison.changes.length === 0
 												? "Redeployed"
 												: "Configuration updated"}
 									</span>

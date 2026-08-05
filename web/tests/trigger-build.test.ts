@@ -39,7 +39,7 @@ function queryReturning(rows: unknown[]) {
 		from: vi.fn(),
 		where: vi.fn(),
 		limit: vi.fn(),
-		// biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+		// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 		then: (resolve: (value: unknown[]) => unknown) =>
 			Promise.resolve(rows).then(resolve),
 	};

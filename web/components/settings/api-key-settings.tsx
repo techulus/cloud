@@ -89,38 +89,39 @@ export function ApiKeySettings() {
 		[apiKeys],
 	);
 
-	const loadApiKeys = useCallback(async (mode: "initial" | "refresh") => {
-		if (mode === "initial") setIsLoading(true);
-		else setIsRefreshing(true);
+	const loadApiKeys = useCallback(
+		() =>
+			apiKeysClient.apiKey
+				.list({
+					query: {
+						limit: 100,
+						sortBy: "createdAt",
+						sortDirection: "desc",
+					},
+				})
+				.then((response) => {
+					if (response.error || !response.data) {
+						throw new Error(
+							getErrorMessage(response.error, "Failed to load API keys"),
+						);
+					}
 
-		try {
-			const response = await apiKeysClient.apiKey.list({
-				query: {
-					limit: 100,
-					sortBy: "createdAt",
-					sortDirection: "desc",
-				},
-			});
-
-			if (response.error || !response.data) {
-				throw new Error(
-					getErrorMessage(response.error, "Failed to load API keys"),
-				);
-			}
-
-			setApiKeys(response.data.apiKeys);
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to load API keys",
-			);
-		} finally {
-			setIsLoading(false);
-			setIsRefreshing(false);
-		}
-	}, []);
+					setApiKeys(response.data.apiKeys);
+				})
+				.catch((error: unknown) => {
+					toast.error(
+						error instanceof Error ? error.message : "Failed to load API keys",
+					);
+				})
+				.finally(() => {
+					setIsLoading(false);
+					setIsRefreshing(false);
+				}),
+		[],
+	);
 
 	useEffect(() => {
-		void loadApiKeys("initial");
+		void loadApiKeys();
 	}, [loadApiKeys]);
 
 	async function handleRevoke(apiKey: ApiKeyRecord) {
@@ -173,7 +174,10 @@ export function ApiKeySettings() {
 							type="button"
 							variant="outline"
 							size="sm"
-							onClick={() => void loadApiKeys("refresh")}
+							onClick={() => {
+								setIsRefreshing(true);
+								void loadApiKeys();
+							}}
 							disabled={isRefreshing || isLoading}
 						>
 							{isRefreshing ? (
