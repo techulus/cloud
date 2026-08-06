@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { ControlPlaneUpgradeState } from "@/lib/control-plane-updates";
@@ -56,20 +57,32 @@ export function ControlPlaneUpgradeOverlay({
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-			<div className="mx-4 w-full max-w-sm rounded-lg border bg-background">
-				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<span className="size-2 animate-pulse rounded-full bg-blue-500" />
-					<span className="text-sm font-medium">
+			<div
+				className="mx-4 w-full max-w-sm overflow-hidden rounded-xl border bg-background shadow-xl"
+				role="status"
+				aria-live="polite"
+			>
+				<div className="flex flex-col items-center px-6 py-7 text-center">
+					<div className="relative mb-5 flex size-20 items-center justify-center">
+						<span className="absolute inset-2 animate-ping rounded-full bg-primary/15 motion-reduce:hidden" />
+						<span className="absolute inset-0 animate-spin rounded-full border border-dashed border-primary/40 [animation-duration:8s] motion-reduce:animate-none" />
+						<span className="absolute inset-2 rounded-full border border-primary/15 bg-primary/5" />
+						<RefreshCw className="relative size-8 animate-spin text-primary [animation-duration:2.5s] motion-reduce:animate-none" />
+					</div>
+					<p className="text-base font-medium">
 						Updating
 						{initialState?.targetVersion
 							? ` to ${initialState.targetVersion}`
 							: ""}
-					</span>
+					</p>
+					<p className="mt-2 max-w-xs text-sm text-muted-foreground">
+						The dashboard will reload automatically when the update completes.
+						Actions are disabled until then.
+					</p>
 				</div>
-				<p className="px-4 py-3 text-sm text-muted-foreground">
-					The dashboard will reload automatically when the update completes.
-					Actions are disabled until then.
-				</p>
+				<div className="relative h-1 overflow-hidden bg-muted">
+					<span className="absolute inset-y-0 -left-1/2 w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-primary to-transparent motion-reduce:left-0 motion-reduce:w-full motion-reduce:animate-none" />
+				</div>
 			</div>
 		</div>
 	);

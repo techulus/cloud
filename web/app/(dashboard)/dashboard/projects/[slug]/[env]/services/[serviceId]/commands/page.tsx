@@ -326,7 +326,7 @@ export default function CommandsPage() {
 										<summary className="cursor-pointer text-sm">
 											Combined output
 										</summary>
-										<pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
+										<pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs">
 											{item.output}
 											{item.errorMessage
 												? `${item.output ? "\n" : ""}${item.errorMessage}`

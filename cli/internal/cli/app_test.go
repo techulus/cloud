@@ -335,8 +335,11 @@ func TestApplyExactNestedPatchForSources(t *testing.T) {
 			}
 			source := body["source"].(map[string]any)
 			placement := body["placement"].(map[string]any)
-			if source["type"] != tc.sourceType || placement["mode"] != "automatic" || placement["replicas"] != float64(2) || len(body) != 8 {
+			if source["type"] != tc.sourceType || placement["mode"] != "automatic" || placement["replicas"] != float64(2) || len(body) != 9 {
 				t.Fatalf("body=%#v", body)
+			}
+			if crons, ok := body["crons"].([]any); !ok || len(crons) != 0 {
+				t.Fatalf("omitted crons must be sent as an empty replacement: %#v", body["crons"])
 			}
 			if tc.name == "github_clear_root" {
 				rootDir, present := source["rootDir"]
@@ -345,6 +348,35 @@ func TestApplyExactNestedPatchForSources(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLinkAndApplyRoundTripCrons(t *testing.T) {
+	d := t.TempDir()
+	var applied map[string]any
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"target":{"project":{"slug":"app"},"environment":{"name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"s","name":"web","source":{"type":"image","image":"nginx"},"ports":[],"replicas":1,"placement":{"mode":"automatic"},"hostname":"web","healthCheck":null,"startCommand":null,"resources":null,"crons":[{"path":"/jobs/nightly","schedule":"0 5 * * *"}]},"management":{"patchable":true,"blockers":[]}}`))
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&applied)
+		w.Write([]byte(`{"action":"noop","currentVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","desiredVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","changes":[]}`))
+	}))
+	defer s.Close()
+	writeConfig(t, s.URL)
+	app, _ := testApp(t, d, s.Client())
+	if err := execute(app, "link", "--service", "s"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := manifest.Load(d)
+	if err != nil || !reflect.DeepEqual(loaded.Manifest.Service.Crons, []manifest.Cron{{Path: "/jobs/nightly", Schedule: "0 5 * * *"}}) {
+		t.Fatalf("crons=%#v err=%v", loaded.Manifest.Service.Crons, err)
+	}
+	if err := execute(app, "apply", "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(applied["crons"], []any{map[string]any{"path": "/jobs/nightly", "schedule": "0 5 * * *"}}) {
+		t.Fatalf("applied crons=%#v", applied["crons"])
 	}
 }
 

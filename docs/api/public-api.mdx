@@ -141,7 +141,7 @@ Configuration and revision responses never include secret names, values, or ciph
 
 `POST /configuration/plan` accepts the same complete desired configuration as `PUT /configuration`. It performs no writes and returns the authoritative `target`, `action`, `currentVersion`, `desiredVersion`, and structured `changes` (`field`, `from`, and `to`). Service IDs on these flat service routes are authorized installation-globally rather than being scoped by a project ID in the URL.
 
-`PUT /configuration` is atomic and replaces the complete managed configuration. Send the `currentVersion` returned by the plan as one quoted strong ETag (for example, `If-Match: "sha256:…"`). Missing, unquoted, multiple, weak, or otherwise invalid headers are rejected; a service change after planning returns `409 CONFIGURATION_PLAN_STALE`. A successful response returns the authoritative target and the structured change set that was applied. The request must contain exactly `name`, `source`, `hostname`, `ports`, `placement`, `healthCheck`, `startCommand`, and `resources`. Omitted or unknown fields are rejected. `hostname` must be concrete and non-null. Use `null` to clear nullable fields, including `resources`.
+`PUT /configuration` is atomic and replaces the complete managed configuration. Send the `currentVersion` returned by the plan as one quoted strong ETag (for example, `If-Match: "sha256:…"`). Missing, unquoted, multiple, weak, or otherwise invalid headers are rejected; a service change after planning returns `409 CONFIGURATION_PLAN_STALE`. A successful response returns the authoritative target and the structured change set that was applied. The request must contain exactly `name`, `source`, `hostname`, `ports`, `placement`, `healthCheck`, `startCommand`, `resources`, and `crons`. Omitted or unknown fields are rejected. `hostname` must be concrete and non-null. Use `null` to clear nullable fields, including `resources`.
 
 Replacing the final public HTTP port with a domain automatically disables serverless in the mutable service configuration. The plan reports this side effect as a `serverless.enabled` change before apply. You do not send serverless settings in the replacement request.
 
@@ -177,11 +177,19 @@ Replacing the final public HTTP port with a domain automatically disables server
   "resources": {
     "cpuCores": 1,
     "memoryMb": 512
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/digest",
+      "schedule": "0 5 * * *"
+    }
+  ]
 }
 ```
 
-The `tc apply` command sends this complete replacement. A linked `techulus.yml` stores only `target.serviceId`; desired service configuration remains under `service`. Explicit CLI targeting uses `--service <serviceId>`. During interactive `tc link`, a project with exactly one environment selects it automatically; zero environments is an error and multiple environments prompt for a choice.
+`crons` is the complete desired list of UTC service cron definitions. Each item contains exactly `path` and `schedule`. Paths must be unique, origin-relative paths without a query string or fragment. Send an empty list to remove all cron definitions. `current.crons` returns definitions only; runtime status remains outside the configuration fingerprint. Cron-only changes take effect without creating a deployment revision. See [Service crons](/services/configuration#service-crons) for request and secret behavior.
+
+The `tc apply` command sends this complete replacement. A linked `techulus.yml` stores its target identity under `target.serviceId` and desired configuration under `service`. `tc link` writes current cron definitions into the manifest, and `tc apply` treats that manifest list as authoritative. Explicit CLI targeting uses `--service <serviceId>`. During interactive `tc link`, a project with exactly one environment selects it automatically; zero environments is an error and multiple environments prompt for a choice.
 
 The API supports these source variants:
 
@@ -341,4 +349,4 @@ The CLI uses the same endpoints documented above:
 | `tc metrics` | Query service metrics |
 | `tc revisions` | List the redacted revision changelog |
 
-`tc link` stores only the selected `target.serviceId` in `techulus.yml`. Relinking a manifest to a different service requires removing `target.serviceId` first. `tc apply` always displays the server-generated plan and prompts before writing; use `tc apply --yes` for noninteractive automation. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.
+`tc link` stores the selected `target.serviceId` and current managed configuration, including cron definitions, in `techulus.yml`. Relinking a manifest to a different service requires removing `target.serviceId` first. `tc apply` always displays the server-generated plan and prompts before writing; use `tc apply --yes` for noninteractive automation. Image and GitHub services use the same `tc link`, `tc apply`, `tc deploy`, and inspection commands.

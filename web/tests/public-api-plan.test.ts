@@ -135,6 +135,80 @@ describe("configuration plan protocol", () => {
 		).toEqual(["a", "z"]);
 	});
 
+	it("sorts crons by path and includes schedule changes in the plan", () => {
+		const desired = canonicalDesired({
+			name: "web",
+			source: { type: "image", image: "nginx" },
+			hostname: "web",
+			ports: [],
+			placement: { mode: "automatic", replicas: 1 },
+			healthCheck: null,
+			startCommand: null,
+			resources: null,
+			crons: [
+				{ path: "/z", schedule: "0 5 * * *" },
+				{ path: "/a", schedule: "0 6 * * *" },
+			],
+		});
+		expect(desired.crons.map((cron) => cron.path)).toEqual(["/a", "/z"]);
+
+		const result = planCanonicalConfiguration(
+			{
+				...desired,
+				serverless: { enabled: false },
+				crons: [{ path: "/a", schedule: "0 7 * * *" }],
+			},
+			{ ...desired, source: { type: "image", image: "nginx" } },
+		);
+		expect(result.changes).toContainEqual({
+			field: "crons",
+			from: [{ path: "/a", schedule: "0 7 * * *" }],
+			to: desired.crons,
+		});
+	});
+
+	it("excludes cron runtime summaries from configuration identity", () => {
+		const definition = { path: "/job", schedule: "0 5 * * *" };
+		const currentCron = {
+			...definition,
+			id: "cron-1",
+			lastStatus: "succeeded",
+			lastStatusCode: 204,
+		};
+		const failedCurrentCron = {
+			...currentCron,
+			lastStatus: "failed",
+			lastStatusCode: 500,
+		};
+		const base = {
+			name: "web",
+			source: { type: "image" as const, image: "nginx" },
+			hostname: "web",
+			ports: [],
+			placement: { mode: "automatic" as const, replicas: 1 },
+			healthCheck: null,
+			startCommand: null,
+			resources: null,
+		};
+
+		const first = planCanonicalConfiguration(
+			{ ...base, crons: [currentCron], serverless: { enabled: false } },
+			{ ...base, crons: [definition] },
+		);
+		const second = planCanonicalConfiguration(
+			{
+				...base,
+				crons: [failedCurrentCron],
+				serverless: { enabled: false },
+			},
+			{ ...base, crons: [definition] },
+		);
+
+		expect(first.action).toBe("noop");
+		expect(first.changes).toEqual([]);
+		expect(second.currentVersion).toBe(first.currentVersion);
+	});
+
 	it("reports every managed field change, including removals and null clears", () => {
 		const current = {
 			name: "old-web",

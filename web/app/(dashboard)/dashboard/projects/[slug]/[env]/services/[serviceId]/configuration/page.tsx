@@ -9,6 +9,7 @@ import { DeleteConfirmationDialog } from "@/components/core/delete-confirmation-
 import { EditableText } from "@/components/core/editable-text";
 import { LocalDate } from "@/components/core/local-date";
 import { ConfigSection } from "@/components/service/details/config-section";
+import { CronsSection } from "@/components/service/details/crons-section";
 import { HealthCheckSection } from "@/components/service/details/health-check-section";
 import { NetworkingSection } from "@/components/service/details/networking-section";
 import { ReplicasSection } from "@/components/service/details/replicas-section";
@@ -119,6 +120,8 @@ export default function ConfigurationPage() {
 				<StartCommandSection service={service} onUpdate={handleConfigSave} />
 
 				<ScheduleSection service={service} onUpdate={handleConfigSave} />
+
+				<CronsSection service={service} />
 			</div>
 
 			<div className="rounded-lg border border-destructive/50">

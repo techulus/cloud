@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,24 +30,50 @@ type updaterStatus struct {
 	Logs          []string `json:"logs"`
 }
 
+type releaseManifest struct {
+	Version      string            `json:"version"`
+	Commit       string            `json:"commit"`
+	Binaries     map[string]string `json:"binaries"`
+	ComposeFiles map[string]string `json:"composeFiles"`
+	Images       map[string]string `json:"images"`
+}
+
 type server struct {
-	deployDir  string
-	token      string
-	rawBaseURL string
-	healthURL  string
+	deployDir      string
+	token          string
+	rawBaseURL     string
+	releaseBaseURL string
+	healthURL      string
+	httpClient     *http.Client
 
 	mu     sync.Mutex
 	status updaterStatus
 }
 
-var versionPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
+var (
+	versionPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
+	commitPattern  = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	sha256Pattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	digestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+)
+
+var composeManifestPaths = []string{
+	"deployment/compose.production.yml",
+	"deployment/compose.postgres.yml",
+}
+
+var imageNames = []string{"web", "registry", "updater"}
+
+const maxReleaseManifestSize = 1024 * 1024
 
 func main() {
 	s := &server{
-		deployDir:  getenv("DEPLOY_DIR", "/opt/techulus-cloud"),
-		token:      os.Getenv("CONTROL_PLANE_UPDATER_TOKEN"),
-		rawBaseURL: getenv("RAW_BASE_URL", "https://raw.githubusercontent.com/techulus/cloud"),
-		healthURL:  getenv("WEB_HEALTH_URL", "http://web:3000/api/health"),
+		deployDir:      getenv("DEPLOY_DIR", "/opt/techulus-cloud"),
+		token:          os.Getenv("CONTROL_PLANE_UPDATER_TOKEN"),
+		rawBaseURL:     getenv("RAW_BASE_URL", "https://raw.githubusercontent.com/techulus/cloud"),
+		releaseBaseURL: getenv("RELEASE_BASE_URL", "https://github.com/techulus/cloud/releases/download"),
+		healthURL:      getenv("WEB_HEALTH_URL", "http://web:3000/api/health"),
+		httpClient:     &http.Client{Timeout: 2 * time.Minute},
 	}
 	s.status = s.readStatus()
 
@@ -218,20 +246,167 @@ func parseEnv(path string) (map[string]string, string, error) {
 	return env, string(data), nil
 }
 
-func updateEnvVersion(envPath, text, targetVersion string) error {
+type envSetting struct {
+	key   string
+	value string
+}
+
+func updateEnv(envPath, text string, settings []envSetting) error {
 	lines := strings.Split(strings.TrimRight(text, "\r\n"), "\n")
-	found := false
+	found := make(map[string]bool, len(settings))
 	for i, line := range lines {
-		if strings.HasPrefix(line, "TECHULUS_CLOUD_VERSION=") {
-			lines[i] = "TECHULUS_CLOUD_VERSION=" + targetVersion
-			found = true
-			break
+		for _, setting := range settings {
+			if strings.HasPrefix(line, setting.key+"=") {
+				lines[i] = setting.key + "=" + setting.value
+				found[setting.key] = true
+				break
+			}
 		}
 	}
-	if !found {
-		lines = append(lines, "TECHULUS_CLOUD_VERSION="+targetVersion)
+	for _, setting := range settings {
+		if !found[setting.key] {
+			lines = append(lines, setting.key+"="+setting.value)
+		}
 	}
-	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	return writeFileAtomically(envPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+}
+
+func manifestEnvSettings(targetVersion string, manifest *releaseManifest) []envSetting {
+	return []envSetting{
+		{key: "TECHULUS_CLOUD_VERSION", value: targetVersion},
+		{key: "TECHULUS_CLOUD_WEB_IMAGE", value: imageReference("web", manifest.Images["web"])},
+		{key: "TECHULUS_CLOUD_REGISTRY_IMAGE", value: imageReference("registry", manifest.Images["registry"])},
+		{key: "TECHULUS_CLOUD_UPDATER_IMAGE", value: imageReference("updater", manifest.Images["updater"])},
+	}
+}
+
+func imageReference(name, digest string) string {
+	return fmt.Sprintf("ghcr.io/techulus/cloud/%s@%s", name, digest)
+}
+
+func validateReleaseManifest(manifest *releaseManifest, targetVersion string) error {
+	if manifest.Version != targetVersion {
+		return fmt.Errorf("release manifest version %q does not match target %q", manifest.Version, targetVersion)
+	}
+	if !commitPattern.MatchString(manifest.Commit) {
+		return errors.New("release manifest contains an invalid commit")
+	}
+	for _, name := range []string{"agent-linux-amd64", "agent-linux-arm64"} {
+		if !sha256Pattern.MatchString(manifest.Binaries[name]) {
+			return fmt.Errorf("release manifest contains an invalid checksum for %s", name)
+		}
+	}
+	for _, path := range composeManifestPaths {
+		if !sha256Pattern.MatchString(manifest.ComposeFiles[path]) {
+			return fmt.Errorf("release manifest contains an invalid checksum for %s", path)
+		}
+	}
+	for _, name := range imageNames {
+		if !digestPattern.MatchString(manifest.Images[name]) {
+			return fmt.Errorf("release manifest contains an invalid digest for %s", name)
+		}
+	}
+	return nil
+}
+
+func (s *server) client() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return &http.Client{Timeout: 2 * time.Minute}
+}
+
+func (s *server) fetchReleaseManifest(targetVersion string) (*releaseManifest, error) {
+	url := fmt.Sprintf("%s/%s/release-manifest.json", strings.TrimRight(s.releaseBaseURL, "/"), targetVersion)
+	response, err := s.client().Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download release manifest: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("release manifest download failed with status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxReleaseManifestSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read release manifest: %w", err)
+	}
+	if len(body) > maxReleaseManifestSize {
+		return nil, errors.New("release manifest exceeds maximum size")
+	}
+
+	var manifest releaseManifest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse release manifest: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, errors.New("release manifest contains trailing data")
+	}
+	if err := validateReleaseManifest(&manifest, targetVersion); err != nil {
+		return nil, err
+	}
+	return &manifest, nil
+}
+
+func (s *server) downloadFile(url, destination string) error {
+	response, err := s.client().Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download %s: %w", filepath.Base(destination), err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("download of %s failed with status %d", filepath.Base(destination), response.StatusCode)
+	}
+
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, response.Body); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func verifyFileSHA256(path, expected string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("checksum verification failed for %s", filepath.Base(path))
+	}
+	return nil
+}
+
+func (s *server) stageComposeFiles(manifest *releaseManifest, stagingDir string) error {
+	for _, manifestPath := range composeManifestPaths {
+		name := filepath.Base(manifestPath)
+		destination := filepath.Join(stagingDir, name)
+		url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.rawBaseURL, "/"), manifest.Commit, manifestPath)
+		if err := s.downloadFile(url, destination); err != nil {
+			return err
+		}
+		if err := verifyFileSHA256(destination, manifest.ComposeFiles[manifestPath]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func supportedComposeFile(name string) bool {
+	return name == "compose.production.yml" || name == "compose.postgres.yml"
 }
 
 func (s *server) upgrade(targetVersion string) {
@@ -271,6 +446,21 @@ func (s *server) runUpgrade(targetVersion string, backupDir *string, composeFile
 	if !versionPattern.MatchString(targetVersion) {
 		return errors.New("invalid target version")
 	}
+	manifest, err := s.fetchReleaseManifest(targetVersion)
+	if err != nil {
+		return err
+	}
+
+	stagingDir, err := os.MkdirTemp(s.deployDir, ".update-staging-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stagingDir)
+
+	s.logf("downloading and verifying compose files for %s at %s", targetVersion, manifest.Commit)
+	if err := s.stageComposeFiles(manifest, stagingDir); err != nil {
+		return err
+	}
 
 	envPath := filepath.Join(s.deployDir, ".env")
 	env, envText, err := parseEnv(envPath)
@@ -280,6 +470,9 @@ func (s *server) runUpgrade(targetVersion string, backupDir *string, composeFile
 
 	if value := env["COMPOSE_FILE"]; value != "" {
 		*composeFile = value
+	}
+	if !supportedComposeFile(*composeFile) {
+		return fmt.Errorf("unsupported COMPOSE_FILE %q", *composeFile)
 	}
 	*backupDir = filepath.Join(s.deployDir, "backups", "update-"+strings.NewReplacer(":", "-", ".", "-").Replace(time.Now().UTC().Format(time.RFC3339Nano)))
 	if err := os.MkdirAll(*backupDir, 0o700); err != nil {
@@ -302,14 +495,13 @@ func (s *server) runUpgrade(targetVersion string, backupDir *string, composeFile
 		return err
 	}
 
-	s.logf("downloading compose files for %s", targetVersion)
-	if err := s.run("curl", []string{"-fsSL", fmt.Sprintf("%s/%s/deployment/compose.production.yml", s.rawBaseURL, targetVersion), "-o", "compose.production.yml"}, nil); err != nil {
-		return err
+	for _, manifestPath := range composeManifestPaths {
+		name := filepath.Base(manifestPath)
+		if err := os.Rename(filepath.Join(stagingDir, name), filepath.Join(s.deployDir, name)); err != nil {
+			return err
+		}
 	}
-	if err := s.run("curl", []string{"-fsSL", fmt.Sprintf("%s/%s/deployment/compose.postgres.yml", s.rawBaseURL, targetVersion), "-o", "compose.postgres.yml"}, nil); err != nil {
-		return err
-	}
-	if err := updateEnvVersion(envPath, envText, targetVersion); err != nil {
+	if err := updateEnv(envPath, envText, manifestEnvSettings(targetVersion, manifest)); err != nil {
 		return err
 	}
 
@@ -341,14 +533,47 @@ func copyFile(source, destination string) error {
 	}
 	defer input.Close()
 
-	output, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	output, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".tmp-")
 	if err != nil {
 		return err
 	}
-	defer output.Close()
+	temporaryPath := output.Name()
+	defer os.Remove(temporaryPath)
 
-	_, err = io.Copy(output, input)
-	return err
+	if err := output.Chmod(0o600); err != nil {
+		output.Close()
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		output.Close()
+		return err
+	}
+	if err := output.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, destination)
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	temporaryPath := file.Name()
+	defer os.Remove(temporaryPath)
+
+	if err := file.Chmod(mode); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 func (s *server) backupDatabase(env map[string]string, backupDir string) error {

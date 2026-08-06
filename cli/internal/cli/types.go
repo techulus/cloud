@@ -51,6 +51,7 @@ type serviceItem struct {
 	HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
 	StartCommand *string               `json:"startCommand"`
 	Resources    *manifest.Resources   `json:"resources"`
+	Crons        []manifest.Cron       `json:"crons"`
 }
 type targetProject struct {
 	ID   string `json:"id"`

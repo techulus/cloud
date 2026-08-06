@@ -1,5 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	inArray,
+	isNull,
+	ne,
+	notInArray,
+	sql,
+} from "drizzle-orm";
+import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -8,6 +18,7 @@ import {
 	githubRepos,
 	projects,
 	servers,
+	serviceCrons,
 	servicePorts,
 	serviceReplicas,
 	serviceRevisions,
@@ -26,6 +37,59 @@ import {
 
 const githubPathPart = /^[A-Za-z0-9_.-]+$/;
 const windowsAbsolutePath = /^[A-Za-z]:[\\/]/;
+
+export function nextOccurrenceAfter(schedule: string, after: Date): Date {
+	return CronExpressionParser.parse(schedule, {
+		currentDate: after,
+		tz: "UTC",
+	})
+		.next()
+		.toDate();
+}
+
+export function isSafeCronPath(value: string): boolean {
+	if (!value.startsWith("/") || value.startsWith("//") || value.length > 2048)
+		return false;
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(value);
+	} catch {
+		return false;
+	}
+	if (
+		!decoded.startsWith("/") ||
+		decoded.startsWith("//") ||
+		// eslint-disable-next-line no-control-regex -- Manifest paths must reject control characters.
+		/[?#\\\u0000-\u001f\u007f]/.test(decoded)
+	)
+		return false;
+	return !decoded.split("/").some((part) => part === "." || part === "..");
+}
+
+export const publicCronSchema = z.strictObject({
+	path: z
+		.string()
+		.trim()
+		.min(1)
+		.max(2048)
+		.refine(isSafeCronPath, "Invalid cron path"),
+	schedule: z
+		.string()
+		.trim()
+		.min(1)
+		.max(255)
+		.refine((value) => value.split(/\s+/).length === 5, {
+			message: "Schedule must contain exactly five cron fields",
+		})
+		.refine((value) => {
+			try {
+				CronExpressionParser.parse(value, { tz: "UTC" });
+				return true;
+			} catch {
+				return false;
+			}
+		}, "Invalid UTC cron expression"),
+});
 
 export function canonicalGitHubRepository(value: string): string {
 	let url: URL;
@@ -314,7 +378,7 @@ function sanitizeSpec(specification: unknown) {
 }
 
 export async function safeConfiguration(service: NestedService) {
-	const [repo, ports, volumes, placements, activeDeployment] =
+	const [repo, ports, crons, volumes, placements, activeDeployment] =
 		await Promise.all([
 			db
 				.select()
@@ -326,6 +390,10 @@ export async function safeConfiguration(service: NestedService) {
 				.select()
 				.from(servicePorts)
 				.where(eq(servicePorts.serviceId, service.id)),
+			db
+				.select({ path: serviceCrons.path, schedule: serviceCrons.schedule })
+				.from(serviceCrons)
+				.where(eq(serviceCrons.serviceId, service.id)),
 			db
 				.select({
 					name: serviceVolumes.name,
@@ -373,6 +441,9 @@ export async function safeConfiguration(service: NestedService) {
 		(a, b) =>
 			a.name.localeCompare(b.name, "en") ||
 			a.containerPath.localeCompare(b.containerPath, "en"),
+	);
+	const sortedCrons = crons.toSorted((a, b) =>
+		a.path.localeCompare(b.path, "en"),
 	);
 	const replicaCount = getServiceTotalReplicas({
 		...service,
@@ -428,6 +499,7 @@ export async function safeConfiguration(service: NestedService) {
 			tlsPassthrough: port.tlsPassthrough,
 		})),
 		volumes: sortedVolumes,
+		crons: sortedCrons,
 		serverless: {
 			enabled: service.serverlessEnabled,
 			sleepAfterSeconds: service.serverlessSleepAfterSeconds,
@@ -628,6 +700,16 @@ export const replaceConfigurationSchema = z.strictObject({
 			"CPU and memory limits must both be set or both be null",
 		)
 		.nullable(),
+	crons: z
+		.array(publicCronSchema)
+		.max(100)
+		.superRefine((crons, context) => {
+			if (new Set(crons.map((cron) => cron.path)).size !== crons.length)
+				context.addIssue({
+					code: "custom",
+					message: "Cron paths must be unique",
+				});
+		}),
 });
 
 type PublicApiDomainError = Error & { code: string; status: number };
@@ -664,6 +746,9 @@ function healthCheckFromService(service: NestedService) {
 }
 
 type ReplacementInput = z.infer<typeof replaceConfigurationSchema>;
+type CanonicalReplacementInput = Omit<ReplacementInput, "crons"> & {
+	crons?: ReplacementInput["crons"];
+};
 type ConfigurationChange = { field: string; from: unknown; to: unknown };
 
 function canonicalPlanSource(source: PublicSource) {
@@ -680,6 +765,7 @@ function canonicalReplacementState(
 	source: ReturnType<typeof resolvePersistedSourceFromRows>,
 	ports: Array<{ port: number; isPublic: boolean; domain: string | null }>,
 	placements: Array<{ serverId: string; count: number }>,
+	crons: Array<{ path: string; schedule: string }>,
 ) {
 	const resources =
 		service.resourceCpuLimit == null && service.resourceMemoryLimitMb == null
@@ -726,11 +812,14 @@ function canonicalReplacementState(
 		healthCheck: healthCheckFromService(service),
 		startCommand: service.startCommand?.trim() || null,
 		resources,
+		crons: crons
+			.map(({ path, schedule }) => ({ path, schedule }))
+			.toSorted((a, b) => a.path.localeCompare(b.path, "en")),
 		serverless: { enabled: service.serverlessEnabled },
 	};
 }
 
-export function canonicalDesired(input: ReplacementInput) {
+export function canonicalDesired(input: CanonicalReplacementInput) {
 	return {
 		...input,
 		source: canonicalPlanSource(input.source),
@@ -762,6 +851,9 @@ export function canonicalDesired(input: ReplacementInput) {
 							},
 						}
 					: input.placement,
+		crons: (input.crons ?? []).toSorted((a, b) =>
+			a.path.localeCompare(b.path, "en"),
+		),
 	};
 }
 
@@ -807,12 +899,19 @@ function configurationChanges(
 }
 
 export function planCanonicalConfiguration(
-	current: ReturnType<typeof canonicalReplacementState>,
-	desiredInput: ReplacementInput,
+	current: Omit<ReturnType<typeof canonicalReplacementState>, "crons"> & {
+		crons?: Array<{ path: string; schedule: string }>;
+	},
+	desiredInput: CanonicalReplacementInput,
 ) {
+	const { serverless, ...currentWithoutServerless } = current;
 	const canonicalCurrent = {
-		...current,
+		...currentWithoutServerless,
 		source: canonicalPlanSource(current.source),
+		crons: (current.crons ?? [])
+			.map(({ path, schedule }) => ({ path, schedule }))
+			.toSorted((a, b) => a.path.localeCompare(b.path, "en")),
+		serverless,
 	};
 	const desiredConfiguration = canonicalDesired(desiredInput);
 	const desired = {
@@ -880,7 +979,7 @@ async function replaceConfigurationInternal(
 			.limit(1)
 			.then((rows) => rows[0]);
 		if (!persisted) domainError("Service not found", "NOT_FOUND", 404);
-		const [ports, volumes, placements, repo] = await Promise.all([
+		const [ports, volumes, placements, repo, crons] = await Promise.all([
 			tx
 				.select()
 				.from(servicePorts)
@@ -899,6 +998,10 @@ async function replaceConfigurationInternal(
 				.where(eq(githubRepos.serviceId, service.id))
 				.limit(1)
 				.then((rows) => rows[0]),
+			tx
+				.select()
+				.from(serviceCrons)
+				.where(eq(serviceCrons.serviceId, service.id)),
 		]);
 		const source = resolvePersistedSourceFromRows(persisted, repo);
 		const currentState = canonicalReplacementState(
@@ -906,6 +1009,7 @@ async function replaceConfigurationInternal(
 			source,
 			ports,
 			placements,
+			crons,
 		);
 		if (
 			input.source.type === "image" &&
@@ -1299,6 +1403,42 @@ async function replaceConfigurationInternal(
 					}
 				}
 			}
+		}
+		const cronsByPath = new Map(crons.map((cron) => [cron.path, cron]));
+		const appliedAt = new Date();
+		for (const cron of input.crons) {
+			const existing = cronsByPath.get(cron.path);
+			if (!existing) {
+				await tx.insert(serviceCrons).values({
+					id: randomUUID(),
+					serviceId: service.id,
+					...cron,
+					nextScheduledFor: nextOccurrenceAfter(cron.schedule, appliedAt),
+				});
+			} else if (existing.schedule !== cron.schedule) {
+				await tx
+					.update(serviceCrons)
+					.set({
+						schedule: cron.schedule,
+						nextScheduledFor: nextOccurrenceAfter(cron.schedule, appliedAt),
+					})
+					.where(eq(serviceCrons.id, existing.id));
+			}
+		}
+		if (input.crons.length === 0) {
+			await tx
+				.delete(serviceCrons)
+				.where(eq(serviceCrons.serviceId, service.id));
+		} else {
+			await tx.delete(serviceCrons).where(
+				and(
+					eq(serviceCrons.serviceId, service.id),
+					notInArray(
+						serviceCrons.path,
+						input.crons.map((cron) => cron.path),
+					),
+				),
+			);
 		}
 
 		return { targetServiceName: persisted.name, ...plan };

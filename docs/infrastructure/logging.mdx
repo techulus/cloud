@@ -3,7 +3,7 @@ title: "Logging"
 description: "Centralized log aggregation with Victoria Logs."
 ---
 
-Techulus Cloud uses [Victoria Logs](https://docs.victoriametrics.com/victorialogs/) for centralized log aggregation. All log types — container output, HTTP access logs, build logs, and agent system logs — are collected and searchable from the web UI.
+Techulus Cloud uses [Victoria Logs](https://docs.victoriametrics.com/victorialogs/) for centralized log aggregation. Container output, HTTP access logs, service cron history, build logs, and agent system logs are collected and searchable from the web UI.
 
 ## Log Types
 
@@ -11,6 +11,7 @@ Techulus Cloud uses [Victoria Logs](https://docs.victoriametrics.com/victorialog
 | --- | --- | --- |
 | `container` | Container stdout/stderr | `deployment_id`, `service_id`, `server_id`, `stream` |
 | `http` | Traefik access logs (proxy nodes) | `service_id`, `host`, `method`, `path`, `status`, `duration_ms`, `client_ip` |
+| `cron` | Scheduled service HTTP requests | `service_id`, `cron_id`, `path`, `result`, `status`, `duration_ms` |
 | `build` | BuildKit image builds | `build_id`, `service_id`, `project_id` |
 | `agent` | Agent process output | `server_id`, `level` |
 
@@ -20,10 +21,11 @@ Each agent ships logs directly to Victoria Logs over HTTP using the JSON Lines f
 
 - **Container logs** are streamed from running containers, batched in groups of 1000, and flushed every 5 seconds. Log positions are tracked per container to prevent duplicates.
 - **HTTP logs** are tailed from Traefik's access log file on proxy nodes, batched in groups of 500.
+- **Cron logs** are written by the control plane after each scheduled request with its result, HTTP status, and duration. They never include `CRON_SECRET`, the base URL, or response bodies.
 - **Build logs** are captured during image builds and streamed in real time.
 - **Agent logs** intercept the agent's own stdout/stderr with automatic log level detection.
 
-All log batches retry up to 3 times with exponential backoff on failure.
+Agent-originated log batches retry up to 3 times with exponential backoff on failure. Cron history writes are best-effort and do not retry the cron request when log ingestion fails.
 
 ## Configuration
 
@@ -42,3 +44,5 @@ The control plane exposes logs at `https://logs.<ROOT_DOMAIN>` with basic auth. 
 Logs are accessible from the web UI for each service, deployment, build, and server. The control plane queries Victoria Logs using LogSQL with filters for `service_id`, `deployment_id`, `server_id`, and time ranges.
 
 Searches run against Victoria Logs rather than only the entries currently loaded in the browser. Continuous service, request, and server log views default to the last 24 hours and support 1-hour, 6-hour, 24-hour, and 7-day ranges. These query ranges do not change the separate `VL_RETENTION` storage setting.
+
+Cron history follows `VL_RETENTION`. The latest cron result remains visible in the read-only **Crons** section of [service configuration](/services/configuration#service-crons).

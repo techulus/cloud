@@ -602,6 +602,41 @@ export const services = pgTable(
 	],
 );
 
+export const serviceCrons = pgTable(
+	"service_crons",
+	{
+		id: text("id").primaryKey(),
+		serviceId: text("service_id")
+			.notNull()
+			.references(() => services.id, { onDelete: "cascade" }),
+		path: text("path").notNull(),
+		schedule: text("schedule").notNull(),
+		nextScheduledFor: timestamp("next_scheduled_for", {
+			withTimezone: true,
+		}).notNull(),
+		lastScheduledFor: timestamp("last_scheduled_for", { withTimezone: true }),
+		lastAttemptedFor: timestamp("last_attempted_for", { withTimezone: true }),
+		lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
+		lastFinishedAt: timestamp("last_finished_at", { withTimezone: true }),
+		lastStatus: text("last_status", {
+			enum: ["succeeded", "failed", "skipped"],
+		}),
+		lastStatusCode: integer("last_status_code"),
+		lastDurationMs: integer("last_duration_ms"),
+		lastError: text("last_error"),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		uniqueIndex("service_crons_service_path_unique_idx").on(
+			table.serviceId,
+			table.path,
+		),
+		index("service_crons_due_scan_idx").on(table.nextScheduledFor),
+	],
+);
+
 export const serviceReplicas = pgTable(
 	"service_replicas",
 	{
