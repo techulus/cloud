@@ -436,6 +436,7 @@ func (a *App) linkCommand() *cobra.Command {
 					HealthCheck  *manifest.HealthCheck `json:"healthCheck"`
 					StartCommand *string               `json:"startCommand"`
 					Resources    *manifest.Resources   `json:"resources"`
+					Crons        []manifest.Cron       `json:"crons"`
 				} `json:"current"`
 				Management *serviceManagement `json:"management"`
 			}
@@ -467,7 +468,7 @@ func (a *App) linkCommand() *cobra.Command {
 					}
 				}
 			}
-			m := manifest.Manifest{APIVersion: "v1", Target: &manifest.Target{ServiceID: service.ID}, Service: manifest.Service{Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, Placement: placement, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources}}
+			m := manifest.Manifest{APIVersion: "v1", Target: &manifest.Target{ServiceID: service.ID}, Service: manifest.Service{Name: service.Name, Source: service.Source, Hostname: cfg.Current.Hostname, Ports: ports, Replicas: cfg.Current.Replicas, Placement: placement, HealthCheck: cfg.Current.HealthCheck, StartCommand: cfg.Current.StartCommand, Resources: cfg.Current.Resources, Crons: cfg.Current.Crons}}
 			if existing != nil {
 				if existing.Manifest.Linked() && existing.Manifest.Target.ServiceID != service.ID {
 					return fmt.Errorf("manifest is linked to service %s; remove target.serviceId before relinking", existing.Manifest.Target.ServiceID)
@@ -516,7 +517,11 @@ func (a *App) applyCommand() *cobra.Command {
 			if placement == nil {
 				return errors.New("service.placement is required")
 			}
-			body := map[string]any{"name": loaded.Manifest.Service.Name, "source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand, "resources": loaded.Manifest.Service.Resources}
+			crons := loaded.Manifest.Service.Crons
+			if crons == nil {
+				crons = []manifest.Cron{}
+			}
+			body := map[string]any{"name": loaded.Manifest.Service.Name, "source": sourcePatch(loaded.Manifest.Service.Source), "hostname": loaded.Manifest.Service.Hostname, "ports": loaded.Manifest.Service.Ports, "healthCheck": loaded.Manifest.Service.HealthCheck, "startCommand": loaded.Manifest.Service.StartCommand, "resources": loaded.Manifest.Service.Resources, "crons": crons}
 			if placement.Mode == "automatic" {
 				body["placement"] = map[string]any{"mode": "automatic", "replicas": loaded.Manifest.Service.Replicas}
 			} else {
@@ -636,7 +641,7 @@ func (a *App) finishLink(path string, existing *manifest.Loaded, service service
 		}
 		return a.printLinked(path, target)
 	}
-	m := manifest.Manifest{APIVersion: "v1", Target: &manifest.Target{ServiceID: serviceID}, Service: manifest.Service{Name: service.Name, Source: service.Source, Hostname: service.Hostname, Ports: service.Ports, Replicas: service.Replicas, Placement: service.Placement, HealthCheck: service.HealthCheck, StartCommand: service.StartCommand, Resources: service.Resources}}
+	m := manifest.Manifest{APIVersion: "v1", Target: &manifest.Target{ServiceID: serviceID}, Service: manifest.Service{Name: service.Name, Source: service.Source, Hostname: service.Hostname, Ports: service.Ports, Replicas: service.Replicas, Placement: service.Placement, HealthCheck: service.HealthCheck, StartCommand: service.StartCommand, Resources: service.Resources, Crons: service.Crons}}
 	if err := manifest.Save(path, m); err != nil {
 		return err
 	}

@@ -12,13 +12,34 @@ func base() Manifest {
 func TestDefaultsAndRoundTrip(t *testing.T) {
 	m := base()
 	m.Service.Replicas = 0
+	m.Service.Crons = []Cron{{Path: " /api/cron/digest ", Schedule: " 0 5 * * * "}}
 	b, e := Marshal(m)
 	if e != nil {
 		t.Fatal(e)
 	}
 	got, e := Parse(b)
-	if e != nil || got.Service.Replicas != 1 || got.Service.Ports == nil {
+	if e != nil || got.Service.Replicas != 1 || got.Service.Ports == nil || got.Service.Crons[0] != (Cron{Path: "/api/cron/digest", Schedule: "0 5 * * *"}) {
 		t.Fatalf("got=%#v err=%v", got, e)
+	}
+}
+
+func TestCronValidation(t *testing.T) {
+	invalidPaths := []string{"//host/job", "/job?x=1", "/job#part", `/job\\next`, "/a/../b", "/a/%2e%2e/b", "/%2fhost", "/bad%zz", "/line%0Abreak"}
+	for _, path := range invalidPaths {
+		m := base()
+		m.Service.Crons = []Cron{{Path: path, Schedule: "0 5 * * *"}}
+		if err := Validate(m); err == nil {
+			t.Fatalf("invalid cron path %q accepted", path)
+		}
+	}
+	m := base()
+	m.Service.Crons = []Cron{{Path: "/jobs/nightly", Schedule: "0 5 * * *"}, {Path: "/jobs/nightly", Schedule: "0 6 * * *"}}
+	if err := Validate(m); err == nil || !strings.Contains(err.Error(), "unique") {
+		t.Fatalf("duplicate path error = %v", err)
+	}
+	m.Service.Crons = []Cron{{Path: "/jobs/nightly", Schedule: "0 5 * *"}}
+	if err := Validate(m); err == nil || !strings.Contains(err.Error(), "five-field") {
+		t.Fatalf("schedule error = %v", err)
 	}
 }
 

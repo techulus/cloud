@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	canonicalGitHubRepository,
+	isSafeCronPath,
 	isSafeRepositoryRoot,
 	publicSourceSchema,
 	replaceConfigurationSchema,
@@ -15,6 +16,7 @@ const completeConfiguration = (overrides: Record<string, unknown> = {}) => ({
 	healthCheck: null,
 	startCommand: null,
 	resources: null,
+	crons: [],
 	...overrides,
 });
 
@@ -191,6 +193,55 @@ describe("public API placement schema", () => {
 		expect(
 			replaceConfigurationSchema.safeParse(completeConfiguration({ placement }))
 				.success,
+		).toBe(false);
+	});
+});
+
+describe("public API cron schema", () => {
+	it.each([
+		"//host/job",
+		"/job?x=1",
+		"/job#part",
+		"/job\\next",
+		"/a/../b",
+		"/a/%2e%2e/b",
+		"/%2fhost",
+		"/bad%zz",
+		"/line%0Abreak",
+	])("rejects unsafe cron path %j", (path) => {
+		expect(isSafeCronPath(path)).toBe(false);
+	});
+
+	it("accepts valid unique five-field UTC cron definitions", () => {
+		expect(
+			replaceConfigurationSchema.safeParse(
+				completeConfiguration({
+					crons: [{ path: "/jobs/nightly", schedule: "0 5 * * *" }],
+				}),
+			).success,
+		).toBe(true);
+	});
+
+	it.each([
+		[{ path: "/jobs/nightly", schedule: "0 5 * *" }, "non-five-field schedule"],
+		[
+			{ path: "/jobs/nightly", schedule: "99 5 * * *" },
+			"invalid cron expression",
+		],
+	])("rejects %s", (cron) => {
+		expect(
+			replaceConfigurationSchema.safeParse(
+				completeConfiguration({ crons: [cron] }),
+			).success,
+		).toBe(false);
+	});
+
+	it("rejects duplicate paths", () => {
+		const cron = { path: "/jobs/nightly", schedule: "0 5 * * *" };
+		expect(
+			replaceConfigurationSchema.safeParse(
+				completeConfiguration({ crons: [cron, cron] }),
+			).success,
 		).toBe(false);
 	});
 });

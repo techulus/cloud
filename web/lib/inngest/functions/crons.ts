@@ -1,4 +1,7 @@
+import { and, asc, eq, isNull, lte } from "drizzle-orm";
 import { cron } from "inngest";
+import { db } from "@/db";
+import { serviceCrons, services } from "@/db/schema";
 import {
 	cleanupExpiredChallenges,
 	renewExpiringCertificates,
@@ -19,6 +22,11 @@ import {
 	runAutoscalingController,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
+import {
+	cronEventId,
+	latestDueOccurrence,
+	nextOccurrenceAfter,
+} from "@/lib/service-crons";
 
 export const staleServerCheck = inngest.createFunction(
 	{
@@ -205,4 +213,59 @@ export const serviceCommandRetention = inngest.createFunction(
 	},
 	async ({ step }) =>
 		step.run("cleanup-service-commands", cleanupOldServiceCommands),
+);
+
+export const serviceCronDispatcher = inngest.createFunction(
+	{
+		id: "cron-service-cron-dispatcher",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) =>
+		step.run("dispatch-service-crons", async () => {
+			const now = new Date();
+			const rows = await db
+				.select({ cron: serviceCrons })
+				.from(serviceCrons)
+				.innerJoin(
+					services,
+					and(
+						eq(serviceCrons.serviceId, services.id),
+						isNull(services.deletedAt),
+					),
+				)
+				.where(lte(serviceCrons.nextScheduledFor, now))
+				.orderBy(asc(serviceCrons.nextScheduledFor))
+				.limit(100)
+				.then((results) => results.map(({ cron }) => cron));
+			for (const row of rows) {
+				const occurrence = latestDueOccurrence(
+					row.schedule,
+					new Date(row.nextScheduledFor.getTime() - 1),
+					now,
+				);
+				if (!occurrence) continue;
+				await inngest.send({
+					id: cronEventId(row.id, occurrence),
+					name: "service-cron/execute",
+					data: {
+						cronId: row.id,
+						schedule: row.schedule,
+						scheduledFor: occurrence.toISOString(),
+					},
+				});
+				await db
+					.update(serviceCrons)
+					.set({
+						lastScheduledFor: occurrence,
+						nextScheduledFor: nextOccurrenceAfter(row.schedule, now),
+					})
+					.where(
+						and(
+							eq(serviceCrons.id, row.id),
+							eq(serviceCrons.nextScheduledFor, row.nextScheduledFor),
+						),
+					);
+			}
+		}),
 );

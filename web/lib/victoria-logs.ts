@@ -20,7 +20,7 @@ function getQueryEndpoint(): EndpointConfig | undefined {
 	return parseEndpoint(endpoint);
 }
 
-export type LogType = "container" | "http";
+export type LogType = "container" | "http" | "cron";
 type LogSearchField = "_msg" | "path" | "method" | "status" | "client_ip";
 
 export type StoredLog = {
@@ -114,8 +114,10 @@ function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 	let query = formatLogSqlExactFilter("service_id", serviceId);
 	if (logType === "http") {
 		query += ` log_type:http`;
+	} else if (logType === "cron") {
+		query += ` log_type:cron`;
 	} else if (logType === "container") {
-		query += ` -log_type:http -log_type:build -log_type:rollout`;
+		query += ` -log_type:http -log_type:build -log_type:rollout -log_type:cron`;
 	} else {
 		query += ` -log_type:build -log_type:rollout`;
 	}
@@ -353,6 +355,42 @@ export type RolloutLog = {
 	stage: string;
 	log_type: "rollout";
 };
+
+export type CronLog = {
+	_msg: string;
+	_time: string;
+	service_id: string;
+	cron_id: string;
+	path: string;
+	scheduled_for: string;
+	started_at: string;
+	finished_at: string;
+	result: "succeeded" | "failed" | "skipped";
+	status: number | null;
+	duration_ms: number;
+	error: string | null;
+	log_type: "cron";
+};
+
+export async function ingestCronLog(entry: CronLog): Promise<void> {
+	try {
+		const endpoint = getQueryEndpoint();
+		if (!endpoint) return;
+		const options = buildFetchOptions(endpoint);
+		await fetch(`${endpoint.url}/insert/jsonline`, {
+			...options,
+			method: "POST",
+			body: `${JSON.stringify(entry)}\n`,
+			headers: {
+				...((options.headers as Record<string, string>) || {}),
+				"Content-Type": "application/json",
+			},
+			signal: AbortSignal.timeout(5_000),
+		});
+	} catch {
+		// Execution history is best-effort and must not affect the request result.
+	}
+}
 
 export async function ingestRolloutLog(
 	rolloutId: string,

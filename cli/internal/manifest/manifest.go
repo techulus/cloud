@@ -37,6 +37,11 @@ type Service struct {
 	HealthCheck  *HealthCheck `json:"healthCheck" yaml:"healthCheck"`
 	StartCommand *string      `json:"startCommand" yaml:"startCommand"`
 	Resources    *Resources   `json:"resources,omitempty" yaml:"resources,omitempty"`
+	Crons        []Cron       `json:"crons,omitempty" yaml:"crons,omitempty"`
+}
+type Cron struct {
+	Path     string `json:"path" yaml:"path"`
+	Schedule string `json:"schedule" yaml:"schedule"`
 }
 type Placement struct {
 	Mode    string            `json:"mode" yaml:"mode"`
@@ -140,6 +145,10 @@ func ApplyDefaults(m *Manifest) {
 	}
 	if m.Service.Ports == nil {
 		m.Service.Ports = []Port{}
+	}
+	for i := range m.Service.Crons {
+		m.Service.Crons[i].Path = strings.TrimSpace(m.Service.Crons[i].Path)
+		m.Service.Crons[i].Schedule = strings.TrimSpace(m.Service.Crons[i].Schedule)
 	}
 	if m.Service.Replicas == 0 {
 		m.Service.Replicas = 1
@@ -305,6 +314,43 @@ func Validate(m Manifest) error {
 		}
 		if r.MemoryMB != nil && (*r.MemoryMB < 64 || *r.MemoryMB > 65536) {
 			return errors.New("service.resources.memoryMb must be between 64 and 65536")
+		}
+	}
+	seenCronPaths := make(map[string]struct{}, len(m.Service.Crons))
+	for i, cron := range m.Service.Crons {
+		if err := validateCronPath(cron.Path); err != nil {
+			return fmt.Errorf("service.crons[%d].path: %w", i, err)
+		}
+		if _, exists := seenCronPaths[cron.Path]; exists {
+			return fmt.Errorf("service.crons[%d].path must be unique", i)
+		}
+		seenCronPaths[cron.Path] = struct{}{}
+		if len(cron.Schedule) > 255 || len(strings.Fields(cron.Schedule)) != 5 {
+			return fmt.Errorf("service.crons[%d].schedule must be a five-field cron expression", i)
+		}
+	}
+	return nil
+}
+
+func validateCronPath(value string) error {
+	if value == "" || len(value) > 2048 || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+		return errors.New("must begin with exactly one slash and be at most 2048 characters")
+	}
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return errors.New("must contain valid URL escapes")
+	}
+	if !strings.HasPrefix(decoded, "/") || strings.HasPrefix(decoded, "//") || strings.ContainsAny(decoded, "?#\\") {
+		return errors.New("cannot contain a host override, query, fragment, or backslash")
+	}
+	for _, r := range decoded {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("cannot contain control characters")
+		}
+	}
+	for _, segment := range strings.Split(decoded, "/") {
+		if segment == "." || segment == ".." {
+			return errors.New("cannot contain '.' or '..' segments")
 		}
 	}
 	return nil

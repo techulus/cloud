@@ -9,6 +9,7 @@ export {
 	controlPlaneUpdateCheck,
 	notificationRetention,
 	serviceCommandRetention,
+	serviceCronDispatcher,
 	oldBackupsCleanup,
 	registryArtifactRetention,
 	scheduledBackupsCheck,
@@ -16,6 +17,7 @@ export {
 	staleItemsCleanup,
 	staleServerCheck,
 } from "./crons";
+export { serviceCronWorkflow } from "./service-cron-workflow";
 export { migrationWorkflow } from "./migration-workflow";
 export { notificationDelivery } from "./notification-delivery";
 export { onDeploymentFailed } from "./on-deployment-failed";

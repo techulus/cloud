@@ -8,6 +8,7 @@ export type { ResourceEvents } from "./resource";
 export type { RestoreEvents } from "./restore";
 export type { RolloutEvents } from "./rollout";
 export type { ServiceDeletionEvents } from "./service-deletion";
+export type { ServiceCronEvents } from "./service-cron";
 
 import type { BackupEvents } from "./backup";
 import type { BuildEvents } from "./build";
@@ -17,6 +18,7 @@ import type { ResourceEvents } from "./resource";
 import type { RestoreEvents } from "./restore";
 import type { RolloutEvents } from "./rollout";
 import type { ServiceDeletionEvents } from "./service-deletion";
+import type { ServiceCronEvents } from "./service-cron";
 
 export type Events = RolloutEvents &
 	MigrationEvents &
@@ -25,7 +27,8 @@ export type Events = RolloutEvents &
 	BuildEvents &
 	ServiceDeletionEvents &
 	ResourceEvents &
-	NotificationEvents;
+	NotificationEvents &
+	ServiceCronEvents;
 
 type EventName = keyof Events & string;
 type EventData<TName extends EventName> = Events[TName]["data"];
@@ -61,4 +64,5 @@ export const inngestEvents = {
 	manifestCompleted: defineEvent("manifest/completed"),
 	manifestFailed: defineEvent("manifest/failed"),
 	notificationRequested: defineEvent("notification/requested"),
+	serviceCronExecute: defineEvent("service-cron/execute"),
 };

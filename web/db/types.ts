@@ -13,6 +13,7 @@ import type {
 	servicePorts,
 	serviceReplicas,
 	serviceCommands,
+	serviceCrons,
 	services,
 	serviceVolumes,
 	user,
@@ -27,6 +28,7 @@ export type ServicePort = typeof servicePorts.$inferSelect;
 export type ServiceVolume = typeof serviceVolumes.$inferSelect;
 export type ServiceReplica = typeof serviceReplicas.$inferSelect;
 export type ServiceCommand = typeof serviceCommands.$inferSelect;
+export type ServiceCron = typeof serviceCrons.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type DeploymentPort = typeof deploymentPorts.$inferSelect;
@@ -47,6 +49,7 @@ export type ServiceWithDetails = Service & {
 	activeConfig?: DeployedConfig | null;
 	currentSource: SourceConfig;
 	ports: ServicePort[];
+	crons: ServiceCron[];
 	configuredReplicas: Array<
 		ServiceReplica & { serverName: string; serverIsProxy: boolean }
 	>;
