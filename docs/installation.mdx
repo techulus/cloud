@@ -27,6 +27,11 @@ curl -fsSL https://raw.githubusercontent.com/techulus/cloud/main/deployment/inst
 
 The script detects your OS, installs Docker, walks you through DNS and environment configuration, and starts all services.
 
+By default, the installer deploys the latest GitHub release and verifies its
+Compose files against the release manifest. Set `TECHULUS_CLOUD_VERSION=tip`
+before running the script only when you explicitly want the unverified rolling
+channel.
+
 ## Manual Setup
 
 Clone the repository and configure your environment:
