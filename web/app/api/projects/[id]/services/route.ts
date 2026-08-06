@@ -12,6 +12,7 @@ import {
 	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceCrons,
 	serviceRevisions,
 	services,
 	serviceVolumes,
@@ -161,6 +162,20 @@ export async function GET(
 				: and(eq(services.projectId, projectId), isNull(services.deletedAt)),
 		)
 		.orderBy(services.createdAt);
+	const cronRows =
+		servicesList.length > 0
+			? await db
+					.select()
+					.from(serviceCrons)
+					.where(
+						inArray(
+							serviceCrons.serviceId,
+							servicesList.map((service) => service.id),
+						),
+					)
+					.orderBy(serviceCrons.path)
+			: [];
+	const cronsByService = Map.groupBy(cronRows, (cron) => cron.serviceId);
 
 	const result = await Promise.all(
 		servicesList.map(async (service) => {
@@ -401,6 +416,7 @@ export async function GET(
 			return {
 				...service,
 				ports,
+				crons: cronsByService.get(service.id) ?? [],
 				configuredReplicas: replicas,
 				deployments: deploymentsWithDetails,
 				secrets: serviceSecrets,

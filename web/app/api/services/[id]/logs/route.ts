@@ -34,7 +34,9 @@ export async function GET(
 	const serverId = url.searchParams.get("serverId") || undefined;
 	const logTypeParam = url.searchParams.get("type");
 	const logType =
-		logTypeParam === "container" || logTypeParam === "http"
+		logTypeParam === "container" ||
+		logTypeParam === "http" ||
+		logTypeParam === "cron"
 			? (logTypeParam as LogType)
 			: undefined;
 

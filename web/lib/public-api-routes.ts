@@ -133,6 +133,7 @@ export async function getServiceDetails(
 				startCommand: current.startCommand,
 				resources:
 					current.resources.cpuCores == null ? null : current.resources,
+				crons: current.crons,
 			},
 			management: configuration.management,
 		});

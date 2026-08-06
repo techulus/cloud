@@ -69,6 +69,18 @@ describe("log routes", () => {
 		});
 	});
 
+	it("accepts cron as a service log type", async () => {
+		const { GET, queryLogsByService } = await loadServiceLogsRoute();
+		const response = await GET(
+			new Request("http://localhost/api/services/service-1/logs?type=cron"),
+			{ params: Promise.resolve({ id: "service-1" }) },
+		);
+		expect(response.status).toBe(200);
+		expect(queryLogsByService).toHaveBeenCalledWith(
+			expect.objectContaining({ logType: "cron" }),
+		);
+	});
+
 	it("passes a validated after cursor to the deployment query", async () => {
 		const { GET, queryLogsByDeployment } = await loadDeploymentLogsRoute();
 		const cursor = "2026-07-10T01:02:03Z";

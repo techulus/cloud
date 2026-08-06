@@ -356,6 +356,66 @@ describe("VictoriaLogs queries", () => {
 			expect(query).toContain('_msg:~"(?i)connection lost"');
 		}
 	});
+
+	it("isolates cron, HTTP, and container service log filters", async () => {
+		const { queryLogsByService } = await loadVictoriaLogs();
+		const queries: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				queries.push(new URL(String(input)).searchParams.get("query") || "");
+				return jsonLinesResponse([]);
+			}),
+		);
+		await queryLogsByService({
+			serviceId: "service-1",
+			limit: 1,
+			logType: "cron",
+		});
+		await queryLogsByService({
+			serviceId: "service-1",
+			limit: 1,
+			logType: "http",
+		});
+		await queryLogsByService({
+			serviceId: "service-1",
+			limit: 1,
+			logType: "container",
+		});
+		expect(queries[0]).toContain("log_type:cron");
+		expect(queries[1]).toContain("log_type:http");
+		expect(queries[2]).toContain("-log_type:cron");
+	});
+
+	it("ingests only supplied cron metadata with a five-second deadline", async () => {
+		const { ingestCronLog } = await loadVictoriaLogs();
+		const fetchMock = vi.fn(
+			async (_input: string | URL | Request, _init?: RequestInit) =>
+				new Response(null, { status: 204 }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await ingestCronLog({
+			_msg: "Cron succeeded",
+			_time: "2026-08-06T10:00:01Z",
+			service_id: "service-1",
+			cron_id: "cron-1",
+			path: "/job",
+			scheduled_for: "2026-08-06T10:00:00Z",
+			started_at: "2026-08-06T10:00:00Z",
+			finished_at: "2026-08-06T10:00:01Z",
+			result: "succeeded",
+			status: 204,
+			duration_ms: 1000,
+			error: null,
+			log_type: "cron",
+		});
+		const [url, init] = fetchMock.mock.calls[0]!;
+		expect(String(url)).toBe("http://victoria.test/insert/jsonline");
+		expect(init?.signal).toBeInstanceOf(AbortSignal);
+		expect(init?.body).toContain('"status":204');
+		expect(init?.body).not.toContain("Authorization");
+		expect(init?.body).not.toContain("CRON_BASE_URL");
+	});
 });
 
 async function loadVictoriaLogs() {

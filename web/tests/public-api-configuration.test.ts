@@ -34,6 +34,7 @@ describe("public API configuration state", () => {
 			[],
 			[],
 			[],
+			[],
 			[{ serverId: "server-1", serverName: "Sydney", count: 1 }],
 			[{ id: "deployment-1", revisionId: "revision-1" }],
 			[

@@ -24,6 +24,8 @@ import {
 	scheduledDeploymentsCheck,
 	serviceDeletionWorkflow,
 	serviceCommandRetention,
+	serviceCronDispatcher,
+	serviceCronWorkflow,
 	serviceRestoreWorkflow,
 	staleItemsCleanup,
 	staleServerCheck,
@@ -58,5 +60,7 @@ export const { GET, POST, PUT } = serve({
 		expiredDeletedServicesPurge,
 		notificationDelivery,
 		notificationRetention,
+		serviceCronDispatcher,
+		serviceCronWorkflow,
 	],
 });
