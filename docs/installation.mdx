@@ -28,9 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/techulus/cloud/main/deployment/inst
 The script detects your OS, installs Docker, walks you through DNS and environment configuration, and starts all services.
 
 By default, the installer deploys the latest GitHub release and verifies its
-Compose files against the release manifest. Set `TECHULUS_CLOUD_VERSION=tip`
-before running the script only when you explicitly want the unverified rolling
-channel.
+Compose files against the release manifest. Set `TECHULUS_CLOUD_VERSION` before
+running the script only when you need a specific release.
 
 ## Manual Setup
 
@@ -56,9 +55,6 @@ Set `TECHULUS_CLOUD_VERSION` to the release tag you are installing:
 ```env
 TECHULUS_CLOUD_VERSION=vX.Y.Z
 ```
-
-Use `tip` only for rolling installs. Rolling installs do not show release
-update prompts.
 
 Then start the stack:
 
@@ -247,7 +243,7 @@ Back up both PostgreSQL and continued access to the KMS key. Deleting the KMS ke
 | Variable | Description |
 | --- | --- |
 | `COMPOSE_FILE` | Compose file used by self-updates. Use `compose.production.yml` for external PostgreSQL or `compose.postgres.yml` for bundled PostgreSQL. |
-| `TECHULUS_CLOUD_VERSION` | Installed release tag. Use `tip` only for rolling installs without release prompts. |
+| `TECHULUS_CLOUD_VERSION` | Installed release tag. The installer defaults to the latest GitHub release. |
 | `CONTROL_PLANE_UPDATER_TOKEN` | Random token used by the web app to call the internal updater service. Generate with `openssl rand -hex 32`. |
 
 ### Victoria Logs
@@ -351,6 +347,4 @@ docker compose -f compose.production.yml down --remove-orphans
 docker compose -f compose.production.yml up -d --pull always --remove-orphans
 ```
 
-Use versioned or digest-pinned image references for production updates when
-possible. Mutable tags such as `latest` and `tip` are convenient, but they can
-move between pulls.
+Use versioned or digest-pinned image references for production updates.

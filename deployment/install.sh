@@ -266,26 +266,6 @@ download_compose_files() {
 
     local target_version temp_dir
     target_version="$(requested_version)"
-    if [[ "$target_version" == "tip" ]]; then
-        temp_dir="$(mktemp -d "${DEPLOY_DIR}/.install-staging.XXXXXX")"
-        trap 'rm -rf "${temp_dir:-}"' EXIT
-
-        log_warn "Installing the rolling tip channel without a release manifest."
-        curl -fsSL "${RAW_BASE_URL}/main/deployment/compose.production.yml" -o "${temp_dir}/compose.production.yml"
-        curl -fsSL "${RAW_BASE_URL}/main/deployment/compose.postgres.yml" -o "${temp_dir}/compose.postgres.yml"
-        mv "${temp_dir}/compose.production.yml" "${DEPLOY_DIR}/compose.production.yml"
-        mv "${temp_dir}/compose.postgres.yml" "${DEPLOY_DIR}/compose.postgres.yml"
-        TECHULUS_CLOUD_VERSION="tip"
-        TECHULUS_CLOUD_WEB_IMAGE="ghcr.io/techulus/cloud/web:tip"
-        TECHULUS_CLOUD_REGISTRY_IMAGE="ghcr.io/techulus/cloud/registry:tip"
-        TECHULUS_CLOUD_UPDATER_IMAGE="ghcr.io/techulus/cloud/updater:tip"
-
-        rm -rf "$temp_dir"
-        trap - EXIT
-        log_success "Rolling Compose files downloaded to ${DEPLOY_DIR}"
-        return
-    fi
-
     ensure_jq
     if [[ -z "$target_version" ]]; then
         target_version="$(curl -fsSL "$GITHUB_LATEST_RELEASE_URL" | jq -er '.tag_name')"
