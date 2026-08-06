@@ -118,6 +118,9 @@ jobs:
     needs: [agent, cli, containers]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download agent artifacts
         uses: actions/download-artifact@v8
         with:
@@ -132,10 +135,70 @@ jobs:
           pattern: tc-*
           merge-multiple: true
 
+      - name: Download image digests
+        uses: actions/download-artifact@v8
+        with:
+          path: image-digests
+          pattern: release-digest-*
+          merge-multiple: true
+
       - name: Generate SHA256 checksums
         run: |
           cd binaries
           sha256sum agent-* tc-* tc_* > checksums.txt
+
+      - name: Generate release manifest
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          sha256_pattern='^[0-9a-f]{64}$'
+          digest_pattern='^sha256:[0-9a-f]{64}$'
+
+          agent_amd64=$(sha256sum binaries/agent-linux-amd64 | awk '{print $1}')
+          agent_arm64=$(sha256sum binaries/agent-linux-arm64 | awk '{print $1}')
+          compose_production=$(sha256sum deployment/compose.production.yml | awk '{print $1}')
+          compose_postgres=$(sha256sum deployment/compose.postgres.yml | awk '{print $1}')
+          web_digest=$(cat image-digests/web)
+          registry_digest=$(cat image-digests/registry)
+          updater_digest=$(cat image-digests/updater)
+
+          for checksum in "$agent_amd64" "$agent_arm64" "$compose_production" "$compose_postgres"; do
+            [[ "$checksum" =~ $sha256_pattern ]]
+          done
+          for digest in "$web_digest" "$registry_digest" "$updater_digest"; do
+            [[ "$digest" =~ $digest_pattern ]]
+          done
+          [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+
+          jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --arg commit "$RELEASE_COMMIT" \
+            --arg agent_amd64 "$agent_amd64" \
+            --arg agent_arm64 "$agent_arm64" \
+            --arg compose_production "$compose_production" \
+            --arg compose_postgres "$compose_postgres" \
+            --arg web_digest "$web_digest" \
+            --arg registry_digest "$registry_digest" \
+            --arg updater_digest "$updater_digest" \
+            '{
+              version: $version,
+              commit: $commit,
+              binaries: {
+                "agent-linux-amd64": $agent_amd64,
+                "agent-linux-arm64": $agent_arm64
+              },
+              composeFiles: {
+                "deployment/compose.production.yml": $compose_production,
+                "deployment/compose.postgres.yml": $compose_postgres
+              },
+              images: {
+                web: $web_digest,
+                registry: $registry_digest,
+                updater: $updater_digest
+              }
+            }' > binaries/release-manifest.json
 
       - name: Create GitHub release
         env:
@@ -145,7 +208,7 @@ jobs:
             --repo ${{ github.repository }} \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            binaries/agent-* binaries/tc-* binaries/tc_* binaries/checksums.txt
+            binaries/agent-* binaries/tc-* binaries/tc_* binaries/checksums.txt binaries/release-manifest.json
 
   homebrew:
     needs: release
@@ -359,3 +422,19 @@ jobs:
             --tag "$image:${{ github.ref_name }}" \
             --tag "$image:tip" \
             $(printf "$image@sha256:%s " *)
+
+      - name: Export multi-platform manifest digest
+        run: |
+          image="ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}"
+          mkdir -p /tmp/release-digests
+          docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' \
+            | jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+            > "/tmp/release-digests/${{ matrix.image }}"
+
+      - name: Upload multi-platform manifest digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-digest-${{ matrix.image }}
+          path: /tmp/release-digests/${{ matrix.image }}
+          if-no-files-found: error
+          retention-days: 1

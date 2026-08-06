@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RAW_URL="https://raw.githubusercontent.com/techulus/cloud/main/deployment"
+GITHUB_LATEST_RELEASE_URL="https://api.github.com/repos/techulus/cloud/releases/latest"
+RELEASE_BASE_URL="https://github.com/techulus/cloud/releases/download"
+RAW_BASE_URL="https://raw.githubusercontent.com/techulus/cloud"
 DEPLOY_DIR="/opt/techulus-cloud"
 
 RED='\033[0;31m'
@@ -231,15 +233,91 @@ EOF
     log_success "Docker log rotation configured"
 }
 
+ensure_jq() {
+    if command -v jq &>/dev/null; then
+        return
+    fi
+
+    log_info "Installing jq for release manifest verification..."
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        apt-get update -qq
+        apt-get install -y -qq jq >/dev/null
+    elif command -v dnf &>/dev/null; then
+        dnf install -y -q jq >/dev/null
+    else
+        yum install -y -q jq >/dev/null
+    fi
+}
+
+requested_version() {
+    if [[ -n "${TECHULUS_CLOUD_VERSION:-}" ]]; then
+        printf '%s' "$TECHULUS_CLOUD_VERSION"
+        return
+    fi
+    if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
+        grep -E '^TECHULUS_CLOUD_VERSION=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true
+    fi
+}
+
 download_compose_files() {
     log_header "Downloading Compose Files"
 
     mkdir -p "$DEPLOY_DIR"
 
-    curl -fsSL "${RAW_URL}/compose.production.yml" -o "${DEPLOY_DIR}/compose.production.yml"
-    curl -fsSL "${RAW_URL}/compose.postgres.yml" -o "${DEPLOY_DIR}/compose.postgres.yml"
+    local target_version temp_dir
+    target_version="$(requested_version)"
+    ensure_jq
+    if [[ -z "$target_version" ]]; then
+        target_version="$(curl -fsSL "$GITHUB_LATEST_RELEASE_URL" | jq -er '.tag_name')"
+    fi
+    if [[ ! "$target_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+        log_error "Invalid TECHULUS_CLOUD_VERSION: ${target_version}"
+        exit 1
+    fi
 
-    log_success "Compose files downloaded to ${DEPLOY_DIR}"
+    TECHULUS_CLOUD_VERSION="$target_version"
+
+    local manifest_path commit
+    local production_checksum postgres_checksum
+    local web_digest registry_digest updater_digest
+    temp_dir="$(mktemp -d "${DEPLOY_DIR}/.install-staging.XXXXXX")"
+    trap 'rm -rf "${temp_dir:-}"' EXIT
+    manifest_path="${temp_dir}/release-manifest.json"
+
+    log_info "Resolving release ${target_version}..."
+    curl -fsSL "${RELEASE_BASE_URL}/${target_version}/release-manifest.json" -o "$manifest_path"
+    if ! jq -e --arg version "$target_version" '
+        .version == $version and
+        (.commit | test("^[0-9a-f]{40}$")) and
+        ([.composeFiles["deployment/compose.production.yml"], .composeFiles["deployment/compose.postgres.yml"]] | all(test("^[0-9a-f]{64}$"))) and
+        ([.images.web, .images.registry, .images.updater] | all(test("^sha256:[0-9a-f]{64}$")))
+    ' "$manifest_path" >/dev/null; then
+        log_error "Release manifest is missing required or valid fields"
+        exit 1
+    fi
+
+    commit="$(jq -r '.commit' "$manifest_path")"
+    production_checksum="$(jq -r '.composeFiles["deployment/compose.production.yml"]' "$manifest_path")"
+    postgres_checksum="$(jq -r '.composeFiles["deployment/compose.postgres.yml"]' "$manifest_path")"
+    web_digest="$(jq -r '.images.web' "$manifest_path")"
+    registry_digest="$(jq -r '.images.registry' "$manifest_path")"
+    updater_digest="$(jq -r '.images.updater' "$manifest_path")"
+
+    curl -fsSL "${RAW_BASE_URL}/${commit}/deployment/compose.production.yml" -o "${temp_dir}/compose.production.yml"
+    curl -fsSL "${RAW_BASE_URL}/${commit}/deployment/compose.postgres.yml" -o "${temp_dir}/compose.postgres.yml"
+    echo "${production_checksum}  ${temp_dir}/compose.production.yml" | sha256sum -c - >/dev/null
+    echo "${postgres_checksum}  ${temp_dir}/compose.postgres.yml" | sha256sum -c - >/dev/null
+
+    mv "${temp_dir}/compose.production.yml" "${DEPLOY_DIR}/compose.production.yml"
+    mv "${temp_dir}/compose.postgres.yml" "${DEPLOY_DIR}/compose.postgres.yml"
+    TECHULUS_CLOUD_WEB_IMAGE="ghcr.io/techulus/cloud/web@${web_digest}"
+    TECHULUS_CLOUD_REGISTRY_IMAGE="ghcr.io/techulus/cloud/registry@${registry_digest}"
+    TECHULUS_CLOUD_UPDATER_IMAGE="ghcr.io/techulus/cloud/updater@${updater_digest}"
+
+    rm -rf "$temp_dir"
+    trap - EXIT
+
+    log_success "Verified ${target_version} Compose files downloaded to ${DEPLOY_DIR}"
 }
 
 prompt_value() {
@@ -369,6 +447,7 @@ AWS_REGION=${AWS_REGION}"
 
 configure_from_file() {
     local src_file="$1"
+    local configured_compose_file
     log_header "Configuration (from file)"
 
     if [[ ! -f "$src_file" ]]; then
@@ -376,14 +455,49 @@ configure_from_file() {
         exit 1
     fi
 
-    cp "$src_file" "${DEPLOY_DIR}/.env"
-    log_success "Configuration loaded from ${src_file}"
-
-    if grep -q "^COMPOSE_FILE=" "${DEPLOY_DIR}/.env"; then
-        COMPOSE_FILE="$(grep "^COMPOSE_FILE=" "${DEPLOY_DIR}/.env" | cut -d'=' -f2)"
-    else
-        COMPOSE_FILE="compose.production.yml"
+    configured_compose_file="$(grep -E '^COMPOSE_FILE=' "$src_file" | tail -1 | cut -d= -f2- || true)"
+    COMPOSE_FILE="${configured_compose_file:-compose.production.yml}"
+    if [[ "$COMPOSE_FILE" != "compose.production.yml" && "$COMPOSE_FILE" != "compose.postgres.yml" ]]; then
+        log_error "Unsupported COMPOSE_FILE: ${COMPOSE_FILE}"
+        exit 1
     fi
+
+    local temp_path
+    temp_path="$(mktemp "${DEPLOY_DIR}/.env.tmp.XXXXXX")"
+
+    awk \
+        -v version="$TECHULUS_CLOUD_VERSION" \
+        -v web_image="$TECHULUS_CLOUD_WEB_IMAGE" \
+        -v registry_image="$TECHULUS_CLOUD_REGISTRY_IMAGE" \
+        -v updater_image="$TECHULUS_CLOUD_UPDATER_IMAGE" '
+        /^TECHULUS_CLOUD_VERSION=/ {
+            if (!version_written++) print "TECHULUS_CLOUD_VERSION=" version
+            next
+        }
+        /^TECHULUS_CLOUD_WEB_IMAGE=/ {
+            if (!web_written++) print "TECHULUS_CLOUD_WEB_IMAGE=" web_image
+            next
+        }
+        /^TECHULUS_CLOUD_REGISTRY_IMAGE=/ {
+            if (!registry_written++) print "TECHULUS_CLOUD_REGISTRY_IMAGE=" registry_image
+            next
+        }
+        /^TECHULUS_CLOUD_UPDATER_IMAGE=/ {
+            if (!updater_written++) print "TECHULUS_CLOUD_UPDATER_IMAGE=" updater_image
+            next
+        }
+        { print }
+        END {
+            if (!version_written) print "TECHULUS_CLOUD_VERSION=" version
+            if (!web_written) print "TECHULUS_CLOUD_WEB_IMAGE=" web_image
+            if (!registry_written) print "TECHULUS_CLOUD_REGISTRY_IMAGE=" registry_image
+            if (!updater_written) print "TECHULUS_CLOUD_UPDATER_IMAGE=" updater_image
+        }
+    ' "$src_file" > "$temp_path"
+    chmod 600 "$temp_path"
+    mv "$temp_path" "${DEPLOY_DIR}/.env"
+
+    log_success "Configuration loaded from ${src_file}"
 }
 
 write_env_file() {
@@ -418,7 +532,10 @@ CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
 
 WEB_REPLICAS=1
 ALLOW_SIGNUP=true
-TECHULUS_CLOUD_VERSION=${TECHULUS_CLOUD_VERSION:-tip}
+TECHULUS_CLOUD_VERSION=${TECHULUS_CLOUD_VERSION}
+TECHULUS_CLOUD_WEB_IMAGE=${TECHULUS_CLOUD_WEB_IMAGE}
+TECHULUS_CLOUD_REGISTRY_IMAGE=${TECHULUS_CLOUD_REGISTRY_IMAGE}
+TECHULUS_CLOUD_UPDATER_IMAGE=${TECHULUS_CLOUD_UPDATER_IMAGE}
 
 COMPOSE_FILE=${COMPOSE_FILE}
 EOF
@@ -502,4 +619,6 @@ main() {
     build_and_start
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
