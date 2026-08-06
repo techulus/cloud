@@ -52,7 +52,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${TECHULUS_CLOUD_WEB_IMAGE:-ghcr.io/techulus/cloud/web:tip}
+    image: "${TECHULUS_CLOUD_WEB_IMAGE:-ghcr.io/techulus/cloud/web:${TECHULUS_CLOUD_VERSION:-tip}}"
     env_file:
       - ./.env
     environment:
@@ -75,7 +75,7 @@ services:
     restart: on-failure
 
   web:
-    image: ${TECHULUS_CLOUD_WEB_IMAGE:-ghcr.io/techulus/cloud/web:tip}
+    image: "${TECHULUS_CLOUD_WEB_IMAGE:-ghcr.io/techulus/cloud/web:${TECHULUS_CLOUD_VERSION:-tip}}"
     scale: ${WEB_REPLICAS:-1}
     env_file:
       - ./.env
@@ -126,7 +126,7 @@ services:
     restart: unless-stopped
 
   control-plane-updater:
-    image: ${TECHULUS_CLOUD_UPDATER_IMAGE:-ghcr.io/techulus/cloud/updater:tip}
+    image: "${TECHULUS_CLOUD_UPDATER_IMAGE:-ghcr.io/techulus/cloud/updater:${TECHULUS_CLOUD_VERSION:-tip}}"
     environment:
       - DEPLOY_DIR=/opt/techulus-cloud
       - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
@@ -142,7 +142,7 @@ services:
     restart: unless-stopped
 
   registry:
-    image: ${TECHULUS_CLOUD_REGISTRY_IMAGE:-ghcr.io/techulus/cloud/registry:tip}
+    image: "${TECHULUS_CLOUD_REGISTRY_IMAGE:-ghcr.io/techulus/cloud/registry:${TECHULUS_CLOUD_VERSION:-tip}}"
     env_file:
       - ./.env
     volumes:
