@@ -41,10 +41,10 @@ Add these service secrets from the web UI:
 
 | Secret | Required | Description |
 | --- | --- | --- |
-| `CRON_BASE_URL` | Yes | Public HTTP or HTTPS origin joined with each configured path |
+| `CRON_BASE_URL` | Yes | HTTP or HTTPS origin joined with each configured path |
 | `CRON_SECRET` | No | Sent as `Authorization: Bearer <value>`; requires an HTTPS base URL |
 
-The control plane only connects to public destinations. It blocks private and reserved addresses, does not follow redirects, and gives each request a 10-second deadline. Cron requests do not retry. If the control plane misses multiple intervals, it sends only the latest due occurrence instead of backfilling every missed run.
+The destination must be reachable from the control plane. Cron requests do not follow redirects or retry, and each request has a 10-second deadline. If the control plane misses multiple intervals, it sends only the latest due occurrence instead of backfilling every missed run.
 
 Missing or invalid configuration produces a skipped run. Redirects and non-2xx responses produce failed runs. The read-only **Crons** section in service configuration shows the latest result. Full history is available in [service logs](/infrastructure/logging) and follows the configured log retention period.
 

@@ -1,10 +1,7 @@
-import { lookup as dnsLookup } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
-import { isIP } from "node:net";
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
-import { Address4, Address6 } from "ip-address";
 import { db } from "@/db";
 import { secrets, serviceCrons, services } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
@@ -13,28 +10,7 @@ import { ingestCronLog, type CronLog } from "@/lib/victoria-logs";
 
 const MAX_ERROR = 500;
 const EXECUTION_BUDGET_MS = 10_000;
-const blockedV4 = [
-	"0.0.0.0/8",
-	"10.0.0.0/8",
-	"100.64.0.0/10",
-	"127.0.0.0/8",
-	"169.254.0.0/16",
-	"172.16.0.0/12",
-	"192.0.0.0/24",
-	"192.0.2.0/24",
-	"192.88.99.0/24",
-	"192.168.0.0/16",
-	"198.18.0.0/15",
-	"198.51.100.0/24",
-	"203.0.113.0/24",
-	"224.0.0.0/4",
-	"240.0.0.0/4",
-].map((value) => new Address4(value));
-const blockedV6 = ["2001::/23", "2001:db8::/32", "3fff::/20"].map(
-	(value) => new Address6(value),
-);
 
-export type ResolvedAddress = { address: string; family: 4 | 6 };
 export type CronRequestResult = {
 	status: "succeeded" | "failed";
 	statusCode: number | null;
@@ -72,24 +48,6 @@ export function sanitizeCronError(error: unknown): string {
 	return message.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, MAX_ERROR);
 }
 
-export function isGlobalAddress(value: string): boolean {
-	try {
-		if (isIP(value) === 4) {
-			const address = new Address4(value);
-			return !blockedV4.some((range) => address.isInSubnet(range));
-		}
-		if (isIP(value) === 6) {
-			const address = new Address6(value);
-			if (address.is4()) return isGlobalAddress(address.to4().address);
-			return (
-				address.isInSubnet(new Address6("2000::/3")) &&
-				!blockedV6.some((range) => address.isInSubnet(range))
-			);
-		}
-	} catch {}
-	return false;
-}
-
 export function parseCronUrl(base: string, path: string): URL {
 	if (!isSafeCronPath(path)) throw new Error("Invalid cron path");
 	let url: URL;
@@ -109,34 +67,6 @@ export function parseCronUrl(base: string, path: string): URL {
 	return new URL(path, `${url.origin}/`);
 }
 
-export async function resolvePublicAddresses(
-	hostname: string,
-	lookup: (
-		hostname: string,
-		options: { all: true; verbatim: true },
-	) => Promise<ResolvedAddress[]> = async (host, options) =>
-		(await dnsLookup(host, options)).map((answer) => ({
-			address: answer.address,
-			family: answer.family as 4 | 6,
-		})),
-): Promise<ResolvedAddress[]> {
-	const literal = isIP(hostname);
-	let answers: ResolvedAddress[];
-	try {
-		answers = literal
-			? [{ address: hostname, family: literal as 4 | 6 }]
-			: await lookup(hostname, { all: true, verbatim: true });
-	} catch {
-		throw new Error("DNS lookup failed");
-	}
-	if (
-		!answers.length ||
-		answers.some(({ address }) => !isGlobalAddress(address))
-	)
-		throw new Error("Cron destination is not public");
-	return answers;
-}
-
 type RequestImpl = typeof http.request;
 export function validateCronTransport(url: URL, secret?: string): void {
 	if (secret && url.protocol === "http:")
@@ -145,7 +75,6 @@ export function validateCronTransport(url: URL, secret?: string): void {
 
 export async function performCronGet(
 	url: URL,
-	addresses: ResolvedAddress[],
 	secret: string | undefined,
 	timeoutMs: number,
 	requestImpl: RequestImpl = url.protocol === "https:"
@@ -165,19 +94,11 @@ export async function performCronGet(
 				statusCode: null,
 				error: "Cron request timed out",
 			});
-		const requestOptions: http.RequestOptions & { autoSelectFamily: boolean } =
-			{
-				method: "GET",
-				agent: false,
-				autoSelectFamily: false,
-				headers: secret ? { Authorization: `Bearer ${secret}` } : undefined,
-				lookup: (_hostname, options, callback) => {
-					const selected = addresses[0];
-					if (options?.all) callback(null, addresses);
-					else callback(null, selected.address, selected.family);
-				},
-				...(url.protocol === "https:" ? { servername: url.hostname } : {}),
-			};
+		const requestOptions: http.RequestOptions = {
+			method: "GET",
+			agent: false,
+			headers: secret ? { Authorization: `Bearer ${secret}` } : undefined,
+		};
 		const req = requestImpl(url, requestOptions, (response) => {
 			const code = response.statusCode ?? null;
 			response.destroy();
@@ -219,33 +140,11 @@ export async function performCronGet(
 		req.end();
 	});
 }
-
-async function withinDeadline<T>(
-	promise: Promise<T>,
-	deadline: number,
-): Promise<T> {
-	const remaining = deadline - Date.now();
-	if (remaining <= 0) throw new Error("Cron request timed out");
-	let timer: ReturnType<typeof setTimeout>;
-	try {
-		return await Promise.race([
-			promise,
-			new Promise<never>((_, reject) => {
-				timer = setTimeout(
-					() => reject(new Error("Cron request timed out")),
-					remaining,
-				);
-			}),
-		]);
-	} finally {
-		clearTimeout(timer!);
-	}
-}
-
 export async function executeServiceCron(
 	cronId: string,
 	schedule: string,
 	scheduledFor: Date,
+	source: "scheduled" | "manual",
 ) {
 	const deadline = Date.now() + EXECUTION_BUDGET_MS;
 	const row = await db
@@ -262,15 +161,20 @@ export async function executeServiceCron(
 	const startedAt = new Date();
 	const claimed = await db
 		.update(serviceCrons)
-		.set({ lastAttemptedFor: scheduledFor, lastStartedAt: startedAt })
+		.set({
+			lastStartedAt: startedAt,
+			...(source === "scheduled" ? { lastAttemptedFor: scheduledFor } : {}),
+		})
 		.where(
 			and(
 				eq(serviceCrons.id, cronId),
 				eq(serviceCrons.schedule, schedule),
-				or(
-					isNull(serviceCrons.lastAttemptedFor),
-					lt(serviceCrons.lastAttemptedFor, scheduledFor),
-				),
+				source === "scheduled"
+					? or(
+							isNull(serviceCrons.lastAttemptedFor),
+							lt(serviceCrons.lastAttemptedFor, scheduledFor),
+						)
+					: undefined,
 			),
 		)
 		.returning({ id: serviceCrons.id });
@@ -309,21 +213,14 @@ export async function executeServiceCron(
 			const url = parseCronUrl(base.trim(), row.cron.path);
 			validateCronTransport(url, secret);
 			try {
-				const addresses = await withinDeadline(
-					resolvePublicAddresses(url.hostname),
-					deadline,
-				);
 				({ status, statusCode, error } = await performCronGet(
 					url,
-					addresses,
 					secret,
 					deadline - Date.now(),
 				));
 			} catch (cause) {
-				const message = sanitizeCronError(cause);
-				status =
-					message === "Cron destination is not public" ? "skipped" : "failed";
-				error = message;
+				status = "failed";
+				error = sanitizeCronError(cause);
 			}
 		} catch (cause) {
 			error = sanitizeCronError(cause);

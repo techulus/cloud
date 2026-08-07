@@ -1,10 +1,21 @@
 "use client";
 
 import cronstrue from "cronstrue";
-import { Ban, CheckCircle2, XCircle } from "lucide-react";
-import { memo } from "react";
+import {
+	AlertTriangle,
+	Ban,
+	CheckCircle2,
+	Loader2,
+	Play,
+	XCircle,
+} from "lucide-react";
+import { memo, useState } from "react";
+import { toast } from "sonner";
+import { runServiceCron } from "@/actions/crons";
 import { LocalDate } from "@/components/core/local-date";
 import { ConfigSection } from "@/components/service/details/config-section";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { ServiceCron, ServiceWithDetails as Service } from "@/db/types";
 
@@ -54,6 +65,21 @@ export const CronsSection = memo(function CronsSection({
 	service: Service;
 }) {
 	const crons = service.crons ?? [];
+	const [runningCronId, setRunningCronId] = useState<string | null>(null);
+
+	const handleRun = async (cronId: string) => {
+		setRunningCronId(cronId);
+		try {
+			await runServiceCron(cronId);
+			toast.success("Cron run queued");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to queue cron run",
+			);
+		} finally {
+			setRunningCronId(null);
+		}
+	};
 
 	return (
 		<ConfigSection
@@ -68,6 +94,19 @@ export const CronsSection = memo(function CronsSection({
 					and are read-only here.
 				</p>
 
+				{crons.length > 0 && (
+					<Alert className="border-yellow-500/50 bg-yellow-500/10">
+						<AlertTriangle className="text-yellow-600" />
+						<AlertTitle className="text-yellow-700 dark:text-yellow-500">
+							Cron base URL required
+						</AlertTitle>
+						<AlertDescription className="text-yellow-700/80 dark:text-yellow-500/80">
+							Cron jobs will not run until the{" "}
+							<code className="font-mono">CRON_BASE_URL</code> secret is set.
+						</AlertDescription>
+					</Alert>
+				)}
+
 				{crons.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						No cron jobs configured.
@@ -76,14 +115,30 @@ export const CronsSection = memo(function CronsSection({
 					<div className="space-y-3">
 						{crons.map((cron) => (
 							<div key={cron.id} className="space-y-3 rounded-md border p-3">
-								<div className="space-y-1">
-									<p className="break-all font-mono text-sm font-medium">
-										{cron.path}
-									</p>
-									<p className="font-mono text-xs">{cron.schedule}</p>
-									<p className="text-xs text-muted-foreground">
-										{describeSchedule(cron.schedule)} (UTC)
-									</p>
+								<div className="flex items-start justify-between gap-3">
+									<div className="min-w-0 space-y-1">
+										<p className="break-all font-mono text-sm font-medium">
+											{cron.path}
+										</p>
+										<p className="font-mono text-xs">{cron.schedule}</p>
+										<p className="text-xs text-muted-foreground">
+											{describeSchedule(cron.schedule)} (UTC)
+										</p>
+									</div>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() => handleRun(cron.id)}
+										disabled={runningCronId !== null}
+									>
+										{runningCronId === cron.id ? (
+											<Loader2 className="animate-spin" />
+										) : (
+											<Play />
+										)}
+										{runningCronId === cron.id ? "Queuing…" : "Run now"}
+									</Button>
 								</div>
 
 								{cron.lastStatus ? (

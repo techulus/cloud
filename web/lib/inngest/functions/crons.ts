@@ -252,6 +252,7 @@ export const serviceCronDispatcher = inngest.createFunction(
 						cronId: row.id,
 						schedule: row.schedule,
 						scheduledFor: occurrence.toISOString(),
+						source: "scheduled",
 					},
 				});
 				await db

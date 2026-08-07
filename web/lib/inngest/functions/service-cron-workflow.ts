@@ -15,6 +15,7 @@ export const serviceCronWorkflow = inngest.createFunction(
 				event.data.cronId,
 				event.data.schedule,
 				new Date(event.data.scheduledFor),
+				event.data.source,
 			),
 		),
 );
