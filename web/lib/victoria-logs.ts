@@ -362,6 +362,7 @@ export type CronLog = {
 	service_id: string;
 	cron_id: string;
 	path: string;
+	source: "scheduled" | "manual";
 	scheduled_for: string;
 	started_at: string;
 	finished_at: string;
