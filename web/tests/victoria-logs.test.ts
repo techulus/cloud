@@ -400,6 +400,7 @@ describe("VictoriaLogs queries", () => {
 			service_id: "service-1",
 			cron_id: "cron-1",
 			path: "/job",
+			source: "manual",
 			scheduled_for: "2026-08-06T10:00:00Z",
 			started_at: "2026-08-06T10:00:00Z",
 			finished_at: "2026-08-06T10:00:01Z",
@@ -413,6 +414,7 @@ describe("VictoriaLogs queries", () => {
 		expect(String(url)).toBe("http://victoria.test/insert/jsonline");
 		expect(init?.signal).toBeInstanceOf(AbortSignal);
 		expect(init?.body).toContain('"status":204');
+		expect(init?.body).toContain('"source":"manual"');
 		expect(init?.body).not.toContain("Authorization");
 		expect(init?.body).not.toContain("CRON_BASE_URL");
 	});

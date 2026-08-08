@@ -245,6 +245,7 @@ export async function executeServiceCron(
 		service_id: row.serviceId,
 		cron_id: cronId,
 		path: row.cron.path,
+		source,
 		scheduled_for: scheduledFor.toISOString(),
 		started_at: startedAt.toISOString(),
 		finished_at: finishedAt.toISOString(),

@@ -46,7 +46,7 @@ Add these service secrets from the web UI:
 
 The destination must be reachable from the control plane. Cron requests do not follow redirects or retry, and each request has a 10-second deadline. If the control plane misses multiple intervals, it sends only the latest due occurrence instead of backfilling every missed run.
 
-Missing or invalid configuration produces a skipped run. Redirects and non-2xx responses produce failed runs. The read-only **Crons** section in service configuration shows the latest result. Full history is available in [service logs](/infrastructure/logging) and follows the configured log retention period.
+Missing or invalid configuration produces a skipped run. Redirects and non-2xx responses produce failed runs. The **Crons** section in service configuration shows the latest result. Full history is available in [service logs](/infrastructure/logging) and follows the configured log retention period.
 
 `tc apply` treats `service.crons` as the complete desired list. Removing the field or setting it to an empty list removes all cron definitions. Cron-only changes take effect without creating a deployment revision.
 

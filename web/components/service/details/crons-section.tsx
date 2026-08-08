@@ -11,13 +11,19 @@ import {
 } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { runServiceCron } from "@/actions/crons";
 import { LocalDate } from "@/components/core/local-date";
 import { ConfigSection } from "@/components/service/details/config-section";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
-import type { ServiceCron, ServiceWithDetails as Service } from "@/db/types";
+import type {
+	Secret,
+	ServiceCron,
+	ServiceWithDetails as Service,
+} from "@/db/types";
+import { fetcher } from "@/lib/fetcher";
 
 const STATUS_CONFIG = {
 	succeeded: {
@@ -65,6 +71,13 @@ export const CronsSection = memo(function CronsSection({
 	service: Service;
 }) {
 	const crons = service.crons ?? [];
+	const { data: secrets } = useSWR<Pick<Secret, "id" | "key" | "createdAt">[]>(
+		crons.length > 0 ? `/api/services/${service.id}/secrets` : null,
+		fetcher,
+	);
+	const hasCronBaseUrl = secrets?.some(
+		(secret) => secret.key === "CRON_BASE_URL",
+	);
 	const [runningCronId, setRunningCronId] = useState<string | null>(null);
 
 	const handleRun = async (cronId: string) => {
@@ -89,12 +102,11 @@ export const CronsSection = memo(function CronsSection({
 		>
 			<div className="space-y-4">
 				<p className="text-sm text-muted-foreground">
-					Cron jobs are managed in{" "}
-					<code className="font-mono">techulus.yml</code>. Schedules run in UTC
-					and are read-only here.
+					Cron schedules are configured in{" "}
+					<code className="font-mono">techulus.yml</code> and run in UTC.
 				</p>
 
-				{crons.length > 0 && (
+				{crons.length > 0 && secrets !== undefined && !hasCronBaseUrl && (
 					<Alert className="border-yellow-500/50 bg-yellow-500/10">
 						<AlertTriangle className="text-yellow-600" />
 						<AlertTitle className="text-yellow-700 dark:text-yellow-500">
