@@ -37,6 +37,8 @@ export async function notificationEventIsEnabled(event: NotificationEvent) {
 			return config?.buildFailure !== false;
 		case "deployment.failed":
 			return config?.deploymentFailure !== false;
+		case "cron.failed":
+			return config?.cronFailure !== false;
 	}
 }
 
@@ -79,6 +81,13 @@ export async function renderInAppNotification(event: NotificationEvent) {
 			title: `Build failed: ${context.serviceName}`,
 			body: event.error ?? `A build for ${context.serviceName} failed.`,
 			href: `${serviceHref}/builds/${event.buildId}`,
+		};
+	}
+	if (event.kind === "cron.failed") {
+		return {
+			title: `Cron failed: ${context.serviceName}`,
+			body: `${event.path}: ${event.error ?? "Cron request failed"}`,
+			href: serviceHref,
 		};
 	}
 	return {

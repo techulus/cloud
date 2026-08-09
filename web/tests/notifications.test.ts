@@ -99,12 +99,49 @@ describe("notification pipeline", () => {
 		).resolves.toBeNull();
 	});
 
+	it("renders cron failures with the service deep link", async () => {
+		mocks.select.mockReturnValueOnce({
+			from: vi.fn(() => ({
+				innerJoin: vi.fn(() => ({
+					innerJoin: vi.fn(() => ({
+						where: vi.fn(() =>
+							Promise.resolve([
+								{
+									serviceName: "API",
+									projectName: "Cloud",
+									projectSlug: "cloud",
+									environmentName: "production",
+								},
+							]),
+						),
+					})),
+				})),
+			})),
+		});
+
+		await expect(
+			renderInAppNotification({
+				kind: "cron.failed",
+				occurrenceId: "cron-1",
+				serviceId: "service-1",
+				path: "/jobs/nightly",
+				statusCode: 500,
+				error: "HTTP status 500",
+			}),
+		).resolves.toEqual({
+			title: "Cron failed: API",
+			body: "/jobs/nightly: HTTP status 500",
+			href: "/dashboard/projects/cloud/production/services/service-1",
+		});
+	});
+
 	it("maps every operational event to its alert toggle", async () => {
 		mocks.getAlertsConfig.mockResolvedValue({
 			serverOfflineAlert: false,
 			buildFailure: false,
 			deploymentFailure: false,
 			deploymentMovedAlert: false,
+			cronFailure: false,
 		});
 
 		await expect(
@@ -141,6 +178,16 @@ describe("notification pipeline", () => {
 				serverId: "server-1",
 			}),
 		).resolves.toBe(false);
+		await expect(
+			notificationEventIsEnabled({
+				kind: "cron.failed",
+				occurrenceId: "cron-1",
+				serviceId: "service-1",
+				path: "/jobs/nightly",
+				statusCode: 500,
+				error: "HTTP status 500",
+			}),
+		).resolves.toBe(false);
 	});
 
 	it("defaults missing alert settings to enabled", async () => {
@@ -148,10 +195,12 @@ describe("notification pipeline", () => {
 
 		await expect(
 			notificationEventIsEnabled({
-				kind: "build.failed",
-				occurrenceId: "build-1",
+				kind: "cron.failed",
+				occurrenceId: "cron-1",
 				serviceId: "service-1",
-				buildId: "build-1",
+				path: "/jobs/nightly",
+				statusCode: null,
+				error: "Cron request failed",
 			}),
 		).resolves.toBe(true);
 	});
@@ -162,6 +211,7 @@ describe("notification pipeline", () => {
 			buildFailure: true,
 			deploymentFailure: true,
 			deploymentMovedAlert: true,
+			cronFailure: true,
 		});
 
 		await deliverInAppNotification({

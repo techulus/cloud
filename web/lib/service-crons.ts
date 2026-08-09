@@ -5,6 +5,7 @@ import { CronExpressionParser } from "cron-parser";
 import { db } from "@/db";
 import { secrets, serviceCrons, services } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
+import { notify } from "@/lib/notifications";
 import { isSafeCronPath, nextOccurrenceAfter } from "@/lib/public-api";
 import { ingestCronLog, type CronLog } from "@/lib/victoria-logs";
 
@@ -256,5 +257,20 @@ export async function executeServiceCron(
 		log_type: "cron",
 	};
 	await ingestCronLog(log);
+	if (status === "failed") {
+		notify({
+			kind: "cron.failed",
+			occurrenceId: cronEventId(cronId, scheduledFor),
+			serviceId: row.serviceId,
+			path: row.cron.path,
+			statusCode,
+			error,
+		}).catch((cause) => {
+			console.error(
+				"[service-cron] failed to enqueue cron failure notification:",
+				cause,
+			);
+		});
+	}
 	return { stale: false as const, status, statusCode, error };
 }
