@@ -19,7 +19,8 @@ type AlertField =
 	| "serverOfflineAlert"
 	| "buildFailure"
 	| "deploymentFailure"
-	| "deploymentMovedAlert";
+	| "deploymentMovedAlert"
+	| "cronFailure";
 
 type AlertSetting = {
 	field: AlertField;
@@ -49,6 +50,11 @@ const ALERT_SETTINGS: AlertSetting[] = [
 		description:
 			"Receive a notification when offline replicas need manual recovery",
 	},
+	{
+		field: "cronFailure",
+		label: "Cron Failure Alert",
+		description: "Receive a notification when a cron run fails",
+	},
 ];
 
 type State = {
@@ -56,6 +62,7 @@ type State = {
 	buildFailure: boolean;
 	deploymentFailure: boolean;
 	deploymentMovedAlert: boolean;
+	cronFailure: boolean;
 	isSavingAlerts: boolean;
 };
 
@@ -70,6 +77,7 @@ function createInitialState(props: Props): State {
 		buildFailure: alertsConfig?.buildFailure ?? true,
 		deploymentFailure: alertsConfig?.deploymentFailure ?? true,
 		deploymentMovedAlert: alertsConfig?.deploymentMovedAlert ?? true,
+		cronFailure: alertsConfig?.cronFailure ?? true,
 		isSavingAlerts: false,
 	};
 }
@@ -99,6 +107,7 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 				buildFailure: state.buildFailure,
 				deploymentFailure: state.deploymentFailure,
 				deploymentMovedAlert: state.deploymentMovedAlert,
+				cronFailure: state.cronFailure,
 			});
 			toast.success("Alert settings saved");
 			router.refresh();
@@ -120,7 +129,8 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 		state.deploymentFailure !==
 			(initialAlertsConfig?.deploymentFailure ?? true) ||
 		state.deploymentMovedAlert !==
-			(initialAlertsConfig?.deploymentMovedAlert ?? true);
+			(initialAlertsConfig?.deploymentMovedAlert ?? true) ||
+		state.cronFailure !== (initialAlertsConfig?.cronFailure ?? true);
 
 	return (
 		<div className="space-y-6">
