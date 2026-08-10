@@ -30,4 +30,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      # Scan `web/` directly. Discovery from the repo root finds the project,
+      # but the baseline diff plan is computed at the root and never resolves
+      # against it, so every PR degraded to "all issues in changed files".
       - uses: millionco/react-doctor@v2
+        with:
+          directory: web
