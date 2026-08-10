@@ -5,7 +5,15 @@ import {
 	isLoggingEnabled,
 	type LogType,
 	queryLogsByService,
+	type StoredLog,
 } from "@/lib/victoria-logs";
+
+function streamOf(log: StoredLog): string {
+	if (log.stream) return log.stream;
+	if (log.log_type === "http") return "http";
+	if (log.log_type === "cron") return "cron";
+	return "stdout";
+}
 
 export async function GET(
 	request: Request,
@@ -36,7 +44,8 @@ export async function GET(
 	const logType =
 		logTypeParam === "container" ||
 		logTypeParam === "http" ||
-		logTypeParam === "cron"
+		logTypeParam === "cron" ||
+		logTypeParam === "container-cron"
 			? (logTypeParam as LogType)
 			: undefined;
 
@@ -49,9 +58,11 @@ export async function GET(
 		});
 
 		const logs = result.logs.map((log) => ({
-			id: `${log.deployment_id || log.service_id}-${log._time}`,
+			id: [log.deployment_id || log.service_id, log.cron_id, log._time]
+				.filter(Boolean)
+				.join("-"),
 			deploymentId: log.deployment_id,
-			stream: log.stream || (log.log_type === "http" ? "http" : "stdout"),
+			stream: streamOf(log),
 			message: log._msg,
 			timestamp: log._time,
 			logType: log.log_type || "container",
@@ -60,6 +71,7 @@ export async function GET(
 			path: log.path,
 			duration: log.duration_ms,
 			clientIp: log.client_ip,
+			error: log.error,
 		}));
 
 		return Response.json({

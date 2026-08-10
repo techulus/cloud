@@ -53,8 +53,12 @@ interface BaseEntry {
 interface ServiceLogEntry extends BaseEntry {
 	id: string;
 	deploymentId?: string;
-	stream: "stdout" | "stderr";
+	stream: "stdout" | "stderr" | "cron";
 	message: string;
+	path?: string;
+	status?: number | null;
+	duration?: number | null;
+	error?: string | null;
 }
 
 interface RequestEntry extends BaseEntry {
@@ -194,7 +198,7 @@ function buildLogEndpoint(
 		case "service-logs":
 			path = `/api/services/${props.serviceId}/logs`;
 			params.set("limit", "500");
-			params.set("type", "container");
+			params.set("type", "container-cron");
 			if (filterServerId) params.set("serverId", filterServerId);
 			break;
 		case "requests":
@@ -271,6 +275,8 @@ function ServiceLogsFilters({
 	onShowStdoutChange,
 	showStderr,
 	onShowStderrChange,
+	showCron,
+	onShowCronChange,
 }: {
 	levels: Set<LogLevel>;
 	onLevelsChange: (levels: Set<LogLevel>) => void;
@@ -278,6 +284,8 @@ function ServiceLogsFilters({
 	onShowStdoutChange: (show: boolean) => void;
 	showStderr: boolean;
 	onShowStderrChange: (show: boolean) => void;
+	showCron: boolean;
+	onShowCronChange: (show: boolean) => void;
 }) {
 	const toggleLevel = (level: LogLevel) => {
 		const newLevels = new Set(levels);
@@ -359,6 +367,13 @@ function ServiceLogsFilters({
 					onClick={() => onShowStderrChange(!showStderr)}
 				>
 					stderr
+				</Button>
+				<Button
+					variant={showCron ? "secondary" : "outline"}
+					size="sm"
+					onClick={() => onShowCronChange(!showCron)}
+				>
+					cron
 				</Button>
 			</div>
 		</>
@@ -544,6 +559,16 @@ function ServerFilter({
 	);
 }
 
+function formatCronMessage(entry: ServiceLogEntry): string {
+	const parts = [entry.message];
+	if (entry.path) parts.push(entry.path);
+	if (entry.status != null) parts.push(String(entry.status));
+	if (entry.duration != null)
+		parts.push(`${Math.round(Number(entry.duration) || 0)}ms`);
+	if (entry.error) parts.push(entry.error);
+	return parts.join(" · ");
+}
+
 function ServiceLogRow({
 	entry,
 	search,
@@ -551,6 +576,9 @@ function ServiceLogRow({
 	entry: ServiceLogEntry;
 	search: string;
 }) {
+	if (entry.stream === "cron")
+		return <CronLogRow entry={entry} search={search} />;
+
 	const level = detectLevel(entry.message);
 
 	return (
@@ -587,6 +615,41 @@ function ServiceLogRow({
 				}`}
 			>
 				{highlightMatches(entry.message, search)}
+			</span>
+		</div>
+	);
+}
+
+function CronLogRow({
+	entry,
+	search,
+}: {
+	entry: ServiceLogEntry;
+	search: string;
+}) {
+	const failed = !!entry.error;
+
+	return (
+		<div className="flex flex-col sm:flex-row hover:bg-black/5 dark:hover:bg-white/5 -mx-2 px-2 py-1 sm:py-0.5 group">
+			<div className="flex items-baseline sm:contents">
+				<span
+					className="shrink-0 w-[70px] text-slate-400 dark:text-slate-600 select-none pr-2 tabular-nums"
+					title={formatPreciseDateTime(entry.timestamp)}
+				>
+					{formatTime(entry.timestamp)}
+				</span>
+				<span className="shrink-0 w-[50px] text-center px-1 rounded text-[10px] mr-2 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+					cron
+				</span>
+			</div>
+			<span
+				className={`break-all whitespace-pre-wrap ${
+					failed
+						? "text-red-600 dark:text-red-400"
+						: "text-slate-800 dark:text-slate-200"
+				}`}
+			>
+				{highlightMatches(formatCronMessage(entry), search)}
 			</span>
 		</div>
 	);
@@ -697,7 +760,9 @@ function serializeLogs(
 		.map((log) => {
 			if (variant === "service-logs") {
 				const entry = log as ServiceLogEntry;
-				return `[${entry.timestamp}] [${entry.stream}] ${entry.message}`;
+				const message =
+					entry.stream === "cron" ? formatCronMessage(entry) : entry.message;
+				return `[${entry.timestamp}] [${entry.stream}] ${message}`;
 			}
 			if (variant === "requests") {
 				const entry = log as RequestEntry;
@@ -752,6 +817,10 @@ export function LogViewer(props: LogViewerProps) {
 	);
 	const [showStderr, setShowStderr] = useQueryState(
 		"stderr",
+		parseAsBoolean.withDefault(true),
+	);
+	const [showCron, setShowCron] = useQueryState(
+		"cron",
 		parseAsBoolean.withDefault(true),
 	);
 
@@ -931,6 +1000,7 @@ export function LogViewer(props: LogViewerProps) {
 				const entry = log as ServiceLogEntry;
 				if (entry.stream === "stdout" && !showStdout) return false;
 				if (entry.stream === "stderr" && !showStderr) return false;
+				if (entry.stream === "cron") return showCron;
 
 				const level = detectLevel(entry.message);
 				if (level && !levels.has(level)) return false;
@@ -945,7 +1015,15 @@ export function LogViewer(props: LogViewerProps) {
 
 			return true;
 		});
-	}, [logs, props.variant, levels, showStdout, showStderr, statusFilter]);
+	}, [
+		logs,
+		props.variant,
+		levels,
+		showStdout,
+		showStderr,
+		showCron,
+		statusFilter,
+	]);
 	const logCount = logs.length;
 	const filteredLogCount = filteredLogs.length;
 	const newestFilteredLogTimestamp = (
@@ -1083,6 +1161,8 @@ export function LogViewer(props: LogViewerProps) {
 						onShowStdoutChange={setShowStdout}
 						showStderr={showStderr}
 						onShowStderrChange={setShowStderr}
+						showCron={showCron}
+						onShowCronChange={setShowCron}
 					/>
 				)}
 
