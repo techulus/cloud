@@ -387,6 +387,29 @@ describe("VictoriaLogs queries", () => {
 		expect(queries[2]).toContain("-log_type:cron");
 	});
 
+	it("keeps cron logs and drops HTTP logs for the combined service log filter", async () => {
+		const { queryLogsByService } = await loadVictoriaLogs();
+		const queries: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				queries.push(new URL(String(input)).searchParams.get("query") || "");
+				return jsonLinesResponse([]);
+			}),
+		);
+		await queryLogsByService({
+			serviceId: "service-1",
+			limit: 1,
+			logType: "container-cron",
+			search: "500",
+		});
+		expect(queries[0]).toContain("-log_type:http");
+		expect(queries[0]).not.toContain("-log_type:cron");
+		for (const field of ["_msg", "path", "status", "error"]) {
+			expect(queries[0]).toContain(`${field}:~`);
+		}
+	});
+
 	it("ingests only supplied cron metadata with a five-second deadline", async () => {
 		const { ingestCronLog } = await loadVictoriaLogs();
 		const fetchMock = vi.fn(
