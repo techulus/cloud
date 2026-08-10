@@ -261,6 +261,60 @@ async function sendBuildFailureAlert(
 	});
 }
 
+type CronFailureAlertOptions = {
+	to: string;
+	serviceId: string;
+	path: string;
+	statusCode: number | null;
+	error: string | null;
+};
+
+async function sendCronFailureAlert(
+	options: CronFailureAlertOptions,
+): Promise<void> {
+	const [result] = await db
+		.select({
+			serviceName: services.name,
+			projectName: projects.name,
+			projectSlug: projects.slug,
+			envName: environments.name,
+		})
+		.from(services)
+		.innerJoin(projects, eq(projects.id, services.projectId))
+		.innerJoin(environments, eq(environments.id, services.environmentId))
+		.where(eq(services.id, options.serviceId));
+
+	if (!result) return;
+
+	const baseUrl = getAppBaseUrl();
+	const serviceUrl = baseUrl
+		? `${baseUrl}/dashboard/projects/${result.projectSlug}/${result.envName}/services/${options.serviceId}`
+		: undefined;
+	const details = [
+		{ label: "Service", value: result.serviceName },
+		{ label: "Project", value: result.projectName },
+		{ label: "Cron Path", value: options.path },
+		...(options.statusCode !== null
+			? [{ label: "HTTP Status", value: String(options.statusCode) }]
+			: []),
+		...(options.error ? [{ label: "Error", value: options.error }] : []),
+	];
+
+	await sendAlert({
+		to: options.to,
+		subject: `Cron Failed: ${result.serviceName}`,
+		template: Alert({
+			bannerText: "CRON FAILED",
+			heading: "Cron Failure Alert",
+			description: `The cron job "${options.path}" for service "${result.serviceName}" in project "${result.projectName}" has failed.`,
+			details,
+			buttonText: serviceUrl ? "View Service" : undefined,
+			buttonUrl: serviceUrl,
+			baseUrl,
+		}),
+	});
+}
+
 type DeploymentFailureAlertOptions = {
 	to: string;
 	serviceId: string;
@@ -399,6 +453,9 @@ export async function deliverNotificationEmail(
 			return;
 		case "build.failed":
 			await sendBuildFailureAlert({ ...event, to });
+			return;
+		case "cron.failed":
+			await sendCronFailureAlert({ ...event, to });
 			return;
 		case "deployment.failed":
 			await sendDeploymentFailureAlert({ ...event, to });

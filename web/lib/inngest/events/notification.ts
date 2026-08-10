@@ -30,6 +30,14 @@ export type NotificationEvent =
 			failedStage?: string;
 	  }
 	| {
+			kind: "cron.failed";
+			occurrenceId: string;
+			serviceId: string;
+			path: string;
+			statusCode: number | null;
+			error: string | null;
+	  }
+	| {
 			kind: "member.invited";
 			occurrenceId: string;
 			to: string;

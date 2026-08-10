@@ -3,16 +3,14 @@ import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import {
 	cronEventId,
-	isGlobalAddress,
 	latestDueOccurrence,
 	nextOccurrenceAfter,
 	parseCronUrl,
 	performCronGet,
-	resolvePublicAddresses,
 	validateCronTransport,
 } from "@/lib/service-crons";
 
-describe("service cron scheduling and SSRF validation", () => {
+describe("service cron scheduling and requests", () => {
 	it("returns the first UTC occurrence strictly after the supplied instant", () => {
 		expect(
 			nextOccurrenceAfter(
@@ -56,33 +54,6 @@ describe("service cron scheduling and SSRF validation", () => {
 		);
 	});
 
-	it.each([
-		"10.0.0.1",
-		"127.0.0.1",
-		"169.254.1.1",
-		"192.0.2.1",
-		"192.88.99.1",
-		"::1",
-		"fc00::1",
-		"fe80::1",
-		"2001::1",
-		"2001:db8::1",
-		"3fff::1",
-		"::ffff:10.0.0.1",
-	])("rejects non-global address %s", (address) =>
-		expect(isGlobalAddress(address)).toBe(false),
-	);
-
-	it("rejects mixed DNS results", async () => {
-		const lookup = vi.fn(async () => [
-			{ address: "8.8.8.8", family: 4 as const },
-			{ address: "10.0.0.1", family: 4 as const },
-		]);
-		await expect(resolvePublicAddresses("example.com", lookup)).rejects.toThrow(
-			"not public",
-		);
-	});
-
 	it("rejects a secret over cleartext HTTP", () => {
 		expect(() =>
 			validateCronTransport(new URL("http://example.com/job"), "not-logged"),
@@ -92,44 +63,27 @@ describe("service cron scheduling and SSRF validation", () => {
 		).not.toThrow();
 	});
 
-	it.each([false, true])(
-		"pins lookup for all=%s without pooling",
-		async (all) => {
-			let options!: RequestOptions & { autoSelectFamily?: boolean };
-			const request = fakeRequest(204, (received) => {
-				options = received;
-			});
-			const result = performCronGet(
+	it("performs a GET without connection pooling", async () => {
+		let options!: RequestOptions;
+		const request = fakeRequest(204, (received) => {
+			options = received;
+		});
+		await expect(
+			performCronGet(
 				new URL("https://example.com/job"),
-				[
-					{ address: "8.8.8.8", family: 4 },
-					{ address: "2001:4860:4860::8888", family: 6 },
-				],
 				undefined,
 				1_000,
 				request,
-			);
-			const callback = vi.fn();
-			options.lookup!("example.com", { all }, callback);
-			if (all)
-				expect(callback).toHaveBeenCalledWith(null, [
-					{ address: "8.8.8.8", family: 4 },
-					{ address: "2001:4860:4860::8888", family: 6 },
-				]);
-			else expect(callback).toHaveBeenCalledWith(null, "8.8.8.8", 4);
-			expect(options).toMatchObject({
-				agent: false,
-				autoSelectFamily: false,
-				servername: "example.com",
-			});
-			expect(await result).toEqual({
-				status: "succeeded",
-				statusCode: 204,
-				error: null,
-			});
-			expect(request).toHaveBeenCalledTimes(1);
-		},
-	);
+			),
+		).resolves.toEqual({
+			status: "succeeded",
+			statusCode: 204,
+			error: null,
+		});
+		expect(options).toMatchObject({ method: "GET", agent: false });
+		expect(options.lookup).toBeUndefined();
+		expect(request).toHaveBeenCalledTimes(1);
+	});
 
 	it.each([302, 404])(
 		"classifies HTTP %s at headers without retaining a body",
@@ -141,7 +95,6 @@ describe("service cron scheduling and SSRF validation", () => {
 			await expect(
 				performCronGet(
 					new URL("https://example.com/job"),
-					[{ address: "8.8.8.8", family: 4 }],
 					undefined,
 					1_000,
 					request,
@@ -163,7 +116,6 @@ describe("service cron scheduling and SSRF validation", () => {
 			}) as unknown as typeof import("node:http").request;
 			const result = performCronGet(
 				new URL("https://example.com/job"),
-				[{ address: "8.8.8.8", family: 4 }],
 				undefined,
 				25,
 				request,
@@ -183,9 +135,7 @@ describe("service cron scheduling and SSRF validation", () => {
 
 function fakeRequest(
 	statusCode: number,
-	onOptions?: (
-		options: RequestOptions & { autoSelectFamily?: boolean },
-	) => void,
+	onOptions?: (options: RequestOptions) => void,
 	onResponseDestroy?: () => void,
 ) {
 	return vi.fn(
