@@ -117,6 +117,16 @@ type PublicServiceLogsOptions = Omit<
 	cursor?: PublicServiceLogCursor;
 };
 
+function serviceLogSearchFields(
+	logType: LogType | undefined,
+): readonly LogSearchField[] {
+	if (logType === "http")
+		return ["_msg", "path", "method", "status", "client_ip"];
+	if (logType === "cron" || logType === "container-cron")
+		return ["_msg", "path", "status", "error"];
+	return ["_msg"];
+}
+
 function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 	const { serviceId, logType, serverId, search, range } = options;
 	let query = formatLogSqlExactFilter("service_id", serviceId);
@@ -139,11 +149,7 @@ function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 	}
 	const searchFilter = formatLogSqlSearchFilter(
 		search,
-		logType === "http"
-			? ["_msg", "path", "method", "status", "client_ip"]
-			: logType === "cron" || logType === "container-cron"
-				? ["_msg", "path", "status", "error"]
-				: ["_msg"],
+		serviceLogSearchFields(logType),
 	);
 	if (searchFilter) {
 		query += ` ${searchFilter}`;
