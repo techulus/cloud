@@ -12,6 +12,7 @@ import {
 	Trash2,
 	Upload,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AnchorHTMLAttributes, MouseEvent, PointerEvent } from "react";
@@ -383,7 +384,9 @@ function ServiceCard({
 		(observedReadyPhases as readonly string[]).includes(d.observedPhase),
 	).length;
 	const statusLabel = getStatusLabel(service.deployments, runningCount);
-	const publicEndpoint = service.ports.find((p) => p.isPublic && p.domain);
+	const publicDomain = service.ports.find(
+		(p) => p.isPublic && p.protocol === "http" && p.domain,
+	)?.domain;
 	const volumeNames = (service.volumes ?? []).map((v) => v.name).join(", ");
 
 	return (
@@ -400,12 +403,28 @@ function ServiceCard({
 					className="relative z-10 flex w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-3.5 py-3"
 					style={{ minHeight: SERVICE_CARD_HEIGHT }}
 				>
-					<SummaryCardTitle>{service.name}</SummaryCardTitle>
+					<SummaryCardTitle className="flex items-center gap-2">
+						{publicDomain && (
+							<Image
+								src={`https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(`https://${publicDomain}`)}&sz=64`}
+								alt=""
+								width={16}
+								height={16}
+								unoptimized
+								className="size-4 shrink-0 rounded-sm"
+								referrerPolicy="no-referrer"
+								onError={(event) => {
+									event.currentTarget.hidden = true;
+								}}
+							/>
+						)}
+						<span className="min-w-0 truncate">{service.name}</span>
+					</SummaryCardTitle>
 
-					{(publicEndpoint || volumeNames) && (
+					{(publicDomain || volumeNames) && (
 						<div className="mt-1.5 space-y-0.5">
-							{publicEndpoint?.domain && (
-								<SummaryCardLine icon={Globe} value={publicEndpoint.domain} />
+							{publicDomain && (
+								<SummaryCardLine icon={Globe} value={publicDomain} />
 							)}
 							{volumeNames && (
 								<SummaryCardLine icon={HardDrive} value={volumeNames} />
