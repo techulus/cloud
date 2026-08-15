@@ -20,8 +20,14 @@ function getQueryEndpoint(): EndpointConfig | undefined {
 	return parseEndpoint(endpoint);
 }
 
-export type LogType = "container" | "http" | "cron";
-type LogSearchField = "_msg" | "path" | "method" | "status" | "client_ip";
+export type LogType = "container" | "http" | "cron" | "container-cron";
+type LogSearchField =
+	| "_msg"
+	| "path"
+	| "method"
+	| "status"
+	| "client_ip"
+	| "error";
 
 export type StoredLog = {
 	_msg: string;
@@ -35,10 +41,12 @@ export type StoredLog = {
 	host?: string;
 	method?: string;
 	path?: string;
-	status?: number;
+	status?: number | null;
 	duration_ms?: number;
 	size?: number;
 	client_ip?: string;
+	cron_id?: string;
+	error?: string | null;
 };
 
 const publicServiceLogEventIdPattern = /^e[0-9]{19}[a-z]{26}$/;
@@ -109,6 +117,16 @@ type PublicServiceLogsOptions = Omit<
 	cursor?: PublicServiceLogCursor;
 };
 
+function serviceLogSearchFields(
+	logType: LogType | undefined,
+): readonly LogSearchField[] {
+	if (logType === "http")
+		return ["_msg", "path", "method", "status", "client_ip"];
+	if (logType === "cron" || logType === "container-cron")
+		return ["_msg", "path", "status", "error"];
+	return ["_msg"];
+}
+
 function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 	const { serviceId, logType, serverId, search, range } = options;
 	let query = formatLogSqlExactFilter("service_id", serviceId);
@@ -118,6 +136,8 @@ function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 		query += ` log_type:cron`;
 	} else if (logType === "container") {
 		query += ` -log_type:http -log_type:build -log_type:rollout -log_type:cron`;
+	} else if (logType === "container-cron") {
+		query += ` -log_type:http -log_type:build -log_type:rollout`;
 	} else {
 		query += ` -log_type:build -log_type:rollout`;
 	}
@@ -129,9 +149,7 @@ function buildServiceLogFilter(options: QueryLogsByServiceOptions): string {
 	}
 	const searchFilter = formatLogSqlSearchFilter(
 		search,
-		logType === "http"
-			? ["_msg", "path", "method", "status", "client_ip"]
-			: ["_msg"],
+		serviceLogSearchFields(logType),
 	);
 	if (searchFilter) {
 		query += ` ${searchFilter}`;
