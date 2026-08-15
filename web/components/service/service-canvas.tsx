@@ -4,7 +4,6 @@ import {
 	ArrowLeftRight,
 	Box,
 	Github,
-	Globe,
 	HardDrive,
 	LayoutGrid,
 	LoaderCircle,
@@ -403,28 +402,28 @@ function ServiceCard({
 					className="relative z-10 flex w-full flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-3.5 py-3"
 					style={{ minHeight: SERVICE_CARD_HEIGHT }}
 				>
-					<SummaryCardTitle className="flex items-center gap-2">
-						{publicDomain && (
-							<Image
-								src={`https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(`https://${publicDomain}`)}&sz=64`}
-								alt=""
-								width={16}
-								height={16}
-								unoptimized
-								className="size-4 shrink-0 rounded-sm"
-								referrerPolicy="no-referrer"
-								onError={(event) => {
-									event.currentTarget.hidden = true;
-								}}
-							/>
-						)}
-						<span className="min-w-0 truncate">{service.name}</span>
-					</SummaryCardTitle>
+					<SummaryCardTitle>{service.name}</SummaryCardTitle>
 
 					{(publicDomain || volumeNames) && (
 						<div className="mt-1.5 space-y-0.5">
 							{publicDomain && (
-								<SummaryCardLine icon={Globe} value={publicDomain} />
+								<div className="flex items-center gap-2.5 text-xs leading-5">
+									<Image
+										src={`https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(`https://${publicDomain}`)}&sz=64`}
+										alt=""
+										width={16}
+										height={16}
+										unoptimized
+										className="size-4 shrink-0 rounded-sm"
+										referrerPolicy="no-referrer"
+										onError={(event) => {
+											event.currentTarget.hidden = true;
+										}}
+									/>
+									<span className="min-w-0 flex-1 truncate font-mono text-foreground">
+										{publicDomain}
+									</span>
+								</div>
 							)}
 							{volumeNames && (
 								<SummaryCardLine icon={HardDrive} value={volumeNames} />
