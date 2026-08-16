@@ -135,6 +135,24 @@ export type GitHubCommit = {
 	date: string;
 };
 
+export type GitHubPullRequest = {
+	number: number;
+	state: "open" | "closed";
+	draft: boolean;
+	merged: boolean;
+	title: string;
+	updatedAt: string;
+	user: { id: number; login: string };
+	base: {
+		ref: string;
+		repository: { id: number; fullName: string };
+	};
+	head: {
+		sha: string;
+		repository: { id: number; fullName: string } | null;
+	};
+};
+
 export function isFullCommitSha(value: string): boolean {
 	return /^[0-9a-f]{40}$/i.test(value);
 }
@@ -235,6 +253,146 @@ export async function resolveGitHubCommit(
 	return mapGitHubCommit(commit);
 }
 
+type GitHubPullRequestResponse = {
+	number: number;
+	state: string;
+	draft?: boolean | null;
+	merged?: boolean | null;
+	title: string;
+	updated_at: string;
+	user: { id: number; login: string } | null;
+	base: { ref: string; repo: { id: number; full_name: string } };
+	head: { sha: string; repo: { id: number; full_name: string } | null };
+};
+
+function mapGitHubPullRequest(
+	pullRequest: GitHubPullRequestResponse,
+): GitHubPullRequest {
+	if (
+		!pullRequest.user ||
+		(pullRequest.state !== "open" && pullRequest.state !== "closed")
+	) {
+		throw new Error("GitHub returned an invalid pull request");
+	}
+	return {
+		number: pullRequest.number,
+		state: pullRequest.state,
+		draft: pullRequest.draft === true,
+		merged: pullRequest.merged === true,
+		title: pullRequest.title,
+		updatedAt: pullRequest.updated_at,
+		user: { id: pullRequest.user.id, login: pullRequest.user.login },
+		base: {
+			ref: pullRequest.base.ref,
+			repository: {
+				id: pullRequest.base.repo.id,
+				fullName: pullRequest.base.repo.full_name,
+			},
+		},
+		head: {
+			sha: pullRequest.head.sha,
+			repository: pullRequest.head.repo
+				? {
+						id: pullRequest.head.repo.id,
+						fullName: pullRequest.head.repo.full_name,
+					}
+				: null,
+		},
+	};
+}
+
+async function githubPullRequestRequest<T>(
+	installationId: number,
+	repoFullName: string,
+	suffix: string,
+): Promise<T> {
+	validateRepoFullName(repoFullName);
+	if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+		throw new Error("Invalid GitHub installation ID");
+	}
+	const token = await getInstallationToken(installationId);
+	const response = await fetch(
+		`https://api.github.com/repos/${repoFullName}/pulls${suffix}`,
+		{
+			headers: {
+				Accept: "application/vnd.github+json",
+				Authorization: `Bearer ${token}`,
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		},
+	);
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new Error(
+			`GitHub pull request failed (${response.status}): ${detail || response.statusText}`,
+		);
+	}
+	return response.json() as Promise<T>;
+}
+
+export async function getGitHubPullRequest(
+	installationId: number,
+	repoFullName: string,
+	pullRequestNumber: number,
+): Promise<GitHubPullRequest> {
+	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new Error("Invalid pull request number");
+	}
+	const pullRequest = await githubPullRequestRequest<GitHubPullRequestResponse>(
+		installationId,
+		repoFullName,
+		`/${pullRequestNumber}`,
+	);
+	return mapGitHubPullRequest(pullRequest);
+}
+
+export async function listOpenGitHubPullRequests(
+	installationId: number,
+	repoFullName: string,
+	baseBranch: string,
+): Promise<GitHubPullRequest[]> {
+	if (!baseBranch.trim()) throw new Error("GitHub branch is not configured");
+	const pullRequests: GitHubPullRequestResponse[] = [];
+	for (let page = 1; ; page++) {
+		const batch = await githubPullRequestRequest<GitHubPullRequestResponse[]>(
+			installationId,
+			repoFullName,
+			`?state=open&base=${encodeURIComponent(baseBranch)}&per_page=100&page=${page}`,
+		);
+		pullRequests.push(...batch);
+		if (batch.length < 100) break;
+	}
+	return pullRequests.map(mapGitHubPullRequest);
+}
+
+export async function resolveGitHubPullRequestMergeRef(
+	installationId: number,
+	repoFullName: string,
+	pullRequestNumber: number,
+): Promise<{ gitRef: string; sha: string }> {
+	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new Error("Invalid pull request number");
+	}
+	const gitRef = `refs/pull/${pullRequestNumber}/merge`;
+	try {
+		const commits = await githubCommitRequest<GitHubCommitResponse[]>(
+			installationId,
+			repoFullName,
+			`?sha=${encodeURIComponent(gitRef)}&per_page=1`,
+		);
+		const sha = commits[0]?.sha;
+		if (!sha || !isFullCommitSha(sha)) {
+			throw new Error("GitHub returned no merge commit");
+		}
+		return { gitRef, sha: sha.toLowerCase() };
+	} catch (error) {
+		throw new Error(
+			`Merge ref ${gitRef} is unavailable; resolve merge conflicts and retry`,
+			{ cause: error },
+		);
+	}
+}
+
 export async function listGitHubCommits(
 	installationId: number,
 	repoFullName: string,
@@ -254,7 +412,8 @@ type DeploymentState =
 	| "in_progress"
 	| "success"
 	| "failure"
-	| "error";
+	| "error"
+	| "inactive";
 
 export async function createGitHubDeployment(
 	installationId: number,
@@ -262,6 +421,11 @@ export async function createGitHubDeployment(
 	ref: string,
 	environment: string,
 	description: string,
+	options: {
+		transientEnvironment?: boolean;
+		productionEnvironment?: boolean;
+		payload?: Record<string, unknown>;
+	} = {},
 ): Promise<number> {
 	validateRepoFullName(repoFullName);
 	const token = await getInstallationToken(installationId);
@@ -280,8 +444,11 @@ export async function createGitHubDeployment(
 				ref,
 				environment,
 				description,
+				payload: options.payload ?? {},
 				auto_merge: false,
 				required_contexts: [],
+				transient_environment: options.transientEnvironment,
+				production_environment: options.productionEnvironment,
 			}),
 		},
 	);

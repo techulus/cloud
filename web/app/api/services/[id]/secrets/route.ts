@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { secrets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -17,6 +18,9 @@ export async function GET(
 	}
 
 	const { id: serviceId } = await params;
+	if (!(await getService(serviceId))) {
+		return Response.json({ error: "Service not found" }, { status: 404 });
+	}
 
 	const secretsList = await db
 		.select({

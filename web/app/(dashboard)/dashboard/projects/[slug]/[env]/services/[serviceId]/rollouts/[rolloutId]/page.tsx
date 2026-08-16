@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
 import { RolloutDetails } from "@/components/service/details/rollout-details";
@@ -21,7 +21,14 @@ async function getRollout(
 	const service = await db
 		.select()
 		.from(services)
-		.where(and(eq(services.id, serviceId), eq(services.projectId, project.id)))
+		.where(
+			and(
+				eq(services.id, serviceId),
+				eq(services.projectId, project.id),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		)
 		.then((r) => r[0]);
 
 	if (!service) return null;

@@ -33,6 +33,7 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			commitSha,
 			commitMessage,
 			branch,
+			gitRef,
 			author,
 			githubDeploymentId,
 			actor = null,
@@ -57,7 +58,8 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			if (
 				parsed.source.type !== "github" ||
 				parsed.source.commitSha !== exactCommitSha ||
-				parsed.source.branch !== branch
+				parsed.source.branch !== branch ||
+				parsed.source.gitRef !== gitRef
 			) {
 				throw new Error("Build trigger does not match its service revision");
 			}

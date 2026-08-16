@@ -6,6 +6,7 @@ const baseSource = {
 	repository: "https://github.com/techulus/cloud",
 	repositoryId: 123,
 	branch: "main",
+	gitRef: "refs/heads/main",
 	commitSha: "0123456789abcdef0123456789abcdef01234567",
 	rootDir: "web",
 };

@@ -54,6 +54,7 @@ import {
 	cleanupRegistryArtifactsForService,
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
+import { deletePreviewsForBaseService } from "@/lib/preview-lifecycle";
 import {
 	containerPathSchema,
 	githubRepoUrlSchema,
@@ -123,7 +124,9 @@ export async function deleteProject(
 	const projectServices = await db
 		.select()
 		.from(services)
-		.where(eq(services.projectId, id));
+		.where(
+			and(eq(services.projectId, id), isNull(services.previewOfServiceId)),
+		);
 
 	for (const service of projectServices) {
 		const activeDeployments = await db
@@ -255,7 +258,12 @@ export async function deleteEnvironment(environmentId: string) {
 	const envServices = await db
 		.select({ id: services.id })
 		.from(services)
-		.where(eq(services.environmentId, environmentId));
+		.where(
+			and(
+				eq(services.environmentId, environmentId),
+				isNull(services.previewOfServiceId),
+			),
+		);
 
 	for (const service of envServices) {
 		await hardDeleteService(service.id);
@@ -451,6 +459,7 @@ async function hardDeleteService(serviceId: string) {
 		);
 	}
 	const claimedService = service.service;
+	await deletePreviewsForBaseService(serviceId, "base service deleted");
 
 	const allDeployments = await db
 		.select()
@@ -639,7 +648,7 @@ export async function restoreDeletedService(serviceId: string) {
 	const service = await db
 		.select()
 		.from(services)
-		.where(eq(services.id, serviceId))
+		.where(and(eq(services.id, serviceId), isNull(services.previewOfServiceId)))
 		.then((r) => r[0]);
 
 	if (!service || !service.deletedAt) {
@@ -821,6 +830,7 @@ export async function updateServiceHostname(
 
 export async function updateServiceName(serviceId: string, name: string) {
 	await requireDeveloperRole();
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 	try {
 		const validatedName = nameSchema.parse(name);
 
@@ -916,6 +926,7 @@ export async function updateServiceGithubRepo(
 export async function deployService(serviceId: string) {
 	const session = await requireDeveloperRole();
 	if (!session) throw new Error("Unauthorized");
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 	const actor = {
 		type: "user",
 		userId: session.user.id,
@@ -926,6 +937,7 @@ export async function deployService(serviceId: string) {
 
 export async function deleteDeployments(serviceId: string) {
 	await requireDeveloperRole();
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 	await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
 	return { success: true };
 }
@@ -1080,6 +1092,7 @@ export async function updateServiceServerlessSettings(
 ) {
 	await requireDeveloperRole();
 	const validated = serverlessSettingsSchema.parse(settings);
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 
 	await db.transaction(async (tx) => {
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
@@ -1557,6 +1570,7 @@ export async function updateServiceConfig(
 
 export async function stopService(serviceId: string) {
 	await requireDeveloperRole();
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 	const desiredDeployments = await db
 		.select()
 		.from(deployments)
@@ -1617,6 +1631,7 @@ export async function restartService(serviceId: string) {
 
 export async function abortRollout(serviceId: string) {
 	await requireDeveloperRole();
+	if (!(await getService(serviceId))) throw new Error("Service not found");
 	const activeRolloutIds = await db.transaction(async (tx) => {
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const activeRollouts = await tx
@@ -1712,9 +1727,18 @@ export async function addServiceVolume(
 			const service = await tx
 				.select()
 				.from(services)
-				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.where(
+					and(
+						eq(services.id, serviceId),
+						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
+					),
+				)
 				.then((rows) => rows[0]);
 			if (!service) throw new Error("Service not found");
+			if (service.previewDeploymentsEnabled) {
+				throw new Error("Disable preview deployments before adding a volume");
+			}
 			if (service.placementMode === "automatic") {
 				throw new Error("Switch to manual placement before adding a volume");
 			}

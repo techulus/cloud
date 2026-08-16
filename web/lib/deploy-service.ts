@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { getService } from "@/db/queries";
+import { getRuntimeService } from "@/db/queries";
 import { serviceReplicas } from "@/db/schema";
 import { startMigrationInternal } from "@/lib/migrations";
 import { sendRolloutCreated } from "@/lib/rollout-enqueue";
@@ -37,7 +37,7 @@ export async function deployServiceInternal(
 		githubTrigger?: "manual" | "scheduled";
 	} = {},
 ) {
-	const service = await getService(serviceId);
+	const service = await getRuntimeService(serviceId);
 	if (!service) {
 		throw new Error("Service not found");
 	}

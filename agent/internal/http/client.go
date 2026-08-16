@@ -398,6 +398,7 @@ type BuildDetails struct {
 		CommitSha     string `json:"commitSha"`
 		CommitMessage string `json:"commitMessage"`
 		Branch        string `json:"branch"`
+		GitRef        string `json:"gitRef"`
 		ServiceID     string `json:"serviceId"`
 		ProjectID     string `json:"projectId"`
 	} `json:"build"`

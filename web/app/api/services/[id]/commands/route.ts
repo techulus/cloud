@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { deployments, servers, serviceCommands, services } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { observedReadyPhases } from "@/lib/deployment-status";
@@ -21,6 +22,9 @@ export async function GET(
 	if (!auth.ok) return auth.response;
 
 	const { id: serviceId } = await params;
+	if (!(await getService(serviceId))) {
+		return Response.json({ error: "Service not found" }, { status: 404 });
+	}
 	const cursorValue = new URL(request.url).searchParams.get("cursor");
 	const cursor = decodeTimestampCursor(cursorValue);
 	if (cursorValue && !cursor) {
@@ -115,7 +119,13 @@ export async function POST(
 	const service = await db
 		.select({ id: services.id })
 		.from(services)
-		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+		.where(
+			and(
+				eq(services.id, serviceId),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		)
 		.then((rows) => rows[0]);
 	if (!service) {
 		return Response.json({ error: "Service not found" }, { status: 404 });

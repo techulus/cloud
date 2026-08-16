@@ -1,6 +1,7 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { builds, rollouts } from "@/db/schema";
 
 export async function GET(
@@ -8,6 +9,9 @@ export async function GET(
 	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const { id: serviceId } = await params;
+	if (!(await getService(serviceId))) {
+		return NextResponse.json({ error: "Service not found" }, { status: 404 });
+	}
 
 	const rolloutsList = await db
 		.select()

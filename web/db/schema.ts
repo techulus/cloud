@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	check,
 	foreignKey,
 	index,
 	integer,
@@ -586,6 +587,17 @@ export const services = pgTable(
 		),
 		migrationBackupId: text("migration_backup_id"),
 		migrationError: text("migration_error"),
+		previewDeploymentsEnabled: boolean("preview_deployments_enabled")
+			.notNull()
+			.default(false),
+		previewOfServiceId: text("preview_of_service_id"),
+		previewPullRequestNumber: integer("preview_pull_request_number"),
+		previewCurrentRevisionId: text("preview_current_revision_id"),
+		previewGithubDeploymentId: bigint("preview_github_deployment_id", {
+			mode: "number",
+		}),
+		previewError: text("preview_error"),
+		previewExpiresAt: timestamp("preview_expires_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -599,6 +611,42 @@ export const services = pgTable(
 		index("services_last_autoscale_attempt_idx").on(
 			table.lastAutoscaleAttemptAt,
 		),
+		foreignKey({
+			name: "services_preview_of_service_fk",
+			columns: [table.previewOfServiceId],
+			foreignColumns: [table.id],
+		}).onDelete("restrict"),
+		check(
+			"services_preview_identity_check",
+			sql`(${table.previewOfServiceId} is null) = (${table.previewPullRequestNumber} is null)`,
+		),
+		check(
+			"services_preview_pull_request_number_check",
+			sql`${table.previewPullRequestNumber} is null or ${table.previewPullRequestNumber} > 0`,
+		),
+		check(
+			"services_preview_policy_check",
+			sql`(
+				(${table.previewOfServiceId} is null and (${table.previewDeploymentsEnabled} = false or ${table.stateful} = false))
+				or
+				(${table.previewOfServiceId} is not null and ${table.previewDeploymentsEnabled} = false and ${table.stateful} = false)
+			)`,
+		),
+		check(
+			"services_preview_metadata_check",
+			sql`${table.previewOfServiceId} is not null or (
+				${table.previewCurrentRevisionId} is null
+				and ${table.previewGithubDeploymentId} is null
+				and ${table.previewError} is null
+				and ${table.previewExpiresAt} is null
+			)`,
+		),
+		uniqueIndex("services_preview_base_pr_unique_idx")
+			.on(table.previewOfServiceId, table.previewPullRequestNumber)
+			.where(sql`${table.previewOfServiceId} is not null`),
+		index("services_preview_expires_at_idx")
+			.on(table.previewExpiresAt)
+			.where(sql`${table.previewOfServiceId} is not null`),
 	],
 );
 

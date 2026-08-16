@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
+import { updateCurrentPreviewGitHubStatus } from "@/lib/preview-deployments";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -167,6 +168,23 @@ function validateCompletedGroup(
 	}
 }
 
+async function markPreviewBuildFailed(
+	serviceId: string,
+	serviceRevisionId: string,
+	description: string,
+) {
+	try {
+		await updateCurrentPreviewGitHubStatus({
+			serviceId,
+			serviceRevisionId,
+			state: "failure",
+			description,
+		});
+	} catch (error) {
+		console.error("[build-workflow] failed to update preview status:", error);
+	}
+}
+
 export const buildWorkflow = inngest.createFunction(
 	{
 		id: "build-workflow",
@@ -175,6 +193,19 @@ export const buildWorkflow = inngest.createFunction(
 		cancelOn: [
 			{ event: inngestEvents.buildCancelled, match: "data.buildGroupId" },
 		],
+		onFailure: async ({ event }) => {
+			const data = event.data.event.data as {
+				serviceId?: string;
+				serviceRevisionId?: string;
+			};
+			if (data.serviceId && data.serviceRevisionId) {
+				await markPreviewBuildFailed(
+					data.serviceId,
+					data.serviceRevisionId,
+					"Preview build workflow failed",
+				);
+			}
+		},
 	},
 	async ({ event, step }) => {
 		const { serviceId, serviceRevisionId, buildGroupId } = event.data;
@@ -183,9 +214,23 @@ export const buildWorkflow = inngest.createFunction(
 
 		let groupBuilds = await step.run("get-group-builds", readGroup);
 		if (groupBuilds.length === 0) {
+			await step.run("report-missing-build-group", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview build group is missing",
+				),
+			);
 			return { status: "failed", reason: "build_group_missing", buildGroupId };
 		}
 		if (groupFailure(groupBuilds)) {
+			await step.run("report-initial-build-failure", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview build failed",
+				),
+			);
 			return { status: "failed", reason: "build_failed", buildGroupId };
 		}
 
@@ -206,9 +251,23 @@ export const buildWorkflow = inngest.createFunction(
 		}
 
 		if (groupBuilds.length === 0) {
+			await step.run("report-missing-build-group-after-wait", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview build group is missing",
+				),
+			);
 			return { status: "failed", reason: "build_group_missing", buildGroupId };
 		}
 		if (groupFailure(groupBuilds)) {
+			await step.run("report-build-failure", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview build failed",
+				),
+			);
 			return { status: "failed", reason: "build_failed", buildGroupId };
 		}
 		if (groupBuilds.some((build) => build.status !== "completed")) {
@@ -232,6 +291,13 @@ export const buildWorkflow = inngest.createFunction(
 			});
 			groupBuilds = await step.run("refresh-group-after-timeout", readGroup);
 			if (groupBuilds.some((build) => build.status !== "completed")) {
+				await step.run("report-build-timeout", () =>
+					markPreviewBuildFailed(
+						serviceId,
+						serviceRevisionId,
+						"Preview build timed out",
+					),
+				);
 				return { status: "failed", reason: "timeout", buildGroupId };
 			}
 		}
@@ -251,9 +317,23 @@ export const buildWorkflow = inngest.createFunction(
 			);
 		}
 		if (!manifest) {
+			await step.run("report-manifest-timeout", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview image manifest timed out",
+				),
+			);
 			return { status: "completed_no_manifest", buildGroupId };
 		}
 		if (manifest.status === "failed") {
+			await step.run("report-manifest-failure", () =>
+				markPreviewBuildFailed(
+					serviceId,
+					serviceRevisionId,
+					"Preview image manifest failed",
+				),
+			);
 			return { status: "failed", reason: "manifest_failed", buildGroupId };
 		}
 

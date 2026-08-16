@@ -145,6 +145,7 @@ export async function POST(
 			commitSha: specification.source.commitSha,
 			commitMessage: build.commitMessage,
 			branch: specification.source.branch,
+			gitRef: specification.source.gitRef,
 			serviceId: build.serviceId,
 			projectId: service.projectId,
 		},

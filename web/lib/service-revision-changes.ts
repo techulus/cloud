@@ -6,7 +6,30 @@ import type {
 	ServiceRevisionPort,
 	ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
-import { validateServiceRevisionPorts } from "@/lib/service-revision-spec";
+import {
+	gitBranchRef,
+	isSupportedGitRef,
+	validateServiceRevisionPorts,
+} from "@/lib/service-revision-spec";
+
+const legacySourceSchema = z.discriminatedUnion("type", [
+	z.strictObject({ type: z.literal("image"), image: z.string() }),
+	z.strictObject({
+		type: z.literal("github"),
+		repository: z.string().url(),
+		repositoryId: z.number().int().positive().nullable(),
+		branch: z.string().min(1),
+		commitSha: z.string().regex(/^[0-9a-f]{40}$/),
+		rootDir: z.string().min(1).nullable(),
+		authentication: z.discriminatedUnion("type", [
+			z.strictObject({ type: z.literal("anonymous") }),
+			z.strictObject({
+				type: z.literal("github_app"),
+				installationId: z.number().int().positive(),
+			}),
+		]),
+	}),
+]);
 
 const serviceRevisionSpecFields = {
 	image: z.string(),
@@ -17,6 +40,7 @@ const serviceRevisionSpecFields = {
 			repository: z.string().url(),
 			repositoryId: z.number().int().positive().nullable(),
 			branch: z.string().min(1),
+			gitRef: z.string().refine(isSupportedGitRef, "Unsupported Git ref"),
 			commitSha: z.string().regex(/^[0-9a-f]{40}$/),
 			rootDir: z.string().min(1).nullable(),
 			authentication: z.discriminatedUnion("type", [
@@ -87,10 +111,23 @@ const serviceRevisionSpecFields = {
 const serviceRevisionSpecV2Schema = z.strictObject({
 	schemaVersion: z.literal(2),
 	...serviceRevisionSpecFields,
+	source: legacySourceSchema,
+});
+const serviceRevisionSpecV3Schema = z.strictObject({
+	schemaVersion: z.literal(3),
+	placement: z.discriminatedUnion("mode", [
+		z.strictObject({ mode: z.literal("manual") }),
+		z.strictObject({
+			mode: z.literal("automatic"),
+			replicas: z.number().int().min(1).max(32),
+		}),
+	]),
+	...serviceRevisionSpecFields,
+	source: legacySourceSchema,
 });
 const serviceRevisionSpecSchema = z
 	.strictObject({
-		schemaVersion: z.literal(3),
+		schemaVersion: z.literal(4),
 		placement: z.discriminatedUnion("mode", [
 			z.strictObject({ mode: z.literal("manual") }),
 			z.strictObject({
@@ -179,8 +216,31 @@ export function parseServiceRevisionSpec(value: unknown): ServiceRevisionSpec {
 		const legacy = serviceRevisionSpecV2Schema.parse(value);
 		const specification = {
 			...legacy,
-			schemaVersion: 3 as const,
+			schemaVersion: 4 as const,
+			source:
+				legacy.source.type === "github"
+					? {
+							...legacy.source,
+							gitRef: gitBranchRef(legacy.source.branch),
+						}
+					: legacy.source,
 			placement: { mode: "manual" as const },
+		};
+		validateServiceRevisionPorts(specification.ports);
+		return specification;
+	}
+	if (version === 3) {
+		const legacy = serviceRevisionSpecV3Schema.parse(value);
+		const specification: ServiceRevisionSpec = {
+			...legacy,
+			schemaVersion: 4,
+			source:
+				legacy.source.type === "github"
+					? {
+							...legacy.source,
+							gitRef: gitBranchRef(legacy.source.branch),
+						}
+					: legacy.source,
 		};
 		validateServiceRevisionPorts(specification.ports);
 		return specification;
@@ -245,6 +305,7 @@ export function diffServiceRevisionSpecs(
 			current.source.repository,
 		);
 		add("GitHub branch", previous.source.branch, current.source.branch);
+		add("Git ref", previous.source.gitRef, current.source.gitRef);
 		add("GitHub commit", previous.source.commitSha, current.source.commitSha);
 		add(
 			"GitHub root directory",

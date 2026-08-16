@@ -18,6 +18,14 @@ Techulus Cloud integrates with GitHub through a [GitHub App](https://docs.github
 
 3. Install the GitHub App on your GitHub account or organization.
 
+The GitHub App needs these repository permissions:
+
+- **Contents:** Read
+- **Pull requests:** Read
+- **Deployments:** Read and write
+
+Subscribe the app to both the **Push** and **Pull request** webhook events.
+
 ## Connecting a Repository
 
 Once the GitHub App is installed, connect a repository to a service:
@@ -39,6 +47,39 @@ The flow:
 4. On success, a rollout deploys the new image.
 
 GitHub deployment statuses are updated on the commit so you can track progress from pull requests.
+
+## Pull Request Preview Deployments
+
+Preview deployments are opt in from a GitHub-backed service's **Previews** tab.
+They require a configured **Automatic Subdomain Domain** and its wildcard DNS
+record. Each eligible pull request gets one hidden, single-replica copy of the
+service and a stable generated HTTPS URL beneath that domain.
+
+A pull request is eligible only when it:
+
+- comes from the same repository as the base branch (forks are skipped),
+- targets the service's configured deployment branch,
+- is open and ready for review (drafts are skipped), and
+- belongs to a stateless service.
+
+The preview builds GitHub's synthetic merge result at
+`refs/pull/<number>/merge`. This tests the change as it would merge into the
+configured branch. If GitHub cannot produce that ref because of merge
+conflicts, the preview fails rather than building the raw pull request head.
+
+Preview copies inherit the service's current source configuration, private
+ports, resource limits, placement, health check, start command, and complete
+secret set. They do not copy volumes, backups, schedules, cron jobs,
+autoscaling, serverless sleep, production custom domains, or public TCP/UDP
+routes. Additional preview-specific secret configuration is neither needed nor
+available.
+
+New commits replace the preview revision without changing its URL. Converting
+the pull request to a draft, closing it, or merging it removes the runtime and
+route and marks the GitHub deployment inactive. A daily reconciliation job
+rechecks previews in case a webhook was missed. Generated hosts use the normal
+HTTP-01 certificate path, so installations with high pull-request volume should
+monitor their certificate authority's issuance limits.
 
 ## Build Process
 

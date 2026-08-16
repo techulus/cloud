@@ -144,6 +144,7 @@ export function ServiceLayoutClient({
 		pathname.includes("/configuration") ||
 		pathname.includes("/changelog") ||
 		pathname.includes("/builds") ||
+		pathname.includes("/previews") ||
 		pathname.includes("/backups") ||
 		pathname.includes("/commands");
 
@@ -159,7 +160,10 @@ export function ServiceLayoutClient({
 			? [{ name: "Requests", href: `${basePath}/requests` }]
 			: []),
 		...(service?.sourceType === "github"
-			? [{ name: "Builds", href: `${basePath}/builds` }]
+			? [
+					{ name: "Builds", href: `${basePath}/builds` },
+					{ name: "Previews", href: `${basePath}/previews` },
+				]
 			: []),
 		...(service?.stateful
 			? [{ name: "Backups", href: `${basePath}/backups` }]

@@ -40,7 +40,7 @@ function revisionSpec(
 	encryptedValue = "cipher",
 ): ServiceRevisionSpec {
 	return {
-		schemaVersion: 3,
+		schemaVersion: 4,
 		placement: { mode: "manual" },
 		image,
 		source: { type: "image", image },

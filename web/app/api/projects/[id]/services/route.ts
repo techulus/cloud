@@ -80,6 +80,7 @@ export async function PATCH(
 						eq(services.projectId, projectId),
 						inArray(services.id, serviceIds),
 						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
 					),
 				);
 
@@ -105,6 +106,7 @@ export async function PATCH(
 							eq(services.id, position.serviceId),
 							eq(services.projectId, projectId),
 							isNull(services.deletedAt),
+							isNull(services.previewOfServiceId),
 						),
 					)
 					.returning({
@@ -158,8 +160,13 @@ export async function GET(
 						eq(services.projectId, projectId),
 						eq(services.environmentId, environmentId),
 						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
 					)
-				: and(eq(services.projectId, projectId), isNull(services.deletedAt)),
+				: and(
+						eq(services.projectId, projectId),
+						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
+					),
 		)
 		.orderBy(services.createdAt);
 	const cronRows =

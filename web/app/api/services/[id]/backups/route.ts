@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { volumeBackups, servers } from "@/db/schema";
 
 export async function GET(
@@ -9,6 +10,9 @@ export async function GET(
 ) {
 	try {
 		const { id: serviceId } = await params;
+		if (!(await getService(serviceId))) {
+			return NextResponse.json({ error: "Service not found" }, { status: 404 });
+		}
 
 		const backups = await db
 			.select({

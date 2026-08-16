@@ -7,7 +7,7 @@ import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 
 function spec(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 3,
+		schemaVersion: 4,
 		placement: { mode: "manual" },
 		image: "app:v1",
 		source: { type: "image", image: "app:v1" },

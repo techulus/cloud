@@ -1,7 +1,7 @@
-import { and, asc, eq, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import { cron } from "inngest";
 import { db } from "@/db";
-import { serviceCrons, services } from "@/db/schema";
+import { githubRepos, serviceCrons, services } from "@/db/schema";
 import {
 	cleanupExpiredChallenges,
 	renewExpiringCertificates,
@@ -22,6 +22,7 @@ import {
 	runAutoscalingController,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import {
 	cronEventId,
 	latestDueOccurrence,
@@ -215,6 +216,81 @@ export const serviceCommandRetention = inngest.createFunction(
 		step.run("cleanup-service-commands", cleanupOldServiceCommands),
 );
 
+export const previewReconciliation = inngest.createFunction(
+	{
+		id: "cron-preview-reconciliation",
+		triggers: [cron("0 1 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		const enabledServices = await step.run(
+			"reconcile-enabled-services",
+			async () => {
+				const rows = await db
+					.select({ id: services.id })
+					.from(services)
+					.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+					.where(
+						and(
+							eq(services.previewDeploymentsEnabled, true),
+							eq(services.sourceType, "github"),
+							isNull(services.previewOfServiceId),
+							isNull(services.deletedAt),
+						),
+					);
+				const day = new Date().toISOString().slice(0, 10);
+				for (const service of rows) {
+					await inngest.send(
+						inngestEvents.previewServiceReconcileRequested.create(
+							{ baseServiceId: service.id },
+							{ id: `preview-service-daily:${service.id}:${day}` },
+						),
+					);
+				}
+				return rows.length;
+			},
+		);
+		const expiredPreviews = await step.run(
+			"reconcile-expired-previews",
+			async () => {
+				const expired = await db
+					.select({
+						baseServiceId: services.previewOfServiceId,
+						pullRequestNumber: services.previewPullRequestNumber,
+						expiresAt: services.previewExpiresAt,
+					})
+					.from(services)
+					.where(
+						and(
+							isNotNull(services.previewOfServiceId),
+							isNotNull(services.previewPullRequestNumber),
+							isNotNull(services.previewExpiresAt),
+							isNull(services.deletedAt),
+							lte(services.previewExpiresAt, new Date()),
+						),
+					)
+					.limit(100);
+				for (const preview of expired) {
+					if (!preview.baseServiceId || !preview.pullRequestNumber) continue;
+					await inngest.send(
+						inngestEvents.previewSyncRequested.create(
+							{
+								baseServiceId: preview.baseServiceId,
+								pullRequestNumber: preview.pullRequestNumber,
+							},
+							{
+								id: `preview-expiry:${preview.baseServiceId}:${preview.pullRequestNumber}:${preview.expiresAt?.toISOString()}`,
+							},
+						),
+					);
+				}
+				return expired.length;
+			},
+		);
+		return { enabledServices, expiredPreviews };
+	},
+);
+
 export const serviceCronDispatcher = inngest.createFunction(
 	{
 		id: "cron-service-cron-dispatcher",
@@ -232,6 +308,7 @@ export const serviceCronDispatcher = inngest.createFunction(
 					and(
 						eq(serviceCrons.serviceId, services.id),
 						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
 					),
 				)
 				.where(lte(serviceCrons.nextScheduledFor, now))

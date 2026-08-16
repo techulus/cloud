@@ -40,7 +40,9 @@ export async function listProjects() {
 			db
 				.select({ projectId: services.projectId, total: count() })
 				.from(services)
-				.where(isNull(services.deletedAt))
+				.where(
+					and(isNull(services.deletedAt), isNull(services.previewOfServiceId)),
+				)
 				.groupBy(services.projectId),
 			db
 				.select({
@@ -52,6 +54,7 @@ export async function listProjects() {
 				.where(
 					and(
 						isNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
 						inArray(deployments.observedPhase, [...observedReadyPhases]),
 					),
 				)
@@ -97,6 +100,20 @@ export async function getService(id: string) {
 	const results = await db
 		.select()
 		.from(services)
+		.where(
+			and(
+				eq(services.id, id),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		);
+	return results[0] || null;
+}
+
+export async function getRuntimeService(id: string) {
+	const results = await db
+		.select()
+		.from(services)
 		.where(and(eq(services.id, id), isNull(services.deletedAt)));
 	return results[0] || null;
 }
@@ -114,8 +131,13 @@ export async function listDeletedServices(
 						eq(services.projectId, projectId),
 						eq(services.environmentId, environmentId),
 						isNotNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
 					)
-				: and(eq(services.projectId, projectId), isNotNull(services.deletedAt)),
+				: and(
+						eq(services.projectId, projectId),
+						isNotNull(services.deletedAt),
+						isNull(services.previewOfServiceId),
+					),
 		)
 		.orderBy(services.deletedAt);
 }

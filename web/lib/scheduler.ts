@@ -79,6 +79,7 @@ export async function runAutoscalingController(
 		.where(
 			and(
 				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
 				or(
 					isNull(services.lastAutoscaleAttemptAt),
 					lt(services.lastAutoscaleAttemptAt, cooldownCutoff),
@@ -254,6 +255,7 @@ export async function rebalanceAutomaticServices(
 		.where(
 			and(
 				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
 				inArray(deployments.runtimeDesiredState, ["running", "stopped"]),
 				eq(deployments.trafficState, "active"),
 				eq(
@@ -716,7 +718,11 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 		})
 		.from(services)
 		.where(
-			and(isNotNull(services.deploymentSchedule), isNull(services.deletedAt)),
+			and(
+				isNotNull(services.deploymentSchedule),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
 		);
 
 	if (scheduledServices.length === 0) return;

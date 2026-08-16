@@ -39,7 +39,7 @@ function specification(
 	overrides: Partial<ServiceRevisionSpec> = {},
 ): ServiceRevisionSpec {
 	return {
-		schemaVersion: 3,
+		schemaVersion: 4,
 		placement: { mode: "manual" },
 		image: "registry/app:revision-1",
 		source: { type: "image", image: "registry/app:revision-1" },

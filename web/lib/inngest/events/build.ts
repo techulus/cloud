@@ -6,10 +6,11 @@ export type BuildEvents = {
 			serviceId: string;
 			serviceRevisionId: string;
 			buildRequestId: string;
-			trigger: "manual" | "scheduled" | "push";
+			trigger: "manual" | "scheduled" | "push" | "preview";
 			commitSha: string;
 			commitMessage: string;
 			branch: string;
+			gitRef: string;
 			author?: string;
 			actor?: ServiceRevisionActor | null;
 			githubDeploymentId?: number;

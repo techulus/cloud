@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { secrets } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { decryptSecret } from "@/lib/crypto";
@@ -15,6 +16,9 @@ export async function POST(
 	}
 
 	const { id: serviceId, secretId } = await params;
+	if (!(await getService(serviceId))) {
+		return Response.json({ error: "Service not found" }, { status: 404 });
+	}
 
 	const secret = await db
 		.select({ encryptedValue: secrets.encryptedValue })

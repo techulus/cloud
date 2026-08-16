@@ -74,6 +74,7 @@ function invoke(commitSha: string) {
 				commitSha,
 				commitMessage: "Exact source commit",
 				branch: "main",
+				gitRef: "refs/heads/main",
 				author: "octocat",
 				actor: { type: "system" },
 			},

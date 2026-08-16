@@ -15,7 +15,12 @@ import {
 
 export async function cancelBuild(buildId: string) {
 	await requireDeveloperRole();
-	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
+	const [result] = await db
+		.select({ build: builds })
+		.from(builds)
+		.innerJoin(services, eq(services.id, builds.serviceId))
+		.where(and(eq(builds.id, buildId), isNull(services.previewOfServiceId)));
+	const build = result?.build;
 
 	if (!build) {
 		throw new Error("Build not found");
@@ -86,7 +91,13 @@ export async function retryBuild(buildId: string) {
 	const [service] = await db
 		.select({ id: services.id })
 		.from(services)
-		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)));
+		.where(
+			and(
+				eq(services.id, build.serviceId),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		);
 
 	if (!service) {
 		throw new Error("Service not found");
@@ -116,6 +127,18 @@ export async function triggerBuild(
 	trigger: "manual" | "scheduled" = "manual",
 ) {
 	const session = await requireDeveloperRole();
+	const service = await db
+		.select({ id: services.id })
+		.from(services)
+		.where(
+			and(
+				eq(services.id, serviceId),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		)
+		.then((rows) => rows[0]);
+	if (!service) throw new Error("Service not found");
 	const actor = session
 		? {
 				type: "user" as const,
@@ -139,7 +162,13 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 		.select({ service: services, githubRepo: githubRepos })
 		.from(services)
 		.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
-		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
+		.where(
+			and(
+				eq(services.id, serviceId),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
+		);
 	if (!result) throw new Error("Active GitHub App-connected service not found");
 	if (result.service.sourceType !== "github") {
 		throw new Error("Service is not connected to GitHub");

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { notify } from "@/lib/notifications";
+import { updateCurrentPreviewGitHubStatus } from "@/lib/preview-deployments";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
@@ -14,74 +15,105 @@ export async function handleRolloutFailure(
 	reason: string,
 	isRollingUpdate: boolean,
 ): Promise<void> {
-	const { applied, rolloutDeployments } = await db.transaction(async (tx) => {
-		const [rollout] = await tx
-			.select({ status: rollouts.status })
-			.from(rollouts)
-			.where(eq(rollouts.id, rolloutId))
-			.for("update");
-		if (rollout?.status !== "in_progress") {
-			return { applied: false, rolloutDeployments: [] };
-		}
+	const { applied, rolloutDeployments, serviceRevisionId } =
+		await db.transaction(async (tx) => {
+			const [rollout] = await tx
+				.select({
+					status: rollouts.status,
+					serviceRevisionId: rollouts.serviceRevisionId,
+				})
+				.from(rollouts)
+				.where(eq(rollouts.id, rolloutId))
+				.for("update");
+			if (rollout?.status !== "in_progress") {
+				return {
+					applied: false,
+					rolloutDeployments: [],
+					serviceRevisionId: rollout?.serviceRevisionId ?? null,
+				};
+			}
 
-		const rolloutDeployments = await tx
-			.select()
-			.from(deployments)
-			.where(eq(deployments.rolloutId, rolloutId));
-		await tx
-			.update(rollouts)
-			.set({
-				status: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
-				currentStage: reason,
-				completedAt: new Date(),
-			})
-			.where(eq(rollouts.id, rolloutId));
-
-		if (rolloutDeployments.length === 0) {
-			return { applied: true, rolloutDeployments };
-		}
-
-		if (isRollingUpdate) {
+			const rolloutDeployments = await tx
+				.select()
+				.from(deployments)
+				.where(eq(deployments.rolloutId, rolloutId));
 			await tx
+				.update(rollouts)
+				.set({
+					status: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+					currentStage: reason,
+					completedAt: new Date(),
+				})
+				.where(eq(rollouts.id, rolloutId));
+
+			if (rolloutDeployments.length === 0) {
+				return {
+					applied: true,
+					rolloutDeployments,
+					serviceRevisionId: rollout.serviceRevisionId,
+				};
+			}
+
+			if (isRollingUpdate) {
+				await tx
+					.update(deployments)
+					.set({ trafficState: "active" })
+					.where(
+						and(
+							eq(deployments.serviceId, serviceId),
+							eq(deployments.trafficState, "draining"),
+						),
+					);
+			}
+
+			const removedDeployments = await tx
 				.update(deployments)
-				.set({ trafficState: "active" })
+				.set(markDeploymentFailedRemoved(reason))
 				.where(
 					and(
-						eq(deployments.serviceId, serviceId),
-						eq(deployments.trafficState, "draining"),
+						eq(deployments.rolloutId, rolloutId),
+						ne(deployments.runtimeDesiredState, "removed"),
 					),
-				);
-		}
+				)
+				.returning({ serverId: deployments.serverId });
 
-		const removedDeployments = await tx
-			.update(deployments)
-			.set(markDeploymentFailedRemoved(reason))
-			.where(
-				and(
-					eq(deployments.rolloutId, rolloutId),
-					ne(deployments.runtimeDesiredState, "removed"),
-				),
-			)
-			.returning({ serverId: deployments.serverId });
-
-		if (isRollingUpdate) {
-			await enqueueReconcileForAllOnlineServers("rollout_rolled_back", tx);
-		} else {
-			for (const serverId of new Set(
-				removedDeployments.map((deployment) => deployment.serverId),
-			)) {
-				await enqueueWork(
-					serverId,
-					"reconcile",
-					{ reason: "rollout_rolled_back" },
-					{ tx },
-				);
+			if (isRollingUpdate) {
+				await enqueueReconcileForAllOnlineServers("rollout_rolled_back", tx);
+			} else {
+				for (const serverId of new Set(
+					removedDeployments.map((deployment) => deployment.serverId),
+				)) {
+					await enqueueWork(
+						serverId,
+						"reconcile",
+						{ reason: "rollout_rolled_back" },
+						{ tx },
+					);
+				}
 			}
-		}
 
-		return { applied: true, rolloutDeployments };
-	});
+			return {
+				applied: true,
+				rolloutDeployments,
+				serviceRevisionId: rollout.serviceRevisionId,
+			};
+		});
 	if (!applied) return;
+	if (serviceRevisionId) {
+		try {
+			await updateCurrentPreviewGitHubStatus({
+				serviceId,
+				serviceRevisionId,
+				state: "failure",
+				description: `Preview rollout failed: ${reason}`,
+			});
+		} catch (error) {
+			console.error(
+				"[rollout:failure] failed to update preview status:",
+				error,
+			);
+		}
+	}
 
 	if (rolloutDeployments.length === 0) {
 		notify({

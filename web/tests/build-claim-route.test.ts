@@ -103,4 +103,58 @@ describe("agent build claim", () => {
 		});
 		expect(mocks.send).not.toHaveBeenCalled();
 	});
+
+	it("returns the exact snapshotted Git ref", async () => {
+		mocks.updateResults.push([build]);
+		mocks.selectResults.push(
+			[{ id: "service-1", projectId: "project-1" }],
+			[
+				{
+					specification: {
+						schemaVersion: 4,
+						image: "registry.example.com/project/service:revision-1",
+						source: {
+							type: "github",
+							repository: "https://github.com/acme/app",
+							repositoryId: null,
+							branch: "main",
+							gitRef: "refs/pull/42/merge",
+							commitSha: build.commitSha,
+							rootDir: null,
+							authentication: { type: "anonymous" },
+						},
+						hostname: "service-1",
+						stateful: false,
+						serverless: {
+							enabled: false,
+							sleepAfterSeconds: 300,
+							wakeTimeoutSeconds: 300,
+						},
+						healthCheck: null,
+						startCommand: null,
+						resourceLimits: { cpuCores: null, memoryMb: null },
+						placement: { mode: "manual" },
+						placements: [],
+						ports: [],
+						secrets: [],
+						volumes: [],
+					},
+				},
+			],
+		);
+
+		const response = await POST(
+			new Request("http://localhost/api/v1/agent/builds/build-amd64", {
+				method: "POST",
+			}) as NextRequest,
+			{ params: Promise.resolve({ id: "build-amd64" }) },
+		);
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).build).toMatchObject({
+			commitSha: build.commitSha,
+			branch: "main",
+			gitRef: "refs/pull/42/merge",
+		});
+	});
 });

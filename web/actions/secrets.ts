@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ZodError } from "zod";
 import { db } from "@/db";
 import { secrets, services } from "@/db/schema";
@@ -25,7 +25,9 @@ export async function createSecretsBatch(
 		const service = await db
 			.select()
 			.from(services)
-			.where(eq(services.id, serviceId));
+			.where(
+				and(eq(services.id, serviceId), isNull(services.previewOfServiceId)),
+			);
 
 		if (!service[0]) {
 			throw new Error("Service not found");

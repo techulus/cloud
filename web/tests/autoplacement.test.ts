@@ -78,7 +78,7 @@ describe("automatic placement eligibility diagnostics", () => {
 });
 
 describe("persisted revision compatibility", () => {
-	it("normalizes v2 revisions to v3 manual intent", () => {
+	it("normalizes v2 revisions to the current manual placement intent", () => {
 		const parsed = parseServiceRevisionSpec({
 			schemaVersion: 2,
 			image: "nginx",
@@ -98,7 +98,7 @@ describe("persisted revision compatibility", () => {
 			secrets: [],
 			volumes: [],
 		});
-		expect(parsed.schemaVersion).toBe(3);
+		expect(parsed.schemaVersion).toBe(4);
 		expect(parsed.placement).toEqual({ mode: "manual" });
 	});
 });

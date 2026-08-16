@@ -1,6 +1,7 @@
 import { desc, eq, getTableColumns } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { getService } from "@/db/queries";
 import { builds, servers } from "@/db/schema";
 import { requireRequestSession } from "@/lib/api-auth";
 
@@ -12,6 +13,9 @@ export async function GET(
 	if (!sessionResult.ok) return sessionResult.response;
 
 	const { id: serviceId } = await params;
+	if (!(await getService(serviceId))) {
+		return NextResponse.json({ error: "Service not found" }, { status: 404 });
+	}
 
 	const buildsList = await db
 		.select({

@@ -32,6 +32,7 @@ vi.mock("@/lib/service-revisions", () => ({
 import {
 	requeueBuildRevisionInternal,
 	triggerBuildInternal,
+	triggerResolvedBuildInternal,
 } from "@/lib/trigger-build";
 
 function queryReturning(rows: unknown[]) {
@@ -104,6 +105,7 @@ describe("internal GitHub build trigger", () => {
 				commitSha: "0123456789abcdef0123456789abcdef01234567",
 				expectedRepository: "https://github.com/acme/app",
 				expectedBranch: "production",
+				gitRef: "refs/heads/production",
 				actor,
 			}),
 		);
@@ -115,6 +117,7 @@ describe("internal GitHub build trigger", () => {
 			commitSha: "0123456789abcdef0123456789abcdef01234567",
 			commitMessage: "Resolved source commit",
 			branch: "production",
+			gitRef: "refs/heads/production",
 			author: "octocat",
 			actor,
 			githubDeploymentId: undefined,
@@ -150,6 +153,7 @@ describe("internal GitHub build trigger", () => {
 			expect.objectContaining({
 				expectedRepository: "https://github.com/acme/public",
 				expectedBranch: "preview",
+				gitRef: "refs/heads/preview",
 			}),
 		);
 		expect(mocks.createBuildTrigger).toHaveBeenCalledWith({
@@ -160,6 +164,7 @@ describe("internal GitHub build trigger", () => {
 			commitSha: "0123456789abcdef0123456789abcdef01234567",
 			commitMessage: "Resolved source commit",
 			branch: "preview",
+			gitRef: "refs/heads/preview",
 			author: "octocat",
 			actor: { type: "system" },
 			githubDeploymentId: undefined,
@@ -168,6 +173,49 @@ describe("internal GitHub build trigger", () => {
 			"acme/public",
 			"preview",
 			undefined,
+		);
+	});
+
+	it("snapshots and dispatches a synthetic pull request merge ref", async () => {
+		mocks.rows = [
+			[
+				{
+					id: "service-1",
+					projectId: "project-1",
+					sourceType: "github",
+					deletedAt: null,
+				},
+			],
+			[
+				{
+					installationId: 123,
+					repoFullName: "acme/app",
+					deployBranch: "main",
+					defaultBranch: "main",
+				},
+			],
+		];
+
+		await triggerResolvedBuildInternal("service-1", {
+			trigger: "preview",
+			commitSha: "0123456789abcdef0123456789abcdef01234567",
+			commitMessage: "Merge pull request #42",
+			actor: { type: "system" },
+			expectedRepository: "https://github.com/acme/app",
+			expectedBranch: "main",
+			gitRef: "refs/pull/42/merge",
+			idempotencyKey: "preview:service-1:42:merge-sha",
+		});
+
+		expect(mocks.createGitHubBuildServiceRevision).toHaveBeenCalledWith(
+			expect.objectContaining({ gitRef: "refs/pull/42/merge" }),
+		);
+		expect(mocks.createBuildTrigger).toHaveBeenCalledWith(
+			expect.objectContaining({
+				trigger: "preview",
+				gitRef: "refs/pull/42/merge",
+			}),
+			{ id: "preview:service-1:42:merge-sha" },
 		);
 	});
 
@@ -246,6 +294,7 @@ describe("internal GitHub build trigger", () => {
 				serviceRevisionId: "retry-1",
 				commitSha: retrySpecification.source.commitSha,
 				branch: "main",
+				gitRef: "refs/heads/main",
 			}),
 		);
 	});

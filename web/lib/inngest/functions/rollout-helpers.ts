@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
@@ -391,6 +391,23 @@ export async function createDeploymentRecords(
 						await tx.execute(
 							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 						);
+						const service = await tx
+							.select({
+								previewOfServiceId: services.previewOfServiceId,
+								previewCurrentRevisionId: services.previewCurrentRevisionId,
+							})
+							.from(services)
+							.where(
+								and(eq(services.id, serviceId), isNull(services.deletedAt)),
+							)
+							.then((rows) => rows[0]);
+						if (
+							!service ||
+							(service.previewOfServiceId &&
+								service.previewCurrentRevisionId !== revisionId)
+						) {
+							throw new Error("Preview revision is no longer current");
+						}
 						const [rollout] = await tx
 							.select({ status: rollouts.status })
 							.from(rollouts)
@@ -493,14 +510,30 @@ export async function createDeploymentRecords(
 export async function completeRollout(
 	rolloutId: string,
 	serviceId: string,
-	context: Omit<DeploymentContext, "serverMap" | "revisionId">,
+	context: Omit<DeploymentContext, "serverMap">,
 ): Promise<{ completed: boolean; stoppedCount: number }> {
-	const { placements, specification, isRollingUpdate } = context;
+	const { placements, revisionId, specification, isRollingUpdate } = context;
 	const lockedServerId = specification.stateful
 		? placements[0]?.serverId
 		: undefined;
 
 	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const service = await tx
+			.select({
+				previewOfServiceId: services.previewOfServiceId,
+				previewCurrentRevisionId: services.previewCurrentRevisionId,
+			})
+			.from(services)
+			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+			.then((rows) => rows[0]);
+		if (
+			!service ||
+			(service.previewOfServiceId &&
+				service.previewCurrentRevisionId !== revisionId)
+		) {
+			return { completed: false, stoppedCount: 0 };
+		}
 		const rollout = await tx
 			.select({ status: rollouts.status })
 			.from(rollouts)

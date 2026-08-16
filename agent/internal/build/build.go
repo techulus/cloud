@@ -27,6 +27,7 @@ type Config struct {
 	CloneURL          string
 	CommitSha         string
 	Branch            string
+	GitRef            string
 	ImageRepository   string
 	ImageURI          string
 	ResolvedCommitSha string
@@ -63,6 +64,8 @@ type dockerfileConfig struct {
 var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
 var windowsAbsoluteRootPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 var imageDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+var credentialURLPattern = regexp.MustCompile(`(?i)https?://[^\s/@]+(?::[^\s/@]*)?@`)
+var pullRequestMergeRefPattern = regexp.MustCompile(`^refs/pull/[1-9][0-9]*/merge$`)
 
 func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	return &Builder{
@@ -154,46 +157,43 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	}
 	b.sendLog(config, fmt.Sprintf("Cloning %s", safeURL))
 
-	branch := config.Branch
-	if branch == "" {
-		branch = "main"
+	if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
+		return fmt.Errorf("invalid exact commit SHA")
+	}
+	if !validGitRef(config.GitRef) {
+		return fmt.Errorf("invalid exact Git ref")
 	}
 
-	if config.CommitSha == "HEAD" {
-		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, config.CloneURL, buildDir)
-		output, err := b.runCommand(cmd, config)
-		if err != nil {
-			return fmt.Errorf("git clone failed: %s: %w", output, err)
-		}
-		b.sendLog(config, fmt.Sprintf("Cloned branch %s", branch))
-	} else {
-		if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
-			return fmt.Errorf("invalid exact commit SHA")
-		}
-		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "50", "--branch", branch, "--single-branch", config.CloneURL, buildDir)
-		output, err := b.runCommand(cmd, config)
-		if err != nil {
-			return fmt.Errorf("git clone failed: %s: %w", output, err)
-		}
+	cmd := exec.CommandContext(ctx, "git", "init", buildDir)
+	output, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git init failed: %s: %w", output, err)
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "remote", "add", "origin", config.CloneURL)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git remote setup failed: %s: %w", output, err)
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", "1", "--no-tags", "origin", config.GitRef)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git fetch exact ref failed: %s: %w", output, err)
+	}
 
-		b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
+	fetchedCommit, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
+		return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
+	}
 
-		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
-		_, err = b.runCommand(cmd, config)
-		if err != nil {
-			b.sendLog(config, "Selected commit is outside the shallow clone; fetching full branch history")
-			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--unshallow", "origin", branch)
-			output, err = b.runCommand(cmd, config)
-			if err != nil {
-				return fmt.Errorf("git fetch full branch history failed: %s: %w", output, err)
-			}
-		}
-
-		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", config.CommitSha)
-		output, err = b.runCommand(cmd, config)
-		if err != nil {
-			return fmt.Errorf("git checkout failed: %s: %w", output, err)
-		}
+	b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", "--detach", config.CommitSha)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git checkout failed: %s: %w", output, err)
 	}
 
 	b.sendLog(config, "Clone completed")
@@ -207,6 +207,30 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	config.ResolvedCommitSha = resolvedCommitSha
 	b.sendLog(config, fmt.Sprintf("Resolved commit %s", truncateStr(resolvedCommitSha, 8)))
 	return nil
+}
+
+func validGitRef(ref string) bool {
+	if pullRequestMergeRefPattern.MatchString(ref) {
+		return true
+	}
+	if !strings.HasPrefix(ref, "refs/heads/") {
+		return false
+	}
+	branch := strings.TrimPrefix(ref, "refs/heads/")
+	if branch == "" || branch == "@" || strings.HasSuffix(branch, ".") || strings.Contains(branch, "..") || strings.Contains(branch, "@{") {
+		return false
+	}
+	for _, character := range branch {
+		if character <= 0x20 || character == 0x7f || strings.ContainsRune("~^:?*[\\", character) {
+			return false
+		}
+	}
+	for _, part := range strings.Split(branch, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	return true
 }
 
 func (b *Builder) resolveCommitSha(ctx context.Context, config *Config, buildDir string) (string, error) {
@@ -462,7 +486,7 @@ func resolveDockerfile(contextDir string, secrets map[string]string) (dockerfile
 
 func (b *Builder) runCommand(cmd *exec.Cmd, config *Config) (string, error) {
 	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
+	outputStr := credentialURLPattern.ReplaceAllString(string(output), "https://***@")
 
 	if len(outputStr) > 0 {
 		lines := strings.Split(strings.TrimSpace(outputStr), "\n")

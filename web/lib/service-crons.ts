@@ -153,7 +153,11 @@ export async function executeServiceCron(
 		.from(serviceCrons)
 		.innerJoin(
 			services,
-			and(eq(serviceCrons.serviceId, services.id), isNull(services.deletedAt)),
+			and(
+				eq(serviceCrons.serviceId, services.id),
+				isNull(services.deletedAt),
+				isNull(services.previewOfServiceId),
+			),
 		)
 		.where(eq(serviceCrons.id, cronId))
 		.limit(1)

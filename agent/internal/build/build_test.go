@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -81,26 +80,20 @@ func TestCleanupStaleBuildDirsRemovesOnlyOldDirectories(t *testing.T) {
 	assertExists(t, filePath)
 }
 
-func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
+func TestCloneFetchesExactPullRequestMergeRef(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "work")
 	remoteDir := filepath.Join(t.TempDir(), "remote.git")
 	runGit(t, "init", "--initial-branch", "main", workDir)
 	runGit(t, "-C", workDir, "config", "user.name", "Test User")
 	runGit(t, "-C", workDir, "config", "user.email", "test@example.com")
-
-	var selectedSHA string
-	for i := range 60 {
-		filePath := filepath.Join(workDir, "history.txt")
-		if err := os.WriteFile(filePath, []byte(strconv.Itoa(i)), 0600); err != nil {
-			t.Fatal(err)
-		}
-		runGit(t, "-C", workDir, "add", "history.txt")
-		runGit(t, "-C", workDir, "commit", "-m", "commit "+strconv.Itoa(i))
-		if i == 5 {
-			selectedSHA = runGit(t, "-C", workDir, "rev-parse", "HEAD")
-		}
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("preview"), 0600); err != nil {
+		t.Fatal(err)
 	}
+	runGit(t, "-C", workDir, "add", "app.txt")
+	runGit(t, "-C", workDir, "commit", "-m", "preview merge")
+	selectedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
 	runGit(t, "clone", "--bare", workDir, remoteDir)
+	runGit(t, "--git-dir", remoteDir, "update-ref", "refs/pull/42/merge", selectedSHA)
 
 	buildDir := filepath.Join(t.TempDir(), "build")
 	config := &Config{
@@ -108,6 +101,7 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 		CloneURL:  "file://" + remoteDir,
 		CommitSha: selectedSHA,
 		Branch:    "main",
+		GitRef:    "refs/pull/42/merge",
 	}
 	builder := NewBuilder(t.TempDir(), nil)
 
@@ -116,6 +110,79 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 	}
 	if config.ResolvedCommitSha != selectedSHA {
 		t.Fatalf("resolved commit = %s, want %s", config.ResolvedCommitSha, selectedSHA)
+	}
+}
+
+func TestCloneRejectsMovedRef(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "work")
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "init", "--initial-branch", "main", workDir)
+	runGit(t, "-C", workDir, "config", "user.name", "Test User")
+	runGit(t, "-C", workDir, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", workDir, "add", "app.txt")
+	runGit(t, "-C", workDir, "commit", "-m", "first")
+	expectedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("second"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", workDir, "commit", "-am", "second")
+	movedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
+	runGit(t, "clone", "--bare", workDir, remoteDir)
+	runGit(t, "--git-dir", remoteDir, "update-ref", "refs/pull/42/merge", movedSHA)
+
+	config := &Config{
+		BuildID:   "build-1",
+		CloneURL:  "file://" + remoteDir,
+		CommitSha: expectedSHA,
+		Branch:    "main",
+		GitRef:    "refs/pull/42/merge",
+	}
+	err := NewBuilder(t.TempDir(), nil).clone(
+		context.Background(),
+		config,
+		filepath.Join(t.TempDir(), "build"),
+	)
+	if err == nil || !strings.Contains(err.Error(), "fetched ref resolved to") {
+		t.Fatalf("clone error = %v, want moved ref failure", err)
+	}
+}
+
+func TestRunCommandRedactsGitCredentials(t *testing.T) {
+	config := &Config{BuildID: "build-1"}
+	output, _ := NewBuilder(t.TempDir(), nil).runCommand(
+		exec.Command("sh", "-c", "printf '%s' 'fatal: https://x-access-token:secret-token@example.com/repo.git' && exit 1"),
+		config,
+	)
+	if strings.Contains(output, "secret-token") || !strings.Contains(output, "https://***@example.com") {
+		t.Fatalf("credential output was not redacted: %q", output)
+	}
+}
+
+func TestValidGitRef(t *testing.T) {
+	for _, ref := range []string{
+		"refs/heads/main",
+		"refs/heads/feature/preview-deployments",
+		"refs/pull/42/merge",
+	} {
+		if !validGitRef(ref) {
+			t.Errorf("validGitRef(%q) = false, want true", ref)
+		}
+	}
+	for _, ref := range []string{
+		"main",
+		"refs/heads//main",
+		"refs/heads/feature/.hidden",
+		"refs/heads/@",
+		"refs/heads/feature.lock",
+		"refs/pull/0/merge",
+		"refs/pull/42/head",
+	} {
+		if validGitRef(ref) {
+			t.Errorf("validGitRef(%q) = true, want false", ref)
+		}
 	}
 }
 
