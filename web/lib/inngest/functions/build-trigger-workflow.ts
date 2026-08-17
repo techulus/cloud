@@ -204,18 +204,89 @@ export const buildTriggerWorkflow = inngest.createFunction(
 				}),
 			);
 		}
-		await step.run("enqueue-builds", () =>
-			Promise.all(
-				assignments.map((assignment) =>
-					enqueueWork(
-						assignment.serverId,
-						"build",
-						{ buildId: assignment.id },
-						{ id: `build-work-${assignment.id}` },
+		const enqueueResult = await step.run("enqueue-builds", () =>
+			db.transaction(async (tx) => {
+				await tx.execute(
+					sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`,
+				);
+				if (isPreview) {
+					const [activeService, latestRevision] = await Promise.all([
+						tx
+							.select({ id: services.id })
+							.from(services)
+							.where(
+								and(eq(services.id, serviceId), isNull(services.deletedAt)),
+							)
+							.then((rows) => rows[0]),
+						tx
+							.select({ id: serviceRevisions.id })
+							.from(serviceRevisions)
+							.where(eq(serviceRevisions.serviceId, serviceId))
+							.orderBy(
+								desc(serviceRevisions.createdAt),
+								desc(serviceRevisions.id),
+							)
+							.limit(1)
+							.then((rows) => rows[0]),
+					]);
+					if (!activeService || latestRevision?.id !== serviceRevisionId) {
+						await tx
+							.update(builds)
+							.set({ status: "cancelled", completedAt: new Date() })
+							.where(
+								and(inArray(builds.id, buildIds), eq(builds.status, "pending")),
+							);
+						return "stale" as const;
+					}
+				}
+				const currentBuilds = await tx
+					.select({ id: builds.id, status: builds.status })
+					.from(builds)
+					.where(inArray(builds.id, buildIds))
+					.for("update");
+				const activeStatuses = new Set([
+					"pending",
+					"claimed",
+					"cloning",
+					"building",
+					"pushing",
+				]);
+				if (
+					currentBuilds.length !== buildIds.length ||
+					currentBuilds.some((build) => !activeStatuses.has(build.status))
+				) {
+					await tx
+						.update(builds)
+						.set({ status: "cancelled", completedAt: new Date() })
+						.where(
+							and(inArray(builds.id, buildIds), eq(builds.status, "pending")),
+						);
+					return "cancelled" as const;
+				}
+
+				await Promise.all(
+					assignments.map((assignment) =>
+						enqueueWork(
+							assignment.serverId,
+							"build",
+							{ buildId: assignment.id },
+							{ id: `build-work-${assignment.id}`, tx },
+						),
 					),
-				),
-			),
+				);
+				return "enqueued" as const;
+			}),
 		);
+		if (enqueueResult !== "enqueued") {
+			return {
+				status: "cancelled",
+				reason:
+					enqueueResult === "stale"
+						? "superseded_preview_revision"
+						: "build_cancelled_before_enqueue",
+				buildGroupId: buildRequestId,
+			};
+		}
 
 		await step.run("send-build-started", async () => {
 			await inngest.send(

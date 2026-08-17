@@ -12,7 +12,6 @@ import {
 } from "@/lib/preview-deployments";
 import {
 	cancelPreviewRevisionWork,
-	deactivatePreviewRuntime,
 	deletePreviewService,
 } from "@/lib/preview-lifecycle";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
@@ -229,14 +228,12 @@ export const previewSyncWorkflow = inngest.createFunction(
 				),
 			);
 		} catch {
-			await step.run("deactivate-unmergeable-preview", () =>
-				deactivatePreviewRuntime(clone.serviceId),
-			);
-			await step.run("inactivate-unmergeable-deployments", () =>
-				inactivatePreviewGitHubDeployments({
-					serviceId: clone.serviceId,
-					description: "Preview merge ref is unavailable",
-				}),
+			await step.run("delete-unmergeable-preview", () =>
+				deletePreviewService(
+					baseServiceId,
+					previewGitRef,
+					"merge ref is unavailable",
+				),
 			);
 			return { status: "failed", reason: "merge_ref_unavailable" };
 		}

@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => {
 		createPreviewClone: vi.fn(),
 		inactivatePreviewGitHubDeployments: vi.fn(),
 		cancelPreviewRevisionWork: vi.fn(),
-		deactivatePreviewRuntime: vi.fn(),
 		deletePreviewService: vi.fn(),
 		triggerResolvedBuildInternal: vi.fn(),
 		parseServiceRevisionSpec: vi.fn(),
@@ -52,7 +51,6 @@ vi.mock("@/lib/preview-deployments", () => ({
 }));
 vi.mock("@/lib/preview-lifecycle", () => ({
 	cancelPreviewRevisionWork: mocks.cancelPreviewRevisionWork,
-	deactivatePreviewRuntime: mocks.deactivatePreviewRuntime,
 	deletePreviewService: mocks.deletePreviewService,
 }));
 vi.mock("@/lib/service-revision-changes", () => ({
@@ -144,7 +142,6 @@ describe("preview lifecycle workflows", () => {
 		});
 		mocks.inactivatePreviewGitHubDeployments.mockResolvedValue(1);
 		mocks.cancelPreviewRevisionWork.mockResolvedValue(undefined);
-		mocks.deactivatePreviewRuntime.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
 	});
 
@@ -191,7 +188,7 @@ describe("preview lifecycle workflows", () => {
 		});
 	});
 
-	it("deactivates the preview when GitHub has no merge ref", async () => {
+	it("deletes the preview when GitHub has no merge ref", async () => {
 		mocks.selectResults.push(
 			[baseContext],
 			[{ previewOfService: "base-service" }],
@@ -210,8 +207,10 @@ describe("preview lifecycle workflows", () => {
 			status: "failed",
 			reason: "merge_ref_unavailable",
 		});
-		expect(mocks.deactivatePreviewRuntime).toHaveBeenCalledWith(
-			"preview-service",
+		expect(mocks.deletePreviewService).toHaveBeenCalledWith(
+			"base-service",
+			"refs/pull/42/merge",
+			"merge ref is unavailable",
 		);
 		expect(mocks.triggerResolvedBuildInternal).not.toHaveBeenCalled();
 	});

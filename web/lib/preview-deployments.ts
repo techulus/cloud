@@ -406,7 +406,7 @@ export async function updatePreviewGitHubStatus(input: {
 	logUrl?: string;
 	expectedDeploymentId?: number;
 }) {
-	const context = await db.transaction(async (tx) => {
+	return db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${input.serviceId}))`,
 		);
@@ -472,25 +472,21 @@ export async function updatePreviewGitHubStatus(input: {
 						.filter((port) => port.domain)
 						.sort((a, b) => a.port - b.port || a.id.localeCompare(b.id))[0],
 			);
-		return {
-			...githubRepo,
-			deploymentId: deployment.id,
-			environmentUrl: primary?.domain ? `https://${primary.domain}` : undefined,
-		};
+		await updateGitHubDeploymentStatus(
+			githubRepo.installationId,
+			githubRepo.repoFullName,
+			deployment.id,
+			input.state,
+			{
+				description: input.description.substring(0, 140),
+				logUrl: input.logUrl,
+				environmentUrl: primary?.domain
+					? `https://${primary.domain}`
+					: undefined,
+			},
+		);
+		return true;
 	});
-	if (!context) return false;
-	await updateGitHubDeploymentStatus(
-		context.installationId,
-		context.repoFullName,
-		context.deploymentId,
-		input.state,
-		{
-			description: input.description.substring(0, 140),
-			logUrl: input.logUrl,
-			environmentUrl: context.environmentUrl,
-		},
-	);
-	return true;
 }
 
 export async function createPreviewGitHubDeployment(input: {

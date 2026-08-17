@@ -68,7 +68,9 @@ A pull request is eligible only when it:
 The preview builds GitHub's synthetic merge result at
 `refs/pull/<number>/merge`. This tests the change as it would merge into the
 configured branch. If GitHub cannot produce that ref because of merge
-conflicts, the preview fails rather than building the raw pull request head.
+conflicts, the preview service is removed rather than building the raw pull
+request head. Reconciliation recreates it after GitHub can produce the merge
+ref again.
 
 When first created, preview services inherit the base service's current source
 configuration, replicas, autoscaling, placement, health check, start command,

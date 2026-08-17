@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
 	values: vi.fn(),
 	onConflictDoNothing: vi.fn(),
 	returning: vi.fn(),
+	set: vi.fn(),
+	updateWhere: vi.fn(),
 	revisionRows: [] as unknown[],
 	transactionSelectResults: [] as unknown[][],
 	execute: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock("@/db", () => ({
 				where: vi.fn(() => query),
 				orderBy: vi.fn(() => query),
 				limit: vi.fn(() => query),
+				for: vi.fn(() => query),
 				// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 				then: (
 					resolve: (rows: unknown[]) => unknown,
@@ -35,6 +38,7 @@ vi.mock("@/db", () => ({
 		const tx = {
 			execute: mocks.execute,
 			insert: vi.fn(() => ({ values: mocks.values })),
+			update: vi.fn(() => ({ set: mocks.set })),
 			select: vi.fn(() => query(mocks.transactionSelectResults.shift() ?? [])),
 		};
 		return {
@@ -54,6 +58,7 @@ vi.mock("@/db/schema", () => ({
 		branch: "branch",
 		targetPlatform: "target_platform",
 		buildGroupId: "build_group_id",
+		status: "status",
 	},
 	services: {
 		id: "id",
@@ -162,6 +167,7 @@ describe("build trigger fan-out", () => {
 			onConflictDoNothing: mocks.onConflictDoNothing,
 		});
 		mocks.onConflictDoNothing.mockReturnValue({ returning: mocks.returning });
+		mocks.set.mockReturnValue({ where: mocks.updateWhere });
 		mocks.returning.mockResolvedValue([{ id: "build-1" }, { id: "build-2" }]);
 		mocks.getTargetPlatformsForRevision.mockResolvedValue([
 			"linux/amd64",
@@ -171,6 +177,10 @@ describe("build trigger fan-out", () => {
 	});
 
 	it("persists one immutable commit for every target platform", async () => {
+		mocks.transactionSelectResults.push([
+			{ id: "build-1", status: "pending" },
+			{ id: "build-2", status: "pending" },
+		]);
 		await invoke(exactSha);
 
 		expect(mocks.values).toHaveBeenCalledTimes(1);
@@ -218,6 +228,55 @@ describe("build trigger fan-out", () => {
 		expect(mocks.values).not.toHaveBeenCalled();
 		expect(mocks.enqueueWork).not.toHaveBeenCalled();
 		expect(mocks.createPreviewGitHubDeployment).not.toHaveBeenCalled();
+	});
+
+	it("cancels a preview superseded before agent work is enqueued", async () => {
+		const previewGitRef = "refs/pull/42/merge";
+		(mocks.revisionRows[0] as Record<string, unknown>).previewGitRef =
+			previewGitRef;
+		mocks.transactionSelectResults.push(
+			[{ id: "service-1" }],
+			[{ id: "revision-1" }],
+			[{ id: "service-1" }],
+			[{ id: "newer-revision" }],
+		);
+
+		await expect(invoke(exactSha, previewGitRef)).resolves.toMatchObject({
+			status: "cancelled",
+			reason: "superseded_preview_revision",
+		});
+		expect(mocks.values).toHaveBeenCalled();
+		expect(mocks.set).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "cancelled" }),
+		);
+		expect(mocks.enqueueWork).not.toHaveBeenCalled();
+		expect(mocks.createBuildStarted).not.toHaveBeenCalled();
+	});
+
+	it("does not enqueue agent work after a build is cancelled", async () => {
+		const previewGitRef = "refs/pull/42/merge";
+		(mocks.revisionRows[0] as Record<string, unknown>).previewGitRef =
+			previewGitRef;
+		mocks.transactionSelectResults.push(
+			[{ id: "service-1" }],
+			[{ id: "revision-1" }],
+			[{ id: "service-1" }],
+			[{ id: "revision-1" }],
+			[
+				{ id: "build-1", status: "cancelled" },
+				{ id: "build-2", status: "pending" },
+			],
+		);
+
+		await expect(invoke(exactSha, previewGitRef)).resolves.toMatchObject({
+			status: "cancelled",
+			reason: "build_cancelled_before_enqueue",
+		});
+		expect(mocks.set).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "cancelled" }),
+		);
+		expect(mocks.enqueueWork).not.toHaveBeenCalled();
+		expect(mocks.createBuildStarted).not.toHaveBeenCalled();
 	});
 
 	it("rejects a moving ref before creating any platform build", async () => {

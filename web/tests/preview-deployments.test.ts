@@ -5,11 +5,13 @@ const mocks = vi.hoisted(() => {
 	const returningResults: unknown[][] = [];
 	const insertedValues: unknown[] = [];
 	const updatedValues: unknown[] = [];
+	const transactionState = { active: false };
 	function query(result: unknown[]) {
 		const value = {
 			from: vi.fn(() => value),
 			where: vi.fn(() => value),
 			orderBy: vi.fn(() => value),
+			limit: vi.fn(() => value),
 			innerJoin: vi.fn(() => value),
 			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
@@ -52,11 +54,20 @@ const mocks = vi.hoisted(() => {
 		returningResults,
 		insertedValues,
 		updatedValues,
+		transactionState,
 		tx,
 		getSetting: vi.fn(),
+		updateGitHubDeploymentStatus: vi.fn(),
 		db: {
-			transaction: vi.fn((operation: (transaction: typeof tx) => unknown) =>
-				operation(tx),
+			transaction: vi.fn(
+				async (operation: (transaction: typeof tx) => unknown) => {
+					transactionState.active = true;
+					try {
+						return await operation(tx);
+					} finally {
+						transactionState.active = false;
+					}
+				},
 			),
 			select: vi.fn(() => query([])),
 		},
@@ -65,11 +76,17 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/db/queries", () => ({ getSetting: mocks.getSetting }));
+vi.mock("@/lib/github", () => ({
+	createGitHubDeployment: vi.fn(),
+	findGitHubDeployment: vi.fn(),
+	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
+}));
 
 import {
 	createPreviewClone,
 	ensurePreviewEnvironment,
 	previewPortConfiguration,
+	updatePreviewGitHubStatus,
 } from "@/lib/preview-deployments";
 
 const baseService = {
@@ -178,6 +195,7 @@ describe("preview service cloning", () => {
 		mocks.insertedValues.length = 0;
 		mocks.updatedValues.length = 0;
 		mocks.getSetting.mockResolvedValue("apps.example.com");
+		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
 		process.env.REGISTRY_HOST = "registry.example.com";
 	});
 
@@ -330,5 +348,36 @@ describe("preview service cloning", () => {
 		expect(mocks.insertedValues[0]).toMatchObject({
 			serverlessEnabled: false,
 		});
+	});
+
+	it("holds the service lock while publishing the current GitHub status", async () => {
+		mocks.selectResults.push(
+			[{ previewOfService: baseService.id }],
+			[{ id: "revision-1" }],
+			[{ id: 303 }],
+			[{ installationId: 101, repoFullName: "acme/app" }],
+			[{ id: "port-1", port: 3000, domain: "preview.apps.example.com" }],
+		);
+		mocks.updateGitHubDeploymentStatus.mockImplementation(async () => {
+			expect(mocks.transactionState.active).toBe(true);
+		});
+
+		await expect(
+			updatePreviewGitHubStatus({
+				serviceId: "preview-service",
+				serviceRevisionId: "revision-1",
+				state: "success",
+				description: "Preview is ready",
+			}),
+		).resolves.toBe(true);
+		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
+			101,
+			"acme/app",
+			303,
+			"success",
+			expect.objectContaining({
+				environmentUrl: "https://preview.apps.example.com",
+			}),
+		);
 	});
 });
