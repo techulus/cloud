@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -18,6 +18,7 @@ import {
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { deletePreviewsForGitHubInstallation } from "@/lib/preview-lifecycle";
+import { pullRequestMergeRef } from "@/lib/service-revision-spec";
 import { triggerResolvedBuildInternal } from "@/lib/trigger-build";
 
 type InstallationPayload = {
@@ -103,6 +104,7 @@ async function handleInstallationEvent(payload: InstallationPayload) {
 		await deletePreviewsForGitHubInstallation(
 			installation.id,
 			"GitHub installation deleted",
+			{ removeRepositoryLinks: true },
 		);
 		await db
 			.delete(githubInstallations)
@@ -115,6 +117,14 @@ async function handleInstallationEvent(payload: InstallationPayload) {
 		await deletePreviewsForGitHubInstallation(
 			installation.id,
 			"GitHub installation suspended",
+			{ githubDeploymentCleanup: "defer" },
+		);
+	}
+	if (action === "unsuspend") {
+		await deletePreviewsForGitHubInstallation(
+			installation.id,
+			"GitHub installation unsuspended",
+			{ githubDeploymentCleanup: "report" },
 		);
 	}
 
@@ -145,12 +155,7 @@ async function handlePushEvent(payload: PushPayload) {
 		.innerJoin(services, eq(githubRepos.serviceId, services.id))
 		.innerJoin(projects, eq(services.projectId, projects.id))
 		.innerJoin(environments, eq(services.environmentId, environments.id))
-		.where(
-			and(
-				eq(githubRepos.repoId, repository.id),
-				isNull(services.previewOfServiceId),
-			),
-		);
+		.where(eq(githubRepos.repoId, repository.id));
 
 	if (linkedServices.length === 0) {
 		return NextResponse.json({
@@ -328,16 +333,20 @@ async function handlePullRequestEvent(
 		pullRequestSyncActions.has(payload.action) &&
 		!payload.pull_request.draft &&
 		sameRepository;
+	const previewGitRef = pullRequestMergeRef(payload.number);
 	const events: Array<
 		| ReturnType<typeof inngestEvents.previewSyncRequested.create>
 		| ReturnType<typeof inngestEvents.previewCloseRequested.create>
 	> = [];
 	const syncedBaseServiceIds = new Set<string>();
+	const linkedBaseServiceIds = linkedServices.flatMap(({ service }) =>
+		!service.previewOfService && !service.deletedAt ? [service.id] : [],
+	);
 
 	if (shouldSync) {
 		for (const { githubRepo, service } of linkedServices) {
 			if (
-				service.previewOfServiceId ||
+				service.previewOfService ||
 				service.deletedAt ||
 				service.sourceType !== "github" ||
 				service.stateful ||
@@ -352,7 +361,7 @@ async function handlePullRequestEvent(
 				inngestEvents.previewSyncRequested.create(
 					{
 						baseServiceId: service.id,
-						pullRequestNumber: payload.number,
+						previewGitRef,
 					},
 					{
 						id: `github-pr-sync:${deliveryId}:${service.id}:${payload.number}`,
@@ -362,12 +371,23 @@ async function handlePullRequestEvent(
 		}
 	}
 
-	for (const { service: clone } of linkedServices) {
+	const clones =
+		linkedBaseServiceIds.length > 0
+			? await db
+					.select()
+					.from(services)
+					.where(
+						and(
+							inArray(services.previewOfService, linkedBaseServiceIds),
+							eq(services.previewGitRef, previewGitRef),
+							isNull(services.deletedAt),
+						),
+					)
+			: [];
+	for (const clone of clones) {
 		if (
-			!clone.previewOfServiceId ||
-			clone.previewPullRequestNumber !== payload.number ||
-			clone.deletedAt ||
-			syncedBaseServiceIds.has(clone.previewOfServiceId)
+			!clone.previewOfService ||
+			syncedBaseServiceIds.has(clone.previewOfService)
 		) {
 			continue;
 		}
@@ -384,13 +404,13 @@ async function handlePullRequestEvent(
 		events.push(
 			inngestEvents.previewCloseRequested.create(
 				{
-					baseServiceId: clone.previewOfServiceId,
-					pullRequestNumber: payload.number,
+					baseServiceId: clone.previewOfService,
+					previewGitRef,
 					reason,
 					verifyWithGitHub: true,
 				},
 				{
-					id: `github-pr-close:${deliveryId}:${clone.previewOfServiceId}:${payload.number}`,
+					id: `github-pr-close:${deliveryId}:${clone.previewOfService}:${payload.number}`,
 				},
 			),
 		);

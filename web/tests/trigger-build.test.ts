@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 	send: vi.fn(),
 	resolveGitHubCommit: vi.fn(),
 	createBuildTrigger: vi.fn(),
+	createPreviewSync: vi.fn(),
 	createGitHubBuildServiceRevision: vi.fn(),
 	cloneGitHubBuildServiceRevision: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock("@/lib/github", () => ({
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {
 		buildTrigger: { create: mocks.createBuildTrigger },
+		previewSyncRequested: { create: mocks.createPreviewSync },
 	},
 }));
 vi.mock("@/lib/service-revisions", () => ({
@@ -32,7 +34,6 @@ vi.mock("@/lib/service-revisions", () => ({
 import {
 	requeueBuildRevisionInternal,
 	triggerBuildInternal,
-	triggerResolvedBuildInternal,
 } from "@/lib/trigger-build";
 
 function queryReturning(rows: unknown[]) {
@@ -56,6 +57,11 @@ describe("internal GitHub build trigger", () => {
 		process.env.REGISTRY_HOST = "registry.test";
 		mocks.rows = [];
 		mocks.createGitHubBuildServiceRevision.mockResolvedValue({});
+		mocks.createPreviewSync.mockImplementation((data, options) => ({
+			name: "preview/sync-requested",
+			data,
+			...options,
+		}));
 		mocks.resolveGitHubCommit.mockResolvedValue({
 			sha: "0123456789abcdef0123456789abcdef01234567",
 			message: "Resolved source commit",
@@ -176,14 +182,18 @@ describe("internal GitHub build trigger", () => {
 		);
 	});
 
-	it("snapshots and dispatches a synthetic pull request merge ref", async () => {
+	it("routes a visible preview build through its pull request merge ref", async () => {
 		mocks.rows = [
 			[
 				{
-					id: "service-1",
+					id: "preview-service",
 					projectId: "project-1",
 					sourceType: "github",
 					deletedAt: null,
+					githubRepoUrl: "https://github.com/acme/app",
+					githubBranch: "main",
+					previewOfService: "base-service",
+					previewGitRef: "refs/pull/42/merge",
 				},
 			],
 			[
@@ -196,27 +206,25 @@ describe("internal GitHub build trigger", () => {
 			],
 		];
 
-		await triggerResolvedBuildInternal("service-1", {
-			trigger: "preview",
-			commitSha: "0123456789abcdef0123456789abcdef01234567",
-			commitMessage: "Merge pull request #42",
-			actor: { type: "system" },
-			expectedRepository: "https://github.com/acme/app",
-			expectedBranch: "main",
-			gitRef: "refs/pull/42/merge",
-			idempotencyKey: "preview:service-1:42:merge-sha",
-		});
-
-		expect(mocks.createGitHubBuildServiceRevision).toHaveBeenCalledWith(
-			expect.objectContaining({ gitRef: "refs/pull/42/merge" }),
-		);
-		expect(mocks.createBuildTrigger).toHaveBeenCalledWith(
-			expect.objectContaining({
-				trigger: "preview",
-				gitRef: "refs/pull/42/merge",
+		await expect(
+			triggerBuildInternal("preview-service", "manual", {
+				type: "system",
 			}),
-			{ id: "preview:service-1:42:merge-sha" },
+		).resolves.toMatchObject({ status: "queued" });
+
+		expect(mocks.createPreviewSync).toHaveBeenCalledWith(
+			{
+				baseServiceId: "base-service",
+				previewGitRef: "refs/pull/42/merge",
+				force: true,
+			},
+			{ id: expect.stringContaining("preview-user-sync:preview-service:") },
 		);
+		expect(mocks.send).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "preview/sync-requested" }),
+		);
+		expect(mocks.resolveGitHubCommit).not.toHaveBeenCalled();
+		expect(mocks.createGitHubBuildServiceRevision).not.toHaveBeenCalled();
 	});
 
 	it("rejects a non-GitHub service before queueing work", async () => {

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
@@ -69,7 +69,6 @@ export async function importCompose(
 			and(
 				eq(services.projectId, projectId),
 				eq(services.environmentId, environmentId),
-				isNull(services.previewOfServiceId),
 			),
 		);
 

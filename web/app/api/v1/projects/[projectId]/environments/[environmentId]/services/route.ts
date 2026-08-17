@@ -52,7 +52,6 @@ export async function GET(
 					eq(services.projectId, projectId),
 					eq(services.environmentId, environmentId),
 					isNull(services.deletedAt),
-					isNull(services.previewOfServiceId),
 					page.cursor
 						? or(
 								gt(services.name, page.cursor.name),

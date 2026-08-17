@@ -383,7 +383,7 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 		const activeService = await tx
 			.select({
 				id: services.id,
-				previewOfServiceId: services.previewOfServiceId,
+				previewOfService: services.previewOfService,
 			})
 			.from(services)
 			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
@@ -429,7 +429,7 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 			specification: active.specification,
 			actor: { type: "system" },
 		});
-		if (activeService.previewOfServiceId) {
+		if (activeService.previewOfService) {
 			await tx
 				.update(services)
 				.set({ previewCurrentRevisionId: revisionId })
@@ -612,7 +612,7 @@ export async function createRolloutForServiceRevision(
 			tx
 				.select({
 					id: services.id,
-					previewOfServiceId: services.previewOfServiceId,
+					previewOfService: services.previewOfService,
 					previewCurrentRevisionId: services.previewCurrentRevisionId,
 				})
 				.from(services)
@@ -624,7 +624,7 @@ export async function createRolloutForServiceRevision(
 			return { rolloutId: null, revision, created: false };
 		}
 		if (
-			activeService.previewOfServiceId &&
+			activeService.previewOfService &&
 			activeService.previewCurrentRevisionId !== serviceRevisionId
 		) {
 			return { rolloutId: null, revision, created: false };

@@ -193,6 +193,26 @@ export async function triggerBuildInternal(
 	actor: ServiceRevisionActor,
 ) {
 	const sourceContext = await getGitHubBuildSource(serviceId);
+	if (
+		sourceContext.service.previewOfService &&
+		sourceContext.service.previewGitRef
+	) {
+		await inngest.send(
+			inngestEvents.previewSyncRequested.create(
+				{
+					baseServiceId: sourceContext.service.previewOfService,
+					previewGitRef: sourceContext.service.previewGitRef,
+					force: true,
+				},
+				{ id: `preview-user-sync:${serviceId}:${randomUUID()}` },
+			),
+		);
+		return {
+			buildId: null,
+			serviceRevisionId: null,
+			status: "queued" as const,
+		};
+	}
 	const { repo, source } = sourceContext;
 	const repoFullName =
 		repo?.repoFullName ??

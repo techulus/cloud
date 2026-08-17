@@ -174,19 +174,39 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	if err != nil {
 		return fmt.Errorf("git remote setup failed: %s: %w", output, err)
 	}
-	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", "1", "--no-tags", "origin", config.GitRef)
+	depth := "50"
+	if pullRequestMergeRefPattern.MatchString(config.GitRef) {
+		depth = "1"
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", depth, "--no-tags", "origin", config.GitRef)
 	output, err = b.runCommand(cmd, config)
 	if err != nil {
 		return fmt.Errorf("git fetch exact ref failed: %s: %w", output, err)
 	}
 
-	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
-	fetchedCommit, err := b.runCommand(cmd, config)
-	if err != nil {
-		return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
-	}
-	if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
-		return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
+	if pullRequestMergeRefPattern.MatchString(config.GitRef) {
+		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
+		fetchedCommit, err := b.runCommand(cmd, config)
+		if err != nil {
+			return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
+			return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
+		}
+	} else {
+		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
+		if _, err = b.runCommand(cmd, config); err != nil {
+			b.sendLog(config, "Selected commit is outside the shallow clone; fetching full branch history")
+			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--unshallow", "--no-tags", "origin", config.GitRef)
+			output, err = b.runCommand(cmd, config)
+			if err != nil {
+				return fmt.Errorf("git fetch full branch history failed: %s: %w", output, err)
+			}
+			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
+			if output, err = b.runCommand(cmd, config); err != nil {
+				return fmt.Errorf("selected commit is not available from configured branch: %s: %w", output, err)
+			}
+		}
 	}
 
 	b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))

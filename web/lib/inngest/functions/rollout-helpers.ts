@@ -385,6 +385,7 @@ export async function createDeploymentRecords(
 		for (let i = 0; i < placement.replicas; i++) {
 			const deploymentId = randomUUID();
 
+			// react-doctor-disable-next-line react-doctor/async-await-in-loop -- each allocation must observe and lock the ports claimed by the previous replica
 			const currentDeploymentIds = await withAllocationRetry(
 				() =>
 					db.transaction(async (tx) => {
@@ -393,7 +394,7 @@ export async function createDeploymentRecords(
 						);
 						const service = await tx
 							.select({
-								previewOfServiceId: services.previewOfServiceId,
+								previewOfService: services.previewOfService,
 								previewCurrentRevisionId: services.previewCurrentRevisionId,
 							})
 							.from(services)
@@ -403,7 +404,7 @@ export async function createDeploymentRecords(
 							.then((rows) => rows[0]);
 						if (
 							!service ||
-							(service.previewOfServiceId &&
+							(service.previewOfService &&
 								service.previewCurrentRevisionId !== revisionId)
 						) {
 							throw new Error("Preview revision is no longer current");
@@ -521,7 +522,7 @@ export async function completeRollout(
 		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const service = await tx
 			.select({
-				previewOfServiceId: services.previewOfServiceId,
+				previewOfService: services.previewOfService,
 				previewCurrentRevisionId: services.previewCurrentRevisionId,
 			})
 			.from(services)
@@ -529,7 +530,7 @@ export async function completeRollout(
 			.then((rows) => rows[0]);
 		if (
 			!service ||
-			(service.previewOfServiceId &&
+			(service.previewOfService &&
 				service.previewCurrentRevisionId !== revisionId)
 		) {
 			return { completed: false, stoppedCount: 0 };

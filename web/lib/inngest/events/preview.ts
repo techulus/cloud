@@ -2,14 +2,14 @@ export type PreviewEvents = {
 	"preview/sync-requested": {
 		data: {
 			baseServiceId: string;
-			pullRequestNumber: number;
+			previewGitRef: string;
 			force?: boolean;
 		};
 	};
 	"preview/close-requested": {
 		data: {
 			baseServiceId: string;
-			pullRequestNumber: number;
+			previewGitRef: string;
 			reason: string;
 			verifyWithGitHub?: boolean;
 		};

@@ -119,7 +119,7 @@ export async function POST(
 			specification: serviceRevisions.specification,
 			projectSlug: projects.slug,
 			environmentName: environments.name,
-			previewOfServiceId: services.previewOfServiceId,
+			previewOfService: services.previewOfService,
 		})
 		.from(serviceRevisions)
 		.innerJoin(services, eq(serviceRevisions.serviceId, services.id))
@@ -261,10 +261,10 @@ export async function POST(
 	) {
 		try {
 			const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
-			const logUrl = revision.previewOfServiceId
-				? `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${revision.previewOfServiceId}/previews`
+			const logUrl = revision.previewOfService
+				? `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}/builds/${buildId}`
 				: `${baseUrl}/builds/${buildId}/logs`;
-			if (revision.previewOfServiceId) {
+			if (revision.previewOfService) {
 				await updateCurrentPreviewGitHubStatus({
 					serviceId: build.serviceId,
 					serviceRevisionId: build.serviceRevisionId,
@@ -394,7 +394,7 @@ export async function POST(
 				const activeService = await tx
 					.select({
 						id: services.id,
-						previewOfServiceId: services.previewOfServiceId,
+						previewOfService: services.previewOfService,
 						previewCurrentRevisionId: services.previewCurrentRevisionId,
 					})
 					.from(services)
@@ -405,7 +405,7 @@ export async function POST(
 					.then((rows) => rows[0]);
 				if (
 					!activeService ||
-					(activeService.previewOfServiceId &&
+					(activeService.previewOfService &&
 						activeService.previewCurrentRevisionId !== build.serviceRevisionId)
 				) {
 					return;

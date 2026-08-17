@@ -15,12 +15,7 @@ import {
 
 export async function cancelBuild(buildId: string) {
 	await requireDeveloperRole();
-	const [result] = await db
-		.select({ build: builds })
-		.from(builds)
-		.innerJoin(services, eq(services.id, builds.serviceId))
-		.where(and(eq(builds.id, buildId), isNull(services.previewOfServiceId)));
-	const build = result?.build;
+	const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
 
 	if (!build) {
 		throw new Error("Build not found");
@@ -89,15 +84,12 @@ export async function retryBuild(buildId: string) {
 	}
 
 	const [service] = await db
-		.select({ id: services.id })
+		.select({
+			id: services.id,
+			previewOfService: services.previewOfService,
+		})
 		.from(services)
-		.where(
-			and(
-				eq(services.id, build.serviceId),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		);
+		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)));
 
 	if (!service) {
 		throw new Error("Service not found");
@@ -107,16 +99,22 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
+	const actor = {
+		type: "user" as const,
+		userId: session.user.id,
+		name: session.user.name,
+	};
+	if (service.previewOfService) {
+		await triggerBuildInternal(build.serviceId, "manual", actor);
+		return { success: true };
+	}
+
 	await requeueBuildRevisionInternal({
 		serviceId: build.serviceId,
 		serviceRevisionId: build.serviceRevisionId,
 		commitMessage: build.commitMessage ?? "Retry build",
 		author: build.author ?? undefined,
-		actor: {
-			type: "user",
-			userId: session.user.id,
-			name: session.user.name,
-		},
+		actor,
 	});
 
 	return { success: true };
@@ -127,18 +125,6 @@ export async function triggerBuild(
 	trigger: "manual" | "scheduled" = "manual",
 ) {
 	const session = await requireDeveloperRole();
-	const service = await db
-		.select({ id: services.id })
-		.from(services)
-		.where(
-			and(
-				eq(services.id, serviceId),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		)
-		.then((rows) => rows[0]);
-	if (!service) throw new Error("Service not found");
 	const actor = session
 		? {
 				type: "user" as const,
@@ -162,16 +148,15 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 		.select({ service: services, githubRepo: githubRepos })
 		.from(services)
 		.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
-		.where(
-			and(
-				eq(services.id, serviceId),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		);
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
 	if (!result) throw new Error("Active GitHub App-connected service not found");
 	if (result.service.sourceType !== "github") {
 		throw new Error("Service is not connected to GitHub");
+	}
+	if (result.service.previewOfService) {
+		throw new Error(
+			"Preview services build their pull request merge ref; use Build to rebuild it",
+		);
 	}
 
 	const branch =

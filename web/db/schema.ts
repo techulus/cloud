@@ -590,14 +590,12 @@ export const services = pgTable(
 		previewDeploymentsEnabled: boolean("preview_deployments_enabled")
 			.notNull()
 			.default(false),
-		previewOfServiceId: text("preview_of_service_id"),
-		previewPullRequestNumber: integer("preview_pull_request_number"),
+		previewOfService: text("preview_of_service"),
+		previewGitRef: text("preview_git_ref"),
 		previewCurrentRevisionId: text("preview_current_revision_id"),
 		previewGithubDeploymentId: bigint("preview_github_deployment_id", {
 			mode: "number",
 		}),
-		previewError: text("preview_error"),
-		previewExpiresAt: timestamp("preview_expires_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -613,40 +611,35 @@ export const services = pgTable(
 		),
 		foreignKey({
 			name: "services_preview_of_service_fk",
-			columns: [table.previewOfServiceId],
+			columns: [table.previewOfService],
 			foreignColumns: [table.id],
 		}).onDelete("restrict"),
 		check(
 			"services_preview_identity_check",
-			sql`(${table.previewOfServiceId} is null) = (${table.previewPullRequestNumber} is null)`,
+			sql`(${table.previewOfService} is null) = (${table.previewGitRef} is null)`,
 		),
 		check(
-			"services_preview_pull_request_number_check",
-			sql`${table.previewPullRequestNumber} is null or ${table.previewPullRequestNumber} > 0`,
+			"services_preview_git_ref_check",
+			sql`${table.previewGitRef} is null or ${table.previewGitRef} ~ '^refs/pull/[1-9][0-9]*/merge$'`,
 		),
 		check(
 			"services_preview_policy_check",
 			sql`(
-				(${table.previewOfServiceId} is null and (${table.previewDeploymentsEnabled} = false or ${table.stateful} = false))
+				(${table.previewOfService} is null and (${table.previewDeploymentsEnabled} = false or ${table.stateful} = false))
 				or
-				(${table.previewOfServiceId} is not null and ${table.previewDeploymentsEnabled} = false and ${table.stateful} = false)
+				(${table.previewOfService} is not null and ${table.previewDeploymentsEnabled} = false and ${table.stateful} = false)
 			)`,
 		),
 		check(
 			"services_preview_metadata_check",
-			sql`${table.previewOfServiceId} is not null or (
+			sql`${table.previewOfService} is not null or (
 				${table.previewCurrentRevisionId} is null
 				and ${table.previewGithubDeploymentId} is null
-				and ${table.previewError} is null
-				and ${table.previewExpiresAt} is null
 			)`,
 		),
-		uniqueIndex("services_preview_base_pr_unique_idx")
-			.on(table.previewOfServiceId, table.previewPullRequestNumber)
-			.where(sql`${table.previewOfServiceId} is not null`),
-		index("services_preview_expires_at_idx")
-			.on(table.previewExpiresAt)
-			.where(sql`${table.previewOfServiceId} is not null`),
+		uniqueIndex("services_preview_base_ref_unique_idx")
+			.on(table.previewOfService, table.previewGitRef)
+			.where(sql`${table.previewOfService} is not null`),
 	],
 );
 

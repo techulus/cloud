@@ -1,5 +1,6 @@
 import { createHmac, createPrivateKey, timingSafeEqual } from "node:crypto";
 import { SignJWT } from "jose";
+import { pullRequestMergeRef } from "@/lib/service-revision-spec";
 
 function getAppId(): string {
 	const appId = process.env.GITHUB_APP_ID;
@@ -370,10 +371,7 @@ export async function resolveGitHubPullRequestMergeRef(
 	repoFullName: string,
 	pullRequestNumber: number,
 ): Promise<{ gitRef: string; sha: string }> {
-	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
-		throw new Error("Invalid pull request number");
-	}
-	const gitRef = `refs/pull/${pullRequestNumber}/merge`;
+	const gitRef = pullRequestMergeRef(pullRequestNumber);
 	try {
 		const commits = await githubCommitRequest<GitHubCommitResponse[]>(
 			installationId,

@@ -263,13 +263,7 @@ export async function findServiceContext(serviceId: string) {
 				eq(environments.projectId, projects.id),
 			),
 		)
-		.where(
-			and(
-				eq(services.id, serviceId),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		)
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 		.limit(1)
 		.then((rows) => rows[0] ?? null);
 }

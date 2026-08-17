@@ -64,13 +64,7 @@ export async function runScheduledBackups() {
 			backupSchedule: services.backupSchedule,
 		})
 		.from(services)
-		.where(
-			and(
-				eq(services.backupEnabled, true),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		);
+		.where(and(eq(services.backupEnabled, true), isNull(services.deletedAt)));
 
 	for (const service of servicesWithBackup) {
 		if (!service.backupSchedule) {

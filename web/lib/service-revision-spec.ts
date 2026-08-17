@@ -28,6 +28,23 @@ export function gitBranchRef(branch: string): string {
 	return ref;
 }
 
+export function pullRequestMergeRef(pullRequestNumber: number): string {
+	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new Error("Invalid pull request number");
+	}
+	return `refs/pull/${pullRequestNumber}/merge`;
+}
+
+export function pullRequestNumberFromMergeRef(gitRef: string): number {
+	const match = /^refs\/pull\/([1-9]\d*)\/merge$/.exec(gitRef);
+	if (!match) throw new Error("Invalid pull request merge ref");
+	const pullRequestNumber = Number(match[1]);
+	if (!Number.isSafeInteger(pullRequestNumber)) {
+		throw new Error("Invalid pull request merge ref");
+	}
+	return pullRequestNumber;
+}
+
 export function getDefaultServiceHostname(
 	name: string,
 	serviceId: string,

@@ -314,14 +314,14 @@ describe("agent build status transitions", () => {
 					specification: previewSpecification,
 					projectSlug: "cloud",
 					environmentName: "production",
-					previewOfServiceId: "base-service",
+					previewOfService: "base-service",
 				},
 			],
 			[completedBuild],
 			[
 				{
 					id: "service-1",
-					previewOfServiceId: "base-service",
+					previewOfService: "base-service",
 					previewCurrentRevisionId: "revision-1",
 				},
 			],
@@ -336,7 +336,7 @@ describe("agent build status transitions", () => {
 			state: "in_progress",
 			description: "Preview image built; preparing deployment",
 			logUrl:
-				"https://cloud.techulus.com/dashboard/projects/cloud/production/services/base-service/previews",
+				"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1/builds/build-amd64",
 		});
 		expect(mocks.updateGitHubDeploymentStatus).not.toHaveBeenCalled();
 	});

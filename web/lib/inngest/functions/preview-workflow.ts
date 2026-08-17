@@ -9,8 +9,7 @@ import {
 	updateGitHubDeploymentStatus,
 } from "@/lib/github";
 import {
-	createOrRefreshPreviewClone,
-	PREVIEW_RECONCILIATION_TTL_MS,
+	createPreviewClone,
 	updateCurrentPreviewGitHubStatus,
 } from "@/lib/preview-deployments";
 import {
@@ -19,6 +18,10 @@ import {
 	deletePreviewService,
 } from "@/lib/preview-lifecycle";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import {
+	pullRequestMergeRef,
+	pullRequestNumberFromMergeRef,
+} from "@/lib/service-revision-spec";
 import { triggerResolvedBuildInternal } from "@/lib/trigger-build";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -31,7 +34,7 @@ async function loadBaseContext(baseServiceId: string) {
 		.where(
 			and(
 				eq(services.id, baseServiceId),
-				isNull(services.previewOfServiceId),
+				isNull(services.previewOfService),
 				isNull(services.deletedAt),
 			),
 		)
@@ -40,26 +43,14 @@ async function loadBaseContext(baseServiceId: string) {
 
 async function closePreview(
 	baseServiceId: string,
-	pullRequestNumber: number,
+	previewGitRef: string,
 	reason: string,
 ) {
-	const deleted = await deletePreviewService(baseServiceId, pullRequestNumber);
-	if (deleted?.service.previewGithubDeploymentId) {
-		try {
-			await updateGitHubDeploymentStatus(
-				deleted.githubRepo.installationId,
-				deleted.githubRepo.repoFullName,
-				deleted.service.previewGithubDeploymentId,
-				"inactive",
-				{ description: `Preview removed: ${reason}`.substring(0, 140) },
-			);
-		} catch (error) {
-			console.error(
-				`[preview:close] failed to mark GitHub deployment ${deleted.service.previewGithubDeploymentId} inactive:`,
-				error,
-			);
-		}
-	}
+	const deleted = await deletePreviewService(
+		baseServiceId,
+		previewGitRef,
+		reason,
+	);
 	return deleted
 		? { status: "deleted" as const, serviceId: deleted.service.id }
 		: { status: "not_found" as const };
@@ -95,16 +86,19 @@ function isEligiblePullRequest(
 
 async function loadPreviewContext(
 	baseServiceId: string,
-	pullRequestNumber: number,
+	previewGitRef: string,
 ) {
 	return db
 		.select({ service: services, githubRepo: githubRepos })
 		.from(services)
-		.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+		.innerJoin(
+			githubRepos,
+			eq(githubRepos.serviceId, services.previewOfService),
+		)
 		.where(
 			and(
-				eq(services.previewOfServiceId, baseServiceId),
-				eq(services.previewPullRequestNumber, pullRequestNumber),
+				eq(services.previewOfService, baseServiceId),
+				eq(services.previewGitRef, previewGitRef),
 				isNull(services.deletedAt),
 			),
 		)
@@ -113,37 +107,34 @@ async function loadPreviewContext(
 
 async function closePreviewFromEvent(input: {
 	baseServiceId: string;
-	pullRequestNumber: number;
+	previewGitRef: string;
 	reason: string;
 	verifyWithGitHub?: boolean;
 }) {
+	const pullRequestNumber = pullRequestNumberFromMergeRef(input.previewGitRef);
 	if (input.verifyWithGitHub) {
 		const [baseContext, previewContext] = await Promise.all([
 			loadBaseContext(input.baseServiceId),
-			loadPreviewContext(input.baseServiceId, input.pullRequestNumber),
+			loadPreviewContext(input.baseServiceId, input.previewGitRef),
 		]);
 		if (!previewContext) return { status: "not_found" as const };
 		if (baseContext) {
 			const pullRequest = await getGitHubPullRequest(
 				previewContext.githubRepo.installationId,
 				previewContext.githubRepo.repoFullName,
-				input.pullRequestNumber,
+				pullRequestNumber,
 			);
 			if (isEligiblePullRequest(baseContext, pullRequest)) {
 				await enqueuePreviewSync(
 					input.baseServiceId,
-					input.pullRequestNumber,
+					input.previewGitRef,
 					`stale-close:${pullRequest.updatedAt}`,
 				);
 				return { status: "stale" as const };
 			}
 		}
 	}
-	return closePreview(
-		input.baseServiceId,
-		input.pullRequestNumber,
-		input.reason,
-	);
+	return closePreview(input.baseServiceId, input.previewGitRef, input.reason);
 }
 
 async function loadCurrentPreviewRevision(serviceId: string) {
@@ -151,7 +142,6 @@ async function loadCurrentPreviewRevision(serviceId: string) {
 		.select({
 			previewCurrentRevisionId: services.previewCurrentRevisionId,
 			previewGithubDeploymentId: services.previewGithubDeploymentId,
-			previewError: services.previewError,
 		})
 		.from(services)
 		.where(eq(services.id, serviceId))
@@ -175,18 +165,17 @@ async function loadCurrentPreviewRevision(serviceId: string) {
 	};
 }
 
-async function storePreviewPreBuildError(input: {
+async function clearCurrentPreviewRevision(input: {
 	baseServiceId: string;
-	pullRequestNumber: number;
+	previewGitRef: string;
 	previewServiceId: string;
-	message: string;
 }) {
 	return db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}))`,
 		);
 		await tx.execute(
-			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}), ${input.pullRequestNumber})`,
+			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}), hashtext(${input.previewGitRef}))`,
 		);
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${input.previewServiceId}))`,
@@ -200,8 +189,8 @@ async function storePreviewPreBuildError(input: {
 			.where(
 				and(
 					eq(services.id, input.previewServiceId),
-					eq(services.previewOfServiceId, input.baseServiceId),
-					eq(services.previewPullRequestNumber, input.pullRequestNumber),
+					eq(services.previewOfService, input.baseServiceId),
+					eq(services.previewGitRef, input.previewGitRef),
 					isNull(services.deletedAt),
 				),
 			)
@@ -212,11 +201,43 @@ async function storePreviewPreBuildError(input: {
 			.set({
 				previewCurrentRevisionId: null,
 				previewGithubDeploymentId: null,
-				previewError: input.message,
-				previewExpiresAt: new Date(Date.now() + PREVIEW_RECONCILIATION_TTL_MS),
 			})
 			.where(eq(services.id, input.previewServiceId));
 		return current;
+	});
+}
+
+async function storePreviewGitHubDeployment(input: {
+	baseServiceId: string;
+	previewGitRef: string;
+	previewServiceId: string;
+	githubDeploymentId: number;
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}))`,
+		);
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}), hashtext(${input.previewGitRef}))`,
+		);
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${input.previewServiceId}))`,
+		);
+		return tx
+			.update(services)
+			.set({ previewGithubDeploymentId: input.githubDeploymentId })
+			.where(
+				and(
+					eq(services.id, input.previewServiceId),
+					eq(services.previewOfService, input.baseServiceId),
+					eq(services.previewGitRef, input.previewGitRef),
+					isNull(services.previewCurrentRevisionId),
+					isNull(services.previewGithubDeploymentId),
+					isNull(services.deletedAt),
+				),
+			)
+			.returning({ id: services.id })
+			.then((rows) => rows.length > 0);
 	});
 }
 
@@ -227,22 +248,19 @@ export const previewSyncWorkflow = inngest.createFunction(
 		concurrency: [
 			{
 				limit: 1,
-				key: 'event.data.baseServiceId + ":" + event.data.pullRequestNumber',
+				key: 'event.data.baseServiceId + ":" + event.data.previewGitRef',
 			},
 		],
 	},
 	async ({ event, step }) => {
-		const { baseServiceId, pullRequestNumber, force = false } = event.data;
+		const { baseServiceId, previewGitRef, force = false } = event.data;
+		const pullRequestNumber = pullRequestNumberFromMergeRef(previewGitRef);
 		const context = await step.run("load-base-service", () =>
 			loadBaseContext(baseServiceId),
 		);
 		if (!context) {
 			await step.run("close-orphaned-preview", () =>
-				closePreview(
-					baseServiceId,
-					pullRequestNumber,
-					"base service unavailable",
-				),
+				closePreview(baseServiceId, previewGitRef, "base service unavailable"),
 			);
 			return { status: "closed", reason: "base_service_unavailable" };
 		}
@@ -256,19 +274,15 @@ export const previewSyncWorkflow = inngest.createFunction(
 		);
 		if (!isEligiblePullRequest(context, pullRequest)) {
 			await step.run("close-ineligible-preview", () =>
-				closePreview(
-					baseServiceId,
-					pullRequestNumber,
-					"pull request ineligible",
-				),
+				closePreview(baseServiceId, previewGitRef, "pull request ineligible"),
 			);
 			return { status: "closed", reason: "pull_request_ineligible" };
 		}
 
-		const clone = await step.run("refresh-preview-service", () =>
-			createOrRefreshPreviewClone({
+		const clone = await step.run("create-preview-service", () =>
+			createPreviewClone({
 				baseServiceId,
-				pullRequestNumber,
+				previewGitRef,
 			}),
 		);
 		const previous = await step.run("load-current-preview-revision", () =>
@@ -284,16 +298,11 @@ export const previewSyncWorkflow = inngest.createFunction(
 				),
 			);
 		} catch (error) {
-			const message =
-				error instanceof Error
-					? error.message
-					: "Pull request merge ref unavailable";
-			const superseded = await step.run("store-merge-ref-error", () =>
-				storePreviewPreBuildError({
+			const superseded = await step.run("clear-unmergeable-preview", () =>
+				clearCurrentPreviewRevision({
 					baseServiceId,
-					pullRequestNumber,
+					previewGitRef,
 					previewServiceId: clone.serviceId,
-					message,
 				}),
 			);
 			if (superseded?.previewCurrentRevisionId) {
@@ -312,24 +321,66 @@ export const previewSyncWorkflow = inngest.createFunction(
 					),
 				);
 			}
+			if (!superseded) {
+				return { status: "closed", reason: "preview_service_unavailable" };
+			}
+			const message =
+				error instanceof Error
+					? error.message
+					: "Pull request merge ref unavailable";
+			const failedDeploymentId = await step.run(
+				"create-unmergeable-deployment",
+				() =>
+					createGitHubDeployment(
+						context.githubRepo.installationId,
+						context.githubRepo.repoFullName,
+						pullRequest.head.sha,
+						`preview/${context.service.name}/pr-${pullRequestNumber}`,
+						`Preview unavailable for PR #${pullRequestNumber}`,
+						{
+							transientEnvironment: true,
+							productionEnvironment: false,
+							payload: {
+								baseServiceId,
+								previewServiceId: clone.serviceId,
+								previewGitRef,
+							},
+						},
+					),
+			);
+			const stored = await step.run("store-unmergeable-deployment", () =>
+				storePreviewGitHubDeployment({
+					baseServiceId,
+					previewGitRef,
+					previewServiceId: clone.serviceId,
+					githubDeploymentId: failedDeploymentId,
+				}),
+			);
+			if (!stored) {
+				await step.run("inactivate-orphaned-unmergeable-deployment", () =>
+					updateGitHubDeploymentStatus(
+						context.githubRepo.installationId,
+						context.githubRepo.repoFullName,
+						failedDeploymentId,
+						"inactive",
+						{ description: "Preview was removed" },
+					),
+				);
+				return { status: "closed", reason: "preview_service_unavailable" };
+			}
+			await step.run("mark-unmergeable-deployment-failed", () =>
+				updateCurrentPreviewGitHubStatus({
+					serviceId: clone.serviceId,
+					serviceRevisionId: null,
+					expectedDeploymentId: failedDeploymentId,
+					state: "failure",
+					description: message,
+				}),
+			);
 			return { status: "failed", reason: "merge_ref_unavailable" };
 		}
 
-		if (
-			!force &&
-			previous?.commitSha === mergeRef.sha &&
-			!previous.previewError
-		) {
-			await step.run("extend-preview-expiry", () =>
-				db
-					.update(services)
-					.set({
-						previewExpiresAt: new Date(
-							Date.now() + PREVIEW_RECONCILIATION_TTL_MS,
-						),
-					})
-					.where(eq(services.id, clone.serviceId)),
-			);
+		if (!force && previous?.commitSha === mergeRef.sha) {
 			return { status: "unchanged", serviceId: clone.serviceId };
 		}
 
@@ -349,7 +400,7 @@ export const previewSyncWorkflow = inngest.createFunction(
 					payload: {
 						baseServiceId,
 						previewServiceId: clone.serviceId,
-						pullRequestNumber,
+						previewGitRef,
 					},
 				},
 			),
@@ -384,7 +435,7 @@ export const previewSyncWorkflow = inngest.createFunction(
 								sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}))`,
 							);
 							await tx.execute(
-								sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}), ${pullRequestNumber})`,
+								sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}), hashtext(${previewGitRef}))`,
 							);
 							await tx.execute(
 								sql`select pg_advisory_xact_lock(hashtext(${clone.serviceId}))`,
@@ -394,16 +445,12 @@ export const previewSyncWorkflow = inngest.createFunction(
 								.set({
 									previewCurrentRevisionId: serviceRevisionId,
 									previewGithubDeploymentId: deploymentId,
-									previewError: null,
-									previewExpiresAt: new Date(
-										Date.now() + PREVIEW_RECONCILIATION_TTL_MS,
-									),
 								})
 								.where(
 									and(
 										eq(services.id, clone.serviceId),
-										eq(services.previewOfServiceId, baseServiceId),
-										eq(services.previewPullRequestNumber, pullRequestNumber),
+										eq(services.previewOfService, baseServiceId),
+										eq(services.previewGitRef, previewGitRef),
 										isNull(services.deletedAt),
 									),
 								)
@@ -420,71 +467,68 @@ export const previewSyncWorkflow = inngest.createFunction(
 				error instanceof Error
 					? error.message
 					: "Failed to queue preview build";
-			await step.run("mark-preview-queue-failed", async () => {
-				await db.transaction(async (tx) => {
-					await tx.execute(
-						sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}))`,
-					);
-					await tx.execute(
-						sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}), ${pullRequestNumber})`,
-					);
-					await tx.execute(
-						sql`select pg_advisory_xact_lock(hashtext(${clone.serviceId}))`,
-					);
-					const current = await tx
-						.select({
-							previewCurrentRevisionId: services.previewCurrentRevisionId,
-							previewGithubDeploymentId: services.previewGithubDeploymentId,
-						})
-						.from(services)
-						.where(
-							and(eq(services.id, clone.serviceId), isNull(services.deletedAt)),
-						)
-						.then((rows) => rows[0]);
-					if (current) {
-						try {
-							await updateGitHubDeploymentStatus(
-								context.githubRepo.installationId,
-								context.githubRepo.repoFullName,
-								deploymentId,
-								"failure",
-								{ description: message.substring(0, 140) },
-							);
-						} catch (statusError) {
-							console.error(
-								"[preview:sync] failed to report build queue failure:",
-								statusError,
-							);
-						}
-					}
-					if (
-						activatedRevisionId &&
-						current?.previewCurrentRevisionId === activatedRevisionId &&
-						current.previewGithubDeploymentId === deploymentId
-					) {
-						await tx
-							.update(services)
-							.set({
-								previewCurrentRevisionId:
-									previous?.previewCurrentRevisionId ?? null,
-								previewGithubDeploymentId:
-									previous?.previewGithubDeploymentId ?? null,
-								previewError: message,
+			const previewStillExists = await step.run(
+				"restore-preview-after-queue-failure",
+				() =>
+					db.transaction(async (tx) => {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}))`,
+						);
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}), hashtext(${previewGitRef}))`,
+						);
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(hashtext(${clone.serviceId}))`,
+						);
+						const current = await tx
+							.select({
+								previewCurrentRevisionId: services.previewCurrentRevisionId,
+								previewGithubDeploymentId: services.previewGithubDeploymentId,
 							})
-							.where(eq(services.id, clone.serviceId));
-					} else if (!activatedRevisionId && current) {
-						await tx
-							.update(services)
-							.set({ previewError: message })
-							.where(eq(services.id, clone.serviceId));
-					}
-				});
-			});
+							.from(services)
+							.where(
+								and(
+									eq(services.id, clone.serviceId),
+									isNull(services.deletedAt),
+								),
+							)
+							.then((rows) => rows[0]);
+						if (
+							activatedRevisionId &&
+							current?.previewCurrentRevisionId === activatedRevisionId &&
+							current.previewGithubDeploymentId === deploymentId
+						) {
+							await tx
+								.update(services)
+								.set({
+									previewCurrentRevisionId:
+										previous?.previewCurrentRevisionId ?? null,
+									previewGithubDeploymentId:
+										previous?.previewGithubDeploymentId ?? null,
+								})
+								.where(eq(services.id, clone.serviceId));
+						}
+						return current != null;
+					}),
+			);
 			if (activatedRevisionId) {
 				await step.run("cancel-undispatched-preview", () =>
 					cancelPreviewRevisionWork(clone.serviceId, activatedRevisionId!),
 				);
 			}
+			await step.run("mark-preview-queue-failed", () =>
+				updateGitHubDeploymentStatus(
+					context.githubRepo.installationId,
+					context.githubRepo.repoFullName,
+					deploymentId,
+					previewStillExists ? "failure" : "inactive",
+					{
+						description: previewStillExists
+							? message.substring(0, 140)
+							: "Preview was removed",
+					},
+				),
+			);
 			throw error;
 		}
 
@@ -527,7 +571,7 @@ export const previewCloseWorkflow = inngest.createFunction(
 		concurrency: [
 			{
 				limit: 1,
-				key: 'event.data.baseServiceId + ":" + event.data.pullRequestNumber',
+				key: 'event.data.baseServiceId + ":" + event.data.previewGitRef',
 			},
 		],
 	},
@@ -548,25 +592,25 @@ export const previewServiceReconcileWorkflow = inngest.createFunction(
 		if (!context || !context.service.previewDeploymentsEnabled) {
 			const clones = await step.run("load-previews-to-close", () =>
 				db
-					.select({ pullRequestNumber: services.previewPullRequestNumber })
+					.select({ previewGitRef: services.previewGitRef })
 					.from(services)
-					.where(
-						and(
-							eq(services.previewOfServiceId, event.data.baseServiceId),
-							isNull(services.deletedAt),
-						),
-					),
+					.where(eq(services.previewOfService, event.data.baseServiceId)),
 			);
-			for (const clone of clones) {
-				if (!clone.pullRequestNumber) continue;
-				await step.run(`close-disabled-${clone.pullRequestNumber}`, () =>
-					closePreview(
-						event.data.baseServiceId,
-						clone.pullRequestNumber!,
-						"preview deployments disabled",
-					),
-				);
-			}
+			await Promise.all(
+				clones.flatMap((clone) =>
+					clone.previewGitRef
+						? [
+								step.run(`close-disabled-${clone.previewGitRef}`, () =>
+									closePreview(
+										event.data.baseServiceId,
+										clone.previewGitRef!,
+										"preview deployments disabled",
+									),
+								),
+							]
+						: [],
+				),
+			);
 			return { status: "disabled", closed: clones.length };
 		}
 		const pullRequests = await step.run("list-open-pull-requests", () =>
@@ -579,43 +623,47 @@ export const previewServiceReconcileWorkflow = inngest.createFunction(
 		const eligible = pullRequests.filter((pullRequest) =>
 			isEligiblePullRequest(context, pullRequest),
 		);
-		const eligibleNumbers = new Set(
-			eligible.map((pullRequest) => pullRequest.number),
+		const eligibleRefs = new Set(
+			eligible.map((pullRequest) => pullRequestMergeRef(pullRequest.number)),
 		);
 		const existing = await step.run("list-existing-previews", () =>
 			db
-				.select({ pullRequestNumber: services.previewPullRequestNumber })
+				.select({
+					previewGitRef: services.previewGitRef,
+					deletedAt: services.deletedAt,
+				})
 				.from(services)
-				.where(
-					and(
-						eq(services.previewOfServiceId, event.data.baseServiceId),
-						isNull(services.deletedAt),
-					),
-				),
+				.where(eq(services.previewOfService, event.data.baseServiceId)),
 		);
 		const stale = existing.filter(
 			(clone) =>
-				clone.pullRequestNumber &&
-				!eligibleNumbers.has(clone.pullRequestNumber),
+				clone.previewGitRef &&
+				(clone.deletedAt != null || !eligibleRefs.has(clone.previewGitRef)),
 		);
-		for (const clone of stale) {
-			await step.run(`close-stale-${clone.pullRequestNumber}`, () =>
-				closePreview(
-					event.data.baseServiceId,
-					clone.pullRequestNumber!,
-					"pull request no longer eligible",
+		await Promise.all(
+			stale.map((clone) =>
+				step.run(`close-stale-${clone.previewGitRef}`, () =>
+					closePreview(
+						event.data.baseServiceId,
+						clone.previewGitRef!,
+						clone.deletedAt
+							? "retrying preview deletion"
+							: "pull request no longer eligible",
+					),
 				),
-			);
-		}
-		for (const pullRequest of eligible) {
-			await step.run(`queue-pr-${pullRequest.number}`, () =>
-				enqueuePreviewSync(
-					event.data.baseServiceId,
-					pullRequest.number,
-					`reconcile:${pullRequest.updatedAt}`,
+			),
+		);
+		await Promise.all(
+			eligible.map((pullRequest) =>
+				step.run(`queue-pr-${pullRequest.number}`, () =>
+					enqueuePreviewSync(
+						event.data.baseServiceId,
+						pullRequestMergeRef(pullRequest.number),
+						`reconcile:${pullRequest.updatedAt}`,
+					),
 				),
-			);
-		}
+			),
+		);
 		return {
 			status: "queued",
 			count: eligible.length,
@@ -626,12 +674,13 @@ export const previewServiceReconcileWorkflow = inngest.createFunction(
 
 async function enqueuePreviewSync(
 	baseServiceId: string,
-	pullRequestNumber: number,
+	previewGitRef: string,
 	idSuffix: string,
 ) {
+	const pullRequestNumber = pullRequestNumberFromMergeRef(previewGitRef);
 	await inngest.send(
 		inngestEvents.previewSyncRequested.create(
-			{ baseServiceId, pullRequestNumber },
+			{ baseServiceId, previewGitRef },
 			{
 				id: `preview-reconcile:${baseServiceId}:${pullRequestNumber}:${idSuffix}`,
 			},

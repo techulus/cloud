@@ -148,7 +148,6 @@ describe("service commands route", () => {
 
 	it("returns paginated history without internal actor IDs", async () => {
 		mocks.queryResults.push(
-			[{ id: "service-1" }],
 			Array.from({ length: 26 }, (_, index) => ({
 				id: `command-${String(26 - index).padStart(2, "0")}`,
 				command: "whoami",

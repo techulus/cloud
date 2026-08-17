@@ -137,20 +137,23 @@ With no configured health check, `healthy` means only that the container is runn
 
 ## Pull Request Preview Isolation
 
-An enabled GitHub service represents each eligible pull request as a hidden
-stateless service copy. The copy gives the preview an independent service ID,
-revision, build, rollout, deployment set, registry path, and generated route,
-while reusing the normal runtime pipeline. This avoids allowing concurrent pull
-request revisions to compete for the base service's single rollout and routing
-state.
+An enabled GitHub service represents each eligible pull request as an ordinary,
+visible stateless service in the project's `previews` environment. An existing
+environment with that name is reused; otherwise the control plane creates it.
+The environment remains after its last preview closes and may also contain
+unrelated user-created services.
 
-The control plane resolves the exact synthetic merge ref, refreshes the service
-copy from current base configuration, and queues an ordinary build. A current
-revision pointer on the copy prevents superseded build and rollout callbacks
-from deploying or reporting success. GitHub reports the transient environment
-as ready only after health and routing convergence complete. Closing, merging,
-or drafting the pull request clears that pointer before runtime and registry
-cleanup.
+Each copy has an independent service ID, revision, build, rollout, deployment
+set, registry path, and generated route while reusing the normal runtime
+pipeline. It is copied from the base service only when first created, so later
+user edits to the visible preview service survive pull request updates.
+
+The control plane resolves the exact synthetic merge ref and queues an ordinary
+build. A current revision pointer on the copy prevents superseded build and
+rollout callbacks from deploying or reporting success. GitHub reports the
+transient environment as ready only after health and routing convergence
+complete. Closing, merging, or drafting the pull request clears that pointer
+before runtime and registry cleanup.
 
 ## Networking
 

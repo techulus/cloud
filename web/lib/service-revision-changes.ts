@@ -16,7 +16,7 @@ const legacySourceSchema = z.discriminatedUnion("type", [
 	z.strictObject({ type: z.literal("image"), image: z.string() }),
 	z.strictObject({
 		type: z.literal("github"),
-		repository: z.string().url(),
+		repository: z.url(),
 		repositoryId: z.number().int().positive().nullable(),
 		branch: z.string().min(1),
 		commitSha: z.string().regex(/^[0-9a-f]{40}$/),
@@ -37,7 +37,7 @@ const serviceRevisionSpecFields = {
 		z.strictObject({ type: z.literal("image"), image: z.string() }),
 		z.strictObject({
 			type: z.literal("github"),
-			repository: z.string().url(),
+			repository: z.url(),
 			repositoryId: z.number().int().positive().nullable(),
 			branch: z.string().min(1),
 			gitRef: z.string().refine(isSupportedGitRef, "Unsupported Git ref"),

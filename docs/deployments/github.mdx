@@ -50,10 +50,12 @@ GitHub deployment statuses are updated on the commit so you can track progress f
 
 ## Pull Request Preview Deployments
 
-Preview deployments are opt in from a GitHub-backed service's **Previews** tab.
-They require a configured **Automatic Subdomain Domain** and its wildcard DNS
-record. Each eligible pull request gets one hidden, single-replica copy of the
-service and a stable generated HTTPS URL beneath that domain.
+Preview deployments are opt in from a GitHub-backed service's **Configuration**
+page. They require a configured **Automatic Subdomain Domain** and its wildcard
+DNS record. Each eligible pull request gets one visible, single-replica service
+in the project's ordinary `previews` environment and a stable generated HTTPS
+URL beneath that domain. An existing environment named `previews` is reused and
+is left in place when previews close.
 
 A pull request is eligible only when it:
 
@@ -67,12 +69,14 @@ The preview builds GitHub's synthetic merge result at
 configured branch. If GitHub cannot produce that ref because of merge
 conflicts, the preview fails rather than building the raw pull request head.
 
-Preview copies inherit the service's current source configuration, private
-ports, resource limits, placement, health check, start command, and complete
-secret set. They do not copy volumes, backups, schedules, cron jobs,
-autoscaling, serverless sleep, production custom domains, or public TCP/UDP
-routes. Additional preview-specific secret configuration is neither needed nor
-available.
+When first created, preview services inherit the base service's current source
+configuration, private ports, resource limits, placement, health check, start
+command, and complete secret set. They do not copy volumes, backups, schedules,
+cron jobs, autoscaling, serverless sleep, production custom domains, or public
+TCP/UDP routes. Additional preview-specific secret configuration is neither
+needed nor available. Preview services use the normal service pages and may be
+edited like other services, except that volumes remain unavailable. Later pull
+request updates preserve those edits.
 
 New commits replace the preview revision without changing its URL. Converting
 the pull request to a draft, closing it, or merging it removes the runtime and

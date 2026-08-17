@@ -70,8 +70,8 @@ function linkedService({
 	projectSlug = "cloud",
 	environmentName = "production",
 	previewDeploymentsEnabled = false,
-	previewOfServiceId = null,
-	previewPullRequestNumber = null,
+	previewOfService = null,
+	previewGitRef = null,
 	stateful = false,
 }: {
 	serviceId: string;
@@ -85,8 +85,8 @@ function linkedService({
 	projectSlug?: string;
 	environmentName?: string;
 	previewDeploymentsEnabled?: boolean;
-	previewOfServiceId?: string | null;
-	previewPullRequestNumber?: number | null;
+	previewOfService?: string | null;
+	previewGitRef?: string | null;
 	stateful?: boolean;
 }) {
 	return {
@@ -108,8 +108,8 @@ function linkedService({
 			deletedAt,
 			githubRootDir: rootDir,
 			previewDeploymentsEnabled,
-			previewOfServiceId,
-			previewPullRequestNumber,
+			previewOfService,
+			previewGitRef,
 			stateful,
 		},
 		project: { id: "project-1", name: projectName, slug: projectSlug },
@@ -436,7 +436,7 @@ describe("GitHub pull request webhook", () => {
 		}));
 	});
 
-	it("queues one durable sync for each eligible enabled base service", async () => {
+	it("queues one durable sync per eligible enabled base service", async () => {
 		mocks.queryResults.push([
 			linkedService({
 				serviceId: "service-a",
@@ -461,11 +461,52 @@ describe("GitHub pull request webhook", () => {
 		expect(mocks.send).toHaveBeenCalledWith([
 			expect.objectContaining({
 				name: "preview/sync-requested",
-				data: { baseServiceId: "service-a", pullRequestNumber: 42 },
+				data: {
+					baseServiceId: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+				},
 			}),
 			expect.objectContaining({
 				name: "preview/sync-requested",
-				data: { baseServiceId: "service-b", pullRequestNumber: 42 },
+				data: {
+					baseServiceId: "service-b",
+					previewGitRef: "refs/pull/42/merge",
+				},
+			}),
+		]);
+	});
+
+	it("closes an existing preview when the pull request changes base branch", async () => {
+		mocks.queryResults.push(
+			[
+				linkedService({
+					serviceId: "service-a",
+					previewDeploymentsEnabled: true,
+				}),
+			],
+			[
+				linkedService({
+					serviceId: "preview-42",
+					previewOfService: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+				}).service,
+			],
+		);
+
+		const response = await POST(
+			pullRequest("edited", { baseBranch: "release" }),
+		);
+
+		expect(response.status).toBe(200);
+		expect(mocks.send).toHaveBeenCalledWith([
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: {
+					baseServiceId: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+					reason: "pull_request_ineligible",
+					verifyWithGitHub: true,
+				},
 			}),
 		]);
 	});
@@ -492,13 +533,16 @@ describe("GitHub pull request webhook", () => {
 		["closed", false, "pull_request_closed"],
 		["converted_to_draft", false, "converted_to_draft"],
 	])("queues teardown for %s", async (action, merged, reason) => {
-		mocks.queryResults.push([
-			linkedService({
-				serviceId: "preview-42",
-				previewOfServiceId: "service-a",
-				previewPullRequestNumber: 42,
-			}),
-		]);
+		mocks.queryResults.push(
+			[linkedService({ serviceId: "service-a" })],
+			[
+				linkedService({
+					serviceId: "preview-42",
+					previewOfService: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+				}).service,
+			],
+		);
 
 		const response = await POST(pullRequest(action, { merged }));
 
@@ -508,7 +552,7 @@ describe("GitHub pull request webhook", () => {
 				name: "preview/close-requested",
 				data: {
 					baseServiceId: "service-a",
-					pullRequestNumber: 42,
+					previewGitRef: "refs/pull/42/merge",
 					reason,
 					verifyWithGitHub: true,
 				},

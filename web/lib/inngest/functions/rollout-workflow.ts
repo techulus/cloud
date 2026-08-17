@@ -1,7 +1,7 @@
 import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { getRuntimeService } from "@/db/queries";
-import { deployments, rollouts, servers } from "@/db/schema";
+import { getService } from "@/db/queries";
+import { deployments, rollouts, servers, services } from "@/db/schema";
 import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import {
@@ -207,7 +207,7 @@ export const rolloutWorkflow = inngest.createFunction(
 		const { rolloutId, serviceId } = event.data;
 
 		await step.run("validate-service", async () => {
-			const svc = await getRuntimeService(serviceId);
+			const svc = await getService(serviceId);
 			if (!svc) {
 				throw new Error("Service not found");
 			}
@@ -615,6 +615,21 @@ export const rolloutWorkflow = inngest.createFunction(
 					await tx.execute(
 						sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 					);
+					const service = await tx
+						.select({
+							previewOfService: services.previewOfService,
+							previewCurrentRevisionId: services.previewCurrentRevisionId,
+						})
+						.from(services)
+						.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+						.then((rows) => rows[0]);
+					if (
+						!service ||
+						(service.previewOfService &&
+							service.previewCurrentRevisionId !== revision.id)
+					) {
+						throw new Error("Preview revision was superseded before routing");
+					}
 					const [rollout] = await tx
 						.select({ status: rollouts.status })
 						.from(rollouts)

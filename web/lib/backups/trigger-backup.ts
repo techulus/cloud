@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -38,7 +38,7 @@ export async function triggerBackup({
 	const service = await db
 		.select()
 		.from(services)
-		.where(and(eq(services.id, serviceId), isNull(services.previewOfServiceId)))
+		.where(eq(services.id, serviceId))
 		.then((r) => r[0]);
 
 	if (!service) {

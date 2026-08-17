@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
 	const selectResults: unknown[][] = [];
+	const returningResults: unknown[][] = [];
 	const insertedValues: unknown[] = [];
 	const updatedValues: unknown[] = [];
 	function query(result: unknown[]) {
@@ -24,7 +25,18 @@ const mocks = vi.hoisted(() => {
 		insert: vi.fn(() => ({
 			values: vi.fn((values: unknown) => {
 				insertedValues.push(values);
-				return Promise.resolve();
+				const result = {
+					onConflictDoNothing: vi.fn(() => result),
+					returning: vi.fn(() =>
+						Promise.resolve(returningResults.shift() ?? []),
+					),
+					// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
+					then: (
+						resolve: (value: undefined) => unknown,
+						reject?: (reason: unknown) => unknown,
+					) => Promise.resolve(undefined).then(resolve, reject),
+				};
+				return result;
 			}),
 		})),
 		update: vi.fn(() => ({
@@ -37,6 +49,7 @@ const mocks = vi.hoisted(() => {
 	};
 	return {
 		selectResults,
+		returningResults,
 		insertedValues,
 		updatedValues,
 		tx,
@@ -54,8 +67,8 @@ vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/db/queries", () => ({ getSetting: mocks.getSetting }));
 
 import {
-	createOrRefreshPreviewClone,
-	previewPortConfiguration,
+	createPreviewClone,
+	ensurePreviewEnvironment,
 } from "@/lib/preview-deployments";
 
 const baseService = {
@@ -68,7 +81,7 @@ const baseService = {
 	githubBranch: "main",
 	githubRootDir: "apps/web",
 	previewDeploymentsEnabled: true,
-	previewOfServiceId: null,
+	previewOfService: null,
 	stateful: false,
 	placementMode: "manual",
 	healthCheckCmd: "curl -f http://localhost/health",
@@ -117,6 +130,7 @@ const ports = [
 function queueFactoryReads(existing: unknown[] = []) {
 	mocks.selectResults.push(
 		[baseService],
+		existing,
 		[repo],
 		ports,
 		[
@@ -137,7 +151,7 @@ function queueFactoryReads(existing: unknown[] = []) {
 				wireguardIp: "10.0.0.1",
 			},
 		],
-		existing,
+		[{ id: "preview-environment", projectId: "project-1", name: "previews" }],
 	);
 }
 
@@ -145,6 +159,7 @@ describe("preview service cloning", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.selectResults.length = 0;
+		mocks.returningResults.length = 0;
 		mocks.insertedValues.length = 0;
 		mocks.updatedValues.length = 0;
 		mocks.getSetting.mockResolvedValue("apps.example.com");
@@ -154,10 +169,9 @@ describe("preview service cloning", () => {
 	it("copies ordinary configuration and secrets while enforcing preview policy", async () => {
 		queueFactoryReads();
 
-		const result = await createOrRefreshPreviewClone({
+		const result = await createPreviewClone({
 			baseServiceId: baseService.id,
-			pullRequestNumber: 42,
-			now: new Date("2026-08-16T00:00:00Z"),
+			previewGitRef: "refs/pull/42/merge",
 		});
 
 		expect(result).toMatchObject({
@@ -168,14 +182,14 @@ describe("preview service cloning", () => {
 			mocks.insertedValues as Array<Record<string, unknown>>;
 		expect(service).toMatchObject({
 			projectId: "project-1",
-			environmentId: "environment-1",
+			environmentId: "preview-environment",
 			replicas: 1,
 			stateful: false,
 			autoscalingEnabled: false,
 			serverlessEnabled: false,
 			previewDeploymentsEnabled: false,
-			previewOfServiceId: baseService.id,
-			previewPullRequestNumber: 42,
+			previewOfService: baseService.id,
+			previewGitRef: "refs/pull/42/merge",
 		});
 		expect(clonedPorts).toEqual(
 			expect.arrayContaining([
@@ -203,56 +217,75 @@ describe("preview service cloning", () => {
 		});
 	});
 
-	it("refreshes the same clone instead of creating another service", async () => {
-		queueFactoryReads([
-			{
-				id: "preview-service-1",
-				previewOfServiceId: baseService.id,
-				previewPullRequestNumber: 42,
-			},
-		]);
+	it("preserves the same visible clone instead of refreshing its configuration", async () => {
+		mocks.selectResults.push(
+			[baseService],
+			[
+				{
+					id: "preview-service-1",
+					previewOfService: baseService.id,
+					previewGitRef: "refs/pull/42/merge",
+				},
+			],
+			[{ domain: "custom-preview.apps.example.com" }],
+		);
 
 		await expect(
-			createOrRefreshPreviewClone({
+			createPreviewClone({
 				baseServiceId: baseService.id,
-				pullRequestNumber: 42,
+				previewGitRef: "refs/pull/42/merge",
 			}),
 		).resolves.toMatchObject({
 			serviceId: "preview-service-1",
 			created: false,
+			primaryUrl: "https://custom-preview.apps.example.com",
 		});
-		expect(mocks.updatedValues[0]).toMatchObject({
-			previewOfServiceId: baseService.id,
-			previewPullRequestNumber: 42,
-		});
-		expect(mocks.insertedValues).toHaveLength(4);
-	});
-
-	it("makes non-HTTP public ports private", () => {
-		expect(
-			previewPortConfiguration({
-				ports,
-				serviceName: baseService.name,
-				serviceId: baseService.id,
-				pullRequestNumber: 42,
-				domain: "apps.example.com",
-			})[1],
-		).toMatchObject({
-			isPublic: false,
-			domain: null,
-			externalPort: null,
-			tlsPassthrough: false,
-		});
+		expect(mocks.updatedValues).toHaveLength(0);
+		expect(mocks.insertedValues).toHaveLength(0);
 	});
 
 	it("rejects stateful services", async () => {
 		mocks.selectResults.push([{ ...baseService, stateful: true }]);
 		await expect(
-			createOrRefreshPreviewClone({
+			createPreviewClone({
 				baseServiceId: baseService.id,
-				pullRequestNumber: 42,
+				previewGitRef: "refs/pull/42/merge",
 			}),
 		).rejects.toThrow("require a stateless service");
 		expect(mocks.tx.insert).not.toHaveBeenCalled();
+	});
+
+	it("creates the ordinary previews environment when it is missing", async () => {
+		mocks.selectResults.push([]);
+		mocks.returningResults.push([
+			{ id: "preview-environment", projectId: "project-1", name: "previews" },
+		]);
+
+		await expect(ensurePreviewEnvironment("project-1")).resolves.toMatchObject({
+			id: "preview-environment",
+			name: "previews",
+		});
+		expect(mocks.insertedValues).toContainEqual(
+			expect.objectContaining({ projectId: "project-1", name: "previews" }),
+		);
+	});
+
+	it("reuses an environment created concurrently", async () => {
+		mocks.selectResults.push(
+			[],
+			[
+				{
+					id: "concurrent-environment",
+					projectId: "project-1",
+					name: "previews",
+				},
+			],
+		);
+		mocks.returningResults.push([]);
+
+		await expect(ensurePreviewEnvironment("project-1")).resolves.toMatchObject({
+			id: "concurrent-environment",
+			name: "previews",
+		});
 	});
 });

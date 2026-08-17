@@ -223,71 +223,47 @@ export const previewReconciliation = inngest.createFunction(
 		singleton: { mode: "skip" },
 	},
 	async ({ step }) => {
-		const enabledServices = await step.run(
-			"reconcile-enabled-services",
+		const serviceCount = await step.run(
+			"queue-preview-reconciliation",
 			async () => {
-				const rows = await db
-					.select({ id: services.id })
-					.from(services)
-					.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
-					.where(
-						and(
-							eq(services.previewDeploymentsEnabled, true),
-							eq(services.sourceType, "github"),
-							isNull(services.previewOfServiceId),
-							isNull(services.deletedAt),
+				const [enabled, children] = await Promise.all([
+					db
+						.select({ id: services.id })
+						.from(services)
+						.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+						.where(
+							and(
+								eq(services.previewDeploymentsEnabled, true),
+								eq(services.sourceType, "github"),
+								isNull(services.previewOfService),
+								isNull(services.deletedAt),
+							),
 						),
-					);
+					db
+						.select({ id: services.previewOfService })
+						.from(services)
+						.where(isNotNull(services.previewOfService))
+						.groupBy(services.previewOfService),
+				]);
+				const serviceIds = new Set([
+					...enabled.map(({ id }) => id),
+					...children.flatMap(({ id }) => (id ? [id] : [])),
+				]);
 				const day = new Date().toISOString().slice(0, 10);
-				for (const service of rows) {
+				if (serviceIds.size > 0) {
 					await inngest.send(
-						inngestEvents.previewServiceReconcileRequested.create(
-							{ baseServiceId: service.id },
-							{ id: `preview-service-daily:${service.id}:${day}` },
+						[...serviceIds].map((baseServiceId) =>
+							inngestEvents.previewServiceReconcileRequested.create(
+								{ baseServiceId },
+								{ id: `preview-service-daily:${baseServiceId}:${day}` },
+							),
 						),
 					);
 				}
-				return rows.length;
+				return serviceIds.size;
 			},
 		);
-		const expiredPreviews = await step.run(
-			"reconcile-expired-previews",
-			async () => {
-				const expired = await db
-					.select({
-						baseServiceId: services.previewOfServiceId,
-						pullRequestNumber: services.previewPullRequestNumber,
-						expiresAt: services.previewExpiresAt,
-					})
-					.from(services)
-					.where(
-						and(
-							isNotNull(services.previewOfServiceId),
-							isNotNull(services.previewPullRequestNumber),
-							isNotNull(services.previewExpiresAt),
-							isNull(services.deletedAt),
-							lte(services.previewExpiresAt, new Date()),
-						),
-					)
-					.limit(100);
-				for (const preview of expired) {
-					if (!preview.baseServiceId || !preview.pullRequestNumber) continue;
-					await inngest.send(
-						inngestEvents.previewSyncRequested.create(
-							{
-								baseServiceId: preview.baseServiceId,
-								pullRequestNumber: preview.pullRequestNumber,
-							},
-							{
-								id: `preview-expiry:${preview.baseServiceId}:${preview.pullRequestNumber}:${preview.expiresAt?.toISOString()}`,
-							},
-						),
-					);
-				}
-				return expired.length;
-			},
-		);
-		return { enabledServices, expiredPreviews };
+		return { serviceCount };
 	},
 );
 
@@ -308,7 +284,6 @@ export const serviceCronDispatcher = inngest.createFunction(
 					and(
 						eq(serviceCrons.serviceId, services.id),
 						isNull(services.deletedAt),
-						isNull(services.previewOfServiceId),
 					),
 				)
 				.where(lte(serviceCrons.nextScheduledFor, now))

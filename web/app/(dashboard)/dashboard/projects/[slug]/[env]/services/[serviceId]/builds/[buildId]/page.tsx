@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { BuildDetails } from "@/components/builds/build-details";
 import { SetBreadcrumbs } from "@/components/core/breadcrumb-data";
@@ -28,14 +28,7 @@ async function getBuild(
 	const service = await db
 		.select()
 		.from(services)
-		.where(
-			and(
-				eq(services.id, serviceId),
-				eq(services.projectId, project.id),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		)
+		.where(and(eq(services.id, serviceId), eq(services.projectId, project.id)))
 		.then((r) => r[0]);
 
 	if (!service) return null;

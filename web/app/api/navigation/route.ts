@@ -34,7 +34,6 @@ export async function GET() {
 					eq(services.projectId, projects.id),
 					eq(services.environmentId, environments.id),
 					isNull(services.deletedAt),
-					isNull(services.previewOfServiceId),
 				),
 			)
 			.orderBy(projects.name, environments.name, services.name),

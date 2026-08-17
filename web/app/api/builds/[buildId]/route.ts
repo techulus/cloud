@@ -1,7 +1,7 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { builds, servers, services } from "@/db/schema";
+import { builds, servers } from "@/db/schema";
 import { requireRequestSession } from "@/lib/api-auth";
 
 export async function GET(
@@ -20,14 +20,6 @@ export async function GET(
 		})
 		.from(builds)
 		.leftJoin(servers, eq(builds.claimedBy, servers.id))
-		.innerJoin(
-			services,
-			and(
-				eq(builds.serviceId, services.id),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		)
 		.where(eq(builds.id, buildId));
 
 	if (!buildData) {

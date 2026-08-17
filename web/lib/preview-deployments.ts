@@ -1,25 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
 import {
-	builds,
+	environments,
 	githubRepos,
-	rollouts,
 	secrets,
 	servers,
 	servicePorts,
 	serviceReplicas,
-	serviceRevisions,
 	services,
 } from "@/db/schema";
 import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { resolveRegistryImageHost } from "@/lib/registry-reference";
-import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import {
+	pullRequestMergeRef,
+	pullRequestNumberFromMergeRef,
+} from "@/lib/service-revision-spec";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 const DNS_LABEL_MAX_LENGTH = 63;
-export const PREVIEW_RECONCILIATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const PREVIEWS_ENVIRONMENT_NAME = "previews";
+
+type PreviewTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type PreviewPort = {
 	port: number;
@@ -84,6 +87,59 @@ export async function requirePreviewDomain() {
 	return normalized;
 }
 
+async function ensurePreviewEnvironmentInTransaction(
+	tx: PreviewTransaction,
+	projectId: string,
+) {
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(hashtext(${`preview-environment:${projectId}`}))`,
+	);
+	const existing = await tx
+		.select()
+		.from(environments)
+		.where(
+			and(
+				eq(environments.projectId, projectId),
+				eq(environments.name, PREVIEWS_ENVIRONMENT_NAME),
+			),
+		)
+		.then((rows) => rows[0]);
+	if (existing) return existing;
+
+	const created = await tx
+		.insert(environments)
+		.values({
+			id: randomUUID(),
+			projectId,
+			name: PREVIEWS_ENVIRONMENT_NAME,
+		})
+		.onConflictDoNothing({
+			target: [environments.projectId, environments.name],
+		})
+		.returning()
+		.then((rows) => rows[0]);
+	if (created) return created;
+
+	const concurrent = await tx
+		.select()
+		.from(environments)
+		.where(
+			and(
+				eq(environments.projectId, projectId),
+				eq(environments.name, PREVIEWS_ENVIRONMENT_NAME),
+			),
+		)
+		.then((rows) => rows[0]);
+	if (!concurrent) throw new Error("Failed to create previews environment");
+	return concurrent;
+}
+
+export async function ensurePreviewEnvironment(projectId: string) {
+	return db.transaction((tx) =>
+		ensurePreviewEnvironmentInTransaction(tx, projectId),
+	);
+}
+
 export function previewPortConfiguration(input: {
 	ports: PreviewPort[];
 	serviceName: string;
@@ -120,34 +176,34 @@ export function previewPortConfiguration(input: {
 
 export async function getPreviewClone(
 	baseServiceId: string,
-	pullRequestNumber: number,
+	previewGitRef: string,
 ) {
+	pullRequestNumberFromMergeRef(previewGitRef);
 	return db
 		.select()
 		.from(services)
 		.where(
 			and(
-				eq(services.previewOfServiceId, baseServiceId),
-				eq(services.previewPullRequestNumber, pullRequestNumber),
+				eq(services.previewOfService, baseServiceId),
+				eq(services.previewGitRef, previewGitRef),
 				isNull(services.deletedAt),
 			),
 		)
 		.then((rows) => rows[0] ?? null);
 }
 
-export async function createOrRefreshPreviewClone(input: {
+export async function createPreviewClone(input: {
 	baseServiceId: string;
-	pullRequestNumber: number;
-	now?: Date;
+	previewGitRef: string;
 }) {
 	const domain = await requirePreviewDomain();
-	const now = input.now ?? new Date();
+	const pullRequestNumber = pullRequestNumberFromMergeRef(input.previewGitRef);
 	return db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}))`,
 		);
 		await tx.execute(
-			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}), ${input.pullRequestNumber})`,
+			sql`select pg_advisory_xact_lock(hashtext(${input.baseServiceId}), hashtext(${input.previewGitRef}))`,
 		);
 
 		const base = await tx
@@ -156,7 +212,7 @@ export async function createOrRefreshPreviewClone(input: {
 			.where(
 				and(
 					eq(services.id, input.baseServiceId),
-					isNull(services.previewOfServiceId),
+					isNull(services.previewOfService),
 					isNull(services.deletedAt),
 				),
 			)
@@ -169,6 +225,37 @@ export async function createOrRefreshPreviewClone(input: {
 		}
 		if (base.sourceType !== "github") {
 			throw new Error("Preview deployments require a GitHub App service");
+		}
+
+		const existing = await tx
+			.select()
+			.from(services)
+			.where(
+				and(
+					eq(services.previewOfService, base.id),
+					eq(services.previewGitRef, input.previewGitRef),
+					isNull(services.deletedAt),
+				),
+			)
+			.then((rows) => rows[0]);
+		if (existing) {
+			const primaryDomain = await tx
+				.select({ domain: servicePorts.domain })
+				.from(servicePorts)
+				.where(
+					and(
+						eq(servicePorts.serviceId, existing.id),
+						eq(servicePorts.protocol, "http"),
+						eq(servicePorts.isPublic, true),
+					),
+				)
+				.orderBy(servicePorts.port, servicePorts.id)
+				.then((rows) => rows.find((row) => row.domain)?.domain ?? null);
+			return {
+				serviceId: existing.id,
+				created: false,
+				primaryUrl: primaryDomain ? `https://${primaryDomain}` : null,
+			};
 		}
 
 		const [repo, ports, sourceSecrets, placements] = await Promise.all([
@@ -222,23 +309,16 @@ export async function createOrRefreshPreviewClone(input: {
 			throw new Error("No eligible placement exists for this preview");
 		}
 
-		const existing = await tx
-			.select()
-			.from(services)
-			.where(
-				and(
-					eq(services.previewOfServiceId, base.id),
-					eq(services.previewPullRequestNumber, input.pullRequestNumber),
-					isNull(services.deletedAt),
-				),
-			)
-			.then((rows) => rows[0]);
-		const previewServiceId = existing?.id ?? randomUUID();
+		const previewEnvironment = await ensurePreviewEnvironmentInTransaction(
+			tx,
+			base.projectId,
+		);
+		const previewServiceId = randomUUID();
 		const configuredPorts = previewPortConfiguration({
 			ports,
 			serviceName: base.name,
 			serviceId: base.id,
-			pullRequestNumber: input.pullRequestNumber,
+			pullRequestNumber,
 			domain,
 		});
 		const primaryDomain = configuredPorts.find(
@@ -249,8 +329,8 @@ export async function createOrRefreshPreviewClone(input: {
 
 		const serviceValues = {
 			projectId: base.projectId,
-			environmentId: base.environmentId,
-			name: `${base.name} (PR #${input.pullRequestNumber})`,
+			environmentId: previewEnvironment.id,
+			name: `${base.name} (PR #${pullRequestNumber})`,
 			hostname: primaryDomain.split(".")[0],
 			image: `${resolveRegistryImageHost()}/${base.projectId}/${previewServiceId}:latest`,
 			sourceType: "github" as const,
@@ -277,34 +357,14 @@ export async function createOrRefreshPreviewClone(input: {
 			backupEnabled: false,
 			backupSchedule: null,
 			previewDeploymentsEnabled: false,
-			previewOfServiceId: base.id,
-			previewPullRequestNumber: input.pullRequestNumber,
-			previewError: null,
-			previewExpiresAt: new Date(now.getTime() + PREVIEW_RECONCILIATION_TTL_MS),
+			previewOfService: base.id,
+			previewGitRef: pullRequestMergeRef(pullRequestNumber),
 		};
 
-		if (existing) {
-			await tx
-				.update(services)
-				.set(serviceValues)
-				.where(eq(services.id, previewServiceId));
-		} else {
-			await tx.insert(services).values({
-				id: previewServiceId,
-				...serviceValues,
-			});
-		}
-
-		await Promise.all([
-			tx
-				.delete(servicePorts)
-				.where(eq(servicePorts.serviceId, previewServiceId)),
-			tx
-				.delete(serviceReplicas)
-				.where(eq(serviceReplicas.serviceId, previewServiceId)),
-			tx.delete(secrets).where(eq(secrets.serviceId, previewServiceId)),
-			tx.delete(githubRepos).where(eq(githubRepos.serviceId, previewServiceId)),
-		]);
+		await tx.insert(services).values({
+			id: previewServiceId,
+			...serviceValues,
+		});
 		await tx.insert(servicePorts).values(
 			configuredPorts.map((port) => ({
 				id: randomUUID(),
@@ -344,28 +404,10 @@ export async function createOrRefreshPreviewClone(input: {
 
 		return {
 			serviceId: previewServiceId,
-			created: !existing,
+			created: true,
 			primaryUrl: `https://${primaryDomain}`,
 		};
 	});
-}
-
-export async function isCurrentPreviewRevision(
-	serviceId: string,
-	serviceRevisionId: string,
-) {
-	const clone = await db
-		.select({ id: services.id })
-		.from(services)
-		.where(
-			and(
-				eq(services.id, serviceId),
-				eq(services.previewCurrentRevisionId, serviceRevisionId),
-				isNull(services.deletedAt),
-			),
-		)
-		.then((rows) => rows[0]);
-	return Boolean(clone);
 }
 
 export async function canDeployServiceRevision(
@@ -374,7 +416,7 @@ export async function canDeployServiceRevision(
 ) {
 	const service = await db
 		.select({
-			previewOfServiceId: services.previewOfServiceId,
+			previewOfService: services.previewOfService,
 			previewCurrentRevisionId: services.previewCurrentRevisionId,
 		})
 		.from(services)
@@ -382,7 +424,7 @@ export async function canDeployServiceRevision(
 		.then((rows) => rows[0]);
 	if (!service) return false;
 	return (
-		!service.previewOfServiceId ||
+		!service.previewOfService ||
 		service.previewCurrentRevisionId === serviceRevisionId
 	);
 }
@@ -410,7 +452,7 @@ export async function getPreviewPrimaryUrl(serviceId: string) {
 
 export async function updateCurrentPreviewGitHubStatus(input: {
 	serviceId: string;
-	serviceRevisionId: string;
+	serviceRevisionId: string | null;
 	state: "pending" | "in_progress" | "success" | "failure" | "inactive";
 	description: string;
 	logUrl?: string;
@@ -424,16 +466,19 @@ export async function updateCurrentPreviewGitHubStatus(input: {
 			.select({
 				previewCurrentRevisionId: services.previewCurrentRevisionId,
 				previewGithubDeploymentId: services.previewGithubDeploymentId,
-				previewOfServiceId: services.previewOfServiceId,
+				previewOfService: services.previewOfService,
 				installationId: githubRepos.installationId,
 				repoFullName: githubRepos.repoFullName,
 			})
 			.from(services)
-			.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+			.innerJoin(
+				githubRepos,
+				eq(githubRepos.serviceId, services.previewOfService),
+			)
 			.where(and(eq(services.id, input.serviceId), isNull(services.deletedAt)))
 			.then((rows) => rows[0]);
 		if (
-			!context?.previewOfServiceId ||
+			!context?.previewOfService ||
 			context.previewCurrentRevisionId !== input.serviceRevisionId ||
 			!context.previewGithubDeploymentId ||
 			(input.expectedDeploymentId !== undefined &&
@@ -476,102 +521,4 @@ export async function updateCurrentPreviewGitHubStatus(input: {
 		);
 		return true;
 	});
-}
-
-export async function listPreviewDeployments(baseServiceId: string) {
-	const clones = await db
-		.select()
-		.from(services)
-		.where(
-			and(
-				eq(services.previewOfServiceId, baseServiceId),
-				isNull(services.deletedAt),
-			),
-		)
-		.orderBy(services.previewPullRequestNumber);
-	return Promise.all(
-		clones.map(async (clone) => {
-			const revisionId = clone.previewCurrentRevisionId;
-			const [revision, revisionBuilds, rollout, primaryUrl] = await Promise.all(
-				[
-					revisionId
-						? db
-								.select({
-									specification: serviceRevisions.specification,
-									createdAt: serviceRevisions.createdAt,
-								})
-								.from(serviceRevisions)
-								.where(eq(serviceRevisions.id, revisionId))
-								.then((rows) => rows[0])
-						: null,
-					revisionId
-						? db
-								.select({
-									id: builds.id,
-									status: builds.status,
-									error: builds.error,
-								})
-								.from(builds)
-								.where(eq(builds.serviceRevisionId, revisionId))
-						: [],
-					revisionId
-						? db
-								.select({
-									id: rollouts.id,
-									status: rollouts.status,
-									currentStage: rollouts.currentStage,
-								})
-								.from(rollouts)
-								.where(eq(rollouts.serviceRevisionId, revisionId))
-								.orderBy(desc(rollouts.createdAt))
-								.then((rows) => rows[0])
-						: null,
-					getPreviewPrimaryUrl(clone.id),
-				],
-			);
-			let commitSha: string | null = null;
-			if (revision) {
-				const specification = parseServiceRevisionSpec(revision.specification);
-				if (specification.source.type === "github") {
-					commitSha = specification.source.commitSha;
-				}
-			}
-			const failedBuild = revisionBuilds.find(
-				(build) => build.status === "failed",
-			);
-			const activeBuild = revisionBuilds.some((build) =>
-				["pending", "claimed", "cloning", "building", "pushing"].includes(
-					build.status,
-				),
-			);
-			const status =
-				clone.previewError || failedBuild
-					? "failed"
-					: rollout?.status === "completed"
-						? "ready"
-						: rollout?.status === "failed" || rollout?.status === "rolled_back"
-							? "failed"
-							: rollout
-								? "deploying"
-								: activeBuild || revisionBuilds.length > 0
-									? "building"
-									: "queued";
-			return {
-				serviceId: clone.id,
-				pullRequestNumber: clone.previewPullRequestNumber!,
-				status,
-				commitSha,
-				url: primaryUrl,
-				error:
-					clone.previewError ??
-					failedBuild?.error ??
-					(rollout && ["failed", "rolled_back"].includes(rollout.status)
-						? rollout.currentStage
-						: null),
-				updatedAt:
-					revision?.createdAt.toISOString() ?? clone.createdAt.toISOString(),
-				expiresAt: clone.previewExpiresAt?.toISOString() ?? null,
-			};
-		}),
-	);
 }

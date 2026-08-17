@@ -16,13 +16,7 @@ export async function GET(
 		.select({ service: services, githubRepo: githubRepos })
 		.from(services)
 		.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
-		.where(
-			and(
-				eq(services.id, serviceId),
-				isNull(services.deletedAt),
-				isNull(services.previewOfServiceId),
-			),
-		);
+		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)));
 
 	if (!result) {
 		return Response.json(

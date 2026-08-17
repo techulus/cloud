@@ -28,7 +28,7 @@ vi.mock("@/db", () => ({
 		})),
 	},
 }));
-vi.mock("@/db/queries", () => ({ getRuntimeService: mocks.getService }));
+vi.mock("@/db/queries", () => ({ getService: mocks.getService }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/migrations", () => ({
 	startMigrationInternal: mocks.startMigrationInternal,
