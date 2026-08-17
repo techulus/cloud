@@ -9,9 +9,9 @@ import {
 	services,
 } from "@/db/schema";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
-import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { inactivatePreviewGitHubDeployments } from "@/lib/preview-deployments";
 import {
 	cleanupRegistryArtifactsForService,
 	prepareRegistryArtifactCleanup,
@@ -29,8 +29,6 @@ const activeBuildStatuses = [
 	"building",
 	"pushing",
 ] as const;
-
-type GitHubDeploymentCleanup = "report" | "defer" | "skip";
 
 async function cancelBuildRows(serviceId: string, serviceRevisionId?: string) {
 	const conditions = [
@@ -170,7 +168,7 @@ export async function deletePreviewService(
 	baseServiceId: string,
 	previewGitRef: string,
 	reason = "removed",
-	options: { githubDeploymentCleanup?: GitHubDeploymentCleanup } = {},
+	options: { reportGitHubDeployment?: boolean } = {},
 ) {
 	pullRequestNumberFromMergeRef(previewGitRef);
 	const claimed = await db.transaction(async (tx) => {
@@ -181,12 +179,8 @@ export async function deletePreviewService(
 			sql`select pg_advisory_xact_lock(hashtext(${baseServiceId}), hashtext(${previewGitRef}))`,
 		);
 		const context = await tx
-			.select({ service: services, githubRepo: githubRepos })
+			.select({ service: services })
 			.from(services)
-			.leftJoin(
-				githubRepos,
-				eq(githubRepos.serviceId, services.previewOfService),
-			)
 			.where(
 				and(
 					eq(services.previewOfService, baseServiceId),
@@ -203,10 +197,6 @@ export async function deletePreviewService(
 				"Preview deletion deferred while registry manifest work is processing",
 			);
 		}
-		await tx
-			.update(services)
-			.set({ previewCurrentRevisionId: null })
-			.where(eq(services.id, context.service.id));
 		await tx
 			.update(services)
 			.set({
@@ -254,29 +244,20 @@ export async function deletePreviewService(
 		enqueueReconcileForAllOnlineServers("preview_deleted", tx),
 	);
 	await cleanupRegistryArtifactsForService(claimed.service.id);
-	if (
-		(options.githubDeploymentCleanup ?? "report") === "report" &&
-		claimed.githubRepo &&
-		claimed.service.previewGithubDeploymentId
-	) {
-		await updateGitHubDeploymentStatus(
-			claimed.githubRepo.installationId,
-			claimed.githubRepo.repoFullName,
-			claimed.service.previewGithubDeploymentId,
-			"inactive",
-			{ description: `Preview removed: ${reason}`.substring(0, 140) },
-		);
+	if (options.reportGitHubDeployment !== false) {
+		await inactivatePreviewGitHubDeployments({
+			serviceId: claimed.service.id,
+			description: `Preview removed: ${reason}`,
+		});
 	}
-	if ((options.githubDeploymentCleanup ?? "report") !== "defer") {
-		await db.delete(services).where(eq(services.id, claimed.service.id));
-	}
+	await db.delete(services).where(eq(services.id, claimed.service.id));
 	return claimed;
 }
 
 export async function deletePreviewsForBaseService(
 	baseServiceId: string,
 	reason: string,
-	options: { githubDeploymentCleanup?: GitHubDeploymentCleanup } = {},
+	options: { reportGitHubDeployment?: boolean } = {},
 ) {
 	const previews = await db
 		.select({ service: services })
@@ -294,7 +275,6 @@ export async function deletePreviewsForGitHubInstallation(
 	reason: string,
 	options: {
 		removeRepositoryLinks?: boolean;
-		githubDeploymentCleanup?: GitHubDeploymentCleanup;
 	} = {},
 ) {
 	const baseServiceIds = await db.transaction(async (tx) => {
@@ -327,7 +307,7 @@ export async function deletePreviewsForGitHubInstallation(
 	});
 	for (const baseServiceId of baseServiceIds) {
 		await deletePreviewsForBaseService(baseServiceId, reason, {
-			githubDeploymentCleanup: options.githubDeploymentCleanup ?? "skip",
+			reportGitHubDeployment: false,
 		});
 	}
 }

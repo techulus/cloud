@@ -156,64 +156,50 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		safeURL = "https://***@" + safeURL[idx+1:]
 	}
 	b.sendLog(config, fmt.Sprintf("Cloning %s", safeURL))
-
-	if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
-		return fmt.Errorf("invalid exact commit SHA")
-	}
-	if !validGitRef(config.GitRef) {
-		return fmt.Errorf("invalid exact Git ref")
-	}
-
-	cmd := exec.CommandContext(ctx, "git", "init", buildDir)
-	output, err := b.runCommand(cmd, config)
-	if err != nil {
-		return fmt.Errorf("git init failed: %s: %w", output, err)
-	}
-	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "remote", "add", "origin", config.CloneURL)
-	output, err = b.runCommand(cmd, config)
-	if err != nil {
-		return fmt.Errorf("git remote setup failed: %s: %w", output, err)
-	}
-	depth := "50"
 	if pullRequestMergeRefPattern.MatchString(config.GitRef) {
-		depth = "1"
-	}
-	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", depth, "--no-tags", "origin", config.GitRef)
-	output, err = b.runCommand(cmd, config)
-	if err != nil {
-		return fmt.Errorf("git fetch exact ref failed: %s: %w", output, err)
+		return b.clonePullRequestRef(ctx, config, buildDir)
 	}
 
-	if pullRequestMergeRefPattern.MatchString(config.GitRef) {
-		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
-		fetchedCommit, err := b.runCommand(cmd, config)
+	branch := config.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	if config.CommitSha == "HEAD" {
+		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, config.CloneURL, buildDir)
+		output, err := b.runCommand(cmd, config)
 		if err != nil {
-			return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
+			return fmt.Errorf("git clone failed: %s: %w", output, err)
 		}
-		if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
-			return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
-		}
+		b.sendLog(config, fmt.Sprintf("Cloned branch %s", branch))
 	} else {
+		if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
+			return fmt.Errorf("invalid exact commit SHA")
+		}
+		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "50", "--branch", branch, "--single-branch", config.CloneURL, buildDir)
+		output, err := b.runCommand(cmd, config)
+		if err != nil {
+			return fmt.Errorf("git clone failed: %s: %w", output, err)
+		}
+
+		b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
+
 		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
-		if _, err = b.runCommand(cmd, config); err != nil {
+		_, err = b.runCommand(cmd, config)
+		if err != nil {
 			b.sendLog(config, "Selected commit is outside the shallow clone; fetching full branch history")
-			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--unshallow", "--no-tags", "origin", config.GitRef)
+			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--unshallow", "origin", branch)
 			output, err = b.runCommand(cmd, config)
 			if err != nil {
 				return fmt.Errorf("git fetch full branch history failed: %s: %w", output, err)
 			}
-			cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "cat-file", "-e", config.CommitSha+"^{commit}")
-			if output, err = b.runCommand(cmd, config); err != nil {
-				return fmt.Errorf("selected commit is not available from configured branch: %s: %w", output, err)
-			}
 		}
-	}
 
-	b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
-	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", "--detach", config.CommitSha)
-	output, err = b.runCommand(cmd, config)
-	if err != nil {
-		return fmt.Errorf("git checkout failed: %s: %w", output, err)
+		cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", config.CommitSha)
+		output, err = b.runCommand(cmd, config)
+		if err != nil {
+			return fmt.Errorf("git checkout failed: %s: %w", output, err)
+		}
 	}
 
 	b.sendLog(config, "Clone completed")
@@ -229,28 +215,50 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 	return nil
 }
 
-func validGitRef(ref string) bool {
-	if pullRequestMergeRefPattern.MatchString(ref) {
-		return true
+func (b *Builder) clonePullRequestRef(ctx context.Context, config *Config, buildDir string) error {
+	if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
+		return fmt.Errorf("invalid exact commit SHA")
 	}
-	if !strings.HasPrefix(ref, "refs/heads/") {
-		return false
+	cmd := exec.CommandContext(ctx, "git", "init", buildDir)
+	output, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git init failed: %s: %w", output, err)
 	}
-	branch := strings.TrimPrefix(ref, "refs/heads/")
-	if branch == "" || branch == "@" || strings.HasSuffix(branch, ".") || strings.Contains(branch, "..") || strings.Contains(branch, "@{") {
-		return false
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "remote", "add", "origin", config.CloneURL)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git remote setup failed: %s: %w", output, err)
 	}
-	for _, character := range branch {
-		if character <= 0x20 || character == 0x7f || strings.ContainsRune("~^:?*[\\", character) {
-			return false
-		}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", "1", "--no-tags", "origin", config.GitRef)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git fetch pull request ref failed: %s: %w", output, err)
 	}
-	for _, part := range strings.Split(branch, "/") {
-		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
-			return false
-		}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
+	fetchedCommit, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
 	}
-	return true
+	if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
+		return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
+	}
+	b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", "--detach", config.CommitSha)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git checkout failed: %s: %w", output, err)
+	}
+	b.sendLog(config, "Clone completed")
+	resolvedCommitSha, err := b.resolveCommitSha(ctx, config, buildDir)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(resolvedCommitSha, config.CommitSha) {
+		return fmt.Errorf("checked out commit %s, expected %s", resolvedCommitSha, config.CommitSha)
+	}
+	config.ResolvedCommitSha = resolvedCommitSha
+	b.sendLog(config, fmt.Sprintf("Resolved commit %s", truncateStr(resolvedCommitSha, 8)))
+	return nil
 }
 
 func (b *Builder) resolveCommitSha(ctx context.Context, config *Config, buildDir string) (string, error) {

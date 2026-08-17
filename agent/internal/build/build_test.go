@@ -141,7 +141,6 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 		CloneURL:  "file://" + remoteDir,
 		CommitSha: selectedSHA,
 		Branch:    "main",
-		GitRef:    "refs/heads/main",
 	}
 	if err := NewBuilder(t.TempDir(), nil).clone(context.Background(), config, buildDir); err != nil {
 		t.Fatal(err)
@@ -185,42 +184,6 @@ func TestCloneRejectsMovedRef(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "fetched ref resolved to") {
 		t.Fatalf("clone error = %v, want moved ref failure", err)
-	}
-}
-
-func TestRunCommandRedactsGitCredentials(t *testing.T) {
-	config := &Config{BuildID: "build-1"}
-	output, _ := NewBuilder(t.TempDir(), nil).runCommand(
-		exec.Command("sh", "-c", "printf '%s' 'fatal: https://x-access-token:secret-token@example.com/repo.git' && exit 1"),
-		config,
-	)
-	if strings.Contains(output, "secret-token") || !strings.Contains(output, "https://***@example.com") {
-		t.Fatalf("credential output was not redacted: %q", output)
-	}
-}
-
-func TestValidGitRef(t *testing.T) {
-	for _, ref := range []string{
-		"refs/heads/main",
-		"refs/heads/feature/preview-deployments",
-		"refs/pull/42/merge",
-	} {
-		if !validGitRef(ref) {
-			t.Errorf("validGitRef(%q) = false, want true", ref)
-		}
-	}
-	for _, ref := range []string{
-		"main",
-		"refs/heads//main",
-		"refs/heads/feature/.hidden",
-		"refs/heads/@",
-		"refs/heads/feature.lock",
-		"refs/pull/0/merge",
-		"refs/pull/42/head",
-	} {
-		if validGitRef(ref) {
-			t.Errorf("validGitRef(%q) = true, want false", ref)
-		}
 	}
 }
 

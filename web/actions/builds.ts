@@ -84,10 +84,7 @@ export async function retryBuild(buildId: string) {
 	}
 
 	const [service] = await db
-		.select({
-			id: services.id,
-			previewOfService: services.previewOfService,
-		})
+		.select({ id: services.id, previewOfService: services.previewOfService })
 		.from(services)
 		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)));
 
@@ -108,7 +105,6 @@ export async function retryBuild(buildId: string) {
 		await triggerBuildInternal(build.serviceId, "manual", actor);
 		return { success: true };
 	}
-
 	await requeueBuildRevisionInternal({
 		serviceId: build.serviceId,
 		serviceRevisionId: build.serviceRevisionId,

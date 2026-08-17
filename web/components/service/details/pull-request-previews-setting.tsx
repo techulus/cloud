@@ -93,7 +93,7 @@ export function PullRequestPreviewsSetting({
 					</p>
 				) : !autoSubdomainDomain ? (
 					<p className="text-xs text-amber-600">
-						Configure Automatic Subdomain Domain before enabling previews.
+						Configure Automatic Subdomain Domain to give previews public URLs.
 					</p>
 				) : null}
 			</div>
@@ -101,7 +101,7 @@ export function PullRequestPreviewsSetting({
 				id="pull-request-previews"
 				checked={service.previewDeploymentsEnabled}
 				onCheckedChange={updateEnabled}
-				disabled={isPending || service.stateful || !autoSubdomainDomain}
+				disabled={isPending || service.stateful}
 				aria-label="Enable pull request preview deployments"
 			/>
 		</div>

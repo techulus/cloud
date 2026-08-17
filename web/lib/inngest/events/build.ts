@@ -10,7 +10,7 @@ export type BuildEvents = {
 			commitSha: string;
 			commitMessage: string;
 			branch: string;
-			gitRef: string;
+			gitRef?: string;
 			author?: string;
 			actor?: ServiceRevisionActor | null;
 			githubDeploymentId?: number;

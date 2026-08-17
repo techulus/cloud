@@ -47,7 +47,6 @@ function assertMatchingGitHubBuildRevision(
 		commitSha: string;
 		expectedRepository: string;
 		expectedBranch: string;
-		gitRef: string;
 	},
 ) {
 	if (revision.serviceId !== input.serviceId) {
@@ -60,7 +59,6 @@ function assertMatchingGitHubBuildRevision(
 			specification.source.type !== "github" ||
 			specification.source.repository !== input.expectedRepository ||
 			specification.source.branch !== input.expectedBranch ||
-			specification.source.gitRef !== input.gitRef ||
 			specification.source.commitSha !== input.commitSha.toLowerCase()
 		) {
 			throw new Error("Service revision idempotency conflict");
@@ -187,7 +185,6 @@ export async function createGitHubBuildServiceRevision(input: {
 	commitSha: string;
 	expectedRepository: string;
 	expectedBranch: string;
-	gitRef: string;
 	actor: ServiceRevisionActor | null;
 }) {
 	return db.transaction(async (tx) => {
@@ -237,7 +234,6 @@ export async function createGitHubBuildServiceRevision(input: {
 			repository: currentSource.repository,
 			repositoryId: repo?.repoId ?? null,
 			branch: currentSource.branch,
-			gitRef: input.gitRef,
 			commitSha: input.commitSha,
 			rootDir: currentSource.rootDir?.trim() || null,
 			authentication: repo
@@ -381,10 +377,7 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const activeService = await tx
-			.select({
-				id: services.id,
-				previewOfService: services.previewOfService,
-			})
+			.select({ id: services.id })
 			.from(services)
 			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 			.then((rows) => rows[0]);
@@ -429,12 +422,6 @@ export async function cloneActiveRevisionAndQueueSystemRollout(
 			specification: active.specification,
 			actor: { type: "system" },
 		});
-		if (activeService.previewOfService) {
-			await tx
-				.update(services)
-				.set({ previewCurrentRevisionId: revisionId })
-				.where(eq(services.id, serviceId));
-		}
 		const rolloutId = randomUUID();
 		await tx.insert(rollouts).values({
 			id: rolloutId,
@@ -598,7 +585,7 @@ export async function createRolloutForServiceRevision(
 ) {
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
-		const [revision, activeService] = await Promise.all([
+		const [revision, activeService, latestRevision] = await Promise.all([
 			tx
 				.select()
 				.from(serviceRevisions)
@@ -613,10 +600,16 @@ export async function createRolloutForServiceRevision(
 				.select({
 					id: services.id,
 					previewOfService: services.previewOfService,
-					previewCurrentRevisionId: services.previewCurrentRevisionId,
 				})
 				.from(services)
 				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.then((rows) => rows[0]),
+			tx
+				.select({ id: serviceRevisions.id })
+				.from(serviceRevisions)
+				.where(eq(serviceRevisions.serviceId, serviceId))
+				.orderBy(desc(serviceRevisions.createdAt), desc(serviceRevisions.id))
+				.limit(1)
 				.then((rows) => rows[0]),
 		]);
 		if (!revision) throw new Error("Service revision not found");
@@ -625,7 +618,7 @@ export async function createRolloutForServiceRevision(
 		}
 		if (
 			activeService.previewOfService &&
-			activeService.previewCurrentRevisionId !== serviceRevisionId
+			latestRevision?.id !== serviceRevisionId
 		) {
 			return { rolloutId: null, revision, created: false };
 		}

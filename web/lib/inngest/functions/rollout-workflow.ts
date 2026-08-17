@@ -1,12 +1,29 @@
-import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	lt,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import { getService } from "@/db/queries";
-import { deployments, rollouts, servers, services } from "@/db/schema";
+import {
+	deployments,
+	rollouts,
+	servers,
+	serviceRevisions,
+	services,
+} from "@/db/schema";
 import { isObservedReady, observedReadyPhases } from "@/lib/deployment-status";
 import { buildRoutingTargets } from "@/lib/routing-sync";
 import {
 	canDeployServiceRevision,
-	updateCurrentPreviewGitHubStatus,
+	updatePreviewGitHubStatus,
 } from "@/lib/preview-deployments";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
@@ -206,11 +223,12 @@ export const rolloutWorkflow = inngest.createFunction(
 	async ({ event, step }) => {
 		const { rolloutId, serviceId } = event.data;
 
-		await step.run("validate-service", async () => {
+		const isPreview = await step.run("validate-service", async () => {
 			const svc = await getService(serviceId);
 			if (!svc) {
 				throw new Error("Service not found");
 			}
+			return Boolean(svc.previewOfService);
 		});
 
 		let acquiredTurn = false;
@@ -269,10 +287,11 @@ export const rolloutWorkflow = inngest.createFunction(
 			};
 		});
 		const specification = revision.specification;
-		const currentRevision = await step.run(
-			"validate-current-preview-revision",
-			() => canDeployServiceRevision(serviceId, revision.id),
-		);
+		const currentRevision =
+			!isPreview ||
+			(await step.run("validate-current-preview-revision", () =>
+				canDeployServiceRevision(serviceId, revision.id),
+			));
 		if (!currentRevision) {
 			await step.run("mark-superseded-preview-rollout", () =>
 				db
@@ -441,7 +460,10 @@ export const rolloutWorkflow = inngest.createFunction(
 		}
 
 		const { deploymentIds } = await step.run("create-deployments", async () => {
-			if (!(await canDeployServiceRevision(serviceId, revision.id))) {
+			if (
+				isPreview &&
+				!(await canDeployServiceRevision(serviceId, revision.id))
+			) {
 				throw new Error("Preview revision was superseded before deployment");
 			}
 			await db
@@ -456,6 +478,7 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			const result = await createDeploymentRecords(rolloutId, serviceId, {
 				revisionId: revision.id,
+				isPreview,
 				specification,
 				placements,
 				serverMap,
@@ -615,20 +638,26 @@ export const rolloutWorkflow = inngest.createFunction(
 					await tx.execute(
 						sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 					);
-					const service = await tx
-						.select({
-							previewOfService: services.previewOfService,
-							previewCurrentRevisionId: services.previewCurrentRevisionId,
-						})
-						.from(services)
-						.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
-						.then((rows) => rows[0]);
-					if (
-						!service ||
-						(service.previewOfService &&
-							service.previewCurrentRevisionId !== revision.id)
-					) {
-						throw new Error("Preview revision was superseded before routing");
+					if (isPreview) {
+						const latestRevision = await tx
+							.select({ id: serviceRevisions.id })
+							.from(serviceRevisions)
+							.innerJoin(services, eq(services.id, serviceRevisions.serviceId))
+							.where(
+								and(
+									eq(serviceRevisions.serviceId, serviceId),
+									isNull(services.deletedAt),
+								),
+							)
+							.orderBy(
+								desc(serviceRevisions.createdAt),
+								desc(serviceRevisions.id),
+							)
+							.limit(1)
+							.then((rows) => rows[0]);
+						if (latestRevision?.id !== revision.id) {
+							throw new Error("Preview revision was superseded before routing");
+						}
 					}
 					const [rollout] = await tx
 						.select({ status: rollouts.status })
@@ -731,11 +760,15 @@ export const rolloutWorkflow = inngest.createFunction(
 		}
 
 		const rolloutCompleted = await step.run("complete-rollout", async () => {
-			if (!(await canDeployServiceRevision(serviceId, revision.id))) {
+			if (
+				isPreview &&
+				!(await canDeployServiceRevision(serviceId, revision.id))
+			) {
 				return false;
 			}
 			const result = await completeRollout(rolloutId, serviceId, {
 				revisionId: revision.id,
+				isPreview,
 				specification,
 				placements,
 				totalReplicas,
@@ -756,23 +789,20 @@ export const rolloutWorkflow = inngest.createFunction(
 				"completed",
 				"Rollout completed successfully",
 			);
-			try {
-				await updateCurrentPreviewGitHubStatus({
-					serviceId,
-					serviceRevisionId: revision.id,
-					state: "success",
-					description: "Preview is ready",
-				});
-			} catch (error) {
-				console.error(
-					"[rollout:complete] failed to update preview status:",
-					error,
-				);
-			}
 			return true;
 		});
 		if (!rolloutCompleted) {
 			return { status: "cancelled", rolloutId };
+		}
+		if (isPreview) {
+			await step.run("report-preview-ready", () =>
+				updatePreviewGitHubStatus({
+					serviceId,
+					serviceRevisionId: revision.id,
+					state: "success",
+					description: "Preview is ready",
+				}),
+			);
 		}
 
 		return { status: "completed", rolloutId };

@@ -1,19 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getSetting } from "@/db/queries";
 import {
+	builds,
 	environments,
 	githubRepos,
 	secrets,
-	servers,
 	servicePorts,
 	serviceReplicas,
+	serviceRevisions,
 	services,
 } from "@/db/schema";
-import { updateGitHubDeploymentStatus } from "@/lib/github";
+import {
+	createGitHubDeployment,
+	findGitHubDeployment,
+	updateGitHubDeploymentStatus,
+} from "@/lib/github";
 import { resolveRegistryImageHost } from "@/lib/registry-reference";
 import {
+	getDefaultServiceHostname,
 	pullRequestMergeRef,
 	pullRequestNumberFromMergeRef,
 } from "@/lib/service-revision-spec";
@@ -76,15 +82,9 @@ export function previewHostname(input: {
 	return `${label}.${domain}`;
 }
 
-export async function requirePreviewDomain() {
+export async function getPreviewDomain() {
 	const domain = await getSetting<string>(SETTING_KEYS.AUTO_SUBDOMAIN_DOMAIN);
-	const normalized = domain?.trim().toLowerCase().replace(/\.$/, "");
-	if (!normalized) {
-		throw new Error(
-			"Automatic Subdomain Domain must be configured before enabling preview deployments",
-		);
-	}
-	return normalized;
+	return domain?.trim().toLowerCase().replace(/\.$/, "") || null;
 }
 
 async function ensurePreviewEnvironmentInTransaction(
@@ -145,11 +145,11 @@ export function previewPortConfiguration(input: {
 	serviceName: string;
 	serviceId: string;
 	pullRequestNumber: number;
-	domain: string;
+	domain: string | null;
 }) {
 	let publicHttpIndex = 0;
 	return input.ports.map((port) => {
-		if (port.isPublic && port.protocol === "http") {
+		if (port.isPublic && port.protocol === "http" && input.domain) {
 			const index = publicHttpIndex++;
 			return {
 				...port,
@@ -174,29 +174,11 @@ export function previewPortConfiguration(input: {
 	});
 }
 
-export async function getPreviewClone(
-	baseServiceId: string,
-	previewGitRef: string,
-) {
-	pullRequestNumberFromMergeRef(previewGitRef);
-	return db
-		.select()
-		.from(services)
-		.where(
-			and(
-				eq(services.previewOfService, baseServiceId),
-				eq(services.previewGitRef, previewGitRef),
-				isNull(services.deletedAt),
-			),
-		)
-		.then((rows) => rows[0] ?? null);
-}
-
 export async function createPreviewClone(input: {
 	baseServiceId: string;
 	previewGitRef: string;
 }) {
-	const domain = await requirePreviewDomain();
+	const domain = await getPreviewDomain();
 	const pullRequestNumber = pullRequestNumberFromMergeRef(input.previewGitRef);
 	return db.transaction(async (tx) => {
 		await tx.execute(
@@ -275,38 +257,13 @@ export async function createPreviewClone(input: {
 				.where(eq(secrets.serviceId, base.id))
 				.orderBy(secrets.key, secrets.id),
 			tx
-				.select({
-					serverId: serviceReplicas.serverId,
-					count: serviceReplicas.count,
-					status: servers.status,
-					wireguardIp: servers.wireguardIp,
-				})
+				.select()
 				.from(serviceReplicas)
-				.innerJoin(servers, eq(serviceReplicas.serverId, servers.id))
 				.where(eq(serviceReplicas.serviceId, base.id))
 				.orderBy(serviceReplicas.serverId),
 		]);
 		if (!repo) {
 			throw new Error("Preview deployments require a GitHub App service");
-		}
-
-		const publicHttpPorts = ports.filter(
-			(port) => port.isPublic && port.protocol === "http",
-		);
-		if (publicHttpPorts.length === 0) {
-			throw new Error(
-				"Preview deployments require at least one public HTTP port",
-			);
-		}
-
-		const eligiblePlacement = placements.find(
-			(placement) =>
-				placement.count > 0 &&
-				placement.status === "online" &&
-				placement.wireguardIp,
-		);
-		if (base.placementMode === "manual" && !eligiblePlacement) {
-			throw new Error("No eligible placement exists for this preview");
 		}
 
 		const previewEnvironment = await ensurePreviewEnvironmentInTransaction(
@@ -324,26 +281,29 @@ export async function createPreviewClone(input: {
 		const primaryDomain = configuredPorts.find(
 			(port) => port.isPublic && port.protocol === "http",
 		)?.domain;
-		if (!primaryDomain)
-			throw new Error("Preview domain could not be generated");
 
 		const serviceValues = {
 			projectId: base.projectId,
 			environmentId: previewEnvironment.id,
 			name: `${base.name} (PR #${pullRequestNumber})`,
-			hostname: primaryDomain.split(".")[0],
+			hostname:
+				primaryDomain?.split(".")[0] ??
+				getDefaultServiceHostname(
+					`${base.name}-pr-${pullRequestNumber}`,
+					previewServiceId,
+				),
 			image: `${resolveRegistryImageHost()}/${base.projectId}/${previewServiceId}:latest`,
 			sourceType: "github" as const,
 			githubRepoUrl: base.githubRepoUrl,
 			githubBranch: base.githubBranch,
 			githubRootDir: base.githubRootDir,
-			replicas: 1,
-			autoscalingEnabled: false,
-			autoscalingMinReplicas: 1,
-			autoscalingMaxReplicas: 1,
+			replicas: base.replicas,
+			autoscalingEnabled: base.autoscalingEnabled,
+			autoscalingMinReplicas: base.autoscalingMinReplicas,
+			autoscalingMaxReplicas: base.autoscalingMaxReplicas,
 			placementMode: base.placementMode,
 			stateful: false,
-			lockedServerId: null,
+			lockedServerId: base.lockedServerId,
 			healthCheckCmd: base.healthCheckCmd,
 			healthCheckInterval: base.healthCheckInterval,
 			healthCheckTimeout: base.healthCheckTimeout,
@@ -352,7 +312,9 @@ export async function createPreviewClone(input: {
 			startCommand: base.startCommand,
 			resourceCpuLimit: base.resourceCpuLimit,
 			resourceMemoryLimitMb: base.resourceMemoryLimitMb,
-			serverlessEnabled: false,
+			serverlessEnabled: base.serverlessEnabled && primaryDomain !== undefined,
+			serverlessSleepAfterSeconds: base.serverlessSleepAfterSeconds,
+			serverlessWakeTimeoutSeconds: base.serverlessWakeTimeoutSeconds,
 			deploymentSchedule: null,
 			backupEnabled: false,
 			backupSchedule: null,
@@ -367,18 +329,20 @@ export async function createPreviewClone(input: {
 		});
 		await tx.insert(servicePorts).values(
 			configuredPorts.map((port) => ({
+				...port,
 				id: randomUUID(),
 				serviceId: previewServiceId,
-				...port,
 			})),
 		);
-		if (base.placementMode === "manual" && eligiblePlacement) {
-			await tx.insert(serviceReplicas).values({
-				id: randomUUID(),
-				serviceId: previewServiceId,
-				serverId: eligiblePlacement.serverId,
-				count: 1,
-			});
+		if (base.placementMode === "manual" && placements.length > 0) {
+			await tx.insert(serviceReplicas).values(
+				placements.map((placement) => ({
+					id: randomUUID(),
+					serviceId: previewServiceId,
+					serverId: placement.serverId,
+					count: placement.count,
+				})),
+			);
 		}
 		if (sourceSecrets.length > 0) {
 			await tx.insert(secrets).values(
@@ -405,7 +369,7 @@ export async function createPreviewClone(input: {
 		return {
 			serviceId: previewServiceId,
 			created: true,
-			primaryUrl: `https://${primaryDomain}`,
+			primaryUrl: primaryDomain ? `https://${primaryDomain}` : null,
 		};
 	});
 }
@@ -414,78 +378,80 @@ export async function canDeployServiceRevision(
 	serviceId: string,
 	serviceRevisionId: string,
 ) {
-	const service = await db
-		.select({
-			previewOfService: services.previewOfService,
-			previewCurrentRevisionId: services.previewCurrentRevisionId,
-		})
-		.from(services)
-		.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
-		.then((rows) => rows[0]);
-	if (!service) return false;
-	return (
-		!service.previewOfService ||
-		service.previewCurrentRevisionId === serviceRevisionId
-	);
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const service = await tx
+			.select({ previewOfService: services.previewOfService })
+			.from(services)
+			.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+			.then((rows) => rows[0]);
+		if (!service) return false;
+		if (!service.previewOfService) return true;
+		const latest = await tx
+			.select({ id: serviceRevisions.id })
+			.from(serviceRevisions)
+			.where(eq(serviceRevisions.serviceId, serviceId))
+			.orderBy(desc(serviceRevisions.createdAt), desc(serviceRevisions.id))
+			.limit(1)
+			.then((rows) => rows[0]);
+		return latest?.id === serviceRevisionId;
+	});
 }
 
-export async function getPreviewPrimaryUrl(serviceId: string) {
-	const ports = await db
-		.select({
-			id: servicePorts.id,
-			port: servicePorts.port,
-			domain: servicePorts.domain,
-		})
-		.from(servicePorts)
-		.where(
-			and(
-				eq(servicePorts.serviceId, serviceId),
-				eq(servicePorts.protocol, "http"),
-				eq(servicePorts.isPublic, true),
-			),
-		);
-	const primary = ports
-		.filter((port) => port.domain)
-		.sort((a, b) => a.port - b.port || a.id.localeCompare(b.id))[0];
-	return primary?.domain ? `https://${primary.domain}` : null;
-}
-
-export async function updateCurrentPreviewGitHubStatus(input: {
+export async function updatePreviewGitHubStatus(input: {
 	serviceId: string;
-	serviceRevisionId: string | null;
+	serviceRevisionId: string;
 	state: "pending" | "in_progress" | "success" | "failure" | "inactive";
 	description: string;
 	logUrl?: string;
 	expectedDeploymentId?: number;
 }) {
-	return db.transaction(async (tx) => {
+	const context = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${input.serviceId}))`,
 		);
-		const context = await tx
-			.select({
-				previewCurrentRevisionId: services.previewCurrentRevisionId,
-				previewGithubDeploymentId: services.previewGithubDeploymentId,
-				previewOfService: services.previewOfService,
-				installationId: githubRepos.installationId,
-				repoFullName: githubRepos.repoFullName,
-			})
+		const service = await tx
+			.select({ previewOfService: services.previewOfService })
 			.from(services)
-			.innerJoin(
-				githubRepos,
-				eq(githubRepos.serviceId, services.previewOfService),
-			)
 			.where(and(eq(services.id, input.serviceId), isNull(services.deletedAt)))
 			.then((rows) => rows[0]);
-		if (
-			!context?.previewOfService ||
-			context.previewCurrentRevisionId !== input.serviceRevisionId ||
-			!context.previewGithubDeploymentId ||
-			(input.expectedDeploymentId !== undefined &&
-				context.previewGithubDeploymentId !== input.expectedDeploymentId)
-		) {
-			return false;
+		if (!service?.previewOfService) return null;
+		const latest = await tx
+			.select({ id: serviceRevisions.id })
+			.from(serviceRevisions)
+			.where(eq(serviceRevisions.serviceId, input.serviceId))
+			.orderBy(desc(serviceRevisions.createdAt), desc(serviceRevisions.id))
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (latest?.id !== input.serviceRevisionId) return null;
+		const deploymentConditions = [
+			eq(builds.serviceId, input.serviceId),
+			eq(builds.serviceRevisionId, input.serviceRevisionId),
+			isNotNull(builds.githubDeploymentId),
+		];
+		if (input.expectedDeploymentId !== undefined) {
+			deploymentConditions.push(
+				eq(builds.githubDeploymentId, input.expectedDeploymentId),
+			);
 		}
+		const [deployment, githubRepo] = await Promise.all([
+			tx
+				.select({ id: builds.githubDeploymentId })
+				.from(builds)
+				.where(and(...deploymentConditions))
+				.orderBy(desc(builds.createdAt), desc(builds.id))
+				.limit(1)
+				.then((rows) => rows[0]),
+			tx
+				.select({
+					installationId: githubRepos.installationId,
+					repoFullName: githubRepos.repoFullName,
+				})
+				.from(githubRepos)
+				.where(eq(githubRepos.serviceId, service.previewOfService))
+				.then((rows) => rows[0]),
+		]);
+		if (!deployment?.id || !githubRepo) return null;
 		const primary = await tx
 			.select({
 				id: servicePorts.id,
@@ -506,19 +472,166 @@ export async function updateCurrentPreviewGitHubStatus(input: {
 						.filter((port) => port.domain)
 						.sort((a, b) => a.port - b.port || a.id.localeCompare(b.id))[0],
 			);
-		await updateGitHubDeploymentStatus(
-			context.installationId,
-			context.repoFullName,
-			context.previewGithubDeploymentId,
-			input.state,
-			{
-				description: input.description.substring(0, 140),
-				logUrl: input.logUrl,
-				environmentUrl: primary?.domain
-					? `https://${primary.domain}`
-					: undefined,
-			},
-		);
-		return true;
+		return {
+			...githubRepo,
+			deploymentId: deployment.id,
+			environmentUrl: primary?.domain ? `https://${primary.domain}` : undefined,
+		};
 	});
+	if (!context) return false;
+	await updateGitHubDeploymentStatus(
+		context.installationId,
+		context.repoFullName,
+		context.deploymentId,
+		input.state,
+		{
+			description: input.description.substring(0, 140),
+			logUrl: input.logUrl,
+			environmentUrl: context.environmentUrl,
+		},
+	);
+	return true;
+}
+
+export async function createPreviewGitHubDeployment(input: {
+	serviceId: string;
+	serviceRevisionId: string;
+	commitSha: string;
+}) {
+	const preview = await db
+		.select({
+			previewOfService: services.previewOfService,
+			previewGitRef: services.previewGitRef,
+		})
+		.from(services)
+		.where(and(eq(services.id, input.serviceId), isNull(services.deletedAt)))
+		.then((rows) => rows[0]);
+	if (!preview?.previewOfService || !preview.previewGitRef) return null;
+	const existing = await db
+		.select({ id: builds.githubDeploymentId })
+		.from(builds)
+		.where(
+			and(
+				eq(builds.serviceId, input.serviceId),
+				eq(builds.serviceRevisionId, input.serviceRevisionId),
+				isNotNull(builds.githubDeploymentId),
+			),
+		)
+		.limit(1)
+		.then((rows) => rows[0]?.id ?? null);
+	if (existing) return existing;
+	const githubRepo = await db
+		.select()
+		.from(githubRepos)
+		.where(eq(githubRepos.serviceId, preview.previewOfService))
+		.then((rows) => rows[0]);
+	if (!githubRepo) return null;
+	const pullRequestNumber = pullRequestNumberFromMergeRef(
+		preview.previewGitRef,
+	);
+	const environment = `preview/pr-${pullRequestNumber}-${preview.previewOfService.slice(0, 8)}`;
+	const payload = {
+		baseServiceId: preview.previewOfService,
+		previewServiceId: input.serviceId,
+		previewGitRef: preview.previewGitRef,
+		serviceRevisionId: input.serviceRevisionId,
+	};
+	const deploymentId =
+		(await findGitHubDeployment(
+			githubRepo.installationId,
+			githubRepo.repoFullName,
+			input.commitSha,
+			environment,
+			payload,
+		)) ??
+		(await createGitHubDeployment(
+			githubRepo.installationId,
+			githubRepo.repoFullName,
+			input.commitSha,
+			environment,
+			`Preview PR #${pullRequestNumber}`,
+			{
+				transientEnvironment: true,
+				productionEnvironment: false,
+				payload,
+			},
+		));
+	const updated = await db
+		.update(builds)
+		.set({ githubDeploymentId: deploymentId })
+		.where(
+			and(
+				eq(builds.serviceId, input.serviceId),
+				eq(builds.serviceRevisionId, input.serviceRevisionId),
+				isNull(builds.githubDeploymentId),
+			),
+		)
+		.returning({ id: builds.id });
+	const current =
+		updated.length > 0 &&
+		(await updatePreviewGitHubStatus({
+			serviceId: input.serviceId,
+			serviceRevisionId: input.serviceRevisionId,
+			expectedDeploymentId: deploymentId,
+			state: "pending",
+			description: "Preview build queued",
+		}));
+	if (!current) {
+		await updateGitHubDeploymentStatus(
+			githubRepo.installationId,
+			githubRepo.repoFullName,
+			deploymentId,
+			"inactive",
+			{ description: "Preview was superseded or removed" },
+		);
+	}
+	return deploymentId;
+}
+
+export async function inactivatePreviewGitHubDeployments(input: {
+	serviceId: string;
+	description: string;
+	excludeServiceRevisionId?: string;
+}) {
+	const service = await db
+		.select({ previewOfService: services.previewOfService })
+		.from(services)
+		.where(eq(services.id, input.serviceId))
+		.then((rows) => rows[0]);
+	if (!service?.previewOfService) return 0;
+	const githubRepo = await db
+		.select()
+		.from(githubRepos)
+		.where(eq(githubRepos.serviceId, service.previewOfService))
+		.then((rows) => rows[0]);
+	if (!githubRepo) return 0;
+	const conditions = [
+		eq(builds.serviceId, input.serviceId),
+		isNotNull(builds.githubDeploymentId),
+	];
+	if (input.excludeServiceRevisionId) {
+		conditions.push(
+			ne(builds.serviceRevisionId, input.excludeServiceRevisionId),
+		);
+	}
+	const deploymentIds = await db
+		.selectDistinct({ id: builds.githubDeploymentId })
+		.from(builds)
+		.where(and(...conditions));
+	await Promise.all(
+		deploymentIds.flatMap(({ id }) =>
+			id
+				? [
+						updateGitHubDeploymentStatus(
+							githubRepo.installationId,
+							githubRepo.repoFullName,
+							id,
+							"inactive",
+							{ description: input.description.substring(0, 140) },
+						),
+					]
+				: [],
+		),
+	);
+	return deploymentIds.length;
 }

@@ -65,7 +65,7 @@ import {
 
 function sourceSpecification(): ServiceRevisionSpec {
 	return {
-		schemaVersion: 4,
+		schemaVersion: 3,
 		placement: { mode: "manual" },
 		image: "registry.test/project-1/service-1:revision-original",
 		source: {
@@ -73,7 +73,6 @@ function sourceSpecification(): ServiceRevisionSpec {
 			repository: "https://github.com/acme/app",
 			repositoryId: 101,
 			branch: "main",
-			gitRef: "refs/heads/main",
 			commitSha: "0123456789abcdef0123456789abcdef01234567",
 			rootDir: "apps/web",
 			authentication: { type: "github_app", installationId: 123 },
@@ -162,7 +161,6 @@ describe("GitHub build service revisions", () => {
 				commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				expectedRepository: "https://github.com/acme/app",
 				expectedBranch: "main",
-				gitRef: "refs/heads/main",
 				actor: { type: "system" },
 			}),
 		).rejects.toThrow("Service revision idempotency conflict");

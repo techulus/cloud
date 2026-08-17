@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
-import { updateCurrentPreviewGitHubStatus } from "@/lib/preview-deployments";
+import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -174,7 +174,7 @@ async function markPreviewBuildFailed(
 	description: string,
 ) {
 	try {
-		await updateCurrentPreviewGitHubStatus({
+		await updatePreviewGitHubStatus({
 			serviceId,
 			serviceRevisionId,
 			state: "failure",

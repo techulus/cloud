@@ -1,32 +1,4 @@
-export const SERVICE_REVISION_SCHEMA_VERSION = 4 as const;
-
-export function isSupportedGitRef(ref: string): boolean {
-	if (/^refs\/pull\/[1-9]\d*\/merge$/.test(ref)) return true;
-	if (!ref.startsWith("refs/heads/")) return false;
-	const branch = ref.slice("refs/heads/".length);
-	const parts = branch.split("/");
-	const invalidCharacter = [...branch].some((character) => {
-		const code = character.charCodeAt(0);
-		return code <= 0x20 || code === 0x7f || "~^:?*[\\".includes(character);
-	});
-	return Boolean(
-		branch &&
-		branch !== "@" &&
-		!branch.endsWith(".") &&
-		!branch.includes("..") &&
-		!branch.includes("@{") &&
-		!invalidCharacter &&
-		parts.every(
-			(part) => part && !part.startsWith(".") && !part.endsWith(".lock"),
-		),
-	);
-}
-
-export function gitBranchRef(branch: string): string {
-	const ref = `refs/heads/${branch.trim()}`;
-	if (!isSupportedGitRef(ref)) throw new Error("Invalid Git branch");
-	return ref;
-}
+export const SERVICE_REVISION_SCHEMA_VERSION = 3 as const;
 
 export function pullRequestMergeRef(pullRequestNumber: number): string {
 	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
@@ -191,7 +163,6 @@ export type ServiceRevisionSource =
 			repository: string;
 			repositoryId: number | null;
 			branch: string;
-			gitRef: string;
 			commitSha: string;
 			rootDir: string | null;
 			authentication:
@@ -286,12 +257,6 @@ function validateServiceRevisionSpec(
 	specification: ServiceRevisionSpec,
 	allowNoPlacements: boolean,
 ) {
-	if (
-		specification.source.type === "github" &&
-		!isSupportedGitRef(specification.source.gitRef)
-	) {
-		throw new Error("Unsupported Git ref");
-	}
 	validateServiceRevisionPorts(specification.ports);
 	const totalReplicas = getServiceRevisionTotalReplicas(specification);
 

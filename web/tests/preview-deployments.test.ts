@@ -69,6 +69,7 @@ vi.mock("@/db/queries", () => ({ getSetting: mocks.getSetting }));
 import {
 	createPreviewClone,
 	ensurePreviewEnvironment,
+	previewPortConfiguration,
 } from "@/lib/preview-deployments";
 
 const baseService = {
@@ -83,7 +84,12 @@ const baseService = {
 	previewDeploymentsEnabled: true,
 	previewOfService: null,
 	stateful: false,
+	replicas: 2,
+	autoscalingEnabled: false,
+	autoscalingMinReplicas: 1,
+	autoscalingMaxReplicas: 4,
 	placementMode: "manual",
+	lockedServerId: "server-1",
 	healthCheckCmd: "curl -f http://localhost/health",
 	healthCheckInterval: 10,
 	healthCheckTimeout: 5,
@@ -92,6 +98,12 @@ const baseService = {
 	startCommand: "node server.js",
 	resourceCpuLimit: 1,
 	resourceMemoryLimitMb: 512,
+	serverlessEnabled: true,
+	serverlessSleepAfterSeconds: 300,
+	serverlessWakeTimeoutSeconds: 60,
+	deploymentSchedule: "0 9 * * *",
+	backupEnabled: false,
+	backupSchedule: null,
 };
 
 const repo = {
@@ -127,9 +139,12 @@ const ports = [
 	},
 ];
 
-function queueFactoryReads(existing: unknown[] = []) {
+function queueFactoryReads(
+	existing: unknown[] = [],
+	service: typeof baseService = baseService,
+) {
 	mocks.selectResults.push(
-		[baseService],
+		[service],
 		existing,
 		[repo],
 		ports,
@@ -166,7 +181,7 @@ describe("preview service cloning", () => {
 		process.env.REGISTRY_HOST = "registry.example.com";
 	});
 
-	it("copies ordinary configuration and secrets while enforcing preview policy", async () => {
+	it("copies runtime configuration and secrets but not automation", async () => {
 		queueFactoryReads();
 
 		const result = await createPreviewClone({
@@ -183,10 +198,13 @@ describe("preview service cloning", () => {
 		expect(service).toMatchObject({
 			projectId: "project-1",
 			environmentId: "preview-environment",
-			replicas: 1,
+			replicas: 2,
 			stateful: false,
 			autoscalingEnabled: false,
-			serverlessEnabled: false,
+			serverlessEnabled: true,
+			lockedServerId: "server-1",
+			deploymentSchedule: null,
+			backupEnabled: false,
 			previewDeploymentsEnabled: false,
 			previewOfService: baseService.id,
 			previewGitRef: "refs/pull/42/merge",
@@ -194,11 +212,13 @@ describe("preview service cloning", () => {
 		expect(clonedPorts).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
+					serviceId: result.serviceId,
 					port: 3000,
 					isPublic: true,
 					domain: "web-api-pr-42-12345678.apps.example.com",
 				}),
 				expect.objectContaining({
+					serviceId: result.serviceId,
 					port: 5432,
 					isPublic: false,
 					externalPort: null,
@@ -206,7 +226,15 @@ describe("preview service cloning", () => {
 				}),
 			]),
 		);
-		expect(placement).toMatchObject({ serverId: "server-1", count: 1 });
+		expect(clonedPorts).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "port-http" }),
+				expect.objectContaining({ id: "port-tcp" }),
+			]),
+		);
+		expect(placement).toEqual([
+			expect.objectContaining({ serverId: "server-1", count: 2 }),
+		]);
 		expect(clonedSecrets).toEqual([
 			expect.objectContaining({ key: "TOKEN", encryptedValue: "ciphertext" }),
 		]);
@@ -270,22 +298,37 @@ describe("preview service cloning", () => {
 		);
 	});
 
-	it("reuses an environment created concurrently", async () => {
-		mocks.selectResults.push(
-			[],
-			[
-				{
-					id: "concurrent-environment",
-					projectId: "project-1",
-					name: "previews",
-				},
-			],
+	it("keeps ports private when no automatic domain is configured", () => {
+		expect(
+			previewPortConfiguration({
+				ports,
+				serviceName: baseService.name,
+				serviceId: baseService.id,
+				pullRequestNumber: 42,
+				domain: null,
+			}),
+		).toEqual(
+			ports.map((port) => ({
+				...port,
+				isPublic: false,
+				domain: null,
+				externalPort: null,
+				tlsPassthrough: false,
+			})),
 		);
-		mocks.returningResults.push([]);
+	});
 
-		await expect(ensurePreviewEnvironment("project-1")).resolves.toMatchObject({
-			id: "concurrent-environment",
-			name: "previews",
+	it("disables copied serverless mode when no public preview URL exists", async () => {
+		mocks.getSetting.mockResolvedValue(null);
+		queueFactoryReads([], { ...baseService, serverlessEnabled: true });
+
+		await createPreviewClone({
+			baseServiceId: baseService.id,
+			previewGitRef: "refs/pull/42/merge",
+		});
+
+		expect(mocks.insertedValues[0]).toMatchObject({
+			serverlessEnabled: false,
 		});
 	});
 });

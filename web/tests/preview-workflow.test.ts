@@ -2,56 +2,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
 	const selectResults: unknown[][] = [];
-	const updateResults: unknown[][] = [];
-
-	function selectQuery(result: unknown[]) {
-		const query = {
-			from: vi.fn(() => query),
-			innerJoin: vi.fn(() => query),
-			where: vi.fn(() => query),
+	function query(result: unknown[]) {
+		const value = {
+			from: vi.fn(() => value),
+			innerJoin: vi.fn(() => value),
+			where: vi.fn(() => value),
+			orderBy: vi.fn(() => value),
+			limit: vi.fn(() => value),
 			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
-				resolve: (value: unknown[]) => unknown,
+				resolve: (rows: unknown[]) => unknown,
 				reject?: (reason: unknown) => unknown,
 			) => Promise.resolve(result).then(resolve, reject),
 		};
-		return query;
+		return value;
 	}
-
-	function updateQuery(result: unknown[]) {
-		const query = {
-			set: vi.fn(() => query),
-			where: vi.fn(() => query),
-			returning: vi.fn(() => query),
-			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
-			then: (
-				resolve: (value: unknown[]) => unknown,
-				reject?: (reason: unknown) => unknown,
-			) => Promise.resolve(result).then(resolve, reject),
-		};
-		return query;
-	}
-
-	const db = {
-		select: vi.fn(() => selectQuery(selectResults.shift() ?? [])),
-		update: vi.fn(() => updateQuery(updateResults.shift() ?? [])),
-		execute: vi.fn().mockResolvedValue(undefined),
-		transaction: vi.fn(async (operation: (tx: typeof db) => unknown) =>
-			operation(db),
-		),
-	};
-
+	const db = { select: vi.fn(() => query(selectResults.shift() ?? [])) };
 	return {
 		selectResults,
-		updateResults,
 		db,
 		getGitHubPullRequest: vi.fn(),
 		listOpenGitHubPullRequests: vi.fn(),
 		resolveGitHubPullRequestMergeRef: vi.fn(),
-		createGitHubDeployment: vi.fn(),
-		updateGitHubDeploymentStatus: vi.fn(),
 		createPreviewClone: vi.fn(),
-		updateCurrentPreviewGitHubStatus: vi.fn(),
+		inactivatePreviewGitHubDeployments: vi.fn(),
 		cancelPreviewRevisionWork: vi.fn(),
 		deactivatePreviewRuntime: vi.fn(),
 		deletePreviewService: vi.fn(),
@@ -71,12 +45,10 @@ vi.mock("@/lib/github", () => ({
 	getGitHubPullRequest: mocks.getGitHubPullRequest,
 	listOpenGitHubPullRequests: mocks.listOpenGitHubPullRequests,
 	resolveGitHubPullRequestMergeRef: mocks.resolveGitHubPullRequestMergeRef,
-	createGitHubDeployment: mocks.createGitHubDeployment,
-	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
 }));
 vi.mock("@/lib/preview-deployments", () => ({
 	createPreviewClone: mocks.createPreviewClone,
-	updateCurrentPreviewGitHubStatus: mocks.updateCurrentPreviewGitHubStatus,
+	inactivatePreviewGitHubDeployments: mocks.inactivatePreviewGitHubDeployments,
 }));
 vi.mock("@/lib/preview-lifecycle", () => ({
 	cancelPreviewRevisionWork: mocks.cancelPreviewRevisionWork,
@@ -110,16 +82,11 @@ vi.mock("@/lib/inngest/events", () => ({
 	},
 }));
 
-import {
-	previewCloseWorkflow,
-	previewServiceReconcileWorkflow,
-	previewSyncWorkflow,
-} from "@/lib/inngest/functions/preview-workflow";
+import { previewSyncWorkflow } from "@/lib/inngest/functions/preview-workflow";
 
 const baseContext = {
 	service: {
 		id: "base-service",
-		name: "Web",
 		previewDeploymentsEnabled: true,
 		previewOfService: null,
 		stateful: false,
@@ -139,350 +106,132 @@ const pullRequest = {
 	state: "open" as const,
 	draft: false,
 	merged: false,
-	title: "Add preview deployments",
+	title: "Add previews",
 	updatedAt: "2026-08-16T00:00:00Z",
 	user: { id: 30, login: "octocat" },
-	base: {
-		ref: "main",
-		repository: { id: 20, fullName: "acme/app" },
-	},
-	head: {
-		sha: "1".repeat(40),
-		repository: { id: 20, fullName: "acme/app" },
-	},
+	base: { ref: "main", repository: { id: 20, fullName: "acme/app" } },
+	head: { sha: "1".repeat(40), repository: { id: 20, fullName: "acme/app" } },
 };
-
-function step() {
-	return {
-		run: vi.fn(async (_name: string, operation: () => unknown) => operation()),
-	};
-}
 
 function invoke(
 	workflow: unknown,
 	data: Record<string, unknown>,
-	eventId = "event-1",
+	name = "preview/sync-requested",
 ) {
-	const workflowStep = step();
-	const handler = workflow as (input: {
-		event: { id: string; data: Record<string, unknown> };
-		step: ReturnType<typeof step>;
-	}) => Promise<unknown>;
-	return {
-		result: handler({ event: { id: eventId, data }, step: workflowStep }),
-		step: workflowStep,
-	};
+	return (
+		workflow as (input: {
+			event: { id: string; name: string; data: Record<string, unknown> };
+			step: { run: (_name: string, operation: () => unknown) => unknown };
+		}) => Promise<unknown>
+	)({
+		event: { id: "event-1", name, data },
+		step: { run: async (_name, operation) => operation() },
+	});
 }
 
 describe("preview lifecycle workflows", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.selectResults.length = 0;
-		mocks.updateResults.length = 0;
 		mocks.createPreviewClone.mockResolvedValue({
 			serviceId: "preview-service",
 			created: false,
-			primaryUrl: "https://web-pr-42.example.com",
+			primaryUrl: "https://preview.example.com",
 		});
+		mocks.getGitHubPullRequest.mockResolvedValue(pullRequest);
 		mocks.deletePreviewService.mockResolvedValue({
-			service: { id: "preview-service", previewGithubDeploymentId: null },
-			githubRepo: baseContext.githubRepo,
+			service: { id: "preview-service" },
 		});
-		mocks.createGitHubDeployment.mockResolvedValue(100);
-		mocks.updateCurrentPreviewGitHubStatus.mockResolvedValue(true);
-		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
+		mocks.inactivatePreviewGitHubDeployments.mockResolvedValue(1);
 		mocks.cancelPreviewRevisionWork.mockResolvedValue(undefined);
 		mocks.deactivatePreviewRuntime.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
 	});
 
-	it("ignores a delayed close after the pull request was reopened", async () => {
+	it("builds the exact merge ref and supersedes the prior revision", async () => {
 		mocks.selectResults.push(
 			[baseContext],
-			[
-				{
-					service: {
-						id: "preview-service",
-						previewGithubDeploymentId: 99,
-					},
-					githubRepo: baseContext.githubRepo,
-				},
-			],
+			[{ previewOfService: "base-service" }],
+			[{ id: "revision-old", specification: {} }],
 		);
-		mocks.getGitHubPullRequest.mockResolvedValue(pullRequest);
-
-		await expect(
-			invoke(previewCloseWorkflow, {
-				baseServiceId: "base-service",
-				previewGitRef: "refs/pull/42/merge",
-				reason: "pull_request_closed",
-				verifyWithGitHub: true,
-			}).result,
-		).resolves.toEqual({ status: "stale" });
-
-		expect(mocks.deletePreviewService).not.toHaveBeenCalled();
-		expect(mocks.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				name: "preview/sync-requested",
-				data: {
-					baseServiceId: "base-service",
-					previewGitRef: "refs/pull/42/merge",
-				},
-			}),
-		);
-	});
-
-	it("retries rather than deleting when the authoritative GitHub read fails", async () => {
-		mocks.selectResults.push(
-			[baseContext],
-			[
-				{
-					service: { id: "preview-service" },
-					githubRepo: baseContext.githubRepo,
-				},
-			],
-		);
-		mocks.getGitHubPullRequest.mockRejectedValue(
-			new Error("GitHub temporarily unavailable"),
-		);
-
-		await expect(
-			invoke(previewCloseWorkflow, {
-				baseServiceId: "base-service",
-				previewGitRef: "refs/pull/42/merge",
-				reason: "pull_request_closed",
-				verifyWithGitHub: true,
-			}).result,
-		).rejects.toThrow("GitHub temporarily unavailable");
-		expect(mocks.deletePreviewService).not.toHaveBeenCalled();
-	});
-
-	it("deactivates the old runtime when the merge ref is unavailable", async () => {
-		mocks.selectResults.push(
-			[baseContext],
-			[
-				{
-					previewCurrentRevisionId: "revision-old",
-					previewGithubDeploymentId: 98,
-				},
-			],
-			[{ specification: { source: "old" } }],
-			[
-				{
-					previewCurrentRevisionId: "revision-old",
-					previewGithubDeploymentId: 98,
-				},
-			],
-		);
-		mocks.getGitHubPullRequest.mockResolvedValue(pullRequest);
 		mocks.parseServiceRevisionSpec.mockReturnValue({
 			source: { type: "github", commitSha: "2".repeat(40) },
-		});
-		mocks.resolveGitHubPullRequestMergeRef.mockRejectedValue(
-			new Error("Merge ref refs/pull/42/merge is unavailable"),
-		);
-		mocks.updateResults.push([], [{ id: "preview-service" }]);
-
-		await expect(
-			invoke(previewSyncWorkflow, {
-				baseServiceId: "base-service",
-				previewGitRef: "refs/pull/42/merge",
-			}).result,
-		).resolves.toEqual({
-			status: "failed",
-			reason: "merge_ref_unavailable",
-		});
-
-		expect(mocks.deactivatePreviewRuntime).toHaveBeenCalledWith(
-			"preview-service",
-		);
-		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
-			10,
-			"acme/app",
-			98,
-			"inactive",
-			{ description: "Preview merge ref is unavailable" },
-		);
-		expect(mocks.createGitHubDeployment).toHaveBeenCalledWith(
-			10,
-			"acme/app",
-			pullRequest.head.sha,
-			"preview/Web/pr-42",
-			"Preview unavailable for PR #42",
-			expect.objectContaining({
-				transientEnvironment: true,
-				productionEnvironment: false,
-			}),
-		);
-		expect(mocks.updateCurrentPreviewGitHubStatus).toHaveBeenCalledWith({
-			serviceId: "preview-service",
-			serviceRevisionId: null,
-			expectedDeploymentId: 100,
-			state: "failure",
-			description: "Merge ref refs/pull/42/merge is unavailable",
-		});
-		expect(mocks.triggerResolvedBuildInternal).not.toHaveBeenCalled();
-	});
-
-	it("forces an exact merge-ref rebuild and supersedes the old revision", async () => {
-		mocks.selectResults.push(
-			[baseContext],
-			[
-				{
-					previewCurrentRevisionId: "revision-current",
-					previewGithubDeploymentId: 99,
-				},
-			],
-			[{ specification: { source: "current" } }],
-		);
-		mocks.updateResults.push([{ id: "preview-service" }]);
-		mocks.getGitHubPullRequest.mockResolvedValue(pullRequest);
-		mocks.parseServiceRevisionSpec.mockReturnValue({
-			source: { type: "github", commitSha: "3".repeat(40) },
 		});
 		mocks.resolveGitHubPullRequestMergeRef.mockResolvedValue({
 			gitRef: "refs/pull/42/merge",
 			sha: "3".repeat(40),
 		});
-		mocks.createGitHubDeployment.mockResolvedValue(100);
-		mocks.triggerResolvedBuildInternal.mockImplementation(
-			async (_serviceId, input) => {
-				await input.beforeDispatch("revision-forced");
-				return {
-					buildId: null,
-					serviceRevisionId: "revision-forced",
-					status: "queued",
-				};
-			},
-		);
-
-		await expect(
-			invoke(
-				previewSyncWorkflow,
-				{
-					baseServiceId: "base-service",
-					previewGitRef: "refs/pull/42/merge",
-					force: true,
-				},
-				"redeploy-event",
-			).result,
-		).resolves.toMatchObject({
+		mocks.triggerResolvedBuildInternal.mockResolvedValue({
 			status: "queued",
-			serviceRevisionId: "revision-forced",
-			deploymentId: 100,
+			serviceRevisionId: "revision-new",
 		});
 
+		await expect(
+			invoke(previewSyncWorkflow, {
+				baseServiceId: "base-service",
+				previewGitRef: "refs/pull/42/merge",
+			}),
+		).resolves.toMatchObject({ serviceRevisionId: "revision-new" });
 		expect(mocks.triggerResolvedBuildInternal).toHaveBeenCalledWith(
 			"preview-service",
 			expect.objectContaining({
 				trigger: "preview",
 				commitSha: "3".repeat(40),
 				gitRef: "refs/pull/42/merge",
-				idempotencyKey: expect.stringContaining("redeploy-event"),
 			}),
 		);
 		expect(mocks.cancelPreviewRevisionWork).toHaveBeenCalledWith(
 			"preview-service",
-			"revision-current",
+			"revision-old",
 		);
-		expect(mocks.updateCurrentPreviewGitHubStatus).toHaveBeenCalledWith({
+		expect(mocks.inactivatePreviewGitHubDeployments).toHaveBeenCalledWith({
 			serviceId: "preview-service",
-			serviceRevisionId: "revision-forced",
-			expectedDeploymentId: 100,
-			state: "pending",
-			description: "Preview build queued",
+			excludeServiceRevisionId: "revision-new",
+			description: "Superseded by a newer preview revision",
 		});
 	});
 
-	it("inactivates a GitHub deployment when its preview disappears before dispatch", async () => {
+	it("deactivates the preview when GitHub has no merge ref", async () => {
 		mocks.selectResults.push(
 			[baseContext],
-			[
-				{
-					previewCurrentRevisionId: null,
-					previewGithubDeploymentId: null,
-				},
-			],
+			[{ previewOfService: "base-service" }],
 			[],
 		);
-		mocks.updateResults.push([]);
-		mocks.getGitHubPullRequest.mockResolvedValue(pullRequest);
-		mocks.resolveGitHubPullRequestMergeRef.mockResolvedValue({
-			gitRef: "refs/pull/42/merge",
-			sha: "3".repeat(40),
-		});
-		mocks.triggerResolvedBuildInternal.mockImplementation(
-			async (_serviceId, input) => {
-				await input.beforeDispatch("revision-orphaned");
-				throw new Error("Preview was closed before its build was queued");
-			},
+		mocks.resolveGitHubPullRequestMergeRef.mockRejectedValue(
+			new Error("merge ref unavailable"),
 		);
 
 		await expect(
 			invoke(previewSyncWorkflow, {
 				baseServiceId: "base-service",
 				previewGitRef: "refs/pull/42/merge",
-			}).result,
-		).rejects.toThrow("Preview was closed before its build was queued");
-
-		expect(mocks.cancelPreviewRevisionWork).toHaveBeenCalledWith(
+			}),
+		).resolves.toEqual({
+			status: "failed",
+			reason: "merge_ref_unavailable",
+		});
+		expect(mocks.deactivatePreviewRuntime).toHaveBeenCalledWith(
 			"preview-service",
-			"revision-orphaned",
 		);
-		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
-			10,
-			"acme/app",
-			100,
-			"inactive",
-			{ description: "Preview was removed" },
-		);
+		expect(mocks.triggerResolvedBuildInternal).not.toHaveBeenCalled();
 	});
 
-	it("reconciliation retries deleting previews before recreating missing ones", async () => {
-		const secondPullRequest = {
-			...pullRequest,
-			number: 43,
-			updatedAt: "2026-08-16T01:00:00Z",
-		};
-		mocks.selectResults.push(
-			[baseContext],
-			[
-				{
-					previewGitRef: "refs/pull/42/merge",
-					deletedAt: new Date("2026-08-16T00:30:00Z"),
-				},
-				{ previewGitRef: "refs/pull/99/merge", deletedAt: null },
-			],
-		);
-		mocks.listOpenGitHubPullRequests.mockResolvedValue([
-			pullRequest,
-			secondPullRequest,
-		]);
-
+	it("deletes the preview when a pull request closes", async () => {
 		await expect(
-			invoke(previewServiceReconcileWorkflow, {
-				baseServiceId: "base-service",
-			}).result,
-		).resolves.toEqual({ status: "queued", count: 2, closed: 2 });
-
+			invoke(
+				previewSyncWorkflow,
+				{
+					baseServiceId: "base-service",
+					previewGitRef: "refs/pull/42/merge",
+					reason: "pull_request_closed",
+				},
+				"preview/close-requested",
+			),
+		).resolves.toEqual({ status: "deleted", serviceId: "preview-service" });
 		expect(mocks.deletePreviewService).toHaveBeenCalledWith(
 			"base-service",
 			"refs/pull/42/merge",
-			"retrying preview deletion",
-		);
-		expect(mocks.deletePreviewService).toHaveBeenCalledWith(
-			"base-service",
-			"refs/pull/99/merge",
-			"pull request no longer eligible",
-		);
-		expect(mocks.send).toHaveBeenCalledTimes(2);
-		expect(mocks.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: {
-					baseServiceId: "base-service",
-					previewGitRef: "refs/pull/43/merge",
-				},
-			}),
+			"pull_request_closed",
 		);
 	});
 });

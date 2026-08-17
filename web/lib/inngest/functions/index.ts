@@ -23,7 +23,6 @@ export { migrationWorkflow } from "./migration-workflow";
 export { notificationDelivery } from "./notification-delivery";
 export { onDeploymentFailed } from "./on-deployment-failed";
 export {
-	previewCloseWorkflow,
 	previewServiceReconcileWorkflow,
 	previewSyncWorkflow,
 } from "./preview-workflow";

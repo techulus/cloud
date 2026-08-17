@@ -59,7 +59,7 @@ describe("service config", () => {
 	it("converts an immutable revision for pending-change comparisons", () => {
 		const config = revisionSpecToDeployedConfig(
 			{
-				schemaVersion: 4,
+				schemaVersion: 3,
 				placement: { mode: "manual" },
 				image: "nginx",
 				source: { type: "image", image: "nginx" },
@@ -130,13 +130,12 @@ describe("service config", () => {
 		] as const) {
 			const active = revisionSpecToDeployedConfig(
 				{
-					schemaVersion: 4,
+					schemaVersion: 3,
 					placement: { mode: "manual" },
 					image,
 					source: {
 						...currentSource,
 						repositoryId: 101,
-						gitRef: "refs/heads/main",
 						commitSha,
 						authentication: {
 							type: "github_app",

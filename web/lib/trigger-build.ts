@@ -12,7 +12,6 @@ import {
 import { resolveRegistryImageHost } from "@/lib/registry-reference";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { gitBranchRef, isSupportedGitRef } from "@/lib/service-revision-spec";
 import {
 	cloneGitHubBuildServiceRevision,
 	createGitHubBuildServiceRevision,
@@ -32,7 +31,6 @@ type ResolvedBuildInput = {
 	gitRef?: string;
 	githubDeploymentId?: number;
 	idempotencyKey?: string;
-	beforeDispatch?: (serviceRevisionId: string) => Promise<void>;
 };
 
 function deterministicRevisionId(key: string): string {
@@ -103,13 +101,18 @@ async function queueResolvedBuild(
 		? canonicalGitHubRepository(input.expectedRepository)
 		: source.repository;
 	const expectedBranch = input.expectedBranch ?? source.branch;
-	const gitRef = input.gitRef ?? gitBranchRef(expectedBranch);
-	if (!isSupportedGitRef(gitRef)) throw new Error("Unsupported Git ref");
 	if (
 		source.repository !== expectedRepository ||
 		source.branch !== expectedBranch
 	) {
 		throw new Error("GitHub source changed before the build was queued");
+	}
+	if (
+		service.previewOfService
+			? !service.previewGitRef || input.gitRef !== service.previewGitRef
+			: input.gitRef !== undefined
+	) {
+		throw new Error("Build Git ref does not match the service");
 	}
 
 	const registryHost = resolveRegistryImageHost();
@@ -125,10 +128,8 @@ async function queueResolvedBuild(
 		commitSha,
 		expectedRepository,
 		expectedBranch,
-		gitRef,
 		actor: input.actor,
 	});
-	await input.beforeDispatch?.(serviceRevisionId);
 
 	const buildRequestId = randomUUID();
 	await sendBuildTrigger(
@@ -140,7 +141,7 @@ async function queueResolvedBuild(
 			commitSha,
 			commitMessage: input.commitMessage.substring(0, 500),
 			branch: expectedBranch,
-			gitRef,
+			gitRef: input.gitRef,
 			author: input.author,
 			actor: input.actor,
 			githubDeploymentId: input.githubDeploymentId,
@@ -176,7 +177,6 @@ export async function requeueBuildRevisionInternal(input: {
 		commitSha: specification.source.commitSha,
 		commitMessage: input.commitMessage.substring(0, 500),
 		branch: specification.source.branch,
-		gitRef: specification.source.gitRef,
 		author: input.author,
 		actor: input.actor,
 	});

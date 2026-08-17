@@ -51,11 +51,12 @@ GitHub deployment statuses are updated on the commit so you can track progress f
 ## Pull Request Preview Deployments
 
 Preview deployments are opt in from a GitHub-backed service's **Configuration**
-page. They require a configured **Automatic Subdomain Domain** and its wildcard
-DNS record. Each eligible pull request gets one visible, single-replica service
-in the project's ordinary `previews` environment and a stable generated HTTPS
-URL beneath that domain. An existing environment named `previews` is reused and
-is left in place when previews close.
+page. Each eligible pull request gets one visible service in the project's
+ordinary `previews` environment. An existing environment named `previews` is
+reused and is left in place when previews close. If you configure an
+**Automatic Subdomain Domain** and its wildcard DNS record, each preview also
+gets a stable generated HTTPS URL beneath that domain. Without this setting,
+the preview is still created without a public URL.
 
 A pull request is eligible only when it:
 
@@ -70,13 +71,14 @@ configured branch. If GitHub cannot produce that ref because of merge
 conflicts, the preview fails rather than building the raw pull request head.
 
 When first created, preview services inherit the base service's current source
-configuration, private ports, resource limits, placement, health check, start
-command, and complete secret set. They do not copy volumes, backups, schedules,
-cron jobs, autoscaling, serverless sleep, production custom domains, or public
-TCP/UDP routes. Additional preview-specific secret configuration is neither
-needed nor available. Preview services use the normal service pages and may be
-edited like other services, except that volumes remain unavailable. Later pull
-request updates preserve those edits.
+configuration, replicas, autoscaling, placement, health check, start command,
+resource limits, ports, serverless settings, and complete secret set. They do
+not copy volumes, backups, deployment schedules, cron jobs, production custom
+domains, or public TCP/UDP routes. Serverless mode is disabled when no generated
+public domain is available. Preview services use the normal service pages and
+may be edited like other services. Their source repository remains tied to the
+pull request, and volumes remain unavailable. Later pull request updates
+preserve other edits.
 
 New commits replace the preview revision without changing its URL. Converting
 the pull request to a draft, closing it, or merging it removes the runtime and

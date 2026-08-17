@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -14,7 +14,7 @@ import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { notify } from "@/lib/notifications";
-import { updateCurrentPreviewGitHubStatus } from "@/lib/preview-deployments";
+import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -265,7 +265,7 @@ export async function POST(
 				? `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}/builds/${buildId}`
 				: `${baseUrl}/builds/${buildId}/logs`;
 			if (revision.previewOfService) {
-				await updateCurrentPreviewGitHubStatus({
+				await updatePreviewGitHubStatus({
 					serviceId: build.serviceId,
 					serviceRevisionId: build.serviceRevisionId,
 					expectedDeploymentId: build.githubDeploymentId,
@@ -395,7 +395,6 @@ export async function POST(
 					.select({
 						id: services.id,
 						previewOfService: services.previewOfService,
-						previewCurrentRevisionId: services.previewCurrentRevisionId,
 					})
 					.from(services)
 					.where(
@@ -403,12 +402,21 @@ export async function POST(
 					)
 					.limit(1)
 					.then((rows) => rows[0]);
-				if (
-					!activeService ||
-					(activeService.previewOfService &&
-						activeService.previewCurrentRevisionId !== build.serviceRevisionId)
-				) {
+				if (!activeService) {
 					return;
+				}
+				if (activeService.previewOfService) {
+					const latestRevision = await tx
+						.select({ id: serviceRevisions.id })
+						.from(serviceRevisions)
+						.where(eq(serviceRevisions.serviceId, build.serviceId))
+						.orderBy(
+							desc(serviceRevisions.createdAt),
+							desc(serviceRevisions.id),
+						)
+						.limit(1)
+						.then((rows) => rows[0]);
+					if (latestRevision?.id !== build.serviceRevisionId) return;
 				}
 				await enqueueWork(
 					auth.serverId,

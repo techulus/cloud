@@ -457,7 +457,7 @@ describe("GitHub pull request webhook", () => {
 		const response = await POST(pullRequest("opened"));
 
 		expect(response.status).toBe(200);
-		expect(await response.json()).toMatchObject({ ok: true, queued: 2 });
+		expect(await response.json()).toMatchObject({ ok: true, queued: 4 });
 		expect(mocks.send).toHaveBeenCalledWith([
 			expect.objectContaining({
 				name: "preview/sync-requested",
@@ -473,25 +473,30 @@ describe("GitHub pull request webhook", () => {
 					previewGitRef: "refs/pull/42/merge",
 				},
 			}),
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: expect.objectContaining({
+					baseServiceId: "service-disabled",
+					previewGitRef: "refs/pull/42/merge",
+				}),
+			}),
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: expect.objectContaining({
+					baseServiceId: "service-stateful",
+					previewGitRef: "refs/pull/42/merge",
+				}),
+			}),
 		]);
 	});
 
 	it("closes an existing preview when the pull request changes base branch", async () => {
-		mocks.queryResults.push(
-			[
-				linkedService({
-					serviceId: "service-a",
-					previewDeploymentsEnabled: true,
-				}),
-			],
-			[
-				linkedService({
-					serviceId: "preview-42",
-					previewOfService: "service-a",
-					previewGitRef: "refs/pull/42/merge",
-				}).service,
-			],
-		);
+		mocks.queryResults.push([
+			linkedService({
+				serviceId: "service-a",
+				previewDeploymentsEnabled: true,
+			}),
+		]);
 
 		const response = await POST(
 			pullRequest("edited", { baseBranch: "release" }),
@@ -514,49 +519,54 @@ describe("GitHub pull request webhook", () => {
 	it.each([
 		["draft", { draft: true }],
 		["fork", { headRepoId: 999 }],
-	])("does not deploy a %s pull request", async (_case, options) => {
-		mocks.queryResults.push([
-			linkedService({
-				serviceId: "service-a",
-				previewDeploymentsEnabled: true,
-			}),
-		]);
+	])(
+		"queues teardown instead of deploying a %s pull request",
+		async (_case, options) => {
+			mocks.queryResults.push([
+				linkedService({
+					serviceId: "service-a",
+					previewDeploymentsEnabled: true,
+				}),
+			]);
 
-		const response = await POST(pullRequest("opened", options));
+			const response = await POST(pullRequest("opened", options));
 
-		expect(response.status).toBe(200);
-		expect(mocks.send).not.toHaveBeenCalled();
-	});
+			expect(response.status).toBe(200);
+			expect(mocks.send).toHaveBeenCalledWith([
+				expect.objectContaining({
+					name: "preview/close-requested",
+					data: expect.objectContaining({
+						baseServiceId: "service-a",
+						previewGitRef: "refs/pull/42/merge",
+					}),
+				}),
+			]);
+		},
+	);
 
 	it.each([
 		["closed", true, "pull_request_merged"],
 		["closed", false, "pull_request_closed"],
 		["converted_to_draft", false, "converted_to_draft"],
-	])("queues teardown for %s", async (action, merged, reason) => {
-		mocks.queryResults.push(
-			[linkedService({ serviceId: "service-a" })],
-			[
-				linkedService({
-					serviceId: "preview-42",
-					previewOfService: "service-a",
-					previewGitRef: "refs/pull/42/merge",
-				}).service,
-			],
-		);
+	])(
+		"queues teardown for %s even before a clone exists",
+		async (action, merged, reason) => {
+			mocks.queryResults.push([linkedService({ serviceId: "service-a" })]);
 
-		const response = await POST(pullRequest(action, { merged }));
+			const response = await POST(pullRequest(action, { merged }));
 
-		expect(response.status).toBe(200);
-		expect(mocks.send).toHaveBeenCalledWith([
-			expect.objectContaining({
-				name: "preview/close-requested",
-				data: {
-					baseServiceId: "service-a",
-					previewGitRef: "refs/pull/42/merge",
-					reason,
-					verifyWithGitHub: true,
-				},
-			}),
-		]);
-	});
+			expect(response.status).toBe(200);
+			expect(mocks.send).toHaveBeenCalledWith([
+				expect.objectContaining({
+					name: "preview/close-requested",
+					data: {
+						baseServiceId: "service-a",
+						previewGitRef: "refs/pull/42/merge",
+						reason,
+						verifyWithGitHub: true,
+					},
+				}),
+			]);
+		},
+	);
 });

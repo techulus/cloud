@@ -592,10 +592,6 @@ export const services = pgTable(
 			.default(false),
 		previewOfService: text("preview_of_service"),
 		previewGitRef: text("preview_git_ref"),
-		previewCurrentRevisionId: text("preview_current_revision_id"),
-		previewGithubDeploymentId: bigint("preview_github_deployment_id", {
-			mode: "number",
-		}),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -628,13 +624,6 @@ export const services = pgTable(
 				(${table.previewOfService} is null and (${table.previewDeploymentsEnabled} = false or ${table.stateful} = false))
 				or
 				(${table.previewOfService} is not null and ${table.previewDeploymentsEnabled} = false and ${table.stateful} = false)
-			)`,
-		),
-		check(
-			"services_preview_metadata_check",
-			sql`${table.previewOfService} is not null or (
-				${table.previewCurrentRevisionId} is null
-				and ${table.previewGithubDeploymentId} is null
 			)`,
 		),
 		uniqueIndex("services_preview_base_ref_unique_idx")

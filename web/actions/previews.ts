@@ -8,10 +8,7 @@ import { githubRepos, services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import {
-	ensurePreviewEnvironment,
-	requirePreviewDomain,
-} from "@/lib/preview-deployments";
+import { ensurePreviewEnvironment } from "@/lib/preview-deployments";
 
 export async function setPreviewDeploymentsEnabled(
 	serviceId: string,
@@ -32,7 +29,6 @@ export async function setPreviewDeploymentsEnabled(
 		);
 	}
 	if (enabled) {
-		await requirePreviewDomain();
 		await ensurePreviewEnvironment(service.projectId);
 	}
 

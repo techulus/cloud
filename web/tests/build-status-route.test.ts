@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => query),
 			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
+			orderBy: vi.fn(() => query),
 			limit: vi.fn(() => query),
 			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
@@ -49,7 +50,7 @@ const mocks = vi.hoisted(() => {
 		enqueueWork: vi.fn(),
 		send: vi.fn(),
 		updateGitHubDeploymentStatus: vi.fn(),
-		updateCurrentPreviewGitHubStatus: vi.fn(),
+		updatePreviewGitHubStatus: vi.fn(),
 		notify: vi.fn(),
 		createBuildCompleted: vi.fn((data, options) => ({
 			name: "build/completed",
@@ -68,7 +69,7 @@ vi.mock("@/lib/github", () => ({
 	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
 }));
 vi.mock("@/lib/preview-deployments", () => ({
-	updateCurrentPreviewGitHubStatus: mocks.updateCurrentPreviewGitHubStatus,
+	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
 }));
 vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
@@ -162,7 +163,7 @@ describe("agent build status transitions", () => {
 		mocks.enqueueWork.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
 		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
-		mocks.updateCurrentPreviewGitHubStatus.mockResolvedValue(true);
+		mocks.updatePreviewGitHubStatus.mockResolvedValue(true);
 		mocks.notify.mockResolvedValue(undefined);
 	});
 
@@ -322,14 +323,14 @@ describe("agent build status transitions", () => {
 				{
 					id: "service-1",
 					previewOfService: "base-service",
-					previewCurrentRevisionId: "revision-1",
 				},
 			],
+			[{ id: "revision-1" }],
 		);
 		mocks.updateResults.push([completedBuild]);
 
 		expect((await post("completed")).status).toBe(200);
-		expect(mocks.updateCurrentPreviewGitHubStatus).toHaveBeenCalledWith({
+		expect(mocks.updatePreviewGitHubStatus).toHaveBeenCalledWith({
 			serviceId: "service-1",
 			serviceRevisionId: "revision-1",
 			expectedDeploymentId: 456,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildServiceRevisionSpec,
-	isSupportedGitRef,
 	type ServiceRevisionDraft,
 } from "@/lib/service-revision-spec";
 
@@ -220,7 +219,6 @@ describe("service revision specification", () => {
 				repository: "https://github.com/techulus/cloud",
 				repositoryId: 123,
 				branch: "main",
-				gitRef: "refs/heads/main",
 				commitSha: "0123456789abcdef0123456789abcdef01234567",
 				rootDir: "web",
 				authentication: { type: "github_app", installationId: 456 },
@@ -228,13 +226,12 @@ describe("service revision specification", () => {
 		});
 
 		expect(spec).toMatchObject({
-			schemaVersion: 4,
+			schemaVersion: 3,
 			image: "registry.test/project/service:revision-1",
 			source: {
 				type: "github",
 				repository: "https://github.com/techulus/cloud",
 				branch: "main",
-				gitRef: "refs/heads/main",
 				commitSha: "0123456789abcdef0123456789abcdef01234567",
 				rootDir: "web",
 				authentication: { type: "github_app", installationId: 456 },
@@ -408,25 +405,5 @@ describe("service revision specification", () => {
 			placements: [{ serverId: "proxy-server", count: 1 }],
 			volumes: [{ name: "data", containerPath: "/data" }],
 		});
-	});
-
-	it("accepts only branch and pull-request merge refs that Git can fetch safely", () => {
-		expect(isSupportedGitRef("refs/heads/main")).toBe(true);
-		expect(isSupportedGitRef("refs/heads/feature/preview-deployments")).toBe(
-			true,
-		);
-		expect(isSupportedGitRef("refs/pull/42/merge")).toBe(true);
-
-		for (const ref of [
-			"main",
-			"refs/heads//main",
-			"refs/heads/feature/.hidden",
-			"refs/heads/@",
-			"refs/heads/feature.lock",
-			"refs/pull/0/merge",
-			"refs/pull/42/head",
-		]) {
-			expect(isSupportedGitRef(ref)).toBe(false);
-		}
 	});
 });

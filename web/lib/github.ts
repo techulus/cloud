@@ -413,6 +413,64 @@ type DeploymentState =
 	| "error"
 	| "inactive";
 
+export async function findGitHubDeployment(
+	installationId: number,
+	repoFullName: string,
+	commitSha: string,
+	environment: string,
+	expectedPayload: Record<string, unknown>,
+): Promise<number | null> {
+	validateRepoFullName(repoFullName);
+	const token = await getInstallationToken(installationId);
+	const parameters = new URLSearchParams({
+		sha: commitSha,
+		environment,
+		per_page: "100",
+	});
+	const response = await fetch(
+		`https://api.github.com/repos/${repoFullName}/deployments?${parameters}`,
+		{
+			headers: {
+				Accept: "application/vnd.github+json",
+				Authorization: `Bearer ${token}`,
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		},
+	);
+	if (!response.ok) {
+		const error = await response.text();
+		throw new Error(`Failed to list deployments: ${error}`);
+	}
+	const deployments = (await response.json()) as Array<{
+		id: number;
+		payload: unknown;
+	}>;
+	for (const deployment of deployments) {
+		let payload = deployment.payload;
+		if (typeof payload === "string") {
+			try {
+				payload = JSON.parse(payload);
+			} catch {
+				continue;
+			}
+		}
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+			continue;
+		}
+		const payloadRecord = payload as Record<string, unknown>;
+		if (
+			Number.isSafeInteger(deployment.id) &&
+			Object.entries(expectedPayload).every(
+				([key, value]) =>
+					Object.hasOwn(payloadRecord, key) && payloadRecord[key] === value,
+			)
+		) {
+			return deployment.id;
+		}
+	}
+	return null;
+}
+
 export async function createGitHubDeployment(
 	installationId: number,
 	repoFullName: string,

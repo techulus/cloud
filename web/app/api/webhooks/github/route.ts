@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -117,14 +117,6 @@ async function handleInstallationEvent(payload: InstallationPayload) {
 		await deletePreviewsForGitHubInstallation(
 			installation.id,
 			"GitHub installation suspended",
-			{ githubDeploymentCleanup: "defer" },
-		);
-	}
-	if (action === "unsuspend") {
-		await deletePreviewsForGitHubInstallation(
-			installation.id,
-			"GitHub installation unsuspended",
-			{ githubDeploymentCleanup: "report" },
 		);
 	}
 
@@ -339,8 +331,8 @@ async function handlePullRequestEvent(
 		| ReturnType<typeof inngestEvents.previewCloseRequested.create>
 	> = [];
 	const syncedBaseServiceIds = new Set<string>();
-	const linkedBaseServiceIds = linkedServices.flatMap(({ service }) =>
-		!service.previewOfService && !service.deletedAt ? [service.id] : [],
+	const linkedBaseServices = linkedServices.filter(
+		({ service }) => !service.previewOfService && !service.deletedAt,
 	);
 
 	if (shouldSync) {
@@ -371,24 +363,8 @@ async function handlePullRequestEvent(
 		}
 	}
 
-	const clones =
-		linkedBaseServiceIds.length > 0
-			? await db
-					.select()
-					.from(services)
-					.where(
-						and(
-							inArray(services.previewOfService, linkedBaseServiceIds),
-							eq(services.previewGitRef, previewGitRef),
-							isNull(services.deletedAt),
-						),
-					)
-			: [];
-	for (const clone of clones) {
-		if (
-			!clone.previewOfService ||
-			syncedBaseServiceIds.has(clone.previewOfService)
-		) {
+	for (const { service } of linkedBaseServices) {
+		if (syncedBaseServiceIds.has(service.id)) {
 			continue;
 		}
 		const reason =
@@ -404,13 +380,13 @@ async function handlePullRequestEvent(
 		events.push(
 			inngestEvents.previewCloseRequested.create(
 				{
-					baseServiceId: clone.previewOfService,
+					baseServiceId: service.id,
 					previewGitRef,
 					reason,
 					verifyWithGitHub: true,
 				},
 				{
-					id: `github-pr-close:${deliveryId}:${clone.previewOfService}:${payload.number}`,
+					id: `github-pr-close:${deliveryId}:${service.id}:${payload.number}`,
 				},
 			),
 		);

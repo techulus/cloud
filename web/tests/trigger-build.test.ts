@@ -111,7 +111,6 @@ describe("internal GitHub build trigger", () => {
 				commitSha: "0123456789abcdef0123456789abcdef01234567",
 				expectedRepository: "https://github.com/acme/app",
 				expectedBranch: "production",
-				gitRef: "refs/heads/production",
 				actor,
 			}),
 		);
@@ -123,7 +122,6 @@ describe("internal GitHub build trigger", () => {
 			commitSha: "0123456789abcdef0123456789abcdef01234567",
 			commitMessage: "Resolved source commit",
 			branch: "production",
-			gitRef: "refs/heads/production",
 			author: "octocat",
 			actor,
 			githubDeploymentId: undefined,
@@ -159,7 +157,6 @@ describe("internal GitHub build trigger", () => {
 			expect.objectContaining({
 				expectedRepository: "https://github.com/acme/public",
 				expectedBranch: "preview",
-				gitRef: "refs/heads/preview",
 			}),
 		);
 		expect(mocks.createBuildTrigger).toHaveBeenCalledWith({
@@ -170,7 +167,6 @@ describe("internal GitHub build trigger", () => {
 			commitSha: "0123456789abcdef0123456789abcdef01234567",
 			commitMessage: "Resolved source commit",
 			branch: "preview",
-			gitRef: "refs/heads/preview",
 			author: "octocat",
 			actor: { type: "system" },
 			githubDeploymentId: undefined,
@@ -302,7 +298,6 @@ describe("internal GitHub build trigger", () => {
 				serviceRevisionId: "retry-1",
 				commitSha: retrySpecification.source.commitSha,
 				branch: "main",
-				gitRef: "refs/heads/main",
 			}),
 		);
 	});

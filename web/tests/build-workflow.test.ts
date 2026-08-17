@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
 		queryResults,
 		select: vi.fn(() => query(queryResults.shift() ?? [])),
 		deployServiceRevisionInternal: vi.fn(),
-		updateCurrentPreviewGitHubStatus: vi.fn(),
+		updatePreviewGitHubStatus: vi.fn(),
 	};
 });
 
@@ -27,7 +27,7 @@ vi.mock("@/lib/deploy-service", () => ({
 	deployServiceRevisionInternal: mocks.deployServiceRevisionInternal,
 }));
 vi.mock("@/lib/preview-deployments", () => ({
-	updateCurrentPreviewGitHubStatus: mocks.updateCurrentPreviewGitHubStatus,
+	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
 }));
 vi.mock("@/lib/inngest/client", () => ({
 	inngest: {
@@ -126,7 +126,7 @@ describe("revision-first build completion", () => {
 			rolloutId: "rollout-1",
 			created: true,
 		});
-		mocks.updateCurrentPreviewGitHubStatus.mockResolvedValue(false);
+		mocks.updatePreviewGitHubStatus.mockResolvedValue(false);
 	});
 
 	it("deploys each out-of-order build using its own immutable revision", async () => {
@@ -167,7 +167,7 @@ describe("revision-first build completion", () => {
 			buildGroupId: "group-failed",
 		});
 		expect(mocks.deployServiceRevisionInternal).not.toHaveBeenCalled();
-		expect(mocks.updateCurrentPreviewGitHubStatus).toHaveBeenCalledWith({
+		expect(mocks.updatePreviewGitHubStatus).toHaveBeenCalledWith({
 			serviceId: "service-1",
 			serviceRevisionId: "revision-failed",
 			state: "failure",

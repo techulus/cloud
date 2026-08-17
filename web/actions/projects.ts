@@ -129,9 +129,7 @@ export async function deleteProject(
 		.from(services)
 		.where(eq(services.projectId, id));
 
-	for (const service of projectServices.filter(
-		(service) => !service.previewOfService,
-	)) {
+	for (const service of projectServices) {
 		const activeDeployments = await db
 			.select()
 			.from(deployments)
@@ -918,10 +916,37 @@ export async function updateServiceGithubRepo(
 			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
 		}
 
+		let reconcilePreviews = false;
 		await db.transaction(async (tx) => {
 			await tx.execute(
 				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 			);
+			const current = await tx
+				.select({
+					githubRepoUrl: services.githubRepoUrl,
+					previewDeploymentsEnabled: services.previewDeploymentsEnabled,
+					previewOfService: services.previewOfService,
+				})
+				.from(services)
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.then((rows) => rows[0]);
+			if (!current) throw new Error("Service not found");
+			if (current.previewOfService && normalizedUrl !== current.githubRepoUrl) {
+				throw new Error(
+					"A preview service must remain linked to its pull request",
+				);
+			}
+			if (
+				current.previewDeploymentsEnabled &&
+				!current.previewOfService &&
+				normalizedUrl !== current.githubRepoUrl
+			) {
+				throw new Error(
+					"Disable preview deployments before changing the GitHub repository",
+				);
+			}
+			reconcilePreviews =
+				current.previewDeploymentsEnabled && !current.previewOfService;
 			await tx
 				.update(services)
 				.set(updateData)
@@ -931,6 +956,14 @@ export async function updateServiceGithubRepo(
 				.set({ deployBranch: normalizedBranch })
 				.where(eq(githubRepos.serviceId, serviceId));
 		});
+		if (reconcilePreviews) {
+			await inngest.send(
+				inngestEvents.previewServiceReconcileRequested.create(
+					{ baseServiceId: serviceId },
+					{ id: `preview-source:${serviceId}:${randomUUID()}` },
+				),
+			);
+		}
 
 		return { success: true };
 	} catch (error) {

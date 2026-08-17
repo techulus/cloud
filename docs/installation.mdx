@@ -299,8 +299,8 @@ migrations from every replica.
 
 Configure the app with Contents read, Pull requests read, and Deployments write
 repository permissions. Subscribe it to Push and Pull request events. Pull
-request preview deployments additionally require the Automatic Subdomain Domain
-setting and a wildcard DNS record for that domain.
+request previews use the Automatic Subdomain Domain setting and its wildcard DNS
+record when configured. Without it, previews are created without public URLs.
 
 ## Generating Secrets
 

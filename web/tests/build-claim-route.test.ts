@@ -104,21 +104,26 @@ describe("agent build claim", () => {
 		expect(mocks.send).not.toHaveBeenCalled();
 	});
 
-	it("returns the exact snapshotted Git ref", async () => {
+	it("returns the preview service's exact pull request ref", async () => {
 		mocks.updateResults.push([build]);
 		mocks.selectResults.push(
-			[{ id: "service-1", projectId: "project-1" }],
+			[
+				{
+					id: "service-1",
+					projectId: "project-1",
+					previewGitRef: "refs/pull/42/merge",
+				},
+			],
 			[
 				{
 					specification: {
-						schemaVersion: 4,
+						schemaVersion: 3,
 						image: "registry.example.com/project/service:revision-1",
 						source: {
 							type: "github",
 							repository: "https://github.com/acme/app",
 							repositoryId: null,
 							branch: "main",
-							gitRef: "refs/pull/42/merge",
 							commitSha: build.commitSha,
 							rootDir: null,
 							authentication: { type: "anonymous" },
