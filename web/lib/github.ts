@@ -372,7 +372,14 @@ export async function upsertGitHubPullRequestComment(
 	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
 		throw new Error("Invalid pull request number");
 	}
-	if (!/^<!-- [^\r\n]+ -->$/.test(marker)) {
+	const markerContent = marker.slice("<!-- ".length, -" -->".length);
+	if (
+		!marker.startsWith("<!-- ") ||
+		!marker.endsWith(" -->") ||
+		!markerContent ||
+		marker.includes("\r") ||
+		marker.includes("\n")
+	) {
 		throw new Error("Invalid pull request comment marker");
 	}
 	const body = `${marker}\n${content.trim()}`;
