@@ -17,7 +17,7 @@ import {
 	createGitHubBuildServiceRevision,
 } from "@/lib/service-revisions";
 
-type BuildTrigger = "manual" | "scheduled" | "push";
+type BuildTrigger = "manual" | "scheduled" | "push" | "preview";
 const fullCommitSha = /^[0-9a-f]{40}$/i;
 
 type ResolvedBuildInput = {
@@ -28,6 +28,7 @@ type ResolvedBuildInput = {
 	actor: ServiceRevisionActor;
 	expectedRepository?: string;
 	expectedBranch?: string;
+	gitRef?: string;
 	githubDeploymentId?: number;
 	idempotencyKey?: string;
 };
@@ -106,6 +107,13 @@ async function queueResolvedBuild(
 	) {
 		throw new Error("GitHub source changed before the build was queued");
 	}
+	if (
+		service.previewOfService
+			? !service.previewGitRef || input.gitRef !== service.previewGitRef
+			: input.gitRef !== undefined
+	) {
+		throw new Error("Build Git ref does not match the service");
+	}
 
 	const registryHost = resolveRegistryImageHost();
 	const serviceRevisionId = input.idempotencyKey
@@ -133,6 +141,7 @@ async function queueResolvedBuild(
 			commitSha,
 			commitMessage: input.commitMessage.substring(0, 500),
 			branch: expectedBranch,
+			gitRef: input.gitRef,
 			author: input.author,
 			actor: input.actor,
 			githubDeploymentId: input.githubDeploymentId,
@@ -184,6 +193,26 @@ export async function triggerBuildInternal(
 	actor: ServiceRevisionActor,
 ) {
 	const sourceContext = await getGitHubBuildSource(serviceId);
+	if (
+		sourceContext.service.previewOfService &&
+		sourceContext.service.previewGitRef
+	) {
+		await inngest.send(
+			inngestEvents.previewSyncRequested.create(
+				{
+					baseServiceId: sourceContext.service.previewOfService,
+					previewGitRef: sourceContext.service.previewGitRef,
+					force: true,
+				},
+				{ id: `preview-user-sync:${serviceId}:${randomUUID()}` },
+			),
+		);
+		return {
+			buildId: null,
+			serviceRevisionId: null,
+			status: "queued" as const,
+		};
+	}
 	const { repo, source } = sourceContext;
 	const repoFullName =
 		repo?.repoFullName ??

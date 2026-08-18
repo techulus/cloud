@@ -21,6 +21,11 @@ const mocks = vi.hoisted(() => {
 		oldBackupsCleanup: { id: "old-backups-cleanup" },
 		onDeploymentFailed: { id: "on-deployment-failed" },
 		onRestoreFailed: { id: "on-restore-failed" },
+		previewReconciliation: { id: "preview-reconciliation" },
+		previewServiceReconcileWorkflow: {
+			id: "preview-service-reconcile-workflow",
+		},
+		previewSyncWorkflow: { id: "preview-sync-workflow" },
 		restoreTriggerWorkflow: { id: "restore-trigger-workflow" },
 		restoreWorkflow: { id: "restore-workflow" },
 		registryArtifactRetention: { id: "registry-artifact-retention" },

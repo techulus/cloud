@@ -1,7 +1,7 @@
-import { and, asc, eq, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import { cron } from "inngest";
 import { db } from "@/db";
-import { serviceCrons, services } from "@/db/schema";
+import { githubRepos, serviceCrons, services } from "@/db/schema";
 import {
 	cleanupExpiredChallenges,
 	renewExpiringCertificates,
@@ -22,6 +22,7 @@ import {
 	runAutoscalingController,
 } from "@/lib/scheduler";
 import { inngest } from "../client";
+import { inngestEvents } from "../events";
 import {
 	cronEventId,
 	latestDueOccurrence,
@@ -213,6 +214,57 @@ export const serviceCommandRetention = inngest.createFunction(
 	},
 	async ({ step }) =>
 		step.run("cleanup-service-commands", cleanupOldServiceCommands),
+);
+
+export const previewReconciliation = inngest.createFunction(
+	{
+		id: "cron-preview-reconciliation",
+		triggers: [cron("0 1 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		const serviceCount = await step.run(
+			"queue-preview-reconciliation",
+			async () => {
+				const [enabled, children] = await Promise.all([
+					db
+						.select({ id: services.id })
+						.from(services)
+						.innerJoin(githubRepos, eq(githubRepos.serviceId, services.id))
+						.where(
+							and(
+								eq(services.previewDeploymentsEnabled, true),
+								eq(services.sourceType, "github"),
+								isNull(services.previewOfService),
+								isNull(services.deletedAt),
+							),
+						),
+					db
+						.select({ id: services.previewOfService })
+						.from(services)
+						.where(isNotNull(services.previewOfService))
+						.groupBy(services.previewOfService),
+				]);
+				const serviceIds = new Set([
+					...enabled.map(({ id }) => id),
+					...children.flatMap(({ id }) => (id ? [id] : [])),
+				]);
+				const day = new Date().toISOString().slice(0, 10);
+				if (serviceIds.size > 0) {
+					await inngest.send(
+						[...serviceIds].map((baseServiceId) =>
+							inngestEvents.previewServiceReconcileRequested.create(
+								{ baseServiceId },
+								{ id: `preview-service-daily:${baseServiceId}:${day}` },
+							),
+						),
+					);
+				}
+				return serviceIds.size;
+			},
+		);
+		return { serviceCount };
+	},
 );
 
 export const serviceCronDispatcher = inngest.createFunction(

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { notify } from "@/lib/notifications";
+import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
@@ -14,14 +15,17 @@ export async function handleRolloutFailure(
 	reason: string,
 	isRollingUpdate: boolean,
 ): Promise<void> {
-	const { applied, rolloutDeployments } = await db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		const [rollout] = await tx
-			.select({ status: rollouts.status })
+			.select({
+				status: rollouts.status,
+				serviceRevisionId: rollouts.serviceRevisionId,
+			})
 			.from(rollouts)
 			.where(eq(rollouts.id, rolloutId))
 			.for("update");
 		if (rollout?.status !== "in_progress") {
-			return { applied: false, rolloutDeployments: [] };
+			return { applied: false as const, rolloutDeployments: [] };
 		}
 
 		const rolloutDeployments = await tx
@@ -38,7 +42,7 @@ export async function handleRolloutFailure(
 			.where(eq(rollouts.id, rolloutId));
 
 		if (rolloutDeployments.length === 0) {
-			return { applied: true, rolloutDeployments };
+			return { applied: true as const, rolloutDeployments, rollout };
 		}
 
 		if (isRollingUpdate) {
@@ -79,9 +83,26 @@ export async function handleRolloutFailure(
 			}
 		}
 
-		return { applied: true, rolloutDeployments };
+		return { applied: true as const, rolloutDeployments, rollout };
 	});
-	if (!applied) return;
+	if (!result.applied) return;
+	const { rolloutDeployments } = result;
+	const serviceRevisionId = result.rollout.serviceRevisionId;
+	if (serviceRevisionId) {
+		try {
+			await updatePreviewGitHubStatus({
+				serviceId,
+				serviceRevisionId,
+				state: "failure",
+				description: `Preview rollout failed: ${reason}`,
+			});
+		} catch (error) {
+			console.error(
+				"[rollout:failure] failed to update preview status:",
+				error,
+			);
+		}
+	}
 
 	if (rolloutDeployments.length === 0) {
 		notify({

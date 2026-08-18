@@ -55,6 +55,10 @@ import {
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
 import {
+	deletePreviewService,
+	deletePreviewsForBaseService,
+} from "@/lib/preview-lifecycle";
+import {
 	containerPathSchema,
 	githubRepoUrlSchema,
 	nameSchema,
@@ -143,7 +147,10 @@ export async function deleteProject(
 		}
 	}
 
-	for (const service of projectServices) {
+	for (const service of projectServices.sort(
+		(a, b) =>
+			Number(Boolean(b.previewOfService)) - Number(Boolean(a.previewOfService)),
+	)) {
 		await hardDeleteService(service.id);
 	}
 	await db.transaction(async (tx) => {
@@ -253,11 +260,14 @@ export async function deleteEnvironment(environmentId: string) {
 	}
 
 	const envServices = await db
-		.select({ id: services.id })
+		.select({ id: services.id, previewOfService: services.previewOfService })
 		.from(services)
 		.where(eq(services.environmentId, environmentId));
 
-	for (const service of envServices) {
+	for (const service of envServices.sort(
+		(a, b) =>
+			Number(Boolean(b.previewOfService)) - Number(Boolean(a.previewOfService)),
+	)) {
 		await hardDeleteService(service.id);
 	}
 	await db.transaction(async (tx) => {
@@ -406,6 +416,23 @@ export async function createService(input: CreateServiceInput) {
 }
 
 async function hardDeleteService(serviceId: string) {
+	const preview = await db
+		.select({
+			previewOfService: services.previewOfService,
+			previewGitRef: services.previewGitRef,
+		})
+		.from(services)
+		.where(eq(services.id, serviceId))
+		.then((rows) => rows[0]);
+	if (preview?.previewOfService && preview.previewGitRef) {
+		const deleted = await deletePreviewService(
+			preview.previewOfService,
+			preview.previewGitRef,
+		);
+		if (!deleted) throw new Error("Preview service not found");
+		return { success: true };
+	}
+
 	const service = await db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const freshService = await tx
@@ -451,6 +478,7 @@ async function hardDeleteService(serviceId: string) {
 		);
 	}
 	const claimedService = service.service;
+	await deletePreviewsForBaseService(serviceId, "base service deleted");
 
 	const allDeployments = await db
 		.select()
@@ -888,10 +916,37 @@ export async function updateServiceGithubRepo(
 			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
 		}
 
+		let reconcilePreviews = false;
 		await db.transaction(async (tx) => {
 			await tx.execute(
 				sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 			);
+			const current = await tx
+				.select({
+					githubRepoUrl: services.githubRepoUrl,
+					previewDeploymentsEnabled: services.previewDeploymentsEnabled,
+					previewOfService: services.previewOfService,
+				})
+				.from(services)
+				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.then((rows) => rows[0]);
+			if (!current) throw new Error("Service not found");
+			if (current.previewOfService && normalizedUrl !== current.githubRepoUrl) {
+				throw new Error(
+					"A preview service must remain linked to its pull request",
+				);
+			}
+			if (
+				current.previewDeploymentsEnabled &&
+				!current.previewOfService &&
+				normalizedUrl !== current.githubRepoUrl
+			) {
+				throw new Error(
+					"Disable preview deployments before changing the GitHub repository",
+				);
+			}
+			reconcilePreviews =
+				current.previewDeploymentsEnabled && !current.previewOfService;
 			await tx
 				.update(services)
 				.set(updateData)
@@ -901,6 +956,14 @@ export async function updateServiceGithubRepo(
 				.set({ deployBranch: normalizedBranch })
 				.where(eq(githubRepos.serviceId, serviceId));
 		});
+		if (reconcilePreviews) {
+			await inngest.send(
+				inngestEvents.previewServiceReconcileRequested.create(
+					{ baseServiceId: serviceId },
+					{ id: `preview-source:${serviceId}:${randomUUID()}` },
+				),
+			);
+		}
 
 		return { success: true };
 	} catch (error) {
@@ -1715,6 +1778,12 @@ export async function addServiceVolume(
 				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
 				.then((rows) => rows[0]);
 			if (!service) throw new Error("Service not found");
+			if (service.previewOfService) {
+				throw new Error("Preview services cannot have volumes");
+			}
+			if (service.previewDeploymentsEnabled) {
+				throw new Error("Disable preview deployments before adding a volume");
+			}
 			if (service.placementMode === "automatic") {
 				throw new Error("Switch to manual placement before adding a volume");
 			}

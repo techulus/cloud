@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	deploymentPorts,
 	deployments,
 	rollouts,
 	servers,
+	serviceRevisions,
 	services,
 } from "@/db/schema";
 import { getCertificate, issueCertificate } from "@/lib/acme-manager";
@@ -61,6 +62,7 @@ export function distributeReplicas(
 
 export type DeploymentContext = {
 	revisionId: string;
+	isPreview: boolean;
 	specification: ServiceRevisionSpec;
 	placements: Placement[];
 	serverMap: Map<
@@ -70,6 +72,27 @@ export type DeploymentContext = {
 	totalReplicas: number;
 	isRollingUpdate: boolean;
 };
+
+async function isCurrentPreviewRevision(
+	tx: RolloutTransaction,
+	serviceId: string,
+	revisionId: string,
+) {
+	const latest = await tx
+		.select({ id: serviceRevisions.id })
+		.from(serviceRevisions)
+		.innerJoin(services, eq(services.id, serviceRevisions.serviceId))
+		.where(
+			and(
+				eq(serviceRevisions.serviceId, serviceId),
+				isNull(services.deletedAt),
+			),
+		)
+		.orderBy(desc(serviceRevisions.createdAt), desc(serviceRevisions.id))
+		.limit(1)
+		.then((rows) => rows[0]);
+	return latest?.id === revisionId;
+}
 
 async function getUsedPorts(
 	tx: RolloutTransaction,
@@ -364,7 +387,8 @@ export async function createDeploymentRecords(
 	serviceId: string,
 	context: DeploymentContext,
 ): Promise<{ deploymentIds: string[] }> {
-	const { revisionId, specification, placements, serverMap } = context;
+	const { revisionId, isPreview, specification, placements, serverMap } =
+		context;
 
 	const requestedReplicasByServer = new Map(
 		placements.map((placement) => [placement.serverId, placement.replicas]),
@@ -385,12 +409,19 @@ export async function createDeploymentRecords(
 		for (let i = 0; i < placement.replicas; i++) {
 			const deploymentId = randomUUID();
 
+			// react-doctor-disable-next-line react-doctor/async-await-in-loop -- each allocation must observe and lock the ports claimed by the previous replica
 			const currentDeploymentIds = await withAllocationRetry(
 				() =>
 					db.transaction(async (tx) => {
 						await tx.execute(
 							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 						);
+						if (
+							isPreview &&
+							!(await isCurrentPreviewRevision(tx, serviceId, revisionId))
+						) {
+							throw new Error("Preview revision is no longer current");
+						}
 						const [rollout] = await tx
 							.select({ status: rollouts.status })
 							.from(rollouts)
@@ -493,14 +524,22 @@ export async function createDeploymentRecords(
 export async function completeRollout(
 	rolloutId: string,
 	serviceId: string,
-	context: Omit<DeploymentContext, "serverMap" | "revisionId">,
+	context: Omit<DeploymentContext, "serverMap">,
 ): Promise<{ completed: boolean; stoppedCount: number }> {
-	const { placements, specification, isRollingUpdate } = context;
+	const { placements, revisionId, isPreview, specification, isRollingUpdate } =
+		context;
 	const lockedServerId = specification.stateful
 		? placements[0]?.serverId
 		: undefined;
 
 	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		if (
+			isPreview &&
+			!(await isCurrentPreviewRevision(tx, serviceId, revisionId))
+		) {
+			return { completed: false, stoppedCount: 0 };
+		}
 		const rollout = await tx
 			.select({ status: rollouts.status })
 			.from(rollouts)

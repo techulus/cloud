@@ -18,12 +18,16 @@ const mocks = vi.hoisted(() => {
 		queryResults,
 		select: vi.fn(() => query(queryResults.shift() ?? [])),
 		deployServiceRevisionInternal: vi.fn(),
+		updatePreviewGitHubStatus: vi.fn(),
 	};
 });
 
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/lib/deploy-service", () => ({
 	deployServiceRevisionInternal: mocks.deployServiceRevisionInternal,
+}));
+vi.mock("@/lib/preview-deployments", () => ({
+	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
 }));
 vi.mock("@/lib/inngest/client", () => ({
 	inngest: {
@@ -122,6 +126,7 @@ describe("revision-first build completion", () => {
 			rolloutId: "rollout-1",
 			created: true,
 		});
+		mocks.updatePreviewGitHubStatus.mockResolvedValue(false);
 	});
 
 	it("deploys each out-of-order build using its own immutable revision", async () => {
@@ -162,6 +167,12 @@ describe("revision-first build completion", () => {
 			buildGroupId: "group-failed",
 		});
 		expect(mocks.deployServiceRevisionInternal).not.toHaveBeenCalled();
+		expect(mocks.updatePreviewGitHubStatus).toHaveBeenCalledWith({
+			serviceId: "service-1",
+			serviceRevisionId: "revision-failed",
+			state: "failure",
+			description: "Preview build failed",
+		});
 	});
 
 	it("uses persisted completion when the build event was missed", async () => {

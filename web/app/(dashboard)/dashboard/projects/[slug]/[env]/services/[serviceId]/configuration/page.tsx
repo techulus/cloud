@@ -96,7 +96,13 @@ export default function ConfigurationPage() {
 					</div>
 				</ConfigSection>
 
-				<SourceSection service={service} onUpdate={handleConfigSave} />
+				<SourceSection
+					service={service}
+					projectSlug={projectSlug}
+					autoSubdomainDomain={autoSubdomainDomain}
+					onUpdate={handleConfigSave}
+					onPreviewUpdate={onUpdate}
+				/>
 
 				<ReplicasSection service={service} onUpdate={handleConfigSave} />
 

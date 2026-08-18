@@ -28,7 +28,6 @@ import {
 	DAY_IN_MILLISECONDS,
 	isDateAfter,
 	MINUTE_IN_MILLISECONDS,
-	SECOND_IN_MILLISECONDS,
 	subtractMilliseconds,
 } from "@/lib/date";
 import { deployServiceInternal } from "@/lib/deploy-service";
@@ -49,7 +48,7 @@ import {
 	WORK_QUEUE_MAX_ATTEMPTS,
 } from "@/lib/work-queue";
 
-const STALE_THRESHOLD_MS = 75 * SECOND_IN_MILLISECONDS;
+const STALE_THRESHOLD_MS = 3 * MINUTE_IN_MILLISECONDS;
 export const AUTOMATIC_PLACEMENT_COOLDOWN_MS = 30 * MINUTE_IN_MILLISECONDS;
 export const MAX_REBALANCES_PER_RUN = 5;
 export const MAX_AUTOMATIC_RECOVERIES_PER_RUN = 5;

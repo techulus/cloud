@@ -1,9 +1,32 @@
+import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isFullCommitSha, resolveGitHubCommit } from "@/lib/github";
+import {
+	findGitHubDeployment,
+	getGitHubPullRequest,
+	GitHubApiError,
+	isFullCommitSha,
+	resolveGitHubCommit,
+	resolveGitHubPullRequestMergeRef,
+	upsertGitHubPullRequestComment,
+} from "@/lib/github";
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
 });
+
+function configureGitHubApp() {
+	const { privateKey } = generateKeyPairSync("rsa", {
+		modulusLength: 2048,
+		privateKeyEncoding: { type: "pkcs8", format: "pem" },
+		publicKeyEncoding: { type: "spki", format: "pem" },
+	});
+	vi.stubEnv("GITHUB_APP_ID", "123");
+	vi.stubEnv(
+		"GITHUB_APP_PRIVATE_KEY",
+		Buffer.from(privateKey).toString("base64"),
+	);
+}
 
 describe("GitHub commit SHA validation", () => {
 	it("accepts only full hexadecimal commit SHAs", () => {
@@ -58,5 +81,172 @@ describe("public GitHub branch resolution", () => {
 				}),
 			}),
 		);
+	});
+});
+
+describe("GitHub pull request deployment helpers", () => {
+	it("exposes pull request response status for lifecycle decisions", async () => {
+		configureGitHubApp();
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+				.mockResolvedValueOnce(new Response("Not Found", { status: 404 })),
+		);
+
+		const request = getGitHubPullRequest(10, "acme/app", 42);
+		await expect(request).rejects.toBeInstanceOf(GitHubApiError);
+		await expect(request).rejects.toMatchObject({ status: 404 });
+	});
+
+	it("finds a deployment created for the same preview revision", async () => {
+		configureGitHubApp();
+		const fetchMock = vi.fn(
+			async (input: string | URL | Request, _init?: RequestInit) => {
+				const url = String(input);
+				if (url.includes("/access_tokens")) {
+					return Response.json({ token: "installation-token" });
+				}
+				return Response.json([
+					{
+						id: 101,
+						payload: {
+							previewServiceId: "preview-1",
+							serviceRevisionId: "revision-1",
+						},
+					},
+				]);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			findGitHubDeployment(
+				10,
+				"acme/app",
+				"0123456789abcdef0123456789abcdef01234567",
+				"preview/app/pr-42",
+				{
+					previewServiceId: "preview-1",
+					serviceRevisionId: "revision-1",
+				},
+			),
+		).resolves.toBe(101);
+		expect(fetchMock).toHaveBeenLastCalledWith(
+			"https://api.github.com/repos/acme/app/deployments?sha=0123456789abcdef0123456789abcdef01234567&environment=preview%2Fapp%2Fpr-42&per_page=100",
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: "Bearer installation-token",
+				}),
+			}),
+		);
+	});
+
+	it("fails when the synthetic merge ref is unavailable without using the PR head", async () => {
+		configureGitHubApp();
+		const fetchMock = vi.fn(
+			async (input: string | URL | Request, _init?: RequestInit) => {
+				const url = String(input);
+				if (url.includes("/access_tokens")) {
+					return Response.json({ token: "installation-token" });
+				}
+				return new Response("Not Found", { status: 404 });
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			resolveGitHubPullRequestMergeRef(10, "acme/app", 42),
+		).rejects.toThrow("refs/pull/42/merge is unavailable");
+		const commitRequests = fetchMock.mock.calls
+			.map(([input]) => String(input))
+			.filter((url) => url.includes("/commits"));
+		expect(commitRequests).toEqual([
+			"https://api.github.com/repos/acme/app/commits?sha=refs%2Fpull%2F42%2Fmerge&per_page=1",
+		]);
+	});
+
+	it("creates the marked pull request comment when it is missing", async () => {
+		configureGitHubApp();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+			.mockResolvedValueOnce(Response.json([]))
+			.mockResolvedValueOnce(Response.json({ id: 501 }, { status: 201 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			upsertGitHubPullRequestComment(
+				10,
+				"acme/app",
+				42,
+				"<!-- techulus-preview:service-1 -->",
+				"Preview is ready",
+			),
+		).resolves.toBe(501);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			"https://api.github.com/repos/acme/app/issues/42/comments?per_page=100&page=1",
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: "Bearer installation-token",
+				}),
+			}),
+		);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			3,
+			"https://api.github.com/repos/acme/app/issues/42/comments",
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({
+					body: "<!-- techulus-preview:service-1 -->\nPreview is ready",
+				}),
+			}),
+		);
+	});
+
+	it("replaces the existing marked pull request comment", async () => {
+		configureGitHubApp();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+			.mockResolvedValueOnce(
+				Response.json([
+					{
+						id: 501,
+						body: "<!-- techulus-preview:service-1 -->\nPreview queued",
+					},
+				]),
+			)
+			.mockResolvedValueOnce(Response.json({ id: 501 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			upsertGitHubPullRequestComment(
+				10,
+				"acme/app",
+				42,
+				"<!-- techulus-preview:service-1 -->",
+				"Preview is ready",
+			),
+		).resolves.toBe(501);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			3,
+			"https://api.github.com/repos/acme/app/issues/comments/501",
+			expect.objectContaining({
+				method: "PATCH",
+				body: JSON.stringify({
+					body: "<!-- techulus-preview:service-1 -->\nPreview is ready",
+				}),
+			}),
+		);
+		expect(
+			fetchMock.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith("/issues/42/comments") &&
+					(init as RequestInit | undefined)?.method === "POST",
+			),
+		).toBe(false);
 	});
 });

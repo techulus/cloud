@@ -10,6 +10,7 @@ export default function BuildsPage() {
 		<BuildsViewer
 			serviceId={service.id}
 			hasGithubAppRepo={service.hasGithubAppRepo === true}
+			isPreview={Boolean(service.previewOfService)}
 			projectSlug={projectSlug}
 			envName={envName}
 		/>

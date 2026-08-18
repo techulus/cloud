@@ -8,6 +8,7 @@ export {
 	challengeCleanup,
 	controlPlaneUpdateCheck,
 	notificationRetention,
+	previewReconciliation,
 	serviceCommandRetention,
 	serviceCronDispatcher,
 	oldBackupsCleanup,
@@ -21,6 +22,10 @@ export { serviceCronWorkflow } from "./service-cron-workflow";
 export { migrationWorkflow } from "./migration-workflow";
 export { notificationDelivery } from "./notification-delivery";
 export { onDeploymentFailed } from "./on-deployment-failed";
+export {
+	previewServiceReconcileWorkflow,
+	previewSyncWorkflow,
+} from "./preview-workflow";
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
 export { onRestoreFailed, restoreWorkflow } from "./restore-workflow";
 export { rolloutWorkflow } from "./rollout-workflow";

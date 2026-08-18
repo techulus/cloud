@@ -81,6 +81,39 @@ func TestCleanupStaleBuildDirsRemovesOnlyOldDirectories(t *testing.T) {
 	assertExists(t, filePath)
 }
 
+func TestCloneFetchesExactPullRequestMergeRef(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "work")
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "init", "--initial-branch", "main", workDir)
+	runGit(t, "-C", workDir, "config", "user.name", "Test User")
+	runGit(t, "-C", workDir, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("preview"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", workDir, "add", "app.txt")
+	runGit(t, "-C", workDir, "commit", "-m", "preview merge")
+	selectedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
+	runGit(t, "clone", "--bare", workDir, remoteDir)
+	runGit(t, "--git-dir", remoteDir, "update-ref", "refs/pull/42/merge", selectedSHA)
+
+	buildDir := filepath.Join(t.TempDir(), "build")
+	config := &Config{
+		BuildID:   "build-1",
+		CloneURL:  "file://" + remoteDir,
+		CommitSha: selectedSHA,
+		Branch:    "main",
+		GitRef:    "refs/pull/42/merge",
+	}
+	builder := NewBuilder(t.TempDir(), nil)
+
+	if err := builder.clone(context.Background(), config, buildDir); err != nil {
+		t.Fatal(err)
+	}
+	if config.ResolvedCommitSha != selectedSHA {
+		t.Fatalf("resolved commit = %s, want %s", config.ResolvedCommitSha, selectedSHA)
+	}
+}
+
 func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "work")
 	remoteDir := filepath.Join(t.TempDir(), "remote.git")
@@ -109,13 +142,48 @@ func TestCloneDeepensConfiguredBranchForSelectedCommit(t *testing.T) {
 		CommitSha: selectedSHA,
 		Branch:    "main",
 	}
-	builder := NewBuilder(t.TempDir(), nil)
-
-	if err := builder.clone(context.Background(), config, buildDir); err != nil {
+	if err := NewBuilder(t.TempDir(), nil).clone(context.Background(), config, buildDir); err != nil {
 		t.Fatal(err)
 	}
 	if config.ResolvedCommitSha != selectedSHA {
 		t.Fatalf("resolved commit = %s, want %s", config.ResolvedCommitSha, selectedSHA)
+	}
+}
+
+func TestCloneRejectsMovedRef(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "work")
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "init", "--initial-branch", "main", workDir)
+	runGit(t, "-C", workDir, "config", "user.name", "Test User")
+	runGit(t, "-C", workDir, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", workDir, "add", "app.txt")
+	runGit(t, "-C", workDir, "commit", "-m", "first")
+	expectedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(workDir, "app.txt"), []byte("second"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", workDir, "commit", "-am", "second")
+	movedSHA := runGit(t, "-C", workDir, "rev-parse", "HEAD")
+	runGit(t, "clone", "--bare", workDir, remoteDir)
+	runGit(t, "--git-dir", remoteDir, "update-ref", "refs/pull/42/merge", movedSHA)
+
+	config := &Config{
+		BuildID:   "build-1",
+		CloneURL:  "file://" + remoteDir,
+		CommitSha: expectedSHA,
+		Branch:    "main",
+		GitRef:    "refs/pull/42/merge",
+	}
+	err := NewBuilder(t.TempDir(), nil).clone(
+		context.Background(),
+		config,
+		filepath.Join(t.TempDir(), "build"),
+	)
+	if err == nil || !strings.Contains(err.Error(), "fetched ref resolved to") {
+		t.Fatalf("clone error = %v, want moved ref failure", err)
 	}
 }
 

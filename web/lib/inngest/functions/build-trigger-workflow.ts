@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { builds, serviceRevisions } from "@/db/schema";
+import { builds, serviceRevisions, services } from "@/db/schema";
 import {
 	getTargetPlatformsForRevision,
 	selectBuildServerForRevision,
 } from "@/lib/build-assignment";
 import { isFullCommitSha } from "@/lib/github";
+import { createPreviewGitHubDeployment } from "@/lib/preview-deployments";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -30,9 +31,11 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			serviceId,
 			serviceRevisionId,
 			buildRequestId,
+			trigger,
 			commitSha,
 			commitMessage,
 			branch,
+			gitRef,
 			author,
 			githubDeploymentId,
 			actor = null,
@@ -41,10 +44,14 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			throw new Error("Build fan-out requires a full 40-character commit SHA");
 		}
 		const exactCommitSha = commitSha.toLowerCase();
-		const specification = await step.run("get-build-revision", async () => {
+		const revision = await step.run("get-build-revision", async () => {
 			const revision = await db
-				.select({ specification: serviceRevisions.specification })
+				.select({
+					specification: serviceRevisions.specification,
+					previewGitRef: services.previewGitRef,
+				})
 				.from(serviceRevisions)
+				.innerJoin(services, eq(services.id, serviceRevisions.serviceId))
 				.where(
 					and(
 						eq(serviceRevisions.id, serviceRevisionId),
@@ -57,58 +64,85 @@ export const buildTriggerWorkflow = inngest.createFunction(
 			if (
 				parsed.source.type !== "github" ||
 				parsed.source.commitSha !== exactCommitSha ||
-				parsed.source.branch !== branch
+				parsed.source.branch !== branch ||
+				(revision.previewGitRef ?? undefined) !== gitRef
 			) {
 				throw new Error("Build trigger does not match its service revision");
 			}
-			return parsed;
+			return {
+				specification: parsed,
+				isPreview: revision.previewGitRef != null,
+			};
 		});
+		const { specification, isPreview } = revision;
 
-		const { buildIds, buildGroupId } = await step.run(
-			"create-builds",
-			async () => {
-				const targetPlatforms =
-					await getTargetPlatformsForRevision(specification);
-				if (targetPlatforms.length === 0) {
-					throw new Error("No target platforms configured for this build");
-				}
-				if (new Set(targetPlatforms).size !== targetPlatforms.length) {
-					throw new Error(
-						"Duplicate target platforms configured for this build",
-					);
-				}
+		const buildCreation = await step.run("create-builds", async () => {
+			const targetPlatforms =
+				await getTargetPlatformsForRevision(specification);
+			if (targetPlatforms.length === 0) {
+				throw new Error("No target platforms configured for this build");
+			}
+			if (new Set(targetPlatforms).size !== targetPlatforms.length) {
+				throw new Error("Duplicate target platforms configured for this build");
+			}
 
-				const assignments = await Promise.all(
-					targetPlatforms.map(async (platform) => ({
-						id: buildIdForRequest(buildRequestId, platform),
-						platform,
-						serverId: await selectBuildServerForRevision(
-							specification,
-							platform,
-						),
-					})),
+			const assignments = await Promise.all(
+				targetPlatforms.map(async (platform) => ({
+					id: buildIdForRequest(buildRequestId, platform),
+					platform,
+					serverId: await selectBuildServerForRevision(specification, platform),
+				})),
+			);
+			const buildRows = assignments.map(({ id, platform }) => ({
+				id,
+				serviceId,
+				serviceRevisionId,
+				commitSha: exactCommitSha,
+				commitMessage,
+				branch,
+				author,
+				targetPlatform: platform,
+				buildGroupId: buildRequestId,
+				status: "pending" as const,
+				githubDeploymentId,
+			}));
+			const persisted = await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`,
 				);
-				const buildRows = assignments.map(({ id, platform }) => ({
-					id,
-					serviceId,
-					serviceRevisionId,
-					commitSha: exactCommitSha,
-					commitMessage,
-					branch,
-					author,
-					targetPlatform: platform,
-					buildGroupId: buildRequestId,
-					status: "pending" as const,
-					githubDeploymentId,
-				}));
-				const inserted = await db
+				if (isPreview) {
+					const [activeService, latestRevision] = await Promise.all([
+						tx
+							.select({ id: services.id })
+							.from(services)
+							.where(
+								and(eq(services.id, serviceId), isNull(services.deletedAt)),
+							)
+							.then((rows) => rows[0]),
+						tx
+							.select({ id: serviceRevisions.id })
+							.from(serviceRevisions)
+							.where(eq(serviceRevisions.serviceId, serviceId))
+							.orderBy(
+								desc(serviceRevisions.createdAt),
+								desc(serviceRevisions.id),
+							)
+							.limit(1)
+							.then((rows) => rows[0]),
+					]);
+					if (!activeService || latestRevision?.id !== serviceRevisionId) {
+						return false;
+					}
+				}
+
+				const inserted = await tx
 					.insert(builds)
 					.values(buildRows)
 					.onConflictDoNothing({ target: builds.id })
 					.returning({ id: builds.id });
 
 				if (inserted.length !== buildRows.length) {
-					const existingRows = await db
+					const existingRows = await tx
 						.select({
 							id: builds.id,
 							serviceId: builds.serviceId,
@@ -143,22 +177,116 @@ export const buildTriggerWorkflow = inngest.createFunction(
 						}
 					}
 				}
+				return true;
+			});
 
-				for (const assignment of assignments) {
-					await enqueueWork(
-						assignment.serverId,
-						"build",
-						{ buildId: assignment.id },
-						{ id: `build-work-${assignment.id}` },
-					);
+			return {
+				stale: !persisted,
+				buildIds: assignments.map((assignment) => assignment.id),
+				buildGroupId: buildRequestId,
+				assignments,
+			};
+		});
+		if (buildCreation.stale) {
+			return {
+				status: "cancelled",
+				reason: "superseded_preview_revision",
+				buildGroupId: buildRequestId,
+			};
+		}
+		const { buildIds, buildGroupId, assignments } = buildCreation;
+		if (trigger === "preview" && !githubDeploymentId) {
+			await step.run("create-preview-github-deployment", () =>
+				createPreviewGitHubDeployment({
+					serviceId,
+					serviceRevisionId,
+					commitSha: exactCommitSha,
+				}),
+			);
+		}
+		const enqueueResult = await step.run("enqueue-builds", () =>
+			db.transaction(async (tx) => {
+				await tx.execute(
+					sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`,
+				);
+				if (isPreview) {
+					const [activeService, latestRevision] = await Promise.all([
+						tx
+							.select({ id: services.id })
+							.from(services)
+							.where(
+								and(eq(services.id, serviceId), isNull(services.deletedAt)),
+							)
+							.then((rows) => rows[0]),
+						tx
+							.select({ id: serviceRevisions.id })
+							.from(serviceRevisions)
+							.where(eq(serviceRevisions.serviceId, serviceId))
+							.orderBy(
+								desc(serviceRevisions.createdAt),
+								desc(serviceRevisions.id),
+							)
+							.limit(1)
+							.then((rows) => rows[0]),
+					]);
+					if (!activeService || latestRevision?.id !== serviceRevisionId) {
+						await tx
+							.update(builds)
+							.set({ status: "cancelled", completedAt: new Date() })
+							.where(
+								and(inArray(builds.id, buildIds), eq(builds.status, "pending")),
+							);
+						return "stale" as const;
+					}
+				}
+				const currentBuilds = await tx
+					.select({ id: builds.id, status: builds.status })
+					.from(builds)
+					.where(inArray(builds.id, buildIds))
+					.for("update");
+				const activeStatuses = new Set([
+					"pending",
+					"claimed",
+					"cloning",
+					"building",
+					"pushing",
+				]);
+				if (
+					currentBuilds.length !== buildIds.length ||
+					currentBuilds.some((build) => !activeStatuses.has(build.status))
+				) {
+					await tx
+						.update(builds)
+						.set({ status: "cancelled", completedAt: new Date() })
+						.where(
+							and(inArray(builds.id, buildIds), eq(builds.status, "pending")),
+						);
+					return "cancelled" as const;
 				}
 
-				return {
-					buildIds: assignments.map((assignment) => assignment.id),
-					buildGroupId: buildRequestId,
-				};
-			},
+				await Promise.all(
+					assignments.map((assignment) =>
+						enqueueWork(
+							assignment.serverId,
+							"build",
+							{ buildId: assignment.id },
+							{ id: `build-work-${assignment.id}`, tx },
+						),
+					),
+				);
+				return "enqueued" as const;
+			}),
 		);
+		if (enqueueResult !== "enqueued") {
+			return {
+				status: "cancelled",
+				reason:
+					enqueueResult === "stale"
+						? "superseded_preview_revision"
+						: "build_cancelled_before_enqueue",
+				buildGroupId: buildRequestId,
+			};
+		}
 
 		await step.run("send-build-started", async () => {
 			await inngest.send(

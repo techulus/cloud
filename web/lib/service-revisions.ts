@@ -585,7 +585,7 @@ export async function createRolloutForServiceRevision(
 ) {
 	return db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
-		const [revision, activeService] = await Promise.all([
+		const [revision, activeService, latestRevision] = await Promise.all([
 			tx
 				.select()
 				.from(serviceRevisions)
@@ -597,13 +597,29 @@ export async function createRolloutForServiceRevision(
 				)
 				.then((rows) => rows[0]),
 			tx
-				.select({ id: services.id })
+				.select({
+					id: services.id,
+					previewOfService: services.previewOfService,
+				})
 				.from(services)
 				.where(and(eq(services.id, serviceId), isNull(services.deletedAt)))
+				.then((rows) => rows[0]),
+			tx
+				.select({ id: serviceRevisions.id })
+				.from(serviceRevisions)
+				.where(eq(serviceRevisions.serviceId, serviceId))
+				.orderBy(desc(serviceRevisions.createdAt), desc(serviceRevisions.id))
+				.limit(1)
 				.then((rows) => rows[0]),
 		]);
 		if (!revision) throw new Error("Service revision not found");
 		if (!activeService) {
+			return { rolloutId: null, revision, created: false };
+		}
+		if (
+			activeService.previewOfService &&
+			latestRevision?.id !== serviceRevisionId
+		) {
 			return { rolloutId: null, revision, created: false };
 		}
 
