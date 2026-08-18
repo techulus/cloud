@@ -137,33 +137,6 @@ export async function cancelPreviewRevisionWork(
 	]);
 }
 
-export async function deactivatePreviewRuntime(serviceId: string) {
-	await Promise.all([cancelBuildRows(serviceId), cancelRolloutRows(serviceId)]);
-	const runtime = await db
-		.select()
-		.from(deployments)
-		.where(eq(deployments.serviceId, serviceId));
-	await db
-		.update(deployments)
-		.set(markDeploymentRemoved())
-		.where(eq(deployments.serviceId, serviceId));
-	await Promise.all(
-		runtime.flatMap((deployment) =>
-			deployment.containerId
-				? [
-						enqueueWork(deployment.serverId, "stop", {
-							deploymentId: deployment.id,
-							containerId: deployment.containerId,
-						}),
-					]
-				: [],
-		),
-	);
-	await db.transaction((tx) =>
-		enqueueReconcileForAllOnlineServers("preview_runtime_deactivated", tx),
-	);
-}
-
 export async function deletePreviewService(
 	baseServiceId: string,
 	previewGitRef: string,
@@ -245,10 +218,17 @@ export async function deletePreviewService(
 	);
 	await cleanupRegistryArtifactsForService(claimed.service.id);
 	if (options.reportGitHubDeployment !== false) {
-		await inactivatePreviewGitHubDeployments({
-			serviceId: claimed.service.id,
-			description: `Preview removed: ${reason}`,
-		});
+		try {
+			await inactivatePreviewGitHubDeployments({
+				serviceId: claimed.service.id,
+				description: `Preview removed: ${reason}`,
+			});
+		} catch (error) {
+			console.error(
+				`[preview-lifecycle] failed to inactivate GitHub deployments for ${claimed.service.id}:`,
+				error,
+			);
+		}
 	}
 	await db.delete(services).where(eq(services.id, claimed.service.id));
 	return claimed;

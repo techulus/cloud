@@ -2,6 +2,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	findGitHubDeployment,
+	getGitHubPullRequest,
+	GitHubApiError,
 	isFullCommitSha,
 	resolveGitHubCommit,
 	resolveGitHubPullRequestMergeRef,
@@ -82,6 +84,21 @@ describe("public GitHub branch resolution", () => {
 });
 
 describe("GitHub pull request deployment helpers", () => {
+	it("exposes pull request response status for lifecycle decisions", async () => {
+		configureGitHubApp();
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+				.mockResolvedValueOnce(new Response("Not Found", { status: 404 })),
+		);
+
+		const request = getGitHubPullRequest(10, "acme/app", 42);
+		await expect(request).rejects.toBeInstanceOf(GitHubApiError);
+		await expect(request).rejects.toMatchObject({ status: 404 });
+	});
+
 	it("finds a deployment created for the same preview revision", async () => {
 		configureGitHubApp();
 		const fetchMock = vi.fn(

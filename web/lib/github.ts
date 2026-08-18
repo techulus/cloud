@@ -2,6 +2,16 @@ import { createHmac, createPrivateKey, timingSafeEqual } from "node:crypto";
 import { SignJWT } from "jose";
 import { pullRequestMergeRef } from "@/lib/service-revision-spec";
 
+export class GitHubApiError extends Error {
+	constructor(
+		message: string,
+		public readonly status: number,
+	) {
+		super(message);
+		this.name = "GitHubApiError";
+	}
+}
+
 function getAppId(): string {
 	const appId = process.env.GITHUB_APP_ID;
 	if (!appId) {
@@ -80,7 +90,10 @@ export async function getInstallationToken(
 
 	if (!response.ok) {
 		const error = await response.text();
-		throw new Error(`Failed to get installation token: ${error}`);
+		throw new GitHubApiError(
+			`Failed to get installation token: ${error}`,
+			response.status,
+		);
 	}
 
 	const data = await response.json();
@@ -324,8 +337,9 @@ async function githubPullRequestRequest<T>(
 	);
 	if (!response.ok) {
 		const detail = await response.text();
-		throw new Error(
+		throw new GitHubApiError(
 			`GitHub pull request failed (${response.status}): ${detail || response.statusText}`,
+			response.status,
 		);
 	}
 	return response.json() as Promise<T>;

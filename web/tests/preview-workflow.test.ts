@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
+	class GitHubApiError extends Error {
+		constructor(
+			message: string,
+			public readonly status: number,
+		) {
+			super(message);
+		}
+	}
 	const selectResults: unknown[][] = [];
 	function query(result: unknown[]) {
 		const value = {
@@ -19,6 +27,7 @@ const mocks = vi.hoisted(() => {
 	}
 	const db = { select: vi.fn(() => query(selectResults.shift() ?? [])) };
 	return {
+		GitHubApiError,
 		selectResults,
 		db,
 		getGitHubPullRequest: vi.fn(),
@@ -41,6 +50,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/github", () => ({
+	GitHubApiError: mocks.GitHubApiError,
 	getGitHubPullRequest: mocks.getGitHubPullRequest,
 	listOpenGitHubPullRequests: mocks.listOpenGitHubPullRequests,
 	resolveGitHubPullRequestMergeRef: mocks.resolveGitHubPullRequestMergeRef,
@@ -232,5 +242,63 @@ describe("preview lifecycle workflows", () => {
 			"refs/pull/42/merge",
 			"pull_request_closed",
 		);
+	});
+
+	it("deletes the preview when close verification returns not found", async () => {
+		mocks.selectResults.push(
+			[baseContext],
+			[
+				{
+					service: { id: "preview-service" },
+					githubRepo: baseContext.githubRepo,
+				},
+			],
+		);
+		mocks.getGitHubPullRequest.mockRejectedValue(
+			new mocks.GitHubApiError("Pull request not found", 404),
+		);
+
+		await expect(
+			invoke(
+				previewSyncWorkflow,
+				{
+					baseServiceId: "base-service",
+					previewGitRef: "refs/pull/42/merge",
+					reason: "pull_request_closed",
+					verifyWithGitHub: true,
+				},
+				"preview/close-requested",
+			),
+		).resolves.toEqual({ status: "deleted", serviceId: "preview-service" });
+		expect(mocks.deletePreviewService).toHaveBeenCalled();
+	});
+
+	it("retries close verification after a transient GitHub failure", async () => {
+		mocks.selectResults.push(
+			[baseContext],
+			[
+				{
+					service: { id: "preview-service" },
+					githubRepo: baseContext.githubRepo,
+				},
+			],
+		);
+		mocks.getGitHubPullRequest.mockRejectedValue(
+			new mocks.GitHubApiError("GitHub unavailable", 503),
+		);
+
+		await expect(
+			invoke(
+				previewSyncWorkflow,
+				{
+					baseServiceId: "base-service",
+					previewGitRef: "refs/pull/42/merge",
+					reason: "pull_request_closed",
+					verifyWithGitHub: true,
+				},
+				"preview/close-requested",
+			),
+		).rejects.toThrow("GitHub unavailable");
+		expect(mocks.deletePreviewService).not.toHaveBeenCalled();
 	});
 });

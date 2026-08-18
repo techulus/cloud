@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { githubRepos, serviceRevisions, services } from "@/db/schema";
 import {
+	GitHubApiError,
 	getGitHubPullRequest,
 	listOpenGitHubPullRequests,
 	resolveGitHubPullRequestMergeRef,
@@ -120,8 +121,12 @@ async function closePreviewFromEvent(input: {
 				previewContext.githubRepo.installationId,
 				previewContext.githubRepo.repoFullName,
 				pullRequestNumber,
-			);
-			if (isEligiblePullRequest(baseContext, pullRequest)) {
+			).catch((error: unknown) => {
+				if (error instanceof GitHubApiError && error.status === 404)
+					return null;
+				throw error;
+			});
+			if (pullRequest && isEligiblePullRequest(baseContext, pullRequest)) {
 				await enqueuePreviewSync(
 					input.baseServiceId,
 					input.previewGitRef,
