@@ -361,6 +361,97 @@ export async function getGitHubPullRequest(
 	return mapGitHubPullRequest(pullRequest);
 }
 
+export async function upsertGitHubPullRequestComment(
+	installationId: number,
+	repoFullName: string,
+	pullRequestNumber: number,
+	marker: string,
+	content: string,
+): Promise<number> {
+	validateRepoFullName(repoFullName);
+	if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new Error("Invalid pull request number");
+	}
+	const markerContent = marker.slice("<!-- ".length, -" -->".length);
+	if (
+		!marker.startsWith("<!-- ") ||
+		!marker.endsWith(" -->") ||
+		!markerContent ||
+		marker.includes("\r") ||
+		marker.includes("\n")
+	) {
+		throw new Error("Invalid pull request comment marker");
+	}
+	const body = `${marker}\n${content.trim()}`;
+	if (body.length > 65_536) {
+		throw new Error("Pull request comment is too long");
+	}
+
+	const token = await getInstallationToken(installationId);
+	const headers = {
+		Accept: "application/vnd.github+json",
+		Authorization: `Bearer ${token}`,
+		"X-GitHub-Api-Version": "2022-11-28",
+	};
+	let existingCommentId: number | null = null;
+	for (let page = 1; ; page++) {
+		const response = await fetch(
+			`https://api.github.com/repos/${repoFullName}/issues/${pullRequestNumber}/comments?per_page=100&page=${page}`,
+			{ headers },
+		);
+		if (!response.ok) {
+			const detail = await response.text();
+			throw new GitHubApiError(
+				`Failed to list pull request comments (${response.status}): ${detail || response.statusText}`,
+				response.status,
+			);
+		}
+		const comments = (await response.json()) as unknown;
+		if (!Array.isArray(comments)) {
+			throw new Error("GitHub returned invalid pull request comments");
+		}
+		const existing = comments.find(
+			(comment) =>
+				comment !== null &&
+				typeof comment === "object" &&
+				"body" in comment &&
+				typeof comment.body === "string" &&
+				(comment.body === marker || comment.body.startsWith(`${marker}\n`)),
+		) as { id?: unknown } | undefined;
+		if (existing) {
+			if (!Number.isSafeInteger(existing.id) || Number(existing.id) <= 0) {
+				throw new Error("GitHub returned an invalid pull request comment ID");
+			}
+			existingCommentId = Number(existing.id);
+			break;
+		}
+		if (comments.length < 100) break;
+	}
+
+	const response = await fetch(
+		existingCommentId
+			? `https://api.github.com/repos/${repoFullName}/issues/comments/${existingCommentId}`
+			: `https://api.github.com/repos/${repoFullName}/issues/${pullRequestNumber}/comments`,
+		{
+			method: existingCommentId ? "PATCH" : "POST",
+			headers: { ...headers, "Content-Type": "application/json" },
+			body: JSON.stringify({ body }),
+		},
+	);
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new GitHubApiError(
+			`Failed to ${existingCommentId ? "update" : "create"} pull request comment (${response.status}): ${detail || response.statusText}`,
+			response.status,
+		);
+	}
+	const comment = (await response.json()) as { id?: unknown };
+	if (!Number.isSafeInteger(comment.id) || Number(comment.id) <= 0) {
+		throw new Error("GitHub returned an invalid pull request comment ID");
+	}
+	return Number(comment.id);
+}
+
 export async function listOpenGitHubPullRequests(
 	installationId: number,
 	repoFullName: string,

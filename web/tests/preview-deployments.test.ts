@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => {
 		tx,
 		getSetting: vi.fn(),
 		updateGitHubDeploymentStatus: vi.fn(),
+		upsertGitHubPullRequestComment: vi.fn(),
 		db: {
 			transaction: vi.fn(
 				async (operation: (transaction: typeof tx) => unknown) => {
@@ -80,6 +81,7 @@ vi.mock("@/lib/github", () => ({
 	createGitHubDeployment: vi.fn(),
 	findGitHubDeployment: vi.fn(),
 	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
+	upsertGitHubPullRequestComment: mocks.upsertGitHubPullRequestComment,
 }));
 
 import {
@@ -196,6 +198,7 @@ describe("preview service cloning", () => {
 		mocks.updatedValues.length = 0;
 		mocks.getSetting.mockResolvedValue("apps.example.com");
 		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
+		mocks.upsertGitHubPullRequestComment.mockResolvedValue(501);
 		process.env.REGISTRY_HOST = "registry.example.com";
 	});
 
@@ -350,16 +353,29 @@ describe("preview service cloning", () => {
 		});
 	});
 
-	it("holds the service lock while publishing the current GitHub status", async () => {
-		mocks.selectResults.push(
-			[{ previewOfService: baseService.id }],
-			[{ id: "revision-1" }],
-			[{ id: 303 }],
-			[{ installationId: 101, repoFullName: "acme/app" }],
-			[{ id: "port-1", port: 3000, domain: "preview.apps.example.com" }],
-		);
+	it("holds the service lock while replacing the preview status comment", async () => {
+		const queueStatusReads = () =>
+			mocks.selectResults.push(
+				[
+					{
+						name: "Web API (PR #42)",
+						previewOfService: baseService.id,
+						previewGitRef: "refs/pull/42/merge",
+					},
+				],
+				[{ id: "revision-1" }],
+				[{ id: 303 }],
+				[{ installationId: 101, repoFullName: "acme/app" }],
+				[{ id: "port-1", port: 3000, domain: "preview.apps.example.com" }],
+			);
+		queueStatusReads();
+		queueStatusReads();
 		mocks.updateGitHubDeploymentStatus.mockImplementation(async () => {
 			expect(mocks.transactionState.active).toBe(true);
+		});
+		mocks.upsertGitHubPullRequestComment.mockImplementation(async () => {
+			expect(mocks.transactionState.active).toBe(true);
+			return 501;
 		});
 
 		await expect(
@@ -370,14 +386,32 @@ describe("preview service cloning", () => {
 				description: "Preview is ready",
 			}),
 		).resolves.toBe(true);
-		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
+		await expect(
+			updatePreviewGitHubStatus({
+				serviceId: "preview-service",
+				serviceRevisionId: "revision-1",
+				state: "failure",
+				description: "Preview rollout failed",
+			}),
+		).resolves.toBe(true);
+		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenLastCalledWith(
 			101,
 			"acme/app",
 			303,
-			"success",
+			"failure",
 			expect.objectContaining({
 				environmentUrl: "https://preview.apps.example.com",
 			}),
+		);
+		expect(mocks.upsertGitHubPullRequestComment).toHaveBeenCalledTimes(2);
+		expect(mocks.upsertGitHubPullRequestComment).toHaveBeenLastCalledWith(
+			101,
+			"acme/app",
+			42,
+			`<!-- techulus-preview:${baseService.id} -->`,
+			expect.stringMatching(
+				/Service[\s\S]*Web API \(PR #42\)[\s\S]*Status[\s\S]*Failed[\s\S]*Preview[\s\S]*https:\/\/preview\.apps\.example\.com[\s\S]*Preview rollout failed/,
+			),
 		);
 	});
 });

@@ -297,10 +297,11 @@ migrations from every replica.
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_WEBHOOK_SECRET` | Webhook secret |
 
-Configure the app with Contents read, Pull requests read, and Deployments write
-repository permissions. Subscribe it to Push and Pull request events. Pull
-request previews use the Automatic Subdomain Domain setting and its wildcard DNS
-record when configured. Without it, previews are created without public URLs.
+Configure the app with Contents read, Pull requests read and write, and
+Deployments read and write repository permissions. Subscribe it to Push and
+Pull request events. Pull request previews use the Automatic Subdomain Domain
+setting and its wildcard DNS record when configured. Without it, previews are
+created without public URLs.
 
 ## Generating Secrets
 

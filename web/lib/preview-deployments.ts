@@ -16,6 +16,7 @@ import {
 	createGitHubDeployment,
 	findGitHubDeployment,
 	updateGitHubDeploymentStatus,
+	upsertGitHubPullRequestComment,
 } from "@/lib/github";
 import { resolveRegistryImageHost } from "@/lib/registry-reference";
 import {
@@ -38,6 +39,62 @@ type PreviewPort = {
 	externalPort: number | null;
 	tlsPassthrough: boolean;
 };
+
+type PreviewDeploymentState =
+	| "pending"
+	| "in_progress"
+	| "success"
+	| "failure"
+	| "inactive";
+
+const previewStateLabels: Record<PreviewDeploymentState, string> = {
+	pending: "⏳ Queued",
+	in_progress: "🚧 Deploying",
+	success: "✅ Ready",
+	failure: "❌ Failed",
+	inactive: "🗑️ Removed",
+};
+
+function escapeGitHubCommentText(value: string) {
+	return value
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll("@", "&#64;")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+async function updatePreviewPullRequestComment(input: {
+	installationId: number;
+	repoFullName: string;
+	baseServiceId: string;
+	previewGitRef: string;
+	serviceName: string;
+	state: PreviewDeploymentState;
+	description: string;
+	previewUrl: string | null;
+}) {
+	const pullRequestNumber = pullRequestNumberFromMergeRef(input.previewGitRef);
+	const content = [
+		"### Preview deployment",
+		"",
+		`**Service:** <code>${escapeGitHubCommentText(input.serviceName)}</code>`,
+		`**Status:** ${previewStateLabels[input.state]}`,
+		input.previewUrl
+			? `**Preview:** [Open preview](${input.previewUrl})`
+			: "**Preview:** No public URL configured",
+		"",
+		`<sub>${escapeGitHubCommentText(input.description.substring(0, 500))}</sub>`,
+	].join("\n");
+	await upsertGitHubPullRequestComment(
+		input.installationId,
+		input.repoFullName,
+		pullRequestNumber,
+		`<!-- techulus-preview:${input.baseServiceId} -->`,
+		content,
+	);
+}
 
 function dnsLabelPart(value: string) {
 	return value
@@ -401,7 +458,7 @@ export async function canDeployServiceRevision(
 export async function updatePreviewGitHubStatus(input: {
 	serviceId: string;
 	serviceRevisionId: string;
-	state: "pending" | "in_progress" | "success" | "failure" | "inactive";
+	state: PreviewDeploymentState;
 	description: string;
 	logUrl?: string;
 	expectedDeploymentId?: number;
@@ -411,11 +468,15 @@ export async function updatePreviewGitHubStatus(input: {
 			sql`select pg_advisory_xact_lock(hashtext(${input.serviceId}))`,
 		);
 		const service = await tx
-			.select({ previewOfService: services.previewOfService })
+			.select({
+				name: services.name,
+				previewOfService: services.previewOfService,
+				previewGitRef: services.previewGitRef,
+			})
 			.from(services)
 			.where(and(eq(services.id, input.serviceId), isNull(services.deletedAt)))
 			.then((rows) => rows[0]);
-		if (!service?.previewOfService) return null;
+		if (!service?.previewOfService || !service.previewGitRef) return null;
 		const latest = await tx
 			.select({ id: serviceRevisions.id })
 			.from(serviceRevisions)
@@ -472,6 +533,7 @@ export async function updatePreviewGitHubStatus(input: {
 						.filter((port) => port.domain)
 						.sort((a, b) => a.port - b.port || a.id.localeCompare(b.id))[0],
 			);
+		const previewUrl = primary?.domain ? `https://${primary.domain}` : null;
 		await updateGitHubDeploymentStatus(
 			githubRepo.installationId,
 			githubRepo.repoFullName,
@@ -480,11 +542,19 @@ export async function updatePreviewGitHubStatus(input: {
 			{
 				description: input.description.substring(0, 140),
 				logUrl: input.logUrl,
-				environmentUrl: primary?.domain
-					? `https://${primary.domain}`
-					: undefined,
+				environmentUrl: previewUrl ?? undefined,
 			},
 		);
+		await updatePreviewPullRequestComment({
+			installationId: githubRepo.installationId,
+			repoFullName: githubRepo.repoFullName,
+			baseServiceId: service.previewOfService,
+			previewGitRef: service.previewGitRef,
+			serviceName: service.name,
+			state: input.state,
+			description: input.description,
+			previewUrl,
+		});
 		return true;
 	});
 }
@@ -590,7 +660,11 @@ export async function inactivatePreviewGitHubDeployments(input: {
 	excludeServiceRevisionId?: string;
 }) {
 	const service = await db
-		.select({ previewOfService: services.previewOfService })
+		.select({
+			name: services.name,
+			previewOfService: services.previewOfService,
+			previewGitRef: services.previewGitRef,
+		})
 		.from(services)
 		.where(eq(services.id, input.serviceId))
 		.then((rows) => rows[0]);
@@ -610,10 +684,32 @@ export async function inactivatePreviewGitHubDeployments(input: {
 			ne(builds.serviceRevisionId, input.excludeServiceRevisionId),
 		);
 	}
-	const deploymentIds = await db
-		.selectDistinct({ id: builds.githubDeploymentId })
-		.from(builds)
-		.where(and(...conditions));
+	const [deploymentIds, primary] = await Promise.all([
+		db
+			.selectDistinct({ id: builds.githubDeploymentId })
+			.from(builds)
+			.where(and(...conditions)),
+		db
+			.select({
+				id: servicePorts.id,
+				port: servicePorts.port,
+				domain: servicePorts.domain,
+			})
+			.from(servicePorts)
+			.where(
+				and(
+					eq(servicePorts.serviceId, input.serviceId),
+					eq(servicePorts.protocol, "http"),
+					eq(servicePorts.isPublic, true),
+				),
+			)
+			.then(
+				(ports) =>
+					ports
+						.filter((port) => port.domain)
+						.sort((a, b) => a.port - b.port || a.id.localeCompare(b.id))[0],
+			),
+	]);
 	await Promise.all(
 		deploymentIds.flatMap(({ id }) =>
 			id
@@ -629,5 +725,17 @@ export async function inactivatePreviewGitHubDeployments(input: {
 				: [],
 		),
 	);
+	if (!input.excludeServiceRevisionId && service.previewGitRef) {
+		await updatePreviewPullRequestComment({
+			installationId: githubRepo.installationId,
+			repoFullName: githubRepo.repoFullName,
+			baseServiceId: service.previewOfService,
+			previewGitRef: service.previewGitRef,
+			serviceName: service.name,
+			state: "inactive",
+			description: input.description,
+			previewUrl: primary?.domain ? `https://${primary.domain}` : null,
+		});
+	}
 	return deploymentIds.length;
 }
