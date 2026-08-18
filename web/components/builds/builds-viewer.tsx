@@ -148,11 +148,13 @@ function BuildStatusBadge({
 export function BuildsViewer({
 	serviceId,
 	hasGithubAppRepo,
+	isPreview,
 	projectSlug,
 	envName,
 }: {
 	serviceId: string;
 	hasGithubAppRepo: boolean;
+	isPreview: boolean;
 	projectSlug: string;
 	envName: string;
 }) {
@@ -188,7 +190,7 @@ export function BuildsViewer({
 	);
 
 	const handleTriggerBuild = async () => {
-		if (hasGithubAppRepo) {
+		if (hasGithubAppRepo && !isPreview) {
 			setSelectedSha(null);
 			setIsCommitDialogOpen(true);
 			return;

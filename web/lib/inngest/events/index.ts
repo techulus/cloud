@@ -4,6 +4,7 @@ export type { BackupEvents } from "./backup";
 export type { BuildEvents } from "./build";
 export type { MigrationEvents } from "./migration";
 export type { NotificationEvent, NotificationEvents } from "./notification";
+export type { PreviewEvents } from "./preview";
 export type { ResourceEvents } from "./resource";
 export type { RestoreEvents } from "./restore";
 export type { RolloutEvents } from "./rollout";
@@ -14,6 +15,7 @@ import type { BackupEvents } from "./backup";
 import type { BuildEvents } from "./build";
 import type { MigrationEvents } from "./migration";
 import type { NotificationEvents } from "./notification";
+import type { PreviewEvents } from "./preview";
 import type { ResourceEvents } from "./resource";
 import type { RestoreEvents } from "./restore";
 import type { RolloutEvents } from "./rollout";
@@ -28,6 +30,7 @@ export type Events = RolloutEvents &
 	ServiceDeletionEvents &
 	ResourceEvents &
 	NotificationEvents &
+	PreviewEvents &
 	ServiceCronEvents;
 
 type EventName = keyof Events & string;
@@ -63,6 +66,11 @@ export const inngestEvents = {
 	buildCompleted: defineEvent("build/completed"),
 	manifestCompleted: defineEvent("manifest/completed"),
 	manifestFailed: defineEvent("manifest/failed"),
+	previewSyncRequested: defineEvent("preview/sync-requested"),
+	previewCloseRequested: defineEvent("preview/close-requested"),
+	previewServiceReconcileRequested: defineEvent(
+		"preview/service-reconcile-requested",
+	),
 	notificationRequested: defineEvent("notification/requested"),
 	serviceCronExecute: defineEvent("service-cron/execute"),
 };

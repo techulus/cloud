@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -14,6 +15,10 @@ import {
 	updateGitHubDeploymentStatus,
 	verifyWebhookSignature,
 } from "@/lib/github";
+import { inngest } from "@/lib/inngest/client";
+import { inngestEvents } from "@/lib/inngest/events";
+import { deletePreviewsForGitHubInstallation } from "@/lib/preview-lifecycle";
+import { pullRequestMergeRef } from "@/lib/service-revision-spec";
 import { triggerResolvedBuildInternal } from "@/lib/trigger-build";
 
 type InstallationPayload = {
@@ -52,6 +57,18 @@ type PushPayload = {
 	sender: { id: number; login: string };
 };
 
+type PullRequestPayload = {
+	action: string;
+	number: number;
+	pull_request: {
+		draft: boolean;
+		merged: boolean;
+		base: { ref: string; repo: { id: number; full_name: string } };
+		head: { repo: { id: number; full_name: string } | null };
+	};
+	repository: { id: number; full_name: string };
+};
+
 type PushResult = {
 	serviceId: string;
 	status: "queued" | "skipped" | "failed";
@@ -84,11 +101,23 @@ async function handleInstallationEvent(payload: InstallationPayload) {
 	}
 
 	if (action === "deleted") {
+		await deletePreviewsForGitHubInstallation(
+			installation.id,
+			"GitHub installation deleted",
+			{ removeRepositoryLinks: true },
+		);
 		await db
 			.delete(githubInstallations)
 			.where(eq(githubInstallations.installationId, installation.id));
 
 		return NextResponse.json({ ok: true, message: "Installation deleted" });
+	}
+
+	if (action === "suspend") {
+		await deletePreviewsForGitHubInstallation(
+			installation.id,
+			"GitHub installation suspended",
+		);
 	}
 
 	return NextResponse.json({ ok: true });
@@ -255,6 +284,132 @@ async function handlePushEvent(payload: PushPayload) {
 	);
 }
 
+const pullRequestSyncActions = new Set([
+	"opened",
+	"reopened",
+	"synchronize",
+	"ready_for_review",
+	"edited",
+]);
+const pullRequestCloseActions = new Set(["closed", "converted_to_draft"]);
+
+async function handlePullRequestEvent(
+	payload: PullRequestPayload,
+	deliveryId: string,
+) {
+	if (
+		!pullRequestSyncActions.has(payload.action) &&
+		!pullRequestCloseActions.has(payload.action)
+	) {
+		return NextResponse.json({ ok: true, skipped: true });
+	}
+	if (
+		!Number.isSafeInteger(payload.number) ||
+		payload.number <= 0 ||
+		payload.repository.id !== payload.pull_request.base.repo.id
+	) {
+		return NextResponse.json(
+			{ error: "Invalid pull request payload" },
+			{ status: 400 },
+		);
+	}
+
+	const linkedServices = await db
+		.select({ githubRepo: githubRepos, service: services })
+		.from(githubRepos)
+		.innerJoin(services, eq(githubRepos.serviceId, services.id))
+		.where(eq(githubRepos.repoId, payload.repository.id));
+	const sameRepository =
+		payload.pull_request.head.repo?.id === payload.pull_request.base.repo.id;
+	const shouldSync =
+		pullRequestSyncActions.has(payload.action) &&
+		!payload.pull_request.draft &&
+		sameRepository;
+	const previewGitRef = pullRequestMergeRef(payload.number);
+	const events: Array<
+		| ReturnType<typeof inngestEvents.previewSyncRequested.create>
+		| ReturnType<typeof inngestEvents.previewCloseRequested.create>
+	> = [];
+	const syncedBaseServiceIds = new Set<string>();
+	const linkedBaseServices = linkedServices.filter(
+		({ service }) => !service.previewOfService && !service.deletedAt,
+	);
+
+	if (shouldSync) {
+		for (const { githubRepo, service } of linkedServices) {
+			if (
+				service.previewOfService ||
+				service.deletedAt ||
+				service.sourceType !== "github" ||
+				service.stateful ||
+				!service.previewDeploymentsEnabled ||
+				(githubRepo.deployBranch ?? githubRepo.defaultBranch) !==
+					payload.pull_request.base.ref
+			) {
+				continue;
+			}
+			syncedBaseServiceIds.add(service.id);
+			events.push(
+				inngestEvents.previewSyncRequested.create(
+					{
+						baseServiceId: service.id,
+						previewGitRef,
+					},
+					{
+						id: `github-pr-sync:${deliveryId}:${service.id}:${payload.number}`,
+					},
+				),
+			);
+		}
+	}
+
+	for (const { service } of linkedBaseServices) {
+		if (syncedBaseServiceIds.has(service.id)) {
+			continue;
+		}
+		const reason =
+			payload.action === "closed"
+				? payload.pull_request.merged
+					? "pull_request_merged"
+					: "pull_request_closed"
+				: payload.action === "converted_to_draft"
+					? "converted_to_draft"
+					: !sameRepository
+						? "fork_pull_request"
+						: "pull_request_ineligible";
+		events.push(
+			inngestEvents.previewCloseRequested.create(
+				{
+					baseServiceId: service.id,
+					previewGitRef,
+					reason,
+					verifyWithGitHub: true,
+				},
+				{
+					id: `github-pr-close:${deliveryId}:${service.id}:${payload.number}`,
+				},
+			),
+		);
+	}
+
+	if (events.length > 0) {
+		try {
+			await inngest.send(events);
+		} catch (error) {
+			console.error("Failed to dispatch preview deployment events:", error);
+			return NextResponse.json(
+				{ ok: false, error: "Failed to queue preview deployment work" },
+				{ status: 500 },
+			);
+		}
+	}
+	return NextResponse.json({
+		ok: true,
+		queued: events.length,
+		skippedFork: !sameRepository,
+	});
+}
+
 export async function POST(request: NextRequest) {
 	const body = await request.text();
 	const signature = request.headers.get("x-hub-signature-256");
@@ -274,6 +429,12 @@ export async function POST(request: NextRequest) {
 			return handleInstallationEvent(payload as InstallationPayload);
 		case "push":
 			return handlePushEvent(payload as PushPayload);
+		case "pull_request": {
+			const deliveryId =
+				request.headers.get("x-github-delivery") ??
+				createHash("sha256").update(body).digest("hex");
+			return handlePullRequestEvent(payload as PullRequestPayload, deliveryId);
+		}
 		case "ping":
 			return NextResponse.json({ ok: true, message: "pong" });
 		default:

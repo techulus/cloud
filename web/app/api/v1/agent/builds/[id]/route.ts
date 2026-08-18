@@ -88,7 +88,11 @@ export async function POST(
 
 	const [service, revision, buildTimeoutMinutes] = await Promise.all([
 		db
-			.select({ id: services.id, projectId: services.projectId })
+			.select({
+				id: services.id,
+				projectId: services.projectId,
+				previewGitRef: services.previewGitRef,
+			})
 			.from(services)
 			.where(eq(services.id, build.serviceId))
 			.then((rows) => rows[0]),
@@ -145,6 +149,7 @@ export async function POST(
 			commitSha: specification.source.commitSha,
 			commitMessage: build.commitMessage,
 			branch: specification.source.branch,
+			gitRef: service.previewGitRef,
 			serviceId: build.serviceId,
 			projectId: service.projectId,
 		},

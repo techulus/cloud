@@ -18,6 +18,14 @@ Techulus Cloud integrates with GitHub through a [GitHub App](https://docs.github
 
 3. Install the GitHub App on your GitHub account or organization.
 
+The GitHub App needs these repository permissions:
+
+- **Contents:** Read
+- **Pull requests:** Read
+- **Deployments:** Read and write
+
+Subscribe the app to both the **Push** and **Pull request** webhook events.
+
 ## Connecting a Repository
 
 Once the GitHub App is installed, connect a repository to a service:
@@ -39,6 +47,47 @@ The flow:
 4. On success, a rollout deploys the new image.
 
 GitHub deployment statuses are updated on the commit so you can track progress from pull requests.
+
+## Pull Request Preview Deployments
+
+Preview deployments are opt in from a GitHub-backed service's **Configuration**
+page. Each eligible pull request gets one visible service in the project's
+ordinary `previews` environment. An existing environment named `previews` is
+reused and is left in place when previews close. If you configure an
+**Automatic Subdomain Domain** and its wildcard DNS record, each preview also
+gets a stable generated HTTPS URL beneath that domain. Without this setting,
+the preview is still created without a public URL.
+
+A pull request is eligible only when it:
+
+- comes from the same repository as the base branch (forks are skipped),
+- targets the service's configured deployment branch,
+- is open and ready for review (drafts are skipped), and
+- belongs to a stateless service.
+
+The preview builds GitHub's synthetic merge result at
+`refs/pull/<number>/merge`. This tests the change as it would merge into the
+configured branch. If GitHub cannot produce that ref because of merge
+conflicts, the preview service is removed rather than building the raw pull
+request head. Reconciliation recreates it after GitHub can produce the merge
+ref again.
+
+When first created, preview services inherit the base service's current source
+configuration, replicas, autoscaling, placement, health check, start command,
+resource limits, ports, serverless settings, and complete secret set. They do
+not copy volumes, backups, deployment schedules, cron jobs, production custom
+domains, or public TCP/UDP routes. Serverless mode is disabled when no generated
+public domain is available. Preview services use the normal service pages and
+may be edited like other services. Their source repository remains tied to the
+pull request, and volumes remain unavailable. Later pull request updates
+preserve other edits.
+
+New commits replace the preview revision without changing its URL. Converting
+the pull request to a draft, closing it, or merging it removes the runtime and
+route and marks the GitHub deployment inactive. A daily reconciliation job
+rechecks previews in case a webhook was missed. Generated hosts use the normal
+HTTP-01 certificate path, so installations with high pull-request volume should
+monitor their certificate authority's issuance limits.
 
 ## Build Process
 

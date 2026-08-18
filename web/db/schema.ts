@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	check,
 	foreignKey,
 	index,
 	integer,
@@ -586,6 +587,11 @@ export const services = pgTable(
 		),
 		migrationBackupId: text("migration_backup_id"),
 		migrationError: text("migration_error"),
+		previewDeploymentsEnabled: boolean("preview_deployments_enabled")
+			.notNull()
+			.default(false),
+		previewOfService: text("preview_of_service"),
+		previewGitRef: text("preview_git_ref"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),
@@ -599,6 +605,30 @@ export const services = pgTable(
 		index("services_last_autoscale_attempt_idx").on(
 			table.lastAutoscaleAttemptAt,
 		),
+		foreignKey({
+			name: "services_preview_of_service_fk",
+			columns: [table.previewOfService],
+			foreignColumns: [table.id],
+		}).onDelete("restrict"),
+		check(
+			"services_preview_identity_check",
+			sql`(${table.previewOfService} is null) = (${table.previewGitRef} is null)`,
+		),
+		check(
+			"services_preview_git_ref_check",
+			sql`${table.previewGitRef} is null or ${table.previewGitRef} ~ '^refs/pull/[1-9][0-9]*/merge$'`,
+		),
+		check(
+			"services_preview_policy_check",
+			sql`(
+				(${table.previewOfService} is null and (${table.previewDeploymentsEnabled} = false or ${table.stateful} = false))
+				or
+				(${table.previewOfService} is not null and ${table.previewDeploymentsEnabled} = false and ${table.stateful} = false)
+			)`,
+		),
+		uniqueIndex("services_preview_base_ref_unique_idx")
+			.on(table.previewOfService, table.previewGitRef)
+			.where(sql`${table.previewOfService} is not null`),
 	],
 );
 

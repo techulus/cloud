@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ServiceWithDetails as Service } from "@/db/types";
 import { imageNeedsProductionPinning } from "@/lib/docker-image";
+import { PullRequestPreviewsSetting } from "./pull-request-previews-setting";
 
 function parseImageInfo(image: string): {
 	registry: string;
@@ -44,10 +45,16 @@ function parseImageInfo(image: string): {
 
 export const SourceSection = memo(function SourceSection({
 	service,
+	projectSlug,
+	autoSubdomainDomain,
 	onUpdate,
+	onPreviewUpdate,
 }: {
 	service: Service;
+	projectSlug: string;
+	autoSubdomainDomain: string | null;
 	onUpdate?: () => void;
+	onPreviewUpdate?: () => void;
 }) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [editMode, setEditMode] = useState<"github" | "image">("image");
@@ -221,6 +228,12 @@ export const SourceSection = memo(function SourceSection({
 									</div>
 								)}
 							</div>
+							<PullRequestPreviewsSetting
+								service={service}
+								projectSlug={projectSlug}
+								autoSubdomainDomain={autoSubdomainDomain}
+								onUpdate={onPreviewUpdate}
+							/>
 							<Button variant="outline" size="sm" onClick={startEditGithub}>
 								Edit
 							</Button>

@@ -199,6 +199,7 @@ func (a *Agent) ProcessBuild(item agenthttp.WorkQueueItem) error {
 		CloneURL:        buildDetails.CloneURL,
 		CommitSha:       buildDetails.Build.CommitSha,
 		Branch:          buildDetails.Build.Branch,
+		GitRef:          buildDetails.Build.GitRef,
 		ImageRepository: buildDetails.ImageRepository,
 		ImageURI:        buildDetails.ImageURI,
 		ServiceID:       buildDetails.Build.ServiceID,

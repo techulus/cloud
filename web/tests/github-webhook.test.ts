@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => {
 		updateGitHubDeploymentStatus: vi.fn(),
 		send: vi.fn(),
 		createBuildTrigger: vi.fn(),
+		createPreviewSync: vi.fn(),
+		createPreviewClose: vi.fn(),
 		triggerResolvedBuildInternal: vi.fn(),
 	};
 });
@@ -44,6 +46,8 @@ vi.mock("@/lib/inngest/client", () => ({
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {
 		buildTrigger: { create: mocks.createBuildTrigger },
+		previewSyncRequested: { create: mocks.createPreviewSync },
+		previewCloseRequested: { create: mocks.createPreviewClose },
 	},
 }));
 vi.mock("@/lib/trigger-build", () => ({
@@ -65,6 +69,10 @@ function linkedService({
 	projectName = "Cloud",
 	projectSlug = "cloud",
 	environmentName = "production",
+	previewDeploymentsEnabled = false,
+	previewOfService = null,
+	previewGitRef = null,
+	stateful = false,
 }: {
 	serviceId: string;
 	name?: string;
@@ -76,6 +84,10 @@ function linkedService({
 	projectName?: string;
 	projectSlug?: string;
 	environmentName?: string;
+	previewDeploymentsEnabled?: boolean;
+	previewOfService?: string | null;
+	previewGitRef?: string | null;
+	stateful?: boolean;
 }) {
 	return {
 		githubRepo: {
@@ -95,6 +107,10 @@ function linkedService({
 			sourceType,
 			deletedAt,
 			githubRootDir: rootDir,
+			previewDeploymentsEnabled,
+			previewOfService,
+			previewGitRef,
+			stateful,
 		},
 		project: { id: "project-1", name: projectName, slug: projectSlug },
 		environment: { id: "environment-1", name: environmentName },
@@ -126,6 +142,45 @@ function pushRequest(branch = "main") {
 	});
 }
 
+function pullRequest(
+	action: string,
+	options: {
+		draft?: boolean;
+		merged?: boolean;
+		headRepoId?: number;
+		baseBranch?: string;
+	} = {},
+) {
+	return new NextRequest("http://localhost/api/webhooks/github", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"x-github-event": "pull_request",
+			"x-github-delivery": `delivery-${action}`,
+			"x-hub-signature-256": "sha256=test",
+		},
+		body: JSON.stringify({
+			action,
+			number: 42,
+			repository: { id: 456, full_name: "techulus/cloud" },
+			pull_request: {
+				draft: options.draft ?? false,
+				merged: options.merged ?? false,
+				base: {
+					ref: options.baseBranch ?? "main",
+					repo: { id: 456, full_name: "techulus/cloud" },
+				},
+				head: {
+					repo: {
+						id: options.headRepoId ?? 456,
+						full_name: "techulus/cloud",
+					},
+				},
+			},
+		}),
+	});
+}
+
 describe("GitHub push webhook", () => {
 	beforeEach(() => {
 		mocks.queryResults.length = 0;
@@ -141,6 +196,18 @@ describe("GitHub push webhook", () => {
 		mocks.createBuildTrigger.mockReset();
 		mocks.createBuildTrigger.mockImplementation((data, options) => ({
 			name: "build/trigger",
+			data,
+			...options,
+		}));
+		mocks.createPreviewSync.mockReset();
+		mocks.createPreviewSync.mockImplementation((data, options) => ({
+			name: "preview/sync-requested",
+			data,
+			...options,
+		}));
+		mocks.createPreviewClose.mockReset();
+		mocks.createPreviewClose.mockImplementation((data, options) => ({
+			name: "preview/close-requested",
 			data,
 			...options,
 		}));
@@ -349,4 +416,157 @@ describe("GitHub push webhook", () => {
 			expect.any(Object),
 		);
 	});
+});
+
+describe("GitHub pull request webhook", () => {
+	beforeEach(() => {
+		mocks.queryResults.length = 0;
+		mocks.verifyWebhookSignature.mockReturnValue(true);
+		mocks.send.mockReset();
+		mocks.send.mockResolvedValue(undefined);
+		mocks.createPreviewSync.mockImplementation((data, options) => ({
+			name: "preview/sync-requested",
+			data,
+			...options,
+		}));
+		mocks.createPreviewClose.mockImplementation((data, options) => ({
+			name: "preview/close-requested",
+			data,
+			...options,
+		}));
+	});
+
+	it("queues one durable sync per eligible enabled base service", async () => {
+		mocks.queryResults.push([
+			linkedService({
+				serviceId: "service-a",
+				previewDeploymentsEnabled: true,
+			}),
+			linkedService({
+				serviceId: "service-b",
+				previewDeploymentsEnabled: true,
+			}),
+			linkedService({ serviceId: "service-disabled" }),
+			linkedService({
+				serviceId: "service-stateful",
+				previewDeploymentsEnabled: true,
+				stateful: true,
+			}),
+		]);
+
+		const response = await POST(pullRequest("opened"));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ ok: true, queued: 4 });
+		expect(mocks.send).toHaveBeenCalledWith([
+			expect.objectContaining({
+				name: "preview/sync-requested",
+				data: {
+					baseServiceId: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+				},
+			}),
+			expect.objectContaining({
+				name: "preview/sync-requested",
+				data: {
+					baseServiceId: "service-b",
+					previewGitRef: "refs/pull/42/merge",
+				},
+			}),
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: expect.objectContaining({
+					baseServiceId: "service-disabled",
+					previewGitRef: "refs/pull/42/merge",
+				}),
+			}),
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: expect.objectContaining({
+					baseServiceId: "service-stateful",
+					previewGitRef: "refs/pull/42/merge",
+				}),
+			}),
+		]);
+	});
+
+	it("closes an existing preview when the pull request changes base branch", async () => {
+		mocks.queryResults.push([
+			linkedService({
+				serviceId: "service-a",
+				previewDeploymentsEnabled: true,
+			}),
+		]);
+
+		const response = await POST(
+			pullRequest("edited", { baseBranch: "release" }),
+		);
+
+		expect(response.status).toBe(200);
+		expect(mocks.send).toHaveBeenCalledWith([
+			expect.objectContaining({
+				name: "preview/close-requested",
+				data: {
+					baseServiceId: "service-a",
+					previewGitRef: "refs/pull/42/merge",
+					reason: "pull_request_ineligible",
+					verifyWithGitHub: true,
+				},
+			}),
+		]);
+	});
+
+	it.each([
+		["draft", { draft: true }],
+		["fork", { headRepoId: 999 }],
+	])(
+		"queues teardown instead of deploying a %s pull request",
+		async (_case, options) => {
+			mocks.queryResults.push([
+				linkedService({
+					serviceId: "service-a",
+					previewDeploymentsEnabled: true,
+				}),
+			]);
+
+			const response = await POST(pullRequest("opened", options));
+
+			expect(response.status).toBe(200);
+			expect(mocks.send).toHaveBeenCalledWith([
+				expect.objectContaining({
+					name: "preview/close-requested",
+					data: expect.objectContaining({
+						baseServiceId: "service-a",
+						previewGitRef: "refs/pull/42/merge",
+					}),
+				}),
+			]);
+		},
+	);
+
+	it.each([
+		["closed", true, "pull_request_merged"],
+		["closed", false, "pull_request_closed"],
+		["converted_to_draft", false, "converted_to_draft"],
+	])(
+		"queues teardown for %s even before a clone exists",
+		async (action, merged, reason) => {
+			mocks.queryResults.push([linkedService({ serviceId: "service-a" })]);
+
+			const response = await POST(pullRequest(action, { merged }));
+
+			expect(response.status).toBe(200);
+			expect(mocks.send).toHaveBeenCalledWith([
+				expect.objectContaining({
+					name: "preview/close-requested",
+					data: {
+						baseServiceId: "service-a",
+						previewGitRef: "refs/pull/42/merge",
+						reason,
+						verifyWithGitHub: true,
+					},
+				}),
+			]);
+		},
+	);
 });

@@ -27,6 +27,7 @@ type Config struct {
 	CloneURL          string
 	CommitSha         string
 	Branch            string
+	GitRef            string
 	ImageRepository   string
 	ImageURI          string
 	ResolvedCommitSha string
@@ -63,6 +64,8 @@ type dockerfileConfig struct {
 var managedTempArtifactPattern = regexp.MustCompile(`^(backup|restore)-[0-9a-fA-F-]{36}\.tar\.gz$|^restore-extract-[0-9a-fA-F-]{36}$`)
 var windowsAbsoluteRootPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 var imageDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+var credentialURLPattern = regexp.MustCompile(`(?i)https?://[^\s/@]+(?::[^\s/@]*)?@`)
+var pullRequestMergeRefPattern = regexp.MustCompile(`^refs/pull/[1-9][0-9]*/merge$`)
 
 func NewBuilder(dataDir string, logSender LogSender) *Builder {
 	return &Builder{
@@ -153,6 +156,9 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		safeURL = "https://***@" + safeURL[idx+1:]
 	}
 	b.sendLog(config, fmt.Sprintf("Cloning %s", safeURL))
+	if pullRequestMergeRefPattern.MatchString(config.GitRef) {
+		return b.clonePullRequestRef(ctx, config, buildDir)
+	}
 
 	branch := config.Branch
 	if branch == "" {
@@ -202,6 +208,52 @@ func (b *Builder) clone(ctx context.Context, config *Config, buildDir string) er
 		return err
 	}
 	if config.CommitSha != "HEAD" && !strings.EqualFold(resolvedCommitSha, config.CommitSha) {
+		return fmt.Errorf("checked out commit %s, expected %s", resolvedCommitSha, config.CommitSha)
+	}
+	config.ResolvedCommitSha = resolvedCommitSha
+	b.sendLog(config, fmt.Sprintf("Resolved commit %s", truncateStr(resolvedCommitSha, 8)))
+	return nil
+}
+
+func (b *Builder) clonePullRequestRef(ctx context.Context, config *Config, buildDir string) error {
+	if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, config.CommitSha); !matched {
+		return fmt.Errorf("invalid exact commit SHA")
+	}
+	cmd := exec.CommandContext(ctx, "git", "init", buildDir)
+	output, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git init failed: %s: %w", output, err)
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "remote", "add", "origin", config.CloneURL)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git remote setup failed: %s: %w", output, err)
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "fetch", "--depth", "1", "--no-tags", "origin", config.GitRef)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git fetch pull request ref failed: %s: %w", output, err)
+	}
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "rev-parse", "FETCH_HEAD")
+	fetchedCommit, err := b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git resolve fetched ref failed: %s: %w", fetchedCommit, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(fetchedCommit), config.CommitSha) {
+		return fmt.Errorf("fetched ref resolved to %s, expected %s", strings.TrimSpace(fetchedCommit), config.CommitSha)
+	}
+	b.sendLog(config, fmt.Sprintf("Checking out commit %s", truncateStr(config.CommitSha, 8)))
+	cmd = exec.CommandContext(ctx, "git", "-C", buildDir, "checkout", "--detach", config.CommitSha)
+	output, err = b.runCommand(cmd, config)
+	if err != nil {
+		return fmt.Errorf("git checkout failed: %s: %w", output, err)
+	}
+	b.sendLog(config, "Clone completed")
+	resolvedCommitSha, err := b.resolveCommitSha(ctx, config, buildDir)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(resolvedCommitSha, config.CommitSha) {
 		return fmt.Errorf("checked out commit %s, expected %s", resolvedCommitSha, config.CommitSha)
 	}
 	config.ResolvedCommitSha = resolvedCommitSha
@@ -462,7 +514,7 @@ func resolveDockerfile(contextDir string, secrets map[string]string) (dockerfile
 
 func (b *Builder) runCommand(cmd *exec.Cmd, config *Config) (string, error) {
 	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
+	outputStr := credentialURLPattern.ReplaceAllString(string(output), "https://***@")
 
 	if len(outputStr) > 0 {
 		lines := strings.Split(strings.TrimSpace(outputStr), "\n")

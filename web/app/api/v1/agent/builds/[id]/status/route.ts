@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -14,6 +14,7 @@ import { updateGitHubDeploymentStatus } from "@/lib/github";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { notify } from "@/lib/notifications";
+import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { enqueueWork } from "@/lib/work-queue";
 
@@ -118,6 +119,7 @@ export async function POST(
 			specification: serviceRevisions.specification,
 			projectSlug: projects.slug,
 			environmentName: environments.name,
+			previewOfService: services.previewOfService,
 		})
 		.from(serviceRevisions)
 		.innerJoin(services, eq(serviceRevisions.serviceId, services.id))
@@ -259,48 +261,67 @@ export async function POST(
 	) {
 		try {
 			const baseUrl = process.env.APP_URL || "https://cloud.techulus.com";
-			const logUrl = `${baseUrl}/builds/${buildId}/logs`;
-			const environmentUrl = `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}`;
-			const repository = revisionRepositoryFullName(
-				specification.source.repository,
-			);
-			const installationId = specification.source.authentication.installationId;
-			if (["cloning", "building", "pushing"].includes(update.status)) {
-				await updateGitHubDeploymentStatus(
-					installationId,
-					repository,
-					build.githubDeploymentId,
-					"in_progress",
-					{
-						description: `Build ${update.status}...`,
-						logUrl,
-						environmentUrl,
-					},
-				);
-			} else if (update.status === "completed") {
-				await updateGitHubDeploymentStatus(
-					installationId,
-					repository,
-					build.githubDeploymentId,
-					"success",
-					{
-						description: "Build completed successfully",
-						logUrl,
-						environmentUrl,
-					},
-				);
+			const logUrl = revision.previewOfService
+				? `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}/builds/${buildId}`
+				: `${baseUrl}/builds/${buildId}/logs`;
+			if (revision.previewOfService) {
+				await updatePreviewGitHubStatus({
+					serviceId: build.serviceId,
+					serviceRevisionId: build.serviceRevisionId,
+					expectedDeploymentId: build.githubDeploymentId,
+					state: update.status === "failed" ? "failure" : "in_progress",
+					description:
+						update.status === "completed"
+							? "Preview image built; preparing deployment"
+							: update.status === "failed"
+								? update.error || "Preview build failed"
+								: `Preview build ${update.status}...`,
+					logUrl,
+				});
 			} else {
-				await updateGitHubDeploymentStatus(
-					installationId,
-					repository,
-					build.githubDeploymentId,
-					"failure",
-					{
-						description: update.error || "Build failed",
-						logUrl,
-						environmentUrl,
-					},
+				const environmentUrl = `${baseUrl}/dashboard/projects/${revision.projectSlug}/${revision.environmentName}/services/${build.serviceId}`;
+				const repository = revisionRepositoryFullName(
+					specification.source.repository,
 				);
+				const installationId =
+					specification.source.authentication.installationId;
+				if (["cloning", "building", "pushing"].includes(update.status)) {
+					await updateGitHubDeploymentStatus(
+						installationId,
+						repository,
+						build.githubDeploymentId,
+						"in_progress",
+						{
+							description: `Build ${update.status}...`,
+							logUrl,
+							environmentUrl,
+						},
+					);
+				} else if (update.status === "completed") {
+					await updateGitHubDeploymentStatus(
+						installationId,
+						repository,
+						build.githubDeploymentId,
+						"success",
+						{
+							description: "Build completed successfully",
+							logUrl,
+							environmentUrl,
+						},
+					);
+				} else {
+					await updateGitHubDeploymentStatus(
+						installationId,
+						repository,
+						build.githubDeploymentId,
+						"failure",
+						{
+							description: update.error || "Build failed",
+							logUrl,
+							environmentUrl,
+						},
+					);
+				}
 			}
 		} catch (error) {
 			console.error(
@@ -371,14 +392,32 @@ export async function POST(
 					sql`select pg_advisory_xact_lock(hashtext(${build.serviceId}))`,
 				);
 				const activeService = await tx
-					.select({ id: services.id })
+					.select({
+						id: services.id,
+						previewOfService: services.previewOfService,
+					})
 					.from(services)
 					.where(
 						and(eq(services.id, build.serviceId), isNull(services.deletedAt)),
 					)
 					.limit(1)
 					.then((rows) => rows[0]);
-				if (!activeService) return;
+				if (!activeService) {
+					return;
+				}
+				if (activeService.previewOfService) {
+					const latestRevision = await tx
+						.select({ id: serviceRevisions.id })
+						.from(serviceRevisions)
+						.where(eq(serviceRevisions.serviceId, build.serviceId))
+						.orderBy(
+							desc(serviceRevisions.createdAt),
+							desc(serviceRevisions.id),
+						)
+						.limit(1)
+						.then((rows) => rows[0]);
+					if (latestRevision?.id !== build.serviceRevisionId) return;
+				}
 				await enqueueWork(
 					auth.serverId,
 					"create_manifest",

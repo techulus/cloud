@@ -84,7 +84,7 @@ export async function retryBuild(buildId: string) {
 	}
 
 	const [service] = await db
-		.select({ id: services.id })
+		.select({ id: services.id, previewOfService: services.previewOfService })
 		.from(services)
 		.where(and(eq(services.id, build.serviceId), isNull(services.deletedAt)));
 
@@ -96,16 +96,21 @@ export async function retryBuild(buildId: string) {
 		throw new Error(`Cannot retry build in ${build.status} status`);
 	}
 
+	const actor = {
+		type: "user" as const,
+		userId: session.user.id,
+		name: session.user.name,
+	};
+	if (service.previewOfService) {
+		await triggerBuildInternal(build.serviceId, "manual", actor);
+		return { success: true };
+	}
 	await requeueBuildRevisionInternal({
 		serviceId: build.serviceId,
 		serviceRevisionId: build.serviceRevisionId,
 		commitMessage: build.commitMessage ?? "Retry build",
 		author: build.author ?? undefined,
-		actor: {
-			type: "user",
-			userId: session.user.id,
-			name: session.user.name,
-		},
+		actor,
 	});
 
 	return { success: true };
@@ -143,6 +148,11 @@ export async function triggerManualBuild(serviceId: string, commitSha: string) {
 	if (!result) throw new Error("Active GitHub App-connected service not found");
 	if (result.service.sourceType !== "github") {
 		throw new Error("Service is not connected to GitHub");
+	}
+	if (result.service.previewOfService) {
+		throw new Error(
+			"Preview services build their pull request merge ref; use Build to rebuild it",
+		);
 	}
 
 	const branch =

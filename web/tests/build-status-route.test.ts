@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => query),
 			innerJoin: vi.fn(() => query),
 			where: vi.fn(() => query),
+			orderBy: vi.fn(() => query),
 			limit: vi.fn(() => query),
 			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
@@ -49,6 +50,7 @@ const mocks = vi.hoisted(() => {
 		enqueueWork: vi.fn(),
 		send: vi.fn(),
 		updateGitHubDeploymentStatus: vi.fn(),
+		updatePreviewGitHubStatus: vi.fn(),
 		notify: vi.fn(),
 		createBuildCompleted: vi.fn((data, options) => ({
 			name: "build/completed",
@@ -65,6 +67,9 @@ vi.mock("@/lib/agent-auth", () => ({
 vi.mock("@/lib/notifications", () => ({ notify: mocks.notify }));
 vi.mock("@/lib/github", () => ({
 	updateGitHubDeploymentStatus: mocks.updateGitHubDeploymentStatus,
+}));
+vi.mock("@/lib/preview-deployments", () => ({
+	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
 }));
 vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
@@ -158,6 +163,7 @@ describe("agent build status transitions", () => {
 		mocks.enqueueWork.mockResolvedValue(undefined);
 		mocks.send.mockResolvedValue(undefined);
 		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
+		mocks.updatePreviewGitHubStatus.mockResolvedValue(true);
 		mocks.notify.mockResolvedValue(undefined);
 	});
 
@@ -284,6 +290,56 @@ describe("agent build status transitions", () => {
 					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
 			},
 		);
+	});
+
+	it("keeps a completed preview build in progress until rollout readiness", async () => {
+		const completedBuild = build("completed", {
+			githubDeploymentId: 456,
+			imageUri: amd64Image,
+		});
+		const previewSpecification = {
+			...specification,
+			source: {
+				...specification.source,
+				authentication: { type: "github_app" as const, installationId: 123 },
+			},
+		};
+		mocks.selectResults.push(
+			[
+				build("pushing", {
+					githubDeploymentId: 456,
+				}),
+			],
+			[
+				{
+					specification: previewSpecification,
+					projectSlug: "cloud",
+					environmentName: "production",
+					previewOfService: "base-service",
+				},
+			],
+			[completedBuild],
+			[
+				{
+					id: "service-1",
+					previewOfService: "base-service",
+				},
+			],
+			[{ id: "revision-1" }],
+		);
+		mocks.updateResults.push([completedBuild]);
+
+		expect((await post("completed")).status).toBe(200);
+		expect(mocks.updatePreviewGitHubStatus).toHaveBeenCalledWith({
+			serviceId: "service-1",
+			serviceRevisionId: "revision-1",
+			expectedDeploymentId: 456,
+			state: "in_progress",
+			description: "Preview image built; preparing deployment",
+			logUrl:
+				"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1/builds/build-amd64",
+		});
+		expect(mocks.updateGitHubDeploymentStatus).not.toHaveBeenCalled();
 	});
 
 	it("does not enqueue manifest work after the service is deleted", async () => {

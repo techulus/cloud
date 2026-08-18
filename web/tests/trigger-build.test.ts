@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 	send: vi.fn(),
 	resolveGitHubCommit: vi.fn(),
 	createBuildTrigger: vi.fn(),
+	createPreviewSync: vi.fn(),
 	createGitHubBuildServiceRevision: vi.fn(),
 	cloneGitHubBuildServiceRevision: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock("@/lib/github", () => ({
 vi.mock("@/lib/inngest/events", () => ({
 	inngestEvents: {
 		buildTrigger: { create: mocks.createBuildTrigger },
+		previewSyncRequested: { create: mocks.createPreviewSync },
 	},
 }));
 vi.mock("@/lib/service-revisions", () => ({
@@ -55,6 +57,11 @@ describe("internal GitHub build trigger", () => {
 		process.env.REGISTRY_HOST = "registry.test";
 		mocks.rows = [];
 		mocks.createGitHubBuildServiceRevision.mockResolvedValue({});
+		mocks.createPreviewSync.mockImplementation((data, options) => ({
+			name: "preview/sync-requested",
+			data,
+			...options,
+		}));
 		mocks.resolveGitHubCommit.mockResolvedValue({
 			sha: "0123456789abcdef0123456789abcdef01234567",
 			message: "Resolved source commit",
@@ -169,6 +176,51 @@ describe("internal GitHub build trigger", () => {
 			"preview",
 			undefined,
 		);
+	});
+
+	it("routes a visible preview build through its pull request merge ref", async () => {
+		mocks.rows = [
+			[
+				{
+					id: "preview-service",
+					projectId: "project-1",
+					sourceType: "github",
+					deletedAt: null,
+					githubRepoUrl: "https://github.com/acme/app",
+					githubBranch: "main",
+					previewOfService: "base-service",
+					previewGitRef: "refs/pull/42/merge",
+				},
+			],
+			[
+				{
+					installationId: 123,
+					repoFullName: "acme/app",
+					deployBranch: "main",
+					defaultBranch: "main",
+				},
+			],
+		];
+
+		await expect(
+			triggerBuildInternal("preview-service", "manual", {
+				type: "system",
+			}),
+		).resolves.toMatchObject({ status: "queued" });
+
+		expect(mocks.createPreviewSync).toHaveBeenCalledWith(
+			{
+				baseServiceId: "base-service",
+				previewGitRef: "refs/pull/42/merge",
+				force: true,
+			},
+			{ id: expect.stringContaining("preview-user-sync:preview-service:") },
+		);
+		expect(mocks.send).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "preview/sync-requested" }),
+		);
+		expect(mocks.resolveGitHubCommit).not.toHaveBeenCalled();
+		expect(mocks.createGitHubBuildServiceRevision).not.toHaveBeenCalled();
 	});
 
 	it("rejects a non-GitHub service before queueing work", async () => {
