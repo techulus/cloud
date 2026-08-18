@@ -21,10 +21,12 @@ Techulus Cloud integrates with GitHub through a [GitHub App](https://docs.github
 The GitHub App needs these repository permissions:
 
 - **Contents:** Read
-- **Pull requests:** Read
+- **Pull requests:** Read and write
 - **Deployments:** Read and write
 
 Subscribe the app to both the **Push** and **Pull request** webhook events.
+If you increase permissions for an existing app, approve the new permissions on
+each installation before enabling previews.
 
 ## Connecting a Repository
 
@@ -88,6 +90,10 @@ route and marks the GitHub deployment inactive. A daily reconciliation job
 rechecks previews in case a webhook was missed. Generated hosts use the normal
 HTTP-01 certificate path, so installations with high pull-request volume should
 monitor their certificate authority's issuance limits.
+
+Each preview service maintains one status comment on the pull request. The
+comment shows the current deployment status and preview URL. Status and commit
+updates replace the same comment instead of adding new comments.
 
 ## Build Process
 

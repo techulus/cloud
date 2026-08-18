@@ -7,6 +7,7 @@ import {
 	isFullCommitSha,
 	resolveGitHubCommit,
 	resolveGitHubPullRequestMergeRef,
+	upsertGitHubPullRequestComment,
 } from "@/lib/github";
 
 afterEach(() => {
@@ -164,5 +165,88 @@ describe("GitHub pull request deployment helpers", () => {
 		expect(commitRequests).toEqual([
 			"https://api.github.com/repos/acme/app/commits?sha=refs%2Fpull%2F42%2Fmerge&per_page=1",
 		]);
+	});
+
+	it("creates the marked pull request comment when it is missing", async () => {
+		configureGitHubApp();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+			.mockResolvedValueOnce(Response.json([]))
+			.mockResolvedValueOnce(Response.json({ id: 501 }, { status: 201 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			upsertGitHubPullRequestComment(
+				10,
+				"acme/app",
+				42,
+				"<!-- techulus-preview:service-1 -->",
+				"Preview is ready",
+			),
+		).resolves.toBe(501);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			"https://api.github.com/repos/acme/app/issues/42/comments?per_page=100&page=1",
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: "Bearer installation-token",
+				}),
+			}),
+		);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			3,
+			"https://api.github.com/repos/acme/app/issues/42/comments",
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({
+					body: "<!-- techulus-preview:service-1 -->\nPreview is ready",
+				}),
+			}),
+		);
+	});
+
+	it("replaces the existing marked pull request comment", async () => {
+		configureGitHubApp();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ token: "installation-token" }))
+			.mockResolvedValueOnce(
+				Response.json([
+					{
+						id: 501,
+						body: "<!-- techulus-preview:service-1 -->\nPreview queued",
+					},
+				]),
+			)
+			.mockResolvedValueOnce(Response.json({ id: 501 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			upsertGitHubPullRequestComment(
+				10,
+				"acme/app",
+				42,
+				"<!-- techulus-preview:service-1 -->",
+				"Preview is ready",
+			),
+		).resolves.toBe(501);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			3,
+			"https://api.github.com/repos/acme/app/issues/comments/501",
+			expect.objectContaining({
+				method: "PATCH",
+				body: JSON.stringify({
+					body: "<!-- techulus-preview:service-1 -->\nPreview is ready",
+				}),
+			}),
+		);
+		expect(
+			fetchMock.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith("/issues/42/comments") &&
+					(init as RequestInit | undefined)?.method === "POST",
+			),
+		).toBe(false);
 	});
 });
