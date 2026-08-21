@@ -1,4 +1,5 @@
 import { getSetting, setSetting } from "@/db/queries";
+import { reportServerError } from "@/lib/server-errors";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 const GITHUB_LATEST_RELEASE_URL =
@@ -138,6 +139,9 @@ export async function checkControlPlaneUpdate(
 			channel,
 		};
 	} catch (error) {
+		reportServerError(error, "control-plane.update.check", {
+			tags: { currentVersion },
+		});
 		return {
 			currentVersion,
 			latestVersion: null,
@@ -253,6 +257,9 @@ export async function refreshControlPlaneUpgradeState() {
 		try {
 			await checkAndPersistControlPlaneUpdate(upgradeState.targetVersion);
 		} catch (error) {
+			reportServerError(error, "control-plane.update.refresh-after-upgrade", {
+				tags: { targetVersion: upgradeState.targetVersion },
+			});
 			console.error(
 				"[control-plane-updates] failed to refresh update state after upgrade",
 				error,
@@ -272,6 +279,7 @@ export async function refreshControlPlaneAboutState() {
 		try {
 			await refreshControlPlaneUpgradeState();
 		} catch (error) {
+			reportServerError(error, "control-plane.upgrade.refresh");
 			console.error(
 				"[control-plane-updates] failed to refresh upgrade state on about page",
 				error,

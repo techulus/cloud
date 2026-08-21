@@ -16,6 +16,7 @@ import {
 	cleanupRegistryArtifactsForService,
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
+import { reportServerError } from "@/lib/server-errors";
 import { pullRequestNumberFromMergeRef } from "@/lib/service-revision-spec";
 import {
 	enqueueReconcileForAllOnlineServers,
@@ -224,6 +225,9 @@ export async function deletePreviewService(
 				description: `Preview removed: ${reason}`,
 			});
 		} catch (error) {
+			reportServerError(error, "preview.github-deployments.inactivate", {
+				tags: { serviceId: claimed.service.id },
+			});
 			console.error(
 				`[preview-lifecycle] failed to inactivate GitHub deployments for ${claimed.service.id}:`,
 				error,

@@ -8,6 +8,7 @@ import {
 	getUserRole,
 	hasAnyRole,
 } from "@/lib/members";
+import { reportServerError } from "@/lib/server-errors";
 
 type AuthenticatedIdentity = {
 	user: { id: string; name: string; email: string };
@@ -59,6 +60,7 @@ function unauthorized() {
 }
 
 function authProviderError(error: unknown) {
+	reportServerError(error, "authentication.provider");
 	console.error("[public-api] authentication failed", error);
 	return {
 		ok: false as const,
@@ -84,6 +86,9 @@ export async function requireRequestSession(
 	} catch (error) {
 		const response = getAuthErrorResponse(error);
 		if (response) {
+			if (response.status >= 500) {
+				reportServerError(error, "authentication.session");
+			}
 			return {
 				ok: false as const,
 				response,
@@ -155,6 +160,9 @@ export async function requireApiKeySession(request: Request) {
 	} catch (error) {
 		const response = getAuthErrorResponse(error);
 		if (response) {
+			if (response.status >= 500) {
+				reportServerError(error, "authentication.api-key");
+			}
 			return response.status >= 400 &&
 				response.status < 500 &&
 				response.status !== 429
@@ -185,6 +193,9 @@ async function requireSessionRole(
 			};
 		}
 
+		reportServerError(error, "authorization.role-lookup", {
+			tags: { userId: sessionResult.session.user.id },
+		});
 		console.error("[public-api] authorization lookup failed", error);
 		return {
 			ok: false as const,

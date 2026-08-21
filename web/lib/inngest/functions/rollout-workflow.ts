@@ -27,6 +27,7 @@ import {
 } from "@/lib/preview-deployments";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
+import { reportBusinessFailure } from "@/lib/server-errors";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueReconcileForAllOnlineServers } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -205,7 +206,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				);
 			}
 
-			await db
+			const fallbackFailure = await db
 				.update(rollouts)
 				.set({
 					status: "failed",
@@ -217,7 +218,27 @@ export const rolloutWorkflow = inngest.createFunction(
 						eq(rollouts.id, rolloutId),
 						inArray(rollouts.status, ["queued", "in_progress"]),
 					),
-				);
+				)
+				.returning({
+					serviceId: rollouts.serviceId,
+					serviceRevisionId: rollouts.serviceRevisionId,
+				})
+				.then((rows) => rows[0]);
+			if (fallbackFailure) {
+				reportBusinessFailure("rollout.failed", {
+					occurrenceId: rolloutId,
+					reason: "workflow_failed",
+					tags: {
+						rolloutId,
+						serviceId: fallbackFailure.serviceId,
+						...(fallbackFailure.serviceRevisionId
+							? { revisionId: fallbackFailure.serviceRevisionId }
+							: {}),
+						failureStage: "workflow_failed",
+						rollbackState: "failed",
+					},
+				});
+			}
 		},
 	},
 	async ({ event, step }) => {
@@ -257,14 +278,31 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (!acquiredTurn) {
 			await step.run("mark-rollout-queue-timeout", async () => {
-				await db
+				const failed = await db
 					.update(rollouts)
 					.set({
 						status: "failed",
 						currentStage: "queue_timeout",
 						completedAt: new Date(),
 					})
-					.where(eq(rollouts.id, rolloutId));
+					.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")))
+					.returning({ serviceRevisionId: rollouts.serviceRevisionId })
+					.then((rows) => rows[0]);
+				if (failed) {
+					reportBusinessFailure("rollout.failed", {
+						occurrenceId: rolloutId,
+						reason: "queue_timeout",
+						tags: {
+							rolloutId,
+							serviceId,
+							...(failed.serviceRevisionId
+								? { revisionId: failed.serviceRevisionId }
+								: {}),
+							failureStage: "queue_timeout",
+							rollbackState: "failed",
+						},
+					});
+				}
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,

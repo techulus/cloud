@@ -1,8 +1,55 @@
 import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => {
+	const selectResults: unknown[][] = [];
+	const updateResults: unknown[][] = [];
+	function query(result: unknown[]) {
+		const value = {
+			from: vi.fn(() => value),
+			innerJoin: vi.fn(() => value),
+			where: vi.fn(() => value),
+			limit: vi.fn(() => value),
+			set: vi.fn(() => value),
+			returning: vi.fn(() => value),
+			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
+			then: (
+				resolve: (rows: unknown[]) => unknown,
+				reject?: (reason: unknown) => unknown,
+			) => Promise.resolve(result).then(resolve, reject),
+		};
+		return value;
+	}
+	return {
+		selectResults,
+		updateResults,
+		db: {
+			select: vi.fn(() => query(selectResults.shift() ?? [])),
+			update: vi.fn(() => query(updateResults.shift() ?? [])),
+		},
+		decryptSecret: vi.fn(),
+		notify: vi.fn(),
+		reportBusinessFailure: vi.fn(),
+		reportServerError: vi.fn(),
+		ingestCronLog: vi.fn(),
+	};
+});
+
+vi.mock("@/db", () => ({ db: mocks.db }));
+vi.mock("@/lib/crypto", () => ({ decryptSecret: mocks.decryptSecret }));
+vi.mock("@/lib/notifications", () => ({ notify: mocks.notify }));
+vi.mock("@/lib/server-errors", () => ({
+	reportBusinessFailure: mocks.reportBusinessFailure,
+	reportServerError: mocks.reportServerError,
+}));
+vi.mock("@/lib/victoria-logs", () => ({
+	ingestCronLog: mocks.ingestCronLog,
+}));
+
 import {
 	cronEventId,
+	executeServiceCron,
 	latestDueOccurrence,
 	nextOccurrenceAfter,
 	parseCronUrl,
@@ -11,6 +58,14 @@ import {
 } from "@/lib/service-crons";
 
 describe("service cron scheduling and requests", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.selectResults.length = 0;
+		mocks.updateResults.length = 0;
+		mocks.notify.mockResolvedValue(undefined);
+		mocks.ingestCronLog.mockResolvedValue(undefined);
+	});
+
 	it("returns the first UTC occurrence strictly after the supplied instant", () => {
 		expect(
 			nextOccurrenceAfter(
@@ -130,6 +185,50 @@ describe("service cron scheduling and requests", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("reports a claimed failed execution without URL or secret context", async () => {
+		const scheduledFor = new Date("2026-08-06T10:05:00Z");
+		mocks.selectResults.push(
+			[
+				{
+					cron: {
+						schedule: "* * * * *",
+						path: "/private/job",
+					},
+					serviceId: "service-1",
+				},
+			],
+			[
+				{
+					key: "CRON_BASE_URL",
+					encryptedValue: "encrypted-sensitive-value",
+				},
+			],
+		);
+		mocks.updateResults.push([{ id: "cron-1" }], []);
+		mocks.decryptSecret.mockRejectedValue(new Error("decrypt failed"));
+
+		await expect(
+			executeServiceCron("cron-1", "* * * * *", scheduledFor, "scheduled"),
+		).resolves.toMatchObject({ stale: false, status: "failed" });
+
+		expect(mocks.reportBusinessFailure).toHaveBeenCalledWith(
+			"service-cron.failed",
+			{
+				occurrenceId: cronEventId("cron-1", scheduledFor),
+				reason: "request_failed",
+				tags: {
+					cronId: "cron-1",
+					serviceId: "service-1",
+					source: "scheduled",
+				},
+				extra: { statusCode: null },
+			},
+		);
+		const captured = JSON.stringify(mocks.reportBusinessFailure.mock.calls);
+		expect(captured).not.toContain("/private/job");
+		expect(captured).not.toContain("encrypted-sensitive-value");
 	});
 });
 

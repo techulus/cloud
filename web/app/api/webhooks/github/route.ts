@@ -18,6 +18,7 @@ import {
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { deletePreviewsForGitHubInstallation } from "@/lib/preview-lifecycle";
+import { reportServerError } from "@/lib/server-errors";
 import { pullRequestMergeRef } from "@/lib/service-revision-spec";
 import { triggerResolvedBuildInternal } from "@/lib/trigger-build";
 
@@ -239,6 +240,12 @@ async function handlePushEvent(payload: PushPayload) {
 					{ description: "Build queued", environmentUrl: serviceUrl },
 				);
 			} catch (error) {
+				reportServerError(error, "github.webhook.deployment.create", {
+					tags: {
+						installationId: githubRepo.installationId,
+						serviceId: service.id,
+					},
+				});
 				console.error(
 					`[webhook:push] failed to create GitHub deployment for service ${service.id}:`,
 					error,
@@ -263,6 +270,12 @@ async function handlePushEvent(payload: PushPayload) {
 
 			results.push({ serviceId: service.id, status: "queued" });
 		} catch (error) {
+			reportServerError(error, "github.webhook.build.dispatch", {
+				tags: {
+					installationId: githubRepo.installationId,
+					serviceId: service.id,
+				},
+			});
 			console.error(
 				`[webhook:push] failed to queue build for service ${service.id}:`,
 				error,
@@ -396,6 +409,9 @@ async function handlePullRequestEvent(
 		try {
 			await inngest.send(events);
 		} catch (error) {
+			reportServerError(error, "github.webhook.preview.dispatch", {
+				extra: { eventCount: events.length },
+			});
 			console.error("Failed to dispatch preview deployment events:", error);
 			return NextResponse.json(
 				{ ok: false, error: "Failed to queue preview deployment work" },
@@ -420,7 +436,12 @@ export async function POST(request: NextRequest) {
 	}
 
 	const event = request.headers.get("x-github-event");
-	const payload = JSON.parse(body);
+	let payload: unknown;
+	try {
+		payload = JSON.parse(body);
+	} catch {
+		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+	}
 
 	console.log(`[webhook:github] received event: ${event}`);
 

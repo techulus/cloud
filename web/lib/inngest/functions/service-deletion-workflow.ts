@@ -36,30 +36,43 @@ import {
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
 const DELETED_SERVICE_RETENTION_DAYS = 7;
 
-async function markServiceDeletionFailed(serviceId: string, error: unknown) {
-	await db
+async function markServiceOperationFailed(
+	serviceId: string,
+	errorMessage: string,
+	operation: "service-deletion.failed" | "service-restore.failed",
+	failureStage: string,
+	expectedStatuses: Array<
+		NonNullable<typeof services.$inferSelect.deletionStatus>
+	>,
+) {
+	const failed = await db
 		.update(services)
 		.set({
 			deletionStatus: "failed",
-			deletionError:
-				error instanceof Error ? error.message : "Service operation failed",
+			deletionError: errorMessage,
 		})
 		.where(
 			and(
 				eq(services.id, serviceId),
-				isNull(services.deletedAt),
-				or(
-					eq(services.deletionStatus, "backing_up"),
-					eq(services.deletionStatus, "deleting"),
-				),
+				inArray(services.deletionStatus, expectedStatuses),
 			),
-		);
+		)
+		.returning({ id: services.id })
+		.then((rows) => rows[0]);
+	if (failed) {
+		reportBusinessFailure(operation, {
+			occurrenceId: serviceId,
+			reason: failureStage,
+			tags: { serviceId, failureStage },
+		});
+	}
 }
 
 export const serviceDeletionWorkflow = inngest.createFunction(
@@ -236,17 +249,21 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 				const stillPending = backupResults.some((r) => r.status === "pending");
 				if (timedOut || failed || stillPending) {
 					await step.run("mark-delete-backup-failed", async () => {
-						await db
-							.update(services)
-							.set({
-								deletionStatus: "failed",
-								deletionError:
-									failed?.error ||
-									(stillPending
-										? "Deletion backup did not reach a terminal state"
-										: "Deletion backup timed out"),
-							})
-							.where(eq(services.id, serviceId));
+						const failureStage = timedOut
+							? "backup_timeout"
+							: stillPending
+								? "backup_pending"
+								: "backup_failed";
+						await markServiceOperationFailed(
+							serviceId,
+							failed?.error ||
+								(stillPending
+									? "Deletion backup did not reach a terminal state"
+									: "Deletion backup timed out"),
+							"service-deletion.failed",
+							failureStage,
+							["backing_up"],
+						);
 					});
 					return {
 						status: "failed",
@@ -334,8 +351,17 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 
 			return { status: "deleted", serviceId, backupIds };
 		} catch (error) {
+			reportServerError(error, "service.deletion.workflow", {
+				tags: { serviceId },
+			});
 			await step.run("mark-unhandled-delete-failed", async () => {
-				await markServiceDeletionFailed(serviceId, error);
+				await markServiceOperationFailed(
+					serviceId,
+					error instanceof Error ? error.message : "Service deletion failed",
+					"service-deletion.failed",
+					"workflow_failed",
+					["backing_up", "deleting"],
+				);
 			});
 			return {
 				status: "failed",
@@ -504,14 +530,13 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 			const timedOut = restoreResults.some((r) => r.result === null);
 			if (failed || timedOut) {
 				await step.run("mark-restore-failed", async () => {
-					await db
-						.update(services)
-						.set({
-							deletionStatus: "failed",
-							deletionError:
-								failed?.result?.data.error || "Volume restore timed out",
-						})
-						.where(eq(services.id, serviceId));
+					await markServiceOperationFailed(
+						serviceId,
+						failed?.result?.data.error || "Volume restore timed out",
+						"service-restore.failed",
+						failed ? "volume_restore_failed" : "volume_restore_timeout",
+						["restoring"],
+					);
 				});
 				return { status: "failed", reason: failed ? "restore" : "timeout" };
 			}
@@ -546,11 +571,11 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						}
 						return result;
 					} catch (error) {
-						await db.transaction(async (tx) => {
+						const failed = await db.transaction(async (tx) => {
 							await tx.execute(
 								sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 							);
-							await tx
+							return tx
 								.update(services)
 								.set({
 									deletedAt: toDate(setup.service.deletedAt),
@@ -563,8 +588,25 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 											? error.message
 											: "Restore deployment failed",
 								})
-								.where(eq(services.id, serviceId));
+								.where(
+									and(
+										eq(services.id, serviceId),
+										eq(services.deletionStatus, "restoring"),
+									),
+								)
+								.returning({ id: services.id })
+								.then((rows) => rows[0]);
 						});
+						if (failed) {
+							reportBusinessFailure("service-restore.failed", {
+								occurrenceId: serviceId,
+								reason: "deployment_start_failed",
+								tags: {
+									serviceId,
+									failureStage: "deployment_start_failed",
+								},
+							});
+						}
 						throw error;
 					}
 				},
@@ -605,11 +647,11 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			if (!healthyDeployment || failedDeployment) {
 				await step.run("mark-restore-deployment-failed", async () => {
-					await db.transaction(async (tx) => {
+					const failed = await db.transaction(async (tx) => {
 						await tx.execute(
 							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
 						);
-						await tx
+						return tx
 							.update(services)
 							.set({
 								deletedAt: toDate(setup.service.deletedAt),
@@ -621,8 +663,25 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 									failedDeployment?.failedStage ||
 									"Restore deployment did not become healthy",
 							})
-							.where(eq(services.id, serviceId));
+							.where(
+								and(
+									eq(services.id, serviceId),
+									eq(services.deletionStatus, "restoring"),
+								),
+							)
+							.returning({ id: services.id })
+							.then((rows) => rows[0]);
 					});
+					if (failed) {
+						reportBusinessFailure("service-restore.failed", {
+							occurrenceId: serviceId,
+							reason: "deployment_unhealthy",
+							tags: {
+								serviceId,
+								failureStage: "deployment_unhealthy",
+							},
+						});
+					}
 				});
 				return { status: "failed", reason: "deployment" };
 			}
@@ -646,8 +705,17 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			return { status: "restored", serviceId };
 		} catch (error) {
+			reportServerError(error, "service.restore.workflow", {
+				tags: { serviceId },
+			});
 			await step.run("mark-unhandled-restore-failed", async () => {
-				await markServiceDeletionFailed(serviceId, error);
+				await markServiceOperationFailed(
+					serviceId,
+					error instanceof Error ? error.message : "Service restore failed",
+					"service-restore.failed",
+					"workflow_failed",
+					["restoring"],
+				);
 			});
 			return {
 				status: "failed",
@@ -729,6 +797,9 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 					await db.delete(secrets).where(eq(secrets.serviceId, service.id));
 					await db.delete(services).where(eq(services.id, service.id));
 				} catch (error) {
+					reportServerError(error, "service.purge", {
+						tags: { serviceId: service.id },
+					});
 					console.error(
 						`[service-purge] failed to purge service ${service.id}`,
 						error,

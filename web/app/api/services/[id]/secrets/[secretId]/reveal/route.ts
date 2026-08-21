@@ -4,6 +4,7 @@ import { secrets } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { decryptSecret } from "@/lib/crypto";
 import { EncryptionKeyUnavailableError } from "@/lib/kms";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function POST(
 	request: Request,
@@ -40,6 +41,9 @@ export async function POST(
 			},
 		});
 	} catch (error) {
+		reportServerError(error, "secrets.reveal", {
+			tags: { serviceId, secretId },
+		});
 		if (error instanceof EncryptionKeyUnavailableError) {
 			console.error("Secret encryption key unavailable:", error);
 			return Response.json(

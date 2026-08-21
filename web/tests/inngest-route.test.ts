@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
 		rolloutWorkflow: { id: "rollout-workflow" },
 		scheduledBackupsCheck: { id: "scheduled-backups-check" },
 		scheduledDeploymentsCheck: { id: "scheduled-deployments-check" },
+		sentryFailureWorkflow: { id: "sentry-function-failure" },
 		serviceCommandRetention: { id: "service-command-retention" },
 		serviceCronDispatcher: { id: "service-cron-dispatcher" },
 		serviceCronWorkflow: { id: "service-cron-workflow" },

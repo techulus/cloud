@@ -4,6 +4,7 @@ import { environments, projects } from "@/db/schema";
 import { requireApiKeyRole } from "@/lib/api-auth";
 import { apiError, badRequest, notFound } from "@/lib/public-api";
 import { namedPage, nextNamedCursor } from "@/lib/public-api-pagination";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET(
 	request: Request,
@@ -58,6 +59,9 @@ export async function GET(
 			nextCursor: nextNamedCursor(items, page.limit),
 		});
 	} catch (error) {
+		reportServerError(error, "public-api.environments.list", {
+			tags: { projectId },
+		});
 		console.error("[public-api] list environments failed", error);
 		return apiError("Internal server error", "INTERNAL_ERROR", 500);
 	}

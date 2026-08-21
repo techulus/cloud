@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, serviceRevisions, workQueue } from "@/db/schema";
+import { reportServerError } from "@/lib/server-errors";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
 type RegistryCleanupTransaction = Parameters<
@@ -286,6 +287,12 @@ export async function cleanupRegistryArtifactsDaily() {
 						and artifact_deleted_at is null`);
 			});
 		} catch (error) {
+			reportServerError(error, "registry.artifact.cleanup", {
+				tags: {
+					revisionId: candidate.id,
+					serviceId: candidate.serviceId,
+				},
+			});
 			console.error(
 				`[registry-retention] failed to clean artifact ${candidate.id}`,
 				error,

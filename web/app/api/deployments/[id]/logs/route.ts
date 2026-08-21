@@ -5,6 +5,7 @@ import {
 	normalizeLogCursor,
 	parseLogLimit,
 } from "@/lib/log-query";
+import { reportServerError } from "@/lib/server-errors";
 import { isLoggingEnabled, queryLogsByDeployment } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -50,6 +51,9 @@ export async function GET(
 			hasMore: result.hasMore,
 		});
 	} catch (error) {
+		reportServerError(error, "logs.deployment.query", {
+			tags: { deploymentId },
+		});
 		console.error("[logs:deployment] failed to query logs:", error);
 		return Response.json(
 			{ message: "Failed to query deployment logs" },

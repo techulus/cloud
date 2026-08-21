@@ -16,6 +16,7 @@ import {
 	deletePreviewService,
 } from "@/lib/preview-lifecycle";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	pullRequestMergeRef,
 	pullRequestNumberFromMergeRef,
@@ -232,7 +233,22 @@ export const previewSyncWorkflow = inngest.createFunction(
 					pullRequestNumber,
 				),
 			);
-		} catch {
+		} catch (error) {
+			const cause = error instanceof Error ? error.cause : undefined;
+			if (
+				!(
+					cause instanceof GitHubApiError &&
+					[404, 409, 422].includes(cause.status)
+				)
+			) {
+				reportServerError(error, "preview.merge-ref.resolve", {
+					tags: {
+						baseServiceId,
+						installationId: context.githubRepo.installationId,
+						pullRequestNumber,
+					},
+				});
+			}
 			await step.run("delete-unmergeable-preview", () =>
 				deletePreviewService(
 					baseServiceId,

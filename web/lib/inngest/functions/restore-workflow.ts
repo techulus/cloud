@@ -1,3 +1,4 @@
+import { reportBusinessFailure } from "@/lib/server-errors";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -30,6 +31,14 @@ export const restoreWorkflow = inngest.createFunction(
 		});
 
 		if (!outcome.result) {
+			await step.run("report-restore-timeout", () => {
+				reportBusinessFailure("restore.failed", {
+					occurrenceId: backupId,
+					reason: "timeout",
+					tags: { backupId },
+				});
+				return { reported: true };
+			});
 			return { status: "failed", reason: "timeout", backupId };
 		}
 

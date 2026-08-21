@@ -9,6 +9,7 @@ import {
 	resolvePersistedSource,
 } from "@/lib/public-api";
 import { namedPage, nextNamedCursor } from "@/lib/public-api-pagination";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET(
 	request: Request,
@@ -79,6 +80,9 @@ export async function GET(
 			nextCursor: nextNamedCursor(rows, page.limit),
 		});
 	} catch (error) {
+		reportServerError(error, "public-api.services.list", {
+			tags: { projectId, environmentId },
+		});
 		console.error("[public-api] list services failed", error);
 		return apiError("Internal server error", "INTERNAL_ERROR", 500);
 	}

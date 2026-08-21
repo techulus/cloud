@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
+import { reportBusinessFailure } from "@/lib/server-errors";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -71,7 +72,7 @@ export const backupWorkflow = inngest.createFunction(
 
 		if (!wakeup) {
 			await step.run("handle-backup-timeout", async () => {
-				await db
+				const failed = await db
 					.update(volumeBackups)
 					.set({
 						status: "failed",
@@ -82,7 +83,16 @@ export const backupWorkflow = inngest.createFunction(
 							eq(volumeBackups.id, backupId),
 							inArray(volumeBackups.status, ["pending", "uploading"]),
 						),
-					);
+					)
+					.returning({ serviceId: volumeBackups.serviceId })
+					.then((rows) => rows[0]);
+				if (failed) {
+					reportBusinessFailure("backup.failed", {
+						occurrenceId: backupId,
+						reason: "timeout",
+						tags: { backupId, serviceId: failed.serviceId },
+					});
+				}
 			});
 
 			return { status: "failed", reason: "timeout", backupId };

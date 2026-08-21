@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -181,6 +182,9 @@ async function markPreviewBuildFailed(
 			description,
 		});
 	} catch (error) {
+		reportServerError(error, "build.preview-status.update", {
+			tags: { serviceId, revisionId: serviceRevisionId },
+		});
 		console.error("[build-workflow] failed to update preview status:", error);
 	}
 }
@@ -214,13 +218,22 @@ export const buildWorkflow = inngest.createFunction(
 
 		let groupBuilds = await step.run("get-group-builds", readGroup);
 		if (groupBuilds.length === 0) {
-			await step.run("report-missing-build-group", () =>
-				markPreviewBuildFailed(
+			await step.run("report-missing-build-group", async () => {
+				reportBusinessFailure("build.failed", {
+					occurrenceId: buildGroupId,
+					reason: "build_group_missing",
+					tags: {
+						buildGroupId,
+						serviceId,
+						revisionId: serviceRevisionId,
+					},
+				});
+				await markPreviewBuildFailed(
 					serviceId,
 					serviceRevisionId,
 					"Preview build group is missing",
-				),
-			);
+				);
+			});
 			return { status: "failed", reason: "build_group_missing", buildGroupId };
 		}
 		if (groupFailure(groupBuilds)) {
@@ -251,13 +264,22 @@ export const buildWorkflow = inngest.createFunction(
 		}
 
 		if (groupBuilds.length === 0) {
-			await step.run("report-missing-build-group-after-wait", () =>
-				markPreviewBuildFailed(
+			await step.run("report-missing-build-group-after-wait", async () => {
+				reportBusinessFailure("build.failed", {
+					occurrenceId: buildGroupId,
+					reason: "build_group_missing",
+					tags: {
+						buildGroupId,
+						serviceId,
+						revisionId: serviceRevisionId,
+					},
+				});
+				await markPreviewBuildFailed(
 					serviceId,
 					serviceRevisionId,
 					"Preview build group is missing",
-				),
-			);
+				);
+			});
 			return { status: "failed", reason: "build_group_missing", buildGroupId };
 		}
 		if (groupFailure(groupBuilds)) {
@@ -274,7 +296,7 @@ export const buildWorkflow = inngest.createFunction(
 			await step.run("handle-group-timeout", async () => {
 				for (const build of groupBuilds) {
 					if (build.status === "completed") continue;
-					await db
+					const failed = await db
 						.update(builds)
 						.set({
 							status: "failed",
@@ -286,7 +308,21 @@ export const buildWorkflow = inngest.createFunction(
 								eq(builds.id, build.id),
 								inArray(builds.status, nonTerminalBuildStatuses),
 							),
-						);
+						)
+						.returning({ id: builds.id })
+						.then((rows) => rows[0]);
+					if (failed) {
+						reportBusinessFailure("build.failed", {
+							occurrenceId: failed.id,
+							reason: "timeout",
+							tags: {
+								buildId: failed.id,
+								buildGroupId,
+								serviceId,
+								revisionId: serviceRevisionId,
+							},
+						});
+					}
 				}
 			});
 			groupBuilds = await step.run("refresh-group-after-timeout", readGroup);
@@ -317,13 +353,22 @@ export const buildWorkflow = inngest.createFunction(
 			);
 		}
 		if (!manifest) {
-			await step.run("report-manifest-timeout", () =>
-				markPreviewBuildFailed(
+			await step.run("report-manifest-timeout", async () => {
+				reportBusinessFailure("build-manifest.failed", {
+					occurrenceId: buildGroupId,
+					reason: "timeout",
+					tags: {
+						buildGroupId,
+						serviceId,
+						revisionId: serviceRevisionId,
+					},
+				});
+				await markPreviewBuildFailed(
 					serviceId,
 					serviceRevisionId,
 					"Preview image manifest timed out",
-				),
-			);
+				);
+			});
 			return { status: "completed_no_manifest", buildGroupId };
 		}
 		if (manifest.status === "failed") {

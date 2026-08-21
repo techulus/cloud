@@ -16,6 +16,7 @@ import { inngestEvents } from "@/lib/inngest/events";
 import { notify } from "@/lib/notifications";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
@@ -143,6 +144,14 @@ export async function POST(
 	try {
 		specification = parseServiceRevisionSpec(revision.specification);
 	} catch (error) {
+		reportServerError(error, "agent.build.status.parse-revision", {
+			tags: {
+				buildId,
+				serviceId: build.serviceId,
+				revisionId: build.serviceRevisionId,
+				serverId: auth.serverId,
+			},
+		});
 		console.error("[build:status] invalid service revision:", error);
 		return NextResponse.json(
 			{ error: "Invalid build service revision" },
@@ -324,6 +333,14 @@ export async function POST(
 				}
 			}
 		} catch (error) {
+			reportServerError(error, "agent.build.status.github-deployment", {
+				tags: {
+					buildId,
+					serviceId: build.serviceId,
+					revisionId: build.serviceRevisionId,
+					serverId: auth.serverId,
+				},
+			});
 			console.error(
 				"[build:status] failed to update GitHub deployment:",
 				error,
@@ -333,6 +350,16 @@ export async function POST(
 
 	if (update.status === "failed") {
 		if (!replayingTerminalUpdate) {
+			reportBusinessFailure("build.failed", {
+				occurrenceId: buildId,
+				reason: "agent_reported_failure",
+				tags: {
+					buildId,
+					serviceId: build.serviceId,
+					revisionId: build.serviceRevisionId,
+					serverId: auth.serverId,
+				},
+			});
 			notify({
 				kind: "build.failed",
 				occurrenceId: buildId,
@@ -340,6 +367,13 @@ export async function POST(
 				buildId,
 				error: update.error,
 			}).catch((error) => {
+				reportServerError(error, "agent.build.status.notification", {
+					tags: {
+						buildId,
+						serviceId: build.serviceId,
+						revisionId: build.serviceRevisionId,
+					},
+				});
 				console.error(
 					"[build:status] failed to enqueue build failure notification:",
 					error,

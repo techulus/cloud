@@ -7,6 +7,7 @@ import { secrets, serviceCrons, services } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
 import { notify } from "@/lib/notifications";
 import { isSafeCronPath, nextOccurrenceAfter } from "@/lib/public-api";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import { ingestCronLog, type CronLog } from "@/lib/victoria-logs";
 
 const MAX_ERROR = 500;
@@ -204,7 +205,10 @@ export async function executeServiceCron(
 		secret = encrypted.get("CRON_SECRET")
 			? await decryptSecret(encrypted.get("CRON_SECRET")!)
 			: undefined;
-	} catch {
+	} catch (cause) {
+		reportServerError(cause, "service-cron.configuration.load", {
+			tags: { cronId, serviceId: row.serviceId },
+		});
 		status = "failed";
 		error = "Cron configuration could not be loaded";
 	}
@@ -220,6 +224,9 @@ export async function executeServiceCron(
 					deadline - Date.now(),
 				));
 			} catch (cause) {
+				reportServerError(cause, "service-cron.request", {
+					tags: { cronId, serviceId: row.serviceId },
+				});
 				status = "failed";
 				error = sanitizeCronError(cause);
 			}
@@ -258,14 +265,24 @@ export async function executeServiceCron(
 	};
 	await ingestCronLog(log);
 	if (status === "failed") {
+		const occurrenceId = cronEventId(cronId, scheduledFor);
+		reportBusinessFailure("service-cron.failed", {
+			occurrenceId,
+			reason: "request_failed",
+			tags: { cronId, serviceId: row.serviceId, source },
+			extra: { statusCode },
+		});
 		notify({
 			kind: "cron.failed",
-			occurrenceId: cronEventId(cronId, scheduledFor),
+			occurrenceId,
 			serviceId: row.serviceId,
 			path: row.cron.path,
 			statusCode,
 			error,
 		}).catch((cause) => {
+			reportServerError(cause, "service-cron.notification", {
+				tags: { cronId, serviceId: row.serviceId },
+			});
 			console.error(
 				"[service-cron] failed to enqueue cron failure notification:",
 				cause,

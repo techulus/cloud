@@ -8,6 +8,7 @@ import { cloneUrlForRevisionSource } from "@/lib/build-revision-source";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import {
 	DEFAULT_BUILD_TIMEOUT_MINUTES,
 	SETTING_KEYS,
@@ -68,6 +69,16 @@ export async function POST(
 				{ status: 409 },
 			);
 		}
+		reportBusinessFailure("build.failed", {
+			occurrenceId: buildId,
+			reason: "claim_failed",
+			tags: {
+				buildId,
+				serviceId: build.serviceId,
+				revisionId: build.serviceRevisionId,
+				serverId,
+			},
+		});
 		await inngest.send(
 			inngestEvents.buildCompleted.create(
 				{
@@ -115,6 +126,14 @@ export async function POST(
 	try {
 		specification = parseServiceRevisionSpec(revision.specification);
 	} catch (error) {
+		reportServerError(error, "agent.build.claim.parse-revision", {
+			tags: {
+				buildId,
+				serviceId: build.serviceId,
+				revisionId: build.serviceRevisionId,
+				serverId,
+			},
+		});
 		console.error("[build:get] invalid service revision:", error);
 		return failClaim("Invalid build service revision");
 	}
@@ -130,6 +149,14 @@ export async function POST(
 	try {
 		cloneUrl = await cloneUrlForRevisionSource(specification.source);
 	} catch (error) {
+		reportServerError(error, "agent.build.claim.github-token", {
+			tags: {
+				buildId,
+				serviceId: build.serviceId,
+				revisionId: build.serviceRevisionId,
+				serverId,
+			},
+		});
 		console.error("[build:get] failed to get installation token:", error);
 		return failClaim("Failed to get GitHub installation token");
 	}

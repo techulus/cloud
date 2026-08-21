@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => ({
 	startMigrationInternal: vi.fn(),
 	triggerBuildInternal: vi.fn(),
 	send: vi.fn(),
-	updateWhere: vi.fn(),
+	updateWhere: vi.fn(() => ({
+		returning: vi.fn(() =>
+			Promise.resolve([{ serviceRevisionId: "revision-1" }]),
+		),
+	})),
+	reportBusinessFailure: vi.fn(),
 	createRolloutCreated: vi.fn((data, options) => ({
 		name: "rollout/created",
 		data,
@@ -38,6 +43,9 @@ vi.mock("@/lib/service-revisions", () => ({
 	createRolloutWithServiceRevision: mocks.createRolloutWithServiceRevision,
 }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
+vi.mock("@/lib/server-errors", () => ({
+	reportBusinessFailure: mocks.reportBusinessFailure,
+}));
 vi.mock("@/lib/trigger-build", () => ({
 	triggerBuildInternal: mocks.triggerBuildInternal,
 }));

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import {
@@ -10,9 +10,39 @@ import {
 } from "@/db/schema";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
+import { reportBusinessFailure } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
+
+const activeMigrationStatuses: Array<
+	NonNullable<typeof services.$inferSelect.migrationStatus>
+> = ["stopping", "backing_up", "deploying_target", "restoring", "starting"];
+
+async function markMigrationFailed(
+	serviceId: string,
+	failureStage: string,
+	errorMessage: string,
+) {
+	const failed = await db
+		.update(services)
+		.set({ migrationStatus: "failed", migrationError: errorMessage })
+		.where(
+			and(
+				eq(services.id, serviceId),
+				inArray(services.migrationStatus, activeMigrationStatuses),
+			),
+		)
+		.returning({ id: services.id })
+		.then((rows) => rows[0]);
+	if (failed) {
+		reportBusinessFailure("migration.failed", {
+			occurrenceId: serviceId,
+			reason: failureStage,
+			tags: { serviceId, failureStage },
+		});
+	}
+}
 
 export const migrationWorkflow = inngest.createFunction(
 	{
@@ -178,13 +208,11 @@ export const migrationWorkflow = inngest.createFunction(
 		const backupTimedOut = backupResults.some((r) => r.status === "timed_out");
 		if (backupTimedOut) {
 			await step.run("handle-backup-timeout", async () => {
-				await db
-					.update(services)
-					.set({
-						migrationStatus: "failed",
-						migrationError: "Backup timed out",
-					})
-					.where(eq(services.id, serviceId));
+				await markMigrationFailed(
+					serviceId,
+					"backup_timeout",
+					"Backup timed out",
+				);
 			});
 			return { status: "failed", reason: "backup_timeout" };
 		}
@@ -194,13 +222,11 @@ export const migrationWorkflow = inngest.createFunction(
 		);
 		if (backupStillPending) {
 			await step.run("handle-backup-still-pending", async () => {
-				await db
-					.update(services)
-					.set({
-						migrationStatus: "failed",
-						migrationError: "Backup did not reach a terminal state",
-					})
-					.where(eq(services.id, serviceId));
+				await markMigrationFailed(
+					serviceId,
+					"backup_pending",
+					"Backup did not reach a terminal state",
+				);
 			});
 			return { status: "failed", reason: "backup_pending" };
 		}
@@ -208,13 +234,11 @@ export const migrationWorkflow = inngest.createFunction(
 		const backupFailure = backupResults.find((r) => r.status === "failed");
 		if (backupFailure) {
 			await step.run("handle-backup-failure", async () => {
-				await db
-					.update(services)
-					.set({
-						migrationStatus: "failed",
-						migrationError: backupFailure.error,
-					})
-					.where(eq(services.id, serviceId));
+				await markMigrationFailed(
+					serviceId,
+					"backup_failed",
+					backupFailure.error || "Backup failed",
+				);
 			});
 			return { status: "failed", reason: "backup_failed" };
 		}
@@ -273,13 +297,11 @@ export const migrationWorkflow = inngest.createFunction(
 		const restoreTimedOut = restoreResults.some((r) => r === null);
 		if (restoreTimedOut) {
 			await step.run("handle-restore-timeout", async () => {
-				await db
-					.update(services)
-					.set({
-						migrationStatus: "failed",
-						migrationError: "Restore timed out",
-					})
-					.where(eq(services.id, serviceId));
+				await markMigrationFailed(
+					serviceId,
+					"restore_timeout",
+					"Restore timed out",
+				);
 			});
 			return { status: "failed", reason: "restore_timeout" };
 		}
@@ -289,13 +311,11 @@ export const migrationWorkflow = inngest.createFunction(
 		);
 		if (restoreFailure) {
 			await step.run("handle-restore-failure", async () => {
-				await db
-					.update(services)
-					.set({
-						migrationStatus: "failed",
-						migrationError: restoreFailure.data.error || "Restore failed",
-					})
-					.where(eq(services.id, serviceId));
+				await markMigrationFailed(
+					serviceId,
+					"restore_failed",
+					restoreFailure.data.error || "Restore failed",
+				);
 			});
 			return { status: "failed", reason: "restore_failed" };
 		}

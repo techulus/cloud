@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { githubInstallations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getInstallationRepositories } from "@/lib/github";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET() {
 	const session = await auth.api.getSession({
@@ -48,6 +49,9 @@ export async function GET() {
 				});
 			}
 		} catch (error) {
+			reportServerError(error, "github.repositories.list", {
+				tags: { installationId: installation.installationId },
+			});
 			console.error(
 				`[github:repos] failed to fetch repos for installation ${installation.installationId}:`,
 				error,

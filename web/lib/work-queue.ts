@@ -12,6 +12,7 @@ import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import { notifyWorkAvailable } from "@/lib/work-queue-notifications";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
@@ -147,6 +148,9 @@ export async function enqueueWork<T extends WorkQueue["type"]>(
 		await notifyWorkAvailable(serverId, executor);
 	} catch (error) {
 		if (options.tx) throw error;
+		reportServerError(error, "work-queue.notification.publish", {
+			tags: { serverId },
+		});
 		console.error("[work-queue] failed to publish notification:", error);
 	}
 }
@@ -271,6 +275,17 @@ export async function completeWorkItemResults(
 		}
 
 		accepted.push(result.id);
+		if (result.status === "failed") {
+			reportBusinessFailure("work-item.failed", {
+				occurrenceId: item.id,
+				reason: "agent_reported_failure",
+				tags: {
+					serverId: item.serverId,
+					workItemId: item.id,
+					workType: item.type,
+				},
+			});
+		}
 		if (item.type !== "restore_volume") {
 			await runWorkItemCompletionSideEffects(item, result);
 		}
@@ -433,6 +448,9 @@ async function markAgentUpgradeStarted(serverId: string, payloadText: string) {
 				),
 			);
 	} catch (error) {
+		reportServerError(error, "agent.upgrade.mark-started", {
+			tags: { serverId },
+		});
 		console.error("[work-queue] failed to mark agent upgrade started:", error);
 	}
 }
@@ -637,6 +655,9 @@ async function runWorkItemCompletionSideEffects(
 			);
 		}
 	} catch (error) {
+		reportServerError(error, "work-queue.completion.side-effects", {
+			tags: { workItemId: item.id, workType: item.type },
+		});
 		console.error("[work-queue] failed to run completion side effects:", error);
 	}
 }
@@ -650,7 +671,7 @@ async function runAgentUpgradeCompletionSideEffects(
 		if (!payload.targetVersion) return;
 
 		if (result.status === "failed") {
-			await db
+			const failed = await db
 				.update(servers)
 				.set({
 					agentUpgradeStatus: "failed",
@@ -661,7 +682,20 @@ async function runAgentUpgradeCompletionSideEffects(
 						eq(servers.id, item.serverId),
 						eq(servers.agentUpgradeTargetVersion, payload.targetVersion),
 					),
-				);
+				)
+				.returning({ id: servers.id })
+				.then((rows) => rows[0]);
+			if (failed) {
+				reportBusinessFailure("agent-upgrade.failed", {
+					occurrenceId: item.id,
+					reason: "agent_reported_failure",
+					tags: {
+						serverId: failed.id,
+						workItemId: item.id,
+						workType: item.type,
+					},
+				});
+			}
 			return;
 		}
 
@@ -688,6 +722,9 @@ async function runAgentUpgradeCompletionSideEffects(
 				),
 			);
 	} catch (error) {
+		reportServerError(error, "agent.upgrade.completion", {
+			tags: { serverId: item.serverId, workItemId: item.id },
+		});
 		console.error(
 			"[work-queue] failed to run agent upgrade completion side effects:",
 			error,
@@ -732,6 +769,9 @@ async function runForceCleanupCompletionSideEffects(
 				),
 			);
 	} catch (error) {
+		reportServerError(error, "work-queue.force-cleanup.completion", {
+			tags: { serverId: item.serverId, workItemId: item.id },
+		});
 		console.error(
 			"[work-queue] failed to run force cleanup completion side effects:",
 			error,

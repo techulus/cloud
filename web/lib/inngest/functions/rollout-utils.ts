@@ -4,6 +4,7 @@ import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { notify } from "@/lib/notifications";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
+import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
@@ -88,6 +89,17 @@ export async function handleRolloutFailure(
 	if (!result.applied) return;
 	const { rolloutDeployments } = result;
 	const serviceRevisionId = result.rollout.serviceRevisionId;
+	reportBusinessFailure("rollout.failed", {
+		occurrenceId: rolloutId,
+		reason,
+		tags: {
+			rolloutId,
+			serviceId,
+			...(serviceRevisionId ? { revisionId: serviceRevisionId } : {}),
+			failureStage: reason,
+			rollbackState: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+		},
+	});
 	if (serviceRevisionId) {
 		try {
 			await updatePreviewGitHubStatus({
@@ -97,6 +109,9 @@ export async function handleRolloutFailure(
 				description: `Preview rollout failed: ${reason}`,
 			});
 		} catch (error) {
+			reportServerError(error, "rollout.preview-status.update", {
+				tags: { rolloutId, serviceId, revisionId: serviceRevisionId },
+			});
 			console.error(
 				"[rollout:failure] failed to update preview status:",
 				error,
@@ -112,6 +127,9 @@ export async function handleRolloutFailure(
 			serverId: null,
 			failedStage: reason,
 		}).catch((error) => {
+			reportServerError(error, "rollout.failure.notification", {
+				tags: { rolloutId, serviceId },
+			});
 			console.error(
 				"[rollout:failure] failed to enqueue deployment failure notification:",
 				error,
@@ -129,6 +147,9 @@ export async function handleRolloutFailure(
 		serverId,
 		failedStage: reason,
 	}).catch((error) => {
+		reportServerError(error, "rollout.failure.notification", {
+			tags: { rolloutId, serviceId, serverId },
+		});
 		console.error(
 			"[rollout:failure] failed to enqueue deployment failure notification:",
 			error,

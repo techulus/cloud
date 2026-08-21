@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { getService } from "@/db/queries";
 import { auth } from "@/lib/auth";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	createEmptyServiceMetrics,
 	isMetricsEnabled,
@@ -45,6 +46,9 @@ export async function GET(
 	try {
 		return Response.json(await queryServiceMetrics({ serviceId, range }));
 	} catch (error) {
+		reportServerError(error, "metrics.service.query", {
+			tags: { serviceId },
+		});
 		console.error("[metrics:service] failed to query service metrics:", error);
 		return Response.json(
 			{ message: "Service metrics unavailable" },
