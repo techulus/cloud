@@ -418,33 +418,57 @@ export const rolloutWorkflow = inngest.createFunction(
 			});
 		}
 
-		const certResult = await step.run("issue-certificates", async () => {
-			await db
-				.update(rollouts)
-				.set({ currentStage: "certificates" })
-				.where(eq(rollouts.id, rolloutId));
-			try {
-				const result = await issueCertificatesForRevision(specification);
-				if (result.issuedDomains.length > 0) {
-					await ingestRolloutLog(
-						rolloutId,
-						serviceId,
-						"certificates",
-						`Certificates issued for ${result.issuedDomains.length} domain(s)`,
-					);
-				}
-				return { success: true as const };
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: "Certificate provisioning failed";
-				await ingestRolloutLog(rolloutId, serviceId, "certificates", message);
-				return { success: false as const, reason: message };
+		let certificatesIssued = false;
+		let certificateFailureReason = "Certificate provisioning failed";
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			const certResult = await step.run(
+				`issue-certificates-${attempt}`,
+				async () => {
+					await db
+						.update(rollouts)
+						.set({ currentStage: "certificates" })
+						.where(eq(rollouts.id, rolloutId));
+					try {
+						const result = await issueCertificatesForRevision(specification);
+						if (result.issuedDomains.length > 0) {
+							await ingestRolloutLog(
+								rolloutId,
+								serviceId,
+								"certificates",
+								`Certificates issued for ${result.issuedDomains.length} domain(s)`,
+							);
+						}
+						return { success: true as const };
+					} catch (error) {
+						const message =
+							error instanceof Error
+								? error.message
+								: "Certificate provisioning failed";
+						await ingestRolloutLog(
+							rolloutId,
+							serviceId,
+							"certificates",
+							message,
+						);
+						return { success: false as const, reason: message };
+					}
+				},
+			);
+			if (certResult.success) {
+				certificatesIssued = true;
+				break;
 			}
-		});
 
-		if (!certResult.success) {
+			certificateFailureReason = certResult.reason;
+			if (attempt < 3) {
+				await step.sleep(
+					`wait-for-certificate-retry-${attempt}`,
+					attempt === 1 ? "10s" : "20s",
+				);
+			}
+		}
+
+		if (!certificatesIssued) {
 			await step.run("handle-certificate-failure", async () => {
 				await handleRolloutFailure(
 					rolloutId,
@@ -455,7 +479,7 @@ export const rolloutWorkflow = inngest.createFunction(
 			});
 			return {
 				status: "failed",
-				reason: certResult.reason,
+				reason: certificateFailureReason,
 			};
 		}
 
