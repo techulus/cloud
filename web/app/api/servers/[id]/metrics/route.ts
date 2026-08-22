@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { getServerDetails } from "@/db/queries";
 import { auth } from "@/lib/auth";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	emptyHistory,
 	getMetricWindow,
@@ -61,6 +62,7 @@ export async function GET(
 			range,
 		});
 	} catch (error) {
+		reportServerError(error, "metrics.server.query", { tags: { serverId } });
 		console.error("[metrics:server] failed to query metrics:", error);
 		return Response.json({
 			current: null,

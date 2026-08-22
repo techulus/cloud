@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { getRegistryBundle } from "@/lib/registry-credentials";
+import { reportServerError } from "@/lib/server-errors";
 
 const PRIVATE_HEADERS = {
 	"Cache-Control": "private, no-store",
@@ -19,6 +20,9 @@ export async function GET(request: NextRequest) {
 			headers: PRIVATE_HEADERS,
 		});
 	} catch (error) {
+		reportServerError(error, "agent.registries.bundle", {
+			tags: { serverId: auth.serverId },
+		});
 		console.error("Registry bundle error:", error);
 		return NextResponse.json(
 			{ error: "Registry credentials unavailable" },

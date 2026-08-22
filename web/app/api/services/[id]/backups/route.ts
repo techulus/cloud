@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { volumeBackups, servers } from "@/db/schema";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET(
 	request: NextRequest,
@@ -28,6 +29,8 @@ export async function GET(
 
 		return NextResponse.json({ backups });
 	} catch (error) {
+		const { id: serviceId } = await params;
+		reportServerError(error, "backups.list", { tags: { serviceId } });
 		console.error("[api:backups] failed to fetch backups:", error);
 		return NextResponse.json(
 			{ error: "Failed to fetch backups" },

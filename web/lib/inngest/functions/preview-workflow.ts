@@ -16,6 +16,7 @@ import {
 	deletePreviewService,
 } from "@/lib/preview-lifecycle";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	pullRequestMergeRef,
 	pullRequestNumberFromMergeRef,
@@ -223,16 +224,44 @@ export const previewSyncWorkflow = inngest.createFunction(
 		const previous = await step.run("load-latest-preview-revision", () =>
 			loadLatestPreviewRevision(clone.serviceId),
 		);
-		let mergeRef: { gitRef: string; sha: string };
+		let mergeRef: { gitRef: string; sha: string } | null;
 		try {
-			mergeRef = await step.run("resolve-merge-ref", () =>
-				resolveGitHubPullRequestMergeRef(
-					context.githubRepo.installationId,
-					context.githubRepo.repoFullName,
-					pullRequestNumber,
-				),
-			);
-		} catch {
+			mergeRef = await step.run("resolve-merge-ref", async () => {
+				try {
+					return await resolveGitHubPullRequestMergeRef(
+						context.githubRepo.installationId,
+						context.githubRepo.repoFullName,
+						pullRequestNumber,
+					);
+				} catch (error) {
+					if (
+						error instanceof GitHubApiError &&
+						[404, 409, 422].includes(error.status)
+					) {
+						return null;
+					}
+					throw error;
+				}
+			});
+		} catch (error) {
+			await step.run("delete-unmergeable-preview", async () => {
+				reportServerError(error, "preview.merge-ref.resolve", {
+					tags: {
+						baseServiceId,
+						installationId: context.githubRepo.installationId,
+						pullRequestNumber,
+					},
+				});
+				await deletePreviewService(
+					baseServiceId,
+					previewGitRef,
+					"merge ref is unavailable",
+				);
+			});
+			return { status: "failed", reason: "merge_ref_unavailable" };
+		}
+
+		if (!mergeRef) {
 			await step.run("delete-unmergeable-preview", () =>
 				deletePreviewService(
 					baseServiceId,

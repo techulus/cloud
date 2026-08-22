@@ -5,6 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { githubInstallations } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
+import { reportServerError } from "@/lib/server-errors";
 
 async function getInstallationDetails(installationId: number): Promise<{
 	account: { login: string; type: "User" | "Organization" };
@@ -40,6 +41,13 @@ async function getInstallationDetails(installationId: number): Promise<{
 	);
 
 	if (!response.ok) {
+		reportServerError(
+			new Error(
+				`GitHub installation lookup failed with status ${response.status}`,
+			),
+			"github.installation.get",
+			{ tags: { installationId } },
+		);
 		console.error(
 			`[github:setup] failed to get installation ${installationId}:`,
 			await response.text(),

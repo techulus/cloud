@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requireRequestRole } from "@/lib/api-auth";
 import { auth as betterAuth } from "@/lib/auth";
 import { apiError, badRequest } from "@/lib/public-api";
+import { reportServerError } from "@/lib/server-errors";
 
 const schema = z.strictObject({
 	name: z.string().trim().min(1).max(32),
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
 			{ status: 201 },
 		);
 	} catch (error) {
+		reportServerError(error, "public-api.api-key.create");
 		console.error("[public-api] API key creation failed", error);
 		return apiError("Failed to create API key", "API_KEY_CREATE_FAILED", 500);
 	}

@@ -1,6 +1,10 @@
 package traefik
 
-import "testing"
+import (
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 func TestEnsurePrometheusMetricsConfigAddsPrivateMetricsEndpoint(t *testing.T) {
 	config := map[string]interface{}{
@@ -44,7 +48,17 @@ func TestEnsurePrometheusMetricsConfigIsStable(t *testing.T) {
 	if !ensurePrometheusMetricsConfig(config) {
 		t.Fatal("expected first call to modify config")
 	}
-	if ensurePrometheusMetricsConfig(config) {
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	var roundTripped map[string]interface{}
+	if err := yaml.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+
+	if ensurePrometheusMetricsConfig(roundTripped) {
 		t.Fatal("expected second call to be stable")
 	}
 }

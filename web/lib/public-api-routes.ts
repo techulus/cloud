@@ -30,6 +30,7 @@ import {
 	type TimestampCursor,
 	timestampPage,
 } from "@/lib/public-api-pagination";
+import { reportServerError } from "@/lib/server-errors";
 import { queryServiceRevisionChangelog } from "@/lib/service-revision-changelog";
 import {
 	isLoggingEnabled,
@@ -96,6 +97,7 @@ function cursorFilter<T extends { createdAt: unknown; id: unknown }>(
 		: undefined;
 }
 function internalError(error: unknown, operation: string) {
+	reportServerError(error, `public-api.${operation}`);
 	console.error(`[public-api] ${operation} failed`, error);
 	return apiError("Internal server error", "INTERNAL_ERROR", 500);
 }
@@ -341,6 +343,7 @@ function deployConflict(error: unknown) {
 	) {
 		return apiError(message, "DEPLOYMENT_CONFLICT", 409);
 	}
+	reportServerError(error, "public-api.deploy");
 	return apiError(
 		"Deployment provider unavailable",
 		"DEPLOY_PROVIDER_ERROR",
@@ -601,9 +604,11 @@ export async function getServiceLogs(
 		if (error instanceof ServiceLogCursorUnavailableError) {
 			return apiError(error.message, "LOG_CURSOR_UNAVAILABLE", 409);
 		}
-		return error instanceof RangeError
-			? invalidLogQuery(error)
-			: apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
+		if (error instanceof RangeError) return invalidLogQuery(error);
+		reportServerError(error, "public-api.service-logs.query", {
+			tags: { serviceId: scope.service.id },
+		});
+		return apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
 	}
 }
 
@@ -737,9 +742,11 @@ export async function getRolloutLogs(
 			})),
 		});
 	} catch (error) {
-		return error instanceof RangeError
-			? invalidLogQuery(error)
-			: apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
+		if (error instanceof RangeError) return invalidLogQuery(error);
+		reportServerError(error, "public-api.rollout-logs.query", {
+			tags: { serviceId: scope.service.id, rolloutId },
+		});
+		return apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
 	}
 }
 
@@ -809,7 +816,10 @@ export async function getMetrics(
 				throwOnError: true,
 			}),
 		});
-	} catch {
+	} catch (error) {
+		reportServerError(error, "public-api.metrics.query", {
+			tags: { serviceId: scope.service.id },
+		});
 		return apiError(
 			"Metrics provider unavailable",
 			"METRICS_PROVIDER_ERROR",

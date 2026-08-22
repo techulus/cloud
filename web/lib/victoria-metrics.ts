@@ -14,6 +14,7 @@ import {
 	type EndpointConfig,
 	parseEndpoint,
 } from "@/lib/victoria";
+import { reportServerError } from "@/lib/server-errors";
 
 export { METRIC_RANGE_OPTIONS, type MetricRange, parseMetricRange };
 
@@ -128,26 +129,27 @@ export async function queryNodeMetricsSnapshots(
 ): Promise<Map<string, NodeMetricsSnapshot>> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) return new Map();
+	let reportedError = false;
+	const recover = (metricName: string) =>
+		queryInstantMetricGroup(endpoint, metricName).catch((error) => {
+			if (!reportedError) {
+				reportedError = true;
+				reportServerError(error, "metrics.nodes.snapshot", {
+					tags: { metricName },
+				});
+			}
+			return new Map<string, number | null>();
+		});
 
 	// 5 total queries (one per metric), results grouped by server_id label.
 	// This collapses the previous N × 5 fan-out.
 	const [cpuMap, memPctMap, memBytesMap, diskPctMap, diskBytesMap] =
 		await Promise.all([
-			queryInstantMetricGroup(endpoint, METRIC_NAMES.cpuUsagePercent).catch(
-				() => new Map<string, number | null>(),
-			),
-			queryInstantMetricGroup(endpoint, METRIC_NAMES.memoryUsagePercent).catch(
-				() => new Map<string, number | null>(),
-			),
-			queryInstantMetricGroup(endpoint, METRIC_NAMES.memoryUsedBytes).catch(
-				() => new Map<string, number | null>(),
-			),
-			queryInstantMetricGroup(endpoint, METRIC_NAMES.diskUsagePercent).catch(
-				() => new Map<string, number | null>(),
-			),
-			queryInstantMetricGroup(endpoint, METRIC_NAMES.diskUsedBytes).catch(
-				() => new Map<string, number | null>(),
-			),
+			recover(METRIC_NAMES.cpuUsagePercent),
+			recover(METRIC_NAMES.memoryUsagePercent),
+			recover(METRIC_NAMES.memoryUsedBytes),
+			recover(METRIC_NAMES.diskUsagePercent),
+			recover(METRIC_NAMES.diskUsedBytes),
 		]);
 
 	const result = new Map<string, NodeMetricsSnapshot>();
@@ -176,6 +178,7 @@ export async function queryNodeMetricsSnapshot(
 		diskUsagePercent: null,
 		diskUsedBytes: null,
 	};
+	let reportedError = false;
 
 	await Promise.all(
 		Object.entries(METRIC_NAMES).map(async ([key, metricName]) => {
@@ -183,7 +186,15 @@ export async function queryNodeMetricsSnapshot(
 				endpoint,
 				metricName,
 				serverId,
-			).catch(() => null);
+			).catch((error) => {
+				if (!reportedError) {
+					reportedError = true;
+					reportServerError(error, "metrics.node.snapshot", {
+						tags: { metricName, serverId },
+					});
+				}
+				return null;
+			});
 			snapshot[key as keyof NodeMetricsSnapshot] = value;
 		}),
 	);
@@ -199,6 +210,7 @@ export async function queryNodeMetricsHistory(options: {
 }): Promise<NodeMetricsHistory> {
 	const endpoint = getQueryEndpoint();
 	if (!endpoint) return emptyHistory();
+	let reportedError = false;
 
 	const entries = await Promise.all(
 		Object.entries(METRIC_NAMES).map(async ([key, metricName]) => {
@@ -208,7 +220,15 @@ export async function queryNodeMetricsHistory(options: {
 				start: options.start,
 				end: options.end,
 				stepSeconds: options.stepSeconds,
-			}).catch(() => []);
+			}).catch((error) => {
+				if (!reportedError) {
+					reportedError = true;
+					reportServerError(error, "metrics.node.history", {
+						tags: { metricName, serverId: options.serverId },
+					});
+				}
+				return [];
+			});
 			return [key, series] as const;
 		}),
 	);
@@ -254,8 +274,19 @@ export async function queryServiceMetrics(options: {
 		window.start,
 		window.stepSeconds * SECOND_IN_MILLISECONDS,
 	);
+	let reportedError = false;
 	const recover = <T>(promise: Promise<T>, fallback: T): Promise<T> =>
-		options.throwOnError ? promise : promise.catch(() => fallback);
+		options.throwOnError
+			? promise
+			: promise.catch((error) => {
+					if (!reportedError) {
+						reportedError = true;
+						reportServerError(error, "metrics.service.query", {
+							tags: { serviceId: options.serviceId },
+						});
+					}
+					return fallback;
+				});
 
 	const [
 		requestResults,

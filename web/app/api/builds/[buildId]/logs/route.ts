@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { invalidLogQueryResponse, normalizeLogSearch } from "@/lib/log-query";
+import { reportServerError } from "@/lib/server-errors";
 import { isLoggingEnabled, queryLogsByBuild } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -28,6 +29,7 @@ export async function GET(
 
 		return NextResponse.json({ logs });
 	} catch (error) {
+		reportServerError(error, "logs.build.query", { tags: { buildId } });
 		console.error("Failed to fetch build logs:", error);
 		return NextResponse.json(
 			{ message: "Failed to query build logs" },

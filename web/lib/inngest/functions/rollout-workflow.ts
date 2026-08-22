@@ -27,6 +27,7 @@ import {
 } from "@/lib/preview-deployments";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
+import { reportOperationFailure } from "@/lib/server-errors";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueReconcileForAllOnlineServers } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -197,15 +198,16 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			if (!rolloutId) return;
 			if (serviceId) {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"workflow_failed",
-					true,
-				);
+					reason: "workflow_failed",
+					failureStage: "workflow_failed",
+					isRollingUpdate: true,
+				});
 			}
 
-			await db
+			const fallbackFailure = await db
 				.update(rollouts)
 				.set({
 					status: "failed",
@@ -217,7 +219,27 @@ export const rolloutWorkflow = inngest.createFunction(
 						eq(rollouts.id, rolloutId),
 						inArray(rollouts.status, ["queued", "in_progress"]),
 					),
-				);
+				)
+				.returning({
+					serviceId: rollouts.serviceId,
+					serviceRevisionId: rollouts.serviceRevisionId,
+				})
+				.then((rows) => rows[0]);
+			if (fallbackFailure) {
+				reportOperationFailure("rollout.failed", {
+					occurrenceId: rolloutId,
+					reason: "workflow_failed",
+					tags: {
+						rolloutId,
+						serviceId: fallbackFailure.serviceId,
+						...(fallbackFailure.serviceRevisionId
+							? { revisionId: fallbackFailure.serviceRevisionId }
+							: {}),
+						failureStage: "workflow_failed",
+						rollbackState: "failed",
+					},
+				});
+			}
 		},
 	},
 	async ({ event, step }) => {
@@ -257,14 +279,31 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (!acquiredTurn) {
 			await step.run("mark-rollout-queue-timeout", async () => {
-				await db
+				const failed = await db
 					.update(rollouts)
 					.set({
 						status: "failed",
 						currentStage: "queue_timeout",
 						completedAt: new Date(),
 					})
-					.where(eq(rollouts.id, rolloutId));
+					.where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "queued")))
+					.returning({ serviceRevisionId: rollouts.serviceRevisionId })
+					.then((rows) => rows[0]);
+				if (failed) {
+					reportOperationFailure("rollout.failed", {
+						occurrenceId: rolloutId,
+						reason: "queue_timeout",
+						tags: {
+							rolloutId,
+							serviceId,
+							...(failed.serviceRevisionId
+								? { revisionId: failed.serviceRevisionId }
+								: {}),
+							failureStage: "queue_timeout",
+							rollbackState: "failed",
+						},
+					});
+				}
 				await ingestRolloutLog(
 					rolloutId,
 					serviceId,
@@ -337,7 +376,14 @@ export const rolloutWorkflow = inngest.createFunction(
 					"preparing",
 					`Placement validation failed: ${reason}`,
 				);
-				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				await handleRolloutFailure({
+					rolloutId,
+					serviceId,
+					reason,
+					failureStage: "preflight_failed",
+					isRollingUpdate: false,
+					report: false,
+				});
 				return { success: false as const, reason };
 			}
 		});
@@ -378,7 +424,14 @@ export const rolloutWorkflow = inngest.createFunction(
 					"preparing",
 					`Placement failed: ${reason}`,
 				);
-				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				await handleRolloutFailure({
+					rolloutId,
+					serviceId,
+					reason,
+					failureStage: "preflight_failed",
+					isRollingUpdate: false,
+					report: false,
+				});
 				return { success: false as const, reason };
 			}
 		});
@@ -418,44 +471,69 @@ export const rolloutWorkflow = inngest.createFunction(
 			});
 		}
 
-		const certResult = await step.run("issue-certificates", async () => {
-			await db
-				.update(rollouts)
-				.set({ currentStage: "certificates" })
-				.where(eq(rollouts.id, rolloutId));
-			try {
-				const result = await issueCertificatesForRevision(specification);
-				if (result.issuedDomains.length > 0) {
-					await ingestRolloutLog(
-						rolloutId,
-						serviceId,
-						"certificates",
-						`Certificates issued for ${result.issuedDomains.length} domain(s)`,
-					);
-				}
-				return { success: true as const };
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: "Certificate provisioning failed";
-				await ingestRolloutLog(rolloutId, serviceId, "certificates", message);
-				return { success: false as const, reason: message };
+		let certificatesIssued = false;
+		let certificateFailureReason = "Certificate provisioning failed";
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			const certResult = await step.run(
+				`issue-certificates-${attempt}`,
+				async () => {
+					await db
+						.update(rollouts)
+						.set({ currentStage: "certificates" })
+						.where(eq(rollouts.id, rolloutId));
+					try {
+						const result = await issueCertificatesForRevision(specification);
+						if (result.issuedDomains.length > 0) {
+							await ingestRolloutLog(
+								rolloutId,
+								serviceId,
+								"certificates",
+								`Certificates issued for ${result.issuedDomains.length} domain(s)`,
+							);
+						}
+						return { success: true as const };
+					} catch (error) {
+						const message =
+							error instanceof Error
+								? error.message
+								: "Certificate provisioning failed";
+						await ingestRolloutLog(
+							rolloutId,
+							serviceId,
+							"certificates",
+							message,
+						);
+						return { success: false as const, reason: message };
+					}
+				},
+			);
+			if (certResult.success) {
+				certificatesIssued = true;
+				break;
 			}
-		});
 
-		if (!certResult.success) {
+			certificateFailureReason = certResult.reason;
+			if (attempt < 3) {
+				await step.sleep(
+					`wait-for-certificate-retry-${attempt}`,
+					attempt === 1 ? "10s" : "20s",
+				);
+			}
+		}
+
+		if (!certificatesIssued) {
 			await step.run("handle-certificate-failure", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"certificate_provisioning_failed",
+					reason: "certificate_provisioning_failed",
+					failureStage: "certificate_provisioning_failed",
 					isRollingUpdate,
-				);
+				});
 			});
 			return {
 				status: "failed",
-				reason: certResult.reason,
+				reason: certificateFailureReason,
 			};
 		}
 
@@ -582,12 +660,13 @@ export const rolloutWorkflow = inngest.createFunction(
 				);
 			});
 			await step.run("handle-health-timeout", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					failedReason,
+					reason: failedReason,
+					failureStage: failedReason,
 					isRollingUpdate,
-				);
+				});
 			});
 			return {
 				status: "failed",
@@ -749,12 +828,13 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (dnsTimedOut) {
 			await step.run("rollback-dns-timeout", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"dns_sync_timeout",
+					reason: "dns_sync_timeout",
+					failureStage: "dns_sync_timeout",
 					isRollingUpdate,
-				);
+				});
 			});
 			return { status: "rolled_back", rolloutId, reason: "dns_sync_timeout" };
 		}

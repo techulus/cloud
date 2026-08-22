@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { invalidLogQueryResponse, parseLogListParams } from "@/lib/log-query";
+import { reportServerError } from "@/lib/server-errors";
 import { isLoggingEnabled, queryLogsByServer } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -46,6 +47,7 @@ export async function GET(
 			hasMore: result.hasMore,
 		});
 	} catch (error) {
+		reportServerError(error, "logs.server.query", { tags: { serverId } });
 		console.error("[logs:server] failed to query logs:", error);
 		return Response.json(
 			{ message: "Failed to query server logs" },

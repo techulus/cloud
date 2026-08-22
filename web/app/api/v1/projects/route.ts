@@ -4,6 +4,7 @@ import { projects } from "@/db/schema";
 import { requireApiKeyRole } from "@/lib/api-auth";
 import { apiError, badRequest } from "@/lib/public-api";
 import { namedPage, nextNamedCursor } from "@/lib/public-api-pagination";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET(request: Request) {
 	const auth = await requireApiKeyRole(request, [
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
 			nextCursor: nextNamedCursor(rows, page.limit),
 		});
 	} catch (error) {
+		reportServerError(error, "public-api.projects.list");
 		console.error("[public-api] list projects failed", error);
 		return apiError("Internal server error", "INTERNAL_ERROR", 500);
 	}

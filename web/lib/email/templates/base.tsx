@@ -24,7 +24,7 @@ export function BaseEmail({ preview, children, baseUrl }: BaseEmailProps) {
 			<Head />
 			<Preview>{preview}</Preview>
 			<Body style={body}>
-				<Container style={container}>
+				<Container width="600" style={container}>
 					<Section style={header}>
 						<Img src={logoUrl} width="48" height="48" alt="Techulus Cloud" />
 					</Section>
@@ -47,7 +47,9 @@ const container = {
 	margin: "0 auto",
 	padding: "12px 0 32px",
 	marginBottom: "64px",
+	width: "100%",
 	maxWidth: "600px",
+	tableLayout: "fixed" as const,
 };
 
 const header = {
@@ -56,6 +58,9 @@ const header = {
 
 const content = {
 	padding: "16px 24px",
+	overflowWrap: "anywhere" as const,
+	wordBreak: "break-word" as const,
+	wordWrap: "break-word" as const,
 };
 
 const footer = {

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { invalidLogQueryResponse, parseLogListParams } from "@/lib/log-query";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	isLoggingEnabled,
 	type LogType,
@@ -79,6 +80,7 @@ export async function GET(
 			hasMore: result.hasMore,
 		});
 	} catch (error) {
+		reportServerError(error, "logs.service.query", { tags: { serviceId } });
 		console.error("[logs:service] failed to query logs:", error);
 		return Response.json(
 			{ message: "Failed to query service logs" },

@@ -10,6 +10,7 @@ import {
 	isExpired,
 	MINUTE_IN_MILLISECONDS,
 } from "@/lib/date";
+import { reportServerError } from "@/lib/server-errors";
 import { SETTING_KEYS } from "@/lib/settings-keys";
 
 const ACME_ACCOUNT_KEY_SETTING = "acme_account_key";
@@ -220,6 +221,9 @@ export async function renewExpiringCertificates(): Promise<void> {
 			await issueCertificate(cert.domain);
 			console.log(`[acme] renewed certificate for ${cert.domain}`);
 		} catch (error) {
+			reportServerError(error, "acme.certificate.renew", {
+				tags: { domain: cert.domain },
+			});
 			console.error(`[acme] failed to renew ${cert.domain}:`, error);
 		}
 	}

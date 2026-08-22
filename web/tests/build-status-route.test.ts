@@ -52,6 +52,8 @@ const mocks = vi.hoisted(() => {
 		updateGitHubDeploymentStatus: vi.fn(),
 		updatePreviewGitHubStatus: vi.fn(),
 		notify: vi.fn(),
+		reportOperationFailure: vi.fn(),
+		reportServerError: vi.fn(),
 		createBuildCompleted: vi.fn((data, options) => ({
 			name: "build/completed",
 			data,
@@ -70,6 +72,10 @@ vi.mock("@/lib/github", () => ({
 }));
 vi.mock("@/lib/preview-deployments", () => ({
 	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
+}));
+vi.mock("@/lib/server-errors", () => ({
+	reportOperationFailure: mocks.reportOperationFailure,
+	reportServerError: mocks.reportServerError,
 }));
 vi.mock("@/lib/work-queue", () => ({ enqueueWork: mocks.enqueueWork }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
@@ -181,6 +187,26 @@ describe("agent build status transitions", () => {
 			buildId: "build-amd64",
 			error: undefined,
 		});
+		expect(mocks.reportOperationFailure).toHaveBeenCalledWith("build.failed", {
+			occurrenceId: "build-amd64",
+			reason: "agent_reported_failure",
+			tags: {
+				buildId: "build-amd64",
+				serviceId: "service-1",
+				revisionId: "revision-1",
+				serverId: "server-1",
+			},
+		});
+	});
+
+	it("does not report a replayed failed transition", async () => {
+		const failedBuild = build("failed");
+		mocks.selectResults.push([failedBuild], [{ specification }], [failedBuild]);
+		mocks.updateResults.push([]);
+
+		expect((await post("failed")).status).toBe(200);
+		expect(mocks.reportOperationFailure).not.toHaveBeenCalled();
+		expect(mocks.notify).not.toHaveBeenCalled();
 	});
 
 	it("keeps the service details link on GitHub deployment statuses", async () => {

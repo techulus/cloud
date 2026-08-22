@@ -14,6 +14,7 @@ import {
 	getPublishedContainerPorts,
 	type ServiceRevisionSpec,
 } from "@/lib/service-revision-spec";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	assignContainerIp,
 	CONTAINER_IP_ALLOCATION_CONSTRAINTS,
@@ -360,6 +361,9 @@ export async function issueCertificatesForRevision(
 			console.log(`[deploy] issued certificate for ${domain}`);
 			issuedDomains.push(domain);
 		} catch (error) {
+			reportServerError(error, "acme.certificate.issue", {
+				tags: { domain },
+			});
 			console.error(
 				`[deploy] failed to issue certificate for ${domain}:`,
 				error,

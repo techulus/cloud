@@ -54,6 +54,7 @@ import {
 	cleanupRegistryArtifactsForService,
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	deletePreviewService,
 	deletePreviewsForBaseService,
@@ -1748,6 +1749,9 @@ export async function abortRollout(serviceId: string) {
 		try {
 			await inngest.send(inngestEvents.rolloutCancelled.create({ rolloutId }));
 		} catch (error) {
+			reportServerError(error, "rollout.cancellation.dispatch", {
+				tags: { rolloutId, serviceId },
+			});
 			console.error(
 				`[rollout:${rolloutId}] failed to send cancellation:`,
 				error,

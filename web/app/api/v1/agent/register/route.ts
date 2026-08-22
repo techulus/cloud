@@ -5,6 +5,7 @@ import { servers } from "@/db/schema";
 import { HOUR_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { EncryptionKeyUnavailableError, resolveEncryptionKey } from "@/lib/kms";
 import { agentRegisterSchema } from "@/lib/schemas";
+import { reportServerError } from "@/lib/server-errors";
 import { formatZodErrors } from "@/lib/utils";
 import {
 	assignSubnet,
@@ -114,6 +115,10 @@ export async function POST(request: NextRequest) {
 			metricsEndpoint: process.env.VICTORIA_METRICS_URL ?? null,
 		});
 	} catch (error) {
+		if (error instanceof SyntaxError) {
+			return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+		}
+		reportServerError(error, "agent.register");
 		console.error("Agent registration error:", error);
 		if (error instanceof EncryptionKeyUnavailableError) {
 			return NextResponse.json(
