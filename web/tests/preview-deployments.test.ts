@@ -404,6 +404,9 @@ describe("preview service cloning", () => {
 			}),
 		);
 		expect(mocks.upsertGitHubPullRequestComment).toHaveBeenCalledTimes(2);
+		expect(
+			mocks.upsertGitHubPullRequestComment.mock.calls[0]?.[4],
+		).not.toContain("<sub>");
 		expect(mocks.upsertGitHubPullRequestComment).toHaveBeenLastCalledWith(
 			101,
 			"acme/app",

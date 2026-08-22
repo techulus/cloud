@@ -84,8 +84,12 @@ async function updatePreviewPullRequestComment(input: {
 		input.previewUrl
 			? `**Preview:** [Open preview](${input.previewUrl})`
 			: "**Preview:** No public URL configured",
-		"",
-		`<sub>${escapeGitHubCommentText(input.description.substring(0, 500))}</sub>`,
+		...(input.state === "failure"
+			? [
+					"",
+					`<sub>${escapeGitHubCommentText(input.description.substring(0, 500))}</sub>`,
+				]
+			: []),
 	].join("\n");
 	await upsertGitHubPullRequestComment(
 		input.installationId,
