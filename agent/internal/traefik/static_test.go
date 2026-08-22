@@ -53,11 +53,12 @@ func TestEnsurePrometheusMetricsConfigIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal config: %v", err)
 	}
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	var roundTripped map[string]interface{}
+	if err := yaml.Unmarshal(data, &roundTripped); err != nil {
 		t.Fatalf("failed to unmarshal config: %v", err)
 	}
 
-	if ensurePrometheusMetricsConfig(config) {
+	if ensurePrometheusMetricsConfig(roundTripped) {
 		t.Fatal("expected second call to be stable")
 	}
 }

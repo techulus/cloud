@@ -15,6 +15,7 @@ const (
 	metricsEntryPointAddr = "127.0.0.1:9100"
 )
 
+// Whole-number buckets must be ints to match yaml.v3's decoded types.
 var prometheusLatencyBuckets = []interface{}{
 	0.005,
 	0.01,
