@@ -8,7 +8,7 @@ type ReportingContext = {
 	extra?: Record<string, SafeMetadataValue>;
 };
 
-type BusinessFailureContext = ReportingContext & {
+type OperationFailureContext = ReportingContext & {
 	occurrenceId: string;
 	reason?: string;
 };
@@ -26,7 +26,7 @@ export function reportServerError(
 
 export function reportOperationFailure(
 	operation: string,
-	{ occurrenceId, reason, tags, extra }: BusinessFailureContext,
+	{ occurrenceId, reason, tags, extra }: OperationFailureContext,
 ) {
 	const safeReason = reason
 		// eslint-disable-next-line no-control-regex -- Strip unsafe control characters from reported reasons.
