@@ -15,6 +15,7 @@ import (
 const (
 	lastReloadSuccessMetric = "traefik_config_last_reload_success"
 	pendingReloadMarkerName = ".routing-reload-pending"
+	metricsReadyTimeout     = 15 * time.Second
 )
 
 var (
@@ -28,6 +29,22 @@ var (
 
 func LastSuccessfulReload() (time.Time, error) {
 	return readLastSuccessfulReload()
+}
+
+func waitForMetricsReady(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		if _, err := LastSuccessfulReload(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("traefik metrics did not become ready within %s: %w", timeout, lastErr)
+		}
+		time.Sleep(reloadPollInterval)
+	}
 }
 
 func fetchLastSuccessfulReload() (time.Time, error) {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +15,7 @@ const (
 	metricsEntryPointAddr = "127.0.0.1:9100"
 )
 
+// Whole-number buckets must be ints to match yaml.v3's decoded types.
 var prometheusLatencyBuckets = []interface{}{
 	0.005,
 	0.01,
@@ -26,12 +26,12 @@ var prometheusLatencyBuckets = []interface{}{
 	0.25,
 	0.5,
 	0.75,
-	1.0,
+	1,
 	2.5,
-	5.0,
-	10.0,
-	30.0,
-	60.0,
+	5,
+	10,
+	30,
+	60,
 }
 
 func validateStaticConfig(data []byte) error {
@@ -218,6 +218,5 @@ func ReloadTraefik() error {
 		return fmt.Errorf("failed to restart traefik: %w", err)
 	}
 	log.Printf("[traefik] restarted traefik to apply static config changes")
-	time.Sleep(2 * time.Second)
-	return nil
+	return waitForMetricsReady(metricsReadyTimeout)
 }

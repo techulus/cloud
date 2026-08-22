@@ -20,6 +20,54 @@ traefik_config_last_reload_success 1.725e+09
 	}
 }
 
+func TestWaitForMetricsReadyRetriesTemporaryErrors(t *testing.T) {
+	originalReader := readLastSuccessfulReload
+	originalPollInterval := reloadPollInterval
+	t.Cleanup(func() {
+		readLastSuccessfulReload = originalReader
+		reloadPollInterval = originalPollInterval
+	})
+
+	attempts := 0
+	readLastSuccessfulReload = func() (time.Time, error) {
+		attempts++
+		if attempts < 3 {
+			return time.Time{}, os.ErrNotExist
+		}
+		return time.Now(), nil
+	}
+	reloadPollInterval = time.Millisecond
+
+	if err := waitForMetricsReady(50 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("metrics read attempted %d times, want 3", attempts)
+	}
+}
+
+func TestWaitForMetricsReadyTimesOut(t *testing.T) {
+	originalReader := readLastSuccessfulReload
+	originalPollInterval := reloadPollInterval
+	t.Cleanup(func() {
+		readLastSuccessfulReload = originalReader
+		reloadPollInterval = originalPollInterval
+	})
+
+	readLastSuccessfulReload = func() (time.Time, error) {
+		return time.Time{}, os.ErrDeadlineExceeded
+	}
+	reloadPollInterval = time.Millisecond
+
+	err := waitForMetricsReady(5 * time.Millisecond)
+	if err == nil {
+		t.Fatal("metrics readiness wait unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "traefik metrics did not become ready within 5ms") {
+		t.Fatalf("unexpected timeout error: %v", err)
+	}
+}
+
 func TestDynamicConfigReloadedRequiresReloadAtOrAfterNewestFile(t *testing.T) {
 	originalDir := dynamicConfigDir
 	originalReader := readLastSuccessfulReload
