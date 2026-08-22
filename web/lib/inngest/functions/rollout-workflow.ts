@@ -198,12 +198,13 @@ export const rolloutWorkflow = inngest.createFunction(
 
 			if (!rolloutId) return;
 			if (serviceId) {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"workflow_failed",
-					true,
-				);
+					reason: "workflow_failed",
+					failureStage: "workflow_failed",
+					isRollingUpdate: true,
+				});
 			}
 
 			const fallbackFailure = await db
@@ -375,7 +376,14 @@ export const rolloutWorkflow = inngest.createFunction(
 					"preparing",
 					`Placement validation failed: ${reason}`,
 				);
-				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				await handleRolloutFailure({
+					rolloutId,
+					serviceId,
+					reason,
+					failureStage: "preflight_failed",
+					isRollingUpdate: false,
+					report: false,
+				});
 				return { success: false as const, reason };
 			}
 		});
@@ -416,7 +424,14 @@ export const rolloutWorkflow = inngest.createFunction(
 					"preparing",
 					`Placement failed: ${reason}`,
 				);
-				await handleRolloutFailure(rolloutId, serviceId, reason, false);
+				await handleRolloutFailure({
+					rolloutId,
+					serviceId,
+					reason,
+					failureStage: "preflight_failed",
+					isRollingUpdate: false,
+					report: false,
+				});
 				return { success: false as const, reason };
 			}
 		});
@@ -484,12 +499,13 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (!certResult.success) {
 			await step.run("handle-certificate-failure", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"certificate_provisioning_failed",
+					reason: "certificate_provisioning_failed",
+					failureStage: "certificate_provisioning_failed",
 					isRollingUpdate,
-				);
+				});
 			});
 			return {
 				status: "failed",
@@ -620,12 +636,13 @@ export const rolloutWorkflow = inngest.createFunction(
 				);
 			});
 			await step.run("handle-health-timeout", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					failedReason,
+					reason: failedReason,
+					failureStage: failedReason,
 					isRollingUpdate,
-				);
+				});
 			});
 			return {
 				status: "failed",
@@ -787,12 +804,13 @@ export const rolloutWorkflow = inngest.createFunction(
 
 		if (dnsTimedOut) {
 			await step.run("rollback-dns-timeout", async () => {
-				await handleRolloutFailure(
+				await handleRolloutFailure({
 					rolloutId,
 					serviceId,
-					"dns_sync_timeout",
+					reason: "dns_sync_timeout",
+					failureStage: "dns_sync_timeout",
 					isRollingUpdate,
-				);
+				});
 			});
 			return { status: "rolled_back", rolloutId, reason: "dns_sync_timeout" };
 		}

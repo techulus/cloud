@@ -7,6 +7,10 @@ export const sentryFailureWorkflow = inngest.createFunction(
 		triggers: [{ event: "inngest/function.failed" }],
 	},
 	async ({ event }) => {
+		if (event.data.function_id.endsWith("sentry-function-failure")) {
+			return;
+		}
+
 		const error = new Error(event.data.error.message);
 		error.name = event.data.error.name;
 		error.stack = event.data.error.stack;

@@ -10,12 +10,32 @@ import {
 	enqueueWork,
 } from "@/lib/work-queue";
 
-export async function handleRolloutFailure(
-	rolloutId: string,
-	serviceId: string,
-	reason: string,
-	isRollingUpdate: boolean,
-): Promise<void> {
+type RolloutFailureStage =
+	| "workflow_failed"
+	| "preflight_failed"
+	| "certificate_provisioning_failed"
+	| "deployment_failed"
+	| "health_check_failed"
+	| "health_check_timeout"
+	| "dns_sync_timeout";
+
+type RolloutFailureOptions = {
+	rolloutId: string;
+	serviceId: string;
+	reason: string;
+	failureStage: RolloutFailureStage;
+	isRollingUpdate: boolean;
+	report?: boolean;
+};
+
+export async function handleRolloutFailure({
+	rolloutId,
+	serviceId,
+	reason,
+	failureStage,
+	isRollingUpdate,
+	report = true,
+}: RolloutFailureOptions): Promise<void> {
 	const result = await db.transaction(async (tx) => {
 		const [rollout] = await tx
 			.select({
@@ -89,17 +109,20 @@ export async function handleRolloutFailure(
 	if (!result.applied) return;
 	const { rolloutDeployments } = result;
 	const serviceRevisionId = result.rollout.serviceRevisionId;
-	reportBusinessFailure("rollout.failed", {
-		occurrenceId: rolloutId,
-		reason,
-		tags: {
-			rolloutId,
-			serviceId,
-			...(serviceRevisionId ? { revisionId: serviceRevisionId } : {}),
-			failureStage: reason,
-			rollbackState: rolloutDeployments.length === 0 ? "failed" : "rolled_back",
-		},
-	});
+	if (report) {
+		reportBusinessFailure("rollout.failed", {
+			occurrenceId: rolloutId,
+			reason: failureStage,
+			tags: {
+				rolloutId,
+				serviceId,
+				...(serviceRevisionId ? { revisionId: serviceRevisionId } : {}),
+				failureStage,
+				rollbackState:
+					rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+			},
+		});
+	}
 	if (serviceRevisionId) {
 		try {
 			await updatePreviewGitHubStatus({

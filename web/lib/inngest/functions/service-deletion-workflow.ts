@@ -73,6 +73,7 @@ async function markServiceOperationFailed(
 			tags: { serviceId, failureStage },
 		});
 	}
+	return Boolean(failed);
 }
 
 export const serviceDeletionWorkflow = inngest.createFunction(
@@ -351,17 +352,19 @@ export const serviceDeletionWorkflow = inngest.createFunction(
 
 			return { status: "deleted", serviceId, backupIds };
 		} catch (error) {
-			reportServerError(error, "service.deletion.workflow", {
-				tags: { serviceId },
-			});
 			await step.run("mark-unhandled-delete-failed", async () => {
-				await markServiceOperationFailed(
+				const failed = await markServiceOperationFailed(
 					serviceId,
 					error instanceof Error ? error.message : "Service deletion failed",
 					"service-deletion.failed",
 					"workflow_failed",
 					["backing_up", "deleting"],
 				);
+				if (failed) {
+					reportServerError(error, "service.deletion.workflow", {
+						tags: { serviceId },
+					});
+				}
 			});
 			return {
 				status: "failed",
@@ -541,9 +544,9 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 				return { status: "failed", reason: failed ? "restore" : "timeout" };
 			}
 
-			const deployResult = await step.run(
-				"start-restored-deployment",
-				async () => {
+			let deployResult: { rolloutId: string };
+			try {
+				deployResult = await step.run("start-restored-deployment", async () => {
 					await db.transaction(async (tx) => {
 						await tx.execute(
 							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
@@ -562,55 +565,62 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 							.where(eq(services.id, serviceId));
 					});
 
-					try {
-						const result = await deployServiceInternal(serviceId, actor, {
-							runtimeBaseRevisionId: setup.runtimeBaseRevisionId,
-						});
-						if (!("rolloutId" in result) || !result.rolloutId) {
-							throw new Error("Restore could not start a deployment");
-						}
-						return result;
-					} catch (error) {
-						const failed = await db.transaction(async (tx) => {
-							await tx.execute(
-								sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
-							);
-							return tx
-								.update(services)
-								.set({
-									deletedAt: toDate(setup.service.deletedAt),
-									purgeAfter: toDate(setup.service.purgeAfter),
-									hostname: null,
-									originalHostname: setup.service.originalHostname,
-									deletionStatus: "failed",
-									deletionError:
-										error instanceof Error
-											? error.message
-											: "Restore deployment failed",
-								})
-								.where(
-									and(
-										eq(services.id, serviceId),
-										eq(services.deletionStatus, "restoring"),
-									),
-								)
-								.returning({ id: services.id })
-								.then((rows) => rows[0]);
-						});
-						if (failed) {
-							reportBusinessFailure("service-restore.failed", {
-								occurrenceId: serviceId,
-								reason: "deployment_start_failed",
-								tags: {
-									serviceId,
-									failureStage: "deployment_start_failed",
-								},
-							});
-						}
-						throw error;
+					const result = await deployServiceInternal(serviceId, actor, {
+						runtimeBaseRevisionId: setup.runtimeBaseRevisionId,
+					});
+					if (!("rolloutId" in result) || !result.rolloutId) {
+						throw new Error("Restore could not start a deployment");
 					}
-				},
-			);
+					return { rolloutId: result.rolloutId };
+				});
+			} catch (error) {
+				await step.run("mark-restore-deployment-start-failed", async () => {
+					const failed = await db.transaction(async (tx) => {
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtext(${serviceId}))`,
+						);
+						return tx
+							.update(services)
+							.set({
+								deletedAt: toDate(setup.service.deletedAt),
+								purgeAfter: toDate(setup.service.purgeAfter),
+								hostname: null,
+								originalHostname: setup.service.originalHostname,
+								deletionStatus: "failed",
+								deletionError:
+									error instanceof Error
+										? error.message
+										: "Restore deployment failed",
+							})
+							.where(
+								and(
+									eq(services.id, serviceId),
+									eq(services.deletionStatus, "restoring"),
+								),
+							)
+							.returning({ id: services.id })
+							.then((rows) => rows[0]);
+					});
+					if (failed) {
+						reportServerError(error, "service.restore.workflow", {
+							tags: { serviceId },
+						});
+						reportBusinessFailure("service-restore.failed", {
+							occurrenceId: serviceId,
+							reason: "deployment_start_failed",
+							tags: {
+								serviceId,
+								failureStage: "deployment_start_failed",
+							},
+						});
+					}
+				});
+				return {
+					status: "failed",
+					reason:
+						error instanceof Error ? error.message : "restore_deploy_failed",
+				};
+			}
 
 			await group.parallel(() =>
 				step.waitForEvent("wait-restore-deployment-status", {
@@ -705,17 +715,19 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 
 			return { status: "restored", serviceId };
 		} catch (error) {
-			reportServerError(error, "service.restore.workflow", {
-				tags: { serviceId },
-			});
 			await step.run("mark-unhandled-restore-failed", async () => {
-				await markServiceOperationFailed(
+				const failed = await markServiceOperationFailed(
 					serviceId,
 					error instanceof Error ? error.message : "Service restore failed",
 					"service-restore.failed",
 					"workflow_failed",
 					["restoring"],
 				);
+				if (failed) {
+					reportServerError(error, "service.restore.workflow", {
+						tags: { serviceId },
+					});
+				}
 			});
 			return {
 				status: "failed",

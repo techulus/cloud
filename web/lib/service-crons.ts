@@ -186,6 +186,8 @@ export async function executeServiceCron(
 	let error: string | null = null;
 	let base = "";
 	let secret: string | undefined;
+	let failureReason: "configuration_load_failed" | "request_failed" =
+		"request_failed";
 	try {
 		const values = await db
 			.select()
@@ -211,6 +213,7 @@ export async function executeServiceCron(
 		});
 		status = "failed";
 		error = "Cron configuration could not be loaded";
+		failureReason = "configuration_load_failed";
 	}
 	if (error === null) {
 		try {
@@ -224,9 +227,6 @@ export async function executeServiceCron(
 					deadline - Date.now(),
 				));
 			} catch (cause) {
-				reportServerError(cause, "service-cron.request", {
-					tags: { cronId, serviceId: row.serviceId },
-				});
 				status = "failed";
 				error = sanitizeCronError(cause);
 			}
@@ -268,7 +268,7 @@ export async function executeServiceCron(
 		const occurrenceId = cronEventId(cronId, scheduledFor);
 		reportBusinessFailure("service-cron.failed", {
 			occurrenceId,
-			reason: "request_failed",
+			reason: failureReason,
 			tags: { cronId, serviceId: row.serviceId, source },
 			extra: { statusCode },
 		});

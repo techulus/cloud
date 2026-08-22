@@ -217,7 +217,7 @@ describe("service cron scheduling and requests", () => {
 			"service-cron.failed",
 			{
 				occurrenceId: cronEventId("cron-1", scheduledFor),
-				reason: "request_failed",
+				reason: "configuration_load_failed",
 				tags: {
 					cronId: "cron-1",
 					serviceId: "service-1",
@@ -226,7 +226,15 @@ describe("service cron scheduling and requests", () => {
 				extra: { statusCode: null },
 			},
 		);
-		const captured = JSON.stringify(mocks.reportBusinessFailure.mock.calls);
+		expect(mocks.reportServerError).toHaveBeenCalledWith(
+			expect.any(Error),
+			"service-cron.configuration.load",
+			{ tags: { cronId: "cron-1", serviceId: "service-1" } },
+		);
+		const captured = JSON.stringify([
+			mocks.reportBusinessFailure.mock.calls,
+			mocks.reportServerError.mock.calls,
+		]);
 		expect(captured).not.toContain("/private/job");
 		expect(captured).not.toContain("encrypted-sensitive-value");
 	});

@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
 		deletePreviewService: vi.fn(),
 		triggerResolvedBuildInternal: vi.fn(),
 		parseServiceRevisionSpec: vi.fn(),
+		reportServerError: vi.fn(),
 		send: vi.fn(),
 		createSyncEvent: vi.fn((data, options) => ({
 			name: "preview/sync-requested",
@@ -65,6 +66,9 @@ vi.mock("@/lib/preview-lifecycle", () => ({
 }));
 vi.mock("@/lib/service-revision-changes", () => ({
 	parseServiceRevisionSpec: mocks.parseServiceRevisionSpec,
+}));
+vi.mock("@/lib/server-errors", () => ({
+	reportServerError: mocks.reportServerError,
 }));
 vi.mock("@/lib/trigger-build", () => ({
 	triggerResolvedBuildInternal: mocks.triggerResolvedBuildInternal,
@@ -198,7 +202,38 @@ describe("preview lifecycle workflows", () => {
 		});
 	});
 
-	it("deletes the preview when GitHub has no merge ref", async () => {
+	it.each([404, 409, 422])(
+		"deletes the preview without reporting when GitHub returns %i for the merge ref",
+		async (status) => {
+			mocks.selectResults.push(
+				[baseContext],
+				[{ previewOfService: "base-service" }],
+				[],
+			);
+			mocks.resolveGitHubPullRequestMergeRef.mockRejectedValue(
+				new mocks.GitHubApiError("merge ref unavailable", status),
+			);
+
+			await expect(
+				invoke(previewSyncWorkflow, {
+					baseServiceId: "base-service",
+					previewGitRef: "refs/pull/42/merge",
+				}),
+			).resolves.toEqual({
+				status: "failed",
+				reason: "merge_ref_unavailable",
+			});
+			expect(mocks.deletePreviewService).toHaveBeenCalledWith(
+				"base-service",
+				"refs/pull/42/merge",
+				"merge ref is unavailable",
+			);
+			expect(mocks.reportServerError).not.toHaveBeenCalled();
+			expect(mocks.triggerResolvedBuildInternal).not.toHaveBeenCalled();
+		},
+	);
+
+	it("reports an unexpected merge-ref failure once before cleanup", async () => {
 		mocks.selectResults.push(
 			[baseContext],
 			[{ previewOfService: "base-service" }],
@@ -221,6 +256,18 @@ describe("preview lifecycle workflows", () => {
 			"base-service",
 			"refs/pull/42/merge",
 			"merge ref is unavailable",
+		);
+		expect(mocks.reportServerError).toHaveBeenCalledOnce();
+		expect(mocks.reportServerError).toHaveBeenCalledWith(
+			expect.any(Error),
+			"preview.merge-ref.resolve",
+			{
+				tags: {
+					baseServiceId: "base-service",
+					installationId: 10,
+					pullRequestNumber: 42,
+				},
+			},
 		);
 		expect(mocks.triggerResolvedBuildInternal).not.toHaveBeenCalled();
 	});
