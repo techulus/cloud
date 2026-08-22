@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -219,7 +219,7 @@ export const buildWorkflow = inngest.createFunction(
 		let groupBuilds = await step.run("get-group-builds", readGroup);
 		if (groupBuilds.length === 0) {
 			await step.run("report-missing-build-group", async () => {
-				reportBusinessFailure("build.failed", {
+				reportOperationFailure("build.failed", {
 					occurrenceId: buildGroupId,
 					reason: "build_group_missing",
 					tags: {
@@ -265,7 +265,7 @@ export const buildWorkflow = inngest.createFunction(
 
 		if (groupBuilds.length === 0) {
 			await step.run("report-missing-build-group-after-wait", async () => {
-				reportBusinessFailure("build.failed", {
+				reportOperationFailure("build.failed", {
 					occurrenceId: buildGroupId,
 					reason: "build_group_missing",
 					tags: {
@@ -313,7 +313,7 @@ export const buildWorkflow = inngest.createFunction(
 							.returning({ id: builds.id })
 							.then((rows) => rows[0]);
 						if (failed) {
-							reportBusinessFailure("build.failed", {
+							reportOperationFailure("build.failed", {
 								occurrenceId: failed.id,
 								reason: "timeout",
 								tags: {
@@ -356,7 +356,7 @@ export const buildWorkflow = inngest.createFunction(
 		}
 		if (!manifest) {
 			await step.run("report-manifest-timeout", async () => {
-				reportBusinessFailure("build-manifest.failed", {
+				reportOperationFailure("build-manifest.failed", {
 					occurrenceId: buildGroupId,
 					reason: "timeout",
 					tags: {

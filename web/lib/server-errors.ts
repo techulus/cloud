@@ -24,7 +24,7 @@ export function reportServerError(
 	});
 }
 
-export function reportBusinessFailure(
+export function reportOperationFailure(
 	operation: string,
 	{ occurrenceId, reason, tags, extra }: BusinessFailureContext,
 ) {

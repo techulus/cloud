@@ -12,7 +12,7 @@ import type { WorkQueue } from "@/db/types";
 import { MINUTE_IN_MILLISECONDS, subtractMilliseconds } from "@/lib/date";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { notifyWorkAvailable } from "@/lib/work-queue-notifications";
 
 export const WORK_QUEUE_MAX_ATTEMPTS = 3;
@@ -276,7 +276,7 @@ export async function completeWorkItemResults(
 
 		accepted.push(result.id);
 		if (result.status === "failed") {
-			reportBusinessFailure("work-item.failed", {
+			reportOperationFailure("work-item.failed", {
 				occurrenceId: item.id,
 				reason: "agent_reported_failure",
 				tags: {
@@ -686,7 +686,7 @@ async function runAgentUpgradeCompletionSideEffects(
 				.returning({ id: servers.id })
 				.then((rows) => rows[0]);
 			if (failed) {
-				reportBusinessFailure("agent-upgrade.failed", {
+				reportOperationFailure("agent-upgrade.failed", {
 					occurrenceId: item.id,
 					reason: "agent_reported_failure",
 					tags: {

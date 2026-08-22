@@ -6,7 +6,7 @@ import { volumeBackups } from "@/db/schema";
 import { verifyAgentRequest } from "@/lib/agent-auth";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { reportBusinessFailure } from "@/lib/server-errors";
+import { reportOperationFailure } from "@/lib/server-errors";
 
 export async function POST(request: NextRequest) {
 	const body = await request.text();
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ ok: true });
 	}
 
-	reportBusinessFailure("backup.failed", {
+	reportOperationFailure("backup.failed", {
 		occurrenceId: backupId,
 		reason: "agent_reported_failure",
 		tags: { backupId, serviceId: backup.serviceId, serverId },

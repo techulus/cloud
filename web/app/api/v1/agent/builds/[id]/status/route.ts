@@ -16,7 +16,7 @@ import { inngestEvents } from "@/lib/inngest/events";
 import { notify } from "@/lib/notifications";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 
 type StatusUpdate = {
@@ -350,7 +350,7 @@ export async function POST(
 
 	if (update.status === "failed") {
 		if (!replayingTerminalUpdate) {
-			reportBusinessFailure("build.failed", {
+			reportOperationFailure("build.failed", {
 				occurrenceId: buildId,
 				reason: "agent_reported_failure",
 				tags: {

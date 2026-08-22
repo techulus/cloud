@@ -4,7 +4,7 @@ import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { notify } from "@/lib/notifications";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
@@ -110,7 +110,7 @@ export async function handleRolloutFailure({
 	const { rolloutDeployments } = result;
 	const serviceRevisionId = result.rollout.serviceRevisionId;
 	if (report) {
-		reportBusinessFailure("rollout.failed", {
+		reportOperationFailure("rollout.failed", {
 			occurrenceId: rolloutId,
 			reason: failureStage,
 			tags: {

@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { volumeBackups } from "@/db/schema";
-import { reportBusinessFailure } from "@/lib/server-errors";
+import { reportOperationFailure } from "@/lib/server-errors";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
 
@@ -87,7 +87,7 @@ export const backupWorkflow = inngest.createFunction(
 					.returning({ serviceId: volumeBackups.serviceId })
 					.then((rows) => rows[0]);
 				if (failed) {
-					reportBusinessFailure("backup.failed", {
+					reportOperationFailure("backup.failed", {
 						occurrenceId: backupId,
 						reason: "timeout",
 						tags: { backupId, serviceId: failed.serviceId },

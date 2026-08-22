@@ -8,7 +8,7 @@ import { cloneUrlForRevisionSource } from "@/lib/build-revision-source";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import {
 	DEFAULT_BUILD_TIMEOUT_MINUTES,
 	SETTING_KEYS,
@@ -69,7 +69,7 @@ export async function POST(
 				{ status: 409 },
 			);
 		}
-		reportBusinessFailure("build.failed", {
+		reportOperationFailure("build.failed", {
 			occurrenceId: buildId,
 			reason: "claim_failed",
 			tags: {

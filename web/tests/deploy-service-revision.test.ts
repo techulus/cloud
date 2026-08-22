@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 			Promise.resolve([{ serviceRevisionId: "revision-1" }]),
 		),
 	})),
-	reportBusinessFailure: vi.fn(),
+	reportOperationFailure: vi.fn(),
 	createRolloutCreated: vi.fn((data, options) => ({
 		name: "rollout/created",
 		data,
@@ -44,7 +44,7 @@ vi.mock("@/lib/service-revisions", () => ({
 }));
 vi.mock("@/lib/inngest/client", () => ({ inngest: { send: mocks.send } }));
 vi.mock("@/lib/server-errors", () => ({
-	reportBusinessFailure: mocks.reportBusinessFailure,
+	reportOperationFailure: mocks.reportOperationFailure,
 }));
 vi.mock("@/lib/trigger-build", () => ({
 	triggerBuildInternal: mocks.triggerBuildInternal,

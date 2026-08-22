@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { rollouts } from "@/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
-import { reportBusinessFailure } from "@/lib/server-errors";
+import { reportOperationFailure } from "@/lib/server-errors";
 
 export async function sendRolloutCreated(
 	rolloutId: string,
@@ -28,7 +28,7 @@ export async function sendRolloutCreated(
 			.returning({ serviceRevisionId: rollouts.serviceRevisionId })
 			.then((rows) => rows[0]);
 		if (failed) {
-			reportBusinessFailure("rollout.failed", {
+			reportOperationFailure("rollout.failed", {
 				occurrenceId: rolloutId,
 				reason: "enqueue_failed",
 				tags: {

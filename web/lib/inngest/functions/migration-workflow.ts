@@ -10,7 +10,7 @@ import {
 } from "@/db/schema";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
-import { reportBusinessFailure } from "@/lib/server-errors";
+import { reportOperationFailure } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -36,7 +36,7 @@ async function markMigrationFailed(
 		.returning({ id: services.id })
 		.then((rows) => rows[0]);
 	if (failed) {
-		reportBusinessFailure("migration.failed", {
+		reportOperationFailure("migration.failed", {
 			occurrenceId: serviceId,
 			reason: failureStage,
 			tags: { serviceId, failureStage },

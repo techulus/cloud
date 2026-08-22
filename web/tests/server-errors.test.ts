@@ -7,10 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@sentry/nextjs", () => mocks);
 
-import {
-	reportBusinessFailure,
-	reportServerError,
-} from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 
 describe("server error reporting", () => {
 	beforeEach(() => {
@@ -35,7 +32,7 @@ describe("server error reporting", () => {
 	});
 
 	it("groups business failures by operation", () => {
-		reportBusinessFailure("build.failed", {
+		reportOperationFailure("build.failed", {
 			occurrenceId: "build-1",
 			reason: "Build timed out",
 			tags: { serverId: "server-1" },
@@ -61,7 +58,7 @@ describe("server error reporting", () => {
 	});
 
 	it("bounds and strips control characters from business reasons", () => {
-		reportBusinessFailure("work-item.failed", {
+		reportOperationFailure("work-item.failed", {
 			occurrenceId: "work-1",
 			reason: `failed\n${"x".repeat(600)}`,
 		});

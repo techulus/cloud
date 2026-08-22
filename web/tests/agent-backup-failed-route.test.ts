@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
 		verifyAgentRequest: vi.fn(),
 		revalidatePath: vi.fn(),
 		send: vi.fn(),
-		reportBusinessFailure: vi.fn(),
+		reportOperationFailure: vi.fn(),
 		createResourceStatusChanged: vi.fn((data, options) => ({
 			name: "resource/status.changed",
 			data,
@@ -44,7 +44,7 @@ vi.mock("@/lib/inngest/events", () => ({
 	},
 }));
 vi.mock("@/lib/server-errors", () => ({
-	reportBusinessFailure: mocks.reportBusinessFailure,
+	reportOperationFailure: mocks.reportOperationFailure,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
@@ -78,7 +78,7 @@ describe("agent backup failure", () => {
 
 		expect(response.status).toBe(200);
 		expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/projects");
-		expect(mocks.reportBusinessFailure).toHaveBeenCalledWith("backup.failed", {
+		expect(mocks.reportOperationFailure).toHaveBeenCalledWith("backup.failed", {
 			occurrenceId: "backup-1",
 			reason: "agent_reported_failure",
 			tags: {
@@ -106,7 +106,7 @@ describe("agent backup failure", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ ok: true });
-		expect(mocks.reportBusinessFailure).not.toHaveBeenCalled();
+		expect(mocks.reportOperationFailure).not.toHaveBeenCalled();
 		expect(mocks.revalidatePath).not.toHaveBeenCalled();
 		expect(mocks.send).not.toHaveBeenCalled();
 	});

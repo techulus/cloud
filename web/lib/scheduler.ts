@@ -38,7 +38,7 @@ import {
 import { notify } from "@/lib/notifications";
 import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import {
 	AUTOSCALE_ATTEMPT_COOLDOWN_MS,
 	cloneActiveRevisionAndQueueSystemRollout,
@@ -857,7 +857,7 @@ export async function failTimedOutAgentUpgrades(): Promise<void> {
 				),
 			);
 		for (const server of timedOut) {
-			reportBusinessFailure("agent-upgrade.failed", {
+			reportOperationFailure("agent-upgrade.failed", {
 				occurrenceId: server.id,
 				reason: "timeout",
 				tags: { serverId: server.id },
@@ -917,7 +917,7 @@ export async function cleanupStaleItems(): Promise<void> {
 
 	if (staleWorkItems.length > 0) {
 		for (const item of staleWorkItems) {
-			reportBusinessFailure("work-item.failed", {
+			reportOperationFailure("work-item.failed", {
 				occurrenceId: item.id,
 				reason: "lease_expired",
 				tags: {

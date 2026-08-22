@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
 		},
 		decryptSecret: vi.fn(),
 		notify: vi.fn(),
-		reportBusinessFailure: vi.fn(),
+		reportOperationFailure: vi.fn(),
 		reportServerError: vi.fn(),
 		ingestCronLog: vi.fn(),
 	};
@@ -40,7 +40,7 @@ vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/crypto", () => ({ decryptSecret: mocks.decryptSecret }));
 vi.mock("@/lib/notifications", () => ({ notify: mocks.notify }));
 vi.mock("@/lib/server-errors", () => ({
-	reportBusinessFailure: mocks.reportBusinessFailure,
+	reportOperationFailure: mocks.reportOperationFailure,
 	reportServerError: mocks.reportServerError,
 }));
 vi.mock("@/lib/victoria-logs", () => ({
@@ -213,7 +213,7 @@ describe("service cron scheduling and requests", () => {
 			executeServiceCron("cron-1", "* * * * *", scheduledFor, "scheduled"),
 		).resolves.toMatchObject({ stale: false, status: "failed" });
 
-		expect(mocks.reportBusinessFailure).toHaveBeenCalledWith(
+		expect(mocks.reportOperationFailure).toHaveBeenCalledWith(
 			"service-cron.failed",
 			{
 				occurrenceId: cronEventId("cron-1", scheduledFor),
@@ -232,7 +232,7 @@ describe("service cron scheduling and requests", () => {
 			{ tags: { cronId: "cron-1", serviceId: "service-1" } },
 		);
 		const captured = JSON.stringify([
-			mocks.reportBusinessFailure.mock.calls,
+			mocks.reportOperationFailure.mock.calls,
 			mocks.reportServerError.mock.calls,
 		]);
 		expect(captured).not.toContain("/private/job");

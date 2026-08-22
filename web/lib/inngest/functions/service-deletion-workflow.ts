@@ -36,7 +36,7 @@ import {
 	prepareRegistryArtifactCleanup,
 } from "@/lib/registry-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
 import { inngest } from "../client";
 import { inngestEvents } from "../events";
@@ -67,7 +67,7 @@ async function markServiceOperationFailed(
 		.returning({ id: services.id })
 		.then((rows) => rows[0]);
 	if (failed) {
-		reportBusinessFailure(operation, {
+		reportOperationFailure(operation, {
 			occurrenceId: serviceId,
 			reason: failureStage,
 			tags: { serviceId, failureStage },
@@ -605,7 +605,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 						reportServerError(error, "service.restore.workflow", {
 							tags: { serviceId },
 						});
-						reportBusinessFailure("service-restore.failed", {
+						reportOperationFailure("service-restore.failed", {
 							occurrenceId: serviceId,
 							reason: "deployment_start_failed",
 							tags: {
@@ -683,7 +683,7 @@ export const serviceRestoreWorkflow = inngest.createFunction(
 							.then((rows) => rows[0]);
 					});
 					if (failed) {
-						reportBusinessFailure("service-restore.failed", {
+						reportOperationFailure("service-restore.failed", {
 							occurrenceId: serviceId,
 							reason: "deployment_unhealthy",
 							tags: {

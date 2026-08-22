@@ -7,7 +7,7 @@ import { secrets, serviceCrons, services } from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
 import { notify } from "@/lib/notifications";
 import { isSafeCronPath, nextOccurrenceAfter } from "@/lib/public-api";
-import { reportBusinessFailure, reportServerError } from "@/lib/server-errors";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { ingestCronLog, type CronLog } from "@/lib/victoria-logs";
 
 const MAX_ERROR = 500;
@@ -266,7 +266,7 @@ export async function executeServiceCron(
 	await ingestCronLog(log);
 	if (status === "failed") {
 		const occurrenceId = cronEventId(cronId, scheduledFor);
-		reportBusinessFailure("service-cron.failed", {
+		reportOperationFailure("service-cron.failed", {
 			occurrenceId,
 			reason: failureReason,
 			tags: { cronId, serviceId: row.serviceId, source },

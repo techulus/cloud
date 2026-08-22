@@ -27,7 +27,7 @@ import {
 } from "@/lib/preview-deployments";
 import type { ServiceRevisionSpec } from "@/lib/service-revision-spec";
 import { getRolloutServiceRevision } from "@/lib/service-revisions";
-import { reportBusinessFailure } from "@/lib/server-errors";
+import { reportOperationFailure } from "@/lib/server-errors";
 import { ingestRolloutLog } from "@/lib/victoria-logs";
 import { enqueueReconcileForAllOnlineServers } from "@/lib/work-queue";
 import { inngest } from "../client";
@@ -226,7 +226,7 @@ export const rolloutWorkflow = inngest.createFunction(
 				})
 				.then((rows) => rows[0]);
 			if (fallbackFailure) {
-				reportBusinessFailure("rollout.failed", {
+				reportOperationFailure("rollout.failed", {
 					occurrenceId: rolloutId,
 					reason: "workflow_failed",
 					tags: {
@@ -290,7 +290,7 @@ export const rolloutWorkflow = inngest.createFunction(
 					.returning({ serviceRevisionId: rollouts.serviceRevisionId })
 					.then((rows) => rows[0]);
 				if (failed) {
-					reportBusinessFailure("rollout.failed", {
+					reportOperationFailure("rollout.failed", {
 						occurrenceId: rolloutId,
 						reason: "queue_timeout",
 						tags: {
