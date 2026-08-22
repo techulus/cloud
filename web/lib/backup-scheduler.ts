@@ -9,6 +9,7 @@ import {
 	differenceInElapsedHours,
 	subtractUtcDays,
 } from "@/lib/date";
+import { reportServerError } from "@/lib/server-errors";
 import { DEFAULT_BACKUP_RETENTION_DAYS } from "@/lib/settings-keys";
 
 function shouldRunSchedule(
@@ -114,6 +115,9 @@ export async function runScheduledBackups() {
 				);
 			}
 		} catch (err) {
+			reportServerError(err, "backup.schedule", {
+				tags: { serviceId: service.id },
+			});
 			console.error(
 				`[backup-scheduler] error scheduling backup for ${service.name}:`,
 				err,

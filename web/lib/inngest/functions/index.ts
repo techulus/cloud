@@ -29,6 +29,7 @@ export {
 export { restoreTriggerWorkflow } from "./restore-trigger-workflow";
 export { onRestoreFailed, restoreWorkflow } from "./restore-workflow";
 export { rolloutWorkflow } from "./rollout-workflow";
+export { sentryFailureWorkflow } from "./sentry-failure-workflow";
 export {
 	expiredDeletedServicesPurge,
 	serviceDeletionWorkflow,

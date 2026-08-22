@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { githubRepos, services } from "@/db/schema";
 import { requireRequestDeveloperRole } from "@/lib/api-auth";
 import { listGitHubCommits } from "@/lib/github";
+import { reportServerError } from "@/lib/server-errors";
 
 export async function GET(
 	request: Request,
@@ -41,6 +42,12 @@ export async function GET(
 		);
 		return Response.json({ branch, commits });
 	} catch (error) {
+		reportServerError(error, "github.commits.list", {
+			tags: {
+				installationId: result.githubRepo.installationId,
+				serviceId,
+			},
+		});
 		return Response.json(
 			{
 				message:

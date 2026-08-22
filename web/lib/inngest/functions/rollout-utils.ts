@@ -4,17 +4,38 @@ import { deployments, rollouts } from "@/db/schema";
 import { markDeploymentFailedRemoved } from "@/lib/deployment-status";
 import { notify } from "@/lib/notifications";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import {
 	enqueueReconcileForAllOnlineServers,
 	enqueueWork,
 } from "@/lib/work-queue";
 
-export async function handleRolloutFailure(
-	rolloutId: string,
-	serviceId: string,
-	reason: string,
-	isRollingUpdate: boolean,
-): Promise<void> {
+type RolloutFailureStage =
+	| "workflow_failed"
+	| "preflight_failed"
+	| "certificate_provisioning_failed"
+	| "deployment_failed"
+	| "health_check_failed"
+	| "health_check_timeout"
+	| "dns_sync_timeout";
+
+type RolloutFailureOptions = {
+	rolloutId: string;
+	serviceId: string;
+	reason: string;
+	failureStage: RolloutFailureStage;
+	isRollingUpdate: boolean;
+	report?: boolean;
+};
+
+export async function handleRolloutFailure({
+	rolloutId,
+	serviceId,
+	reason,
+	failureStage,
+	isRollingUpdate,
+	report = true,
+}: RolloutFailureOptions): Promise<void> {
 	const result = await db.transaction(async (tx) => {
 		const [rollout] = await tx
 			.select({
@@ -88,6 +109,20 @@ export async function handleRolloutFailure(
 	if (!result.applied) return;
 	const { rolloutDeployments } = result;
 	const serviceRevisionId = result.rollout.serviceRevisionId;
+	if (report) {
+		reportOperationFailure("rollout.failed", {
+			occurrenceId: rolloutId,
+			reason: failureStage,
+			tags: {
+				rolloutId,
+				serviceId,
+				...(serviceRevisionId ? { revisionId: serviceRevisionId } : {}),
+				failureStage,
+				rollbackState:
+					rolloutDeployments.length === 0 ? "failed" : "rolled_back",
+			},
+		});
+	}
 	if (serviceRevisionId) {
 		try {
 			await updatePreviewGitHubStatus({
@@ -97,6 +132,9 @@ export async function handleRolloutFailure(
 				description: `Preview rollout failed: ${reason}`,
 			});
 		} catch (error) {
+			reportServerError(error, "rollout.preview-status.update", {
+				tags: { rolloutId, serviceId, revisionId: serviceRevisionId },
+			});
 			console.error(
 				"[rollout:failure] failed to update preview status:",
 				error,
@@ -112,6 +150,9 @@ export async function handleRolloutFailure(
 			serverId: null,
 			failedStage: reason,
 		}).catch((error) => {
+			reportServerError(error, "rollout.failure.notification", {
+				tags: { rolloutId, serviceId },
+			});
 			console.error(
 				"[rollout:failure] failed to enqueue deployment failure notification:",
 				error,
@@ -129,6 +170,9 @@ export async function handleRolloutFailure(
 		serverId,
 		failedStage: reason,
 	}).catch((error) => {
+		reportServerError(error, "rollout.failure.notification", {
+			tags: { rolloutId, serviceId, serverId },
+		});
 		console.error(
 			"[rollout:failure] failed to enqueue deployment failure notification:",
 			error,

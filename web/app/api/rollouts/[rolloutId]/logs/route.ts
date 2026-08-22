@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { invalidLogQueryResponse, normalizeLogSearch } from "@/lib/log-query";
+import { reportServerError } from "@/lib/server-errors";
 import { isLoggingEnabled, queryLogsByRollout } from "@/lib/victoria-logs";
 
 export async function GET(
@@ -29,6 +30,7 @@ export async function GET(
 
 		return NextResponse.json({ logs });
 	} catch (error) {
+		reportServerError(error, "logs.rollout.query", { tags: { rolloutId } });
 		console.error("Failed to fetch rollout logs:", error);
 		return NextResponse.json(
 			{ message: "Failed to query rollout logs" },

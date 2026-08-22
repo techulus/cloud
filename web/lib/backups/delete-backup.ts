@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { getBackupStorageConfig } from "@/db/queries";
 import { volumeBackups } from "@/db/schema";
 import { deleteFromS3 } from "@/lib/s3";
+import { reportServerError } from "@/lib/server-errors";
 
 /**
  * Deletes a backup record and its S3 object.
@@ -27,6 +28,9 @@ export async function deleteBackupInternal(backupId: string) {
 			try {
 				await deleteFromS3(storageConfig.bucket, backup.storagePath);
 			} catch (err) {
+				reportServerError(err, "backup.storage.delete", {
+					tags: { backupId },
+				});
 				console.error("[deleteBackup] failed to delete from S3:", {
 					backupId,
 					storagePath: backup.storagePath,

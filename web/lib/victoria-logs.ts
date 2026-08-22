@@ -10,6 +10,7 @@ import {
 	type EndpointConfig,
 	parseEndpoint,
 } from "@/lib/victoria";
+import { reportServerError } from "@/lib/server-errors";
 
 const VICTORIA_LOGS_URL = process.env.VICTORIA_LOGS_URL;
 const VICTORIA_LOGS_PRIVATE_URL = process.env.VICTORIA_LOGS_PRIVATE_URL;
@@ -443,6 +444,9 @@ export async function ingestRolloutLog(
 			},
 		});
 	} catch (error) {
+		reportServerError(error, "logs.rollout.ingest", {
+			tags: { rolloutId, serviceId },
+		});
 		console.error("Failed to ingest rollout log:", error);
 	}
 }

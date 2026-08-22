@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { services } from "@/db/schema";
 import { requireDeveloperRole } from "@/lib/auth";
 import { parseComposeYaml } from "@/lib/compose-parser";
+import { reportServerError } from "@/lib/server-errors";
 import {
 	addServiceVolume,
 	createService,
@@ -144,6 +145,9 @@ export async function importCompose(
 							volume.containerPath,
 						);
 					} catch (e) {
+						reportServerError(e, "compose-import.volume.add", {
+							tags: { serviceId: result.id },
+						});
 						warnings.push({
 							service: finalName,
 							field: "volumes",
@@ -182,9 +186,16 @@ export async function importCompose(
 		for (const serviceId of createdServiceIds) {
 			try {
 				await db.delete(services).where(eq(services.id, serviceId));
-			} catch {}
+			} catch (cleanupError) {
+				reportServerError(cleanupError, "compose-import.cleanup", {
+					tags: { serviceId },
+				});
+			}
 		}
 
+		reportServerError(error, "compose-import.create", {
+			tags: { projectId, environmentId },
+		});
 		return {
 			success: false,
 			created: [],

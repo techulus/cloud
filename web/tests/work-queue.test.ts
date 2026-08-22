@@ -77,6 +77,8 @@ const mocks = vi.hoisted(() => {
 			execute: vi.fn().mockResolvedValue({ rows: [] }),
 		},
 		send: vi.fn(),
+		reportOperationFailure: vi.fn(),
+		reportServerError: vi.fn(),
 	};
 });
 
@@ -108,6 +110,10 @@ vi.mock("@/lib/inngest/events", () => ({
 			})),
 		},
 	},
+}));
+vi.mock("@/lib/server-errors", () => ({
+	reportOperationFailure: mocks.reportOperationFailure,
+	reportServerError: mocks.reportServerError,
 }));
 vi.mock("@/lib/work-queue-notifications", () => ({
 	notifyWorkAvailable: vi.fn(),
@@ -161,6 +167,8 @@ beforeEach(() => {
 	mocks.db.execute.mockClear();
 	mocks.send.mockReset();
 	mocks.send.mockResolvedValue(undefined);
+	mocks.reportOperationFailure.mockReset();
+	mocks.reportServerError.mockReset();
 });
 
 describe("command work completion", () => {
@@ -317,6 +325,35 @@ describe("restore work completion", () => {
 				error: "checksum mismatch",
 			},
 		});
+		expect(mocks.reportOperationFailure).toHaveBeenCalledWith(
+			"work-item.failed",
+			{
+				occurrenceId: "work-1",
+				reason: "agent_reported_failure",
+				tags: {
+					serverId: "server-1",
+					workItemId: "work-1",
+					workType: "restore_volume",
+				},
+			},
+		);
+		expect(
+			JSON.stringify(mocks.reportOperationFailure.mock.calls),
+		).not.toContain("checksum mismatch");
+	});
+
+	it("does not report a replayed failed result", async () => {
+		await completeWorkItemResults("server-1", [
+			{ id: "work-1", attempt: 1, status: "failed", error: "first failure" },
+		]);
+		mocks.reportOperationFailure.mockClear();
+
+		const replay = await completeWorkItemResults("server-1", [
+			{ id: "work-1", attempt: 1, status: "failed", error: "first failure" },
+		]);
+
+		expect(replay.accepted).toEqual([]);
+		expect(mocks.reportOperationFailure).not.toHaveBeenCalled();
 	});
 
 	it("publishes the terminal migration event from persisted context", async () => {

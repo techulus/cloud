@@ -38,6 +38,7 @@ import {
 import { notify } from "@/lib/notifications";
 import { sendRolloutCreated } from "@/lib/rollout-enqueue";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
+import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import {
 	AUTOSCALE_ATTEMPT_COOLDOWN_MS,
 	cloneActiveRevisionAndQueueSystemRollout,
@@ -227,6 +228,9 @@ export async function runAutoscalingController(
 			created++;
 			await sendRolloutCreated(result.rolloutId, service.id);
 		} catch (error) {
+			reportServerError(error, "autoscaling.evaluate", {
+				tags: { serviceId: service.id },
+			});
 			console.error(`[autoscaling] failed to evaluate ${service.name}`, error);
 		}
 	}
@@ -354,6 +358,9 @@ export async function rebalanceAutomaticServices(
 			queuedCount++;
 			await sendRolloutCreated(result.rolloutId, service.id);
 		} catch (error) {
+			reportServerError(error, "scheduler.placement.rebalance", {
+				tags: { serviceId: service.id },
+			});
 			console.error(`[scheduler] failed to rebalance ${service.name}`, error);
 		}
 	}
@@ -490,6 +497,9 @@ export async function recoverInvalidAutomaticPlacements(
 			createdCount++;
 			await sendRolloutCreated(result.rolloutId, serviceId);
 		} catch (error) {
+			reportServerError(error, "scheduler.placement.recover", {
+				tags: { serviceId },
+			});
 			console.error(
 				`[scheduler] failed level-triggered recovery for ${serviceDeployments[0]?.serviceName ?? serviceId}`,
 				error,
@@ -562,6 +572,13 @@ async function triggerRecoveryForOfflineServers(
 				automaticActiveByService.set(deployment.serviceId, deployment);
 			}
 		} catch (error) {
+			reportServerError(error, "scheduler.recovery.classify", {
+				tags: {
+					deploymentId: deployment.deploymentId,
+					serviceId: deployment.serviceId,
+					serverId: deployment.serverId,
+				},
+			});
 			console.error(
 				`[scheduler] cannot classify deployment ${deployment.deploymentId} for recovery`,
 				error,
@@ -587,6 +604,13 @@ async function triggerRecoveryForOfflineServers(
 			createdCount++;
 			await sendRolloutCreated(queued.rolloutId, deployment.serviceId);
 		} catch (error) {
+			reportServerError(error, "scheduler.recovery.queue", {
+				tags: {
+					deploymentId: deployment.deploymentId,
+					serviceId: deployment.serviceId,
+					serverId: deployment.serverId,
+				},
+			});
 			console.error(
 				`[scheduler] automatic recovery failed for ${deployment.serviceName}; periodic recovery will retry`,
 				error,
@@ -635,6 +659,9 @@ async function triggerRecoveryForOfflineServers(
 			impactedReplicas: impact.impactedReplicas,
 			serviceNames: [...impact.serviceNames],
 		}).catch((error) => {
+			reportServerError(error, "scheduler.recovery.notification", {
+				tags: { serverId },
+			});
 			console.error(
 				`[scheduler] failed to enqueue manual recovery notification for ${impact.serverName}:`,
 				error,
@@ -689,6 +716,9 @@ export async function checkAndRecoverStaleServers(
 			serverName: server.name,
 			serverIp: server.wireguardIp || server.publicIp || undefined,
 		}).catch((error) => {
+			reportServerError(error, "scheduler.server-offline.notification", {
+				tags: { serverId: server.id },
+			});
 			console.error(
 				`[scheduler] failed to enqueue offline notification for ${server.name}:`,
 				error,
@@ -775,6 +805,9 @@ export async function checkAndRunScheduledDeployments(): Promise<void> {
 				`[scheduler] ${service.name}: deployment triggered successfully`,
 			);
 		} catch (error) {
+			reportServerError(error, "scheduler.deployment.trigger", {
+				tags: { serviceId: service.id },
+			});
 			console.error(
 				`[scheduler] failed to process schedule for ${service.name}:`,
 				error,
@@ -823,6 +856,13 @@ export async function failTimedOutAgentUpgrades(): Promise<void> {
 					inArray(workQueue.status, ["pending", "processing"]),
 				),
 			);
+		for (const server of timedOut) {
+			reportOperationFailure("agent-upgrade.failed", {
+				occurrenceId: server.id,
+				reason: "timeout",
+				tags: { serverId: server.id },
+			});
+		}
 		console.log(
 			`[scheduler] marked ${timedOut.length} agent upgrade(s) timed out`,
 		);
@@ -852,7 +892,11 @@ export async function cleanupStaleItems(): Promise<void> {
 					),
 				),
 			)
-			.returning({ id: workQueue.id });
+			.returning({
+				id: workQueue.id,
+				serverId: workQueue.serverId,
+				type: workQueue.type,
+			});
 		if (items.length > 0) {
 			await tx
 				.update(serviceCommands)
@@ -872,6 +916,17 @@ export async function cleanupStaleItems(): Promise<void> {
 	});
 
 	if (staleWorkItems.length > 0) {
+		for (const item of staleWorkItems) {
+			reportOperationFailure("work-item.failed", {
+				occurrenceId: item.id,
+				reason: "lease_expired",
+				tags: {
+					serverId: item.serverId,
+					workItemId: item.id,
+					workType: item.type,
+				},
+			});
+		}
 		console.log(
 			`[scheduler] cleaned up ${staleWorkItems.length} stale work queue items`,
 		);

@@ -58,7 +58,13 @@ export const onDeploymentFailed = inngest.createFunction(
 		);
 
 		await step.run("handle-failure", async () => {
-			await handleRolloutFailure(rolloutId, serviceId, reason, true);
+			await handleRolloutFailure({
+				rolloutId,
+				serviceId,
+				reason,
+				failureStage: "deployment_failed",
+				isRollingUpdate: true,
+			});
 		});
 	},
 );
