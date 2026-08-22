@@ -144,17 +144,11 @@ function post(
 	imageUri: string | null | undefined = status === "completed"
 		? amd64Image
 		: undefined,
-	error?: string,
 ) {
 	return POST(
 		new Request("http://localhost/api/v1/agent/builds/build-amd64/status", {
 			method: "POST",
-			body: JSON.stringify({
-				status,
-				resolvedCommitSha: commitSha,
-				imageUri,
-				error,
-			}),
+			body: JSON.stringify({ status, resolvedCommitSha: commitSha, imageUri }),
 		}) as NextRequest,
 		{ params: Promise.resolve({ id: "build-amd64" }) },
 	);
@@ -246,51 +240,6 @@ describe("agent build status transitions", () => {
 			"in_progress",
 			{
 				description: "Build cloning...",
-				logUrl: "https://cloud.techulus.com/builds/build-amd64/logs",
-				environmentUrl:
-					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
-			},
-		);
-	});
-
-	it("keeps detailed build errors out of GitHub deployment statuses", async () => {
-		const error = `buildctl build failed:\n${"internal output ".repeat(20)}`;
-		const githubSpecification = {
-			...specification,
-			source: {
-				...specification.source,
-				authentication: { type: "github_app" as const, installationId: 123 },
-			},
-		};
-		const failedBuild = build("failed", { githubDeploymentId: 456, error });
-		mocks.selectResults.push(
-			[build("building", { githubDeploymentId: 456 })],
-			[
-				{
-					specification: githubSpecification,
-					projectSlug: "cloud",
-					environmentName: "production",
-				},
-			],
-		);
-		mocks.updateResults.push([failedBuild]);
-
-		expect((await post("failed", undefined, error)).status).toBe(200);
-		expect(mocks.updateSets[0]).toMatchObject({ status: "failed", error });
-		expect(mocks.notify).toHaveBeenCalledWith(
-			expect.objectContaining({ error }),
-		);
-		expect(mocks.createBuildCompleted).toHaveBeenCalledWith(
-			expect.objectContaining({ status: "failed", error }),
-			{ id: "build-completed-build-amd64" },
-		);
-		expect(mocks.updateGitHubDeploymentStatus).toHaveBeenCalledWith(
-			123,
-			"acme/app",
-			456,
-			"failure",
-			{
-				description: "Build failed",
 				logUrl: "https://cloud.techulus.com/builds/build-amd64/logs",
 				environmentUrl:
 					"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1",
@@ -413,42 +362,6 @@ describe("agent build status transitions", () => {
 			expectedDeploymentId: 456,
 			state: "in_progress",
 			description: "Preview image built; preparing deployment",
-			logUrl:
-				"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1/builds/build-amd64",
-		});
-		expect(mocks.updateGitHubDeploymentStatus).not.toHaveBeenCalled();
-	});
-
-	it("keeps detailed build errors out of preview GitHub statuses", async () => {
-		const error = `buildctl build failed:\n${"internal output ".repeat(20)}`;
-		const previewSpecification = {
-			...specification,
-			source: {
-				...specification.source,
-				authentication: { type: "github_app" as const, installationId: 123 },
-			},
-		};
-		const failedBuild = build("failed", { githubDeploymentId: 456, error });
-		mocks.selectResults.push(
-			[build("building", { githubDeploymentId: 456 })],
-			[
-				{
-					specification: previewSpecification,
-					projectSlug: "cloud",
-					environmentName: "production",
-					previewOfService: "base-service",
-				},
-			],
-		);
-		mocks.updateResults.push([failedBuild]);
-
-		expect((await post("failed", undefined, error)).status).toBe(200);
-		expect(mocks.updatePreviewGitHubStatus).toHaveBeenCalledWith({
-			serviceId: "service-1",
-			serviceRevisionId: "revision-1",
-			expectedDeploymentId: 456,
-			state: "failure",
-			description: "Preview build failed",
 			logUrl:
 				"https://cloud.techulus.com/dashboard/projects/cloud/production/services/service-1/builds/build-amd64",
 		});
