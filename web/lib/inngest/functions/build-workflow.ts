@@ -294,36 +294,39 @@ export const buildWorkflow = inngest.createFunction(
 		}
 		if (groupBuilds.some((build) => build.status !== "completed")) {
 			await step.run("handle-group-timeout", async () => {
-				for (const build of groupBuilds) {
-					if (build.status === "completed") continue;
-					const failed = await db
-						.update(builds)
-						.set({
-							status: "failed",
-							error: "Build timed out after 60 minutes",
-							completedAt: new Date(),
-						})
-						.where(
-							and(
-								eq(builds.id, build.id),
-								inArray(builds.status, nonTerminalBuildStatuses),
-							),
-						)
-						.returning({ id: builds.id })
-						.then((rows) => rows[0]);
-					if (failed) {
-						reportBusinessFailure("build.failed", {
-							occurrenceId: failed.id,
-							reason: "timeout",
-							tags: {
-								buildId: failed.id,
-								buildGroupId,
-								serviceId,
-								revisionId: serviceRevisionId,
-							},
-						});
-					}
-				}
+				await Promise.all(
+					groupBuilds
+						.filter((build) => build.status !== "completed")
+						.map(async (build) => {
+							const failed = await db
+								.update(builds)
+								.set({
+									status: "failed",
+									error: "Build timed out after 60 minutes",
+									completedAt: new Date(),
+								})
+								.where(
+									and(
+										eq(builds.id, build.id),
+										inArray(builds.status, nonTerminalBuildStatuses),
+									),
+								)
+								.returning({ id: builds.id })
+								.then((rows) => rows[0]);
+							if (failed) {
+								reportBusinessFailure("build.failed", {
+									occurrenceId: failed.id,
+									reason: "timeout",
+									tags: {
+										buildId: failed.id,
+										buildGroupId,
+										serviceId,
+										revisionId: serviceRevisionId,
+									},
+								});
+							}
+						}),
+				);
 			});
 			groupBuilds = await step.run("refresh-group-after-timeout", readGroup);
 			if (groupBuilds.some((build) => build.status !== "completed")) {
