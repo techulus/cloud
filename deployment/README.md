@@ -36,6 +36,27 @@ installer, which writes bounded `json-file` log settings on fresh Docker hosts.
 Prefer versioned or digest-pinned image references over mutable tags when you
 operate a long-lived deployment.
 
+### Separate data volume
+
+On a fresh install, the installer can place persistent control plane data on an
+existing mounted filesystem instead of Docker-managed volumes. Choose the custom
+storage option interactively, or set this in the installer's `--env-file`:
+
+```env
+TECHULUS_CLOUD_DATA_DIR=/mnt/HC_Volume_123/control-plane
+```
+
+The directory must already exist on a persistent mount separate from `/`. The
+installer creates `letsencrypt`, `postgres`, `registry`, `victoria-logs`,
+`victoria-metrics`, and `inngest` beneath it and configures Docker to start after
+the backing mount. Docker images, container layers, and container logs remain in
+Docker's data root.
+
+This is an install-time choice. Do not add or change the setting on an existing
+deployment: the installer does not migrate existing named-volume data. Back up
+the attached volume independently because server snapshots or backups may not
+include it.
+
 Health checks in these Compose files are for visibility. Plain Compose reports
 unhealthy containers but does not restart them automatically.
 

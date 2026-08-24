@@ -394,6 +394,31 @@ configure_interactive() {
         esac
     done
 
+    echo ""
+    log_info "Control plane storage"
+    echo -e "  ${BOLD}1)${NC} Docker-managed volumes"
+    echo -e "  ${BOLD}2)${NC} Existing mounted host directory"
+    echo ""
+
+    local storage_choice
+    while true; do
+        read -rp "$(echo -e "${CYAN}Choose storage option [1]: ${NC}")" storage_choice
+        storage_choice="${storage_choice:-1}"
+        case "$storage_choice" in
+            1)
+                unset TECHULUS_CLOUD_DATA_DIR
+                break
+                ;;
+            2)
+                prompt_value TECHULUS_CLOUD_DATA_DIR "Enter the mounted data directory (e.g. /mnt/HC_Volume_123/control-plane)"
+                break
+                ;;
+            *)
+                log_warn "Please enter 1 or 2"
+                ;;
+        esac
+    done
+
     BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
 
     echo ""
@@ -549,8 +574,60 @@ POSTGRES_DB=${POSTGRES_DB}
 EOF
     fi
 
+    if [[ -n "${TECHULUS_CLOUD_DATA_DIR:-}" ]]; then
+        printf '\nTECHULUS_CLOUD_DATA_DIR=%s\n' "$TECHULUS_CLOUD_DATA_DIR" >> "${DEPLOY_DIR}/.env"
+    fi
+
     chmod 600 "${DEPLOY_DIR}/.env"
     log_success "Configuration written"
+}
+
+prepare_data_directory() {
+    local data_dir mount_target mount_unit
+    data_dir="$(grep -E '^TECHULUS_CLOUD_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+
+    if [[ -z "$data_dir" ]]; then
+        unset TECHULUS_CLOUD_DATA_DIR
+        return
+    fi
+    if [[ ! "$data_dir" =~ ^/[A-Za-z0-9._/-]+$ || "$data_dir" == "/" ]]; then
+        log_error "TECHULUS_CLOUD_DATA_DIR must be an absolute path containing only letters, numbers, '.', '_', '-', and '/'."
+        exit 1
+    fi
+    if [[ ! -d "$data_dir" ]]; then
+        log_error "Data directory does not exist: ${data_dir}"
+        log_error "Attach and mount the volume, then create this directory before running the installer."
+        exit 1
+    fi
+
+    mount_target="$(findmnt -n -o TARGET --target "$data_dir" 2>/dev/null || true)"
+    if [[ -z "$mount_target" || "$mount_target" == "/" ]]; then
+        log_error "Data directory must be backed by a mounted filesystem separate from /: ${data_dir}"
+        exit 1
+    fi
+
+    mount_unit="$(systemd-escape --path --suffix=mount "$mount_target")"
+    if ! findmnt --fstab --mountpoint "$mount_target" >/dev/null 2>&1 && \
+       ! systemctl is-enabled --quiet "$mount_unit" >/dev/null 2>&1; then
+        log_error "The filesystem mounted at ${mount_target} is not configured to persist after reboot."
+        log_error "Add it to /etc/fstab or enable ${mount_unit}, then run the installer again."
+        exit 1
+    fi
+
+    export TECHULUS_CLOUD_DATA_DIR="$data_dir"
+    install -m 0755 -d \
+        "${data_dir}/letsencrypt" \
+        "${data_dir}/postgres" \
+        "${data_dir}/registry" \
+        "${data_dir}/victoria-logs" \
+        "${data_dir}/victoria-metrics" \
+        "${data_dir}/inngest"
+
+    install -m 0755 -d /etc/systemd/system/docker.service.d
+    printf '[Unit]\nRequiresMountsFor=%s\n' "$mount_target" > /etc/systemd/system/docker.service.d/techulus-cloud-storage.conf
+    systemctl daemon-reload
+
+    log_success "Control plane data directory prepared at ${data_dir}"
 }
 
 build_and_start() {
@@ -564,8 +641,9 @@ build_and_start() {
     echo ""
     log_header "Deployment Complete"
 
-    local root_domain
+    local root_domain data_dir
     root_domain="$(grep "^ROOT_DOMAIN=" "${DEPLOY_DIR}/.env" | cut -d'=' -f2)"
+    data_dir="$(grep -E '^TECHULUS_CLOUD_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
 
     echo -e "${GREEN}${BOLD}Services are starting up!${NC}"
     echo ""
@@ -575,6 +653,9 @@ build_and_start() {
     echo ""
     echo -e "  ${BOLD}Config file:${NC}  ${DEPLOY_DIR}/.env"
     echo -e "  ${BOLD}Compose file:${NC} ${DEPLOY_DIR}/${COMPOSE_FILE}"
+    if [[ -n "$data_dir" ]]; then
+        echo -e "  ${BOLD}Data directory:${NC} ${data_dir}"
+    fi
     echo ""
     echo -e "${YELLOW}It may take a few minutes for SSL certificates to be provisioned.${NC}"
     echo ""
@@ -616,6 +697,7 @@ main() {
         configure_interactive
     fi
 
+    prepare_data_directory
     build_and_start
 }
 
