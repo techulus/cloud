@@ -167,7 +167,7 @@ services:
     env_file:
       - ./.env
     volumes:
-      - "${TECHULUS_CLOUD_REGISTRY_DATA_DIR:-registry-data}:/var/lib/registry${TECHULUS_CLOUD_REGISTRY_DATA_DIR:+:Z}"
+      - "${TECHULUS_CLOUD_REGISTRY_DATA_DIR:-registry-data}:/var/lib/registry${TECHULUS_CLOUD_REGISTRY_DATA_DIR:+:z}"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.registry.rule=Host(`registry.${ROOT_DOMAIN}`)"

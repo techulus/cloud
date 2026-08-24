@@ -13,7 +13,8 @@ docker compose up -d
 - **Port**: 5000
 - **Storage**: Filesystem at `/var/lib/registry`
 - **Delete**: Enabled (for garbage collection)
-- **Data**: Persisted in `registry-data` volume
+- **Data**: Persisted in `registry-data` by default, or the optional
+  `TECHULUS_CLOUD_REGISTRY_DATA_DIR` bind mount on fresh installs
 
 ## Image Naming
 

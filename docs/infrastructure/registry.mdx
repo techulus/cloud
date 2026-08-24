@@ -43,7 +43,10 @@ The TLS setting applies to agent-managed Podman pulls, build exports, and manife
 
 ## Storage
 
-Images are stored on the local filesystem in a persistent Docker volume (`registry-data`). Delete operations are enabled for garbage collection.
+Images are stored on the local filesystem. The default deployment uses the
+persistent Docker volume `registry-data`; fresh installs can instead configure
+an [external registry data directory](/installation#separate-registry-data-volume).
+Delete operations are enabled for garbage collection.
 
 ### Garbage collection
 
