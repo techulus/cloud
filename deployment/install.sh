@@ -344,6 +344,36 @@ prompt_value() {
 configure_interactive() {
     log_header "Configuration"
 
+    echo ""
+    log_info "Registry storage"
+    echo -e "  ${BOLD}1)${NC} Docker-managed volume"
+    echo -e "  ${BOLD}2)${NC} Existing mounted host directory"
+    echo ""
+
+    local storage_choice
+    while true; do
+        read -rp "$(echo -e "${CYAN}Choose registry storage option [1]: ${NC}")" storage_choice
+        storage_choice="${storage_choice:-1}"
+        case "$storage_choice" in
+            1)
+                unset TECHULUS_CLOUD_REGISTRY_DATA_DIR
+                break
+                ;;
+            2)
+                while true; do
+                    prompt_value TECHULUS_CLOUD_REGISTRY_DATA_DIR "Enter the mounted registry directory (e.g. /mnt/HC_Volume_123/registry)"
+                    if validate_registry_data_directory "$TECHULUS_CLOUD_REGISTRY_DATA_DIR"; then
+                        break
+                    fi
+                done
+                break
+                ;;
+            *)
+                log_warn "Please enter 1 or 2"
+                ;;
+        esac
+    done
+
     prompt_value ROOT_DOMAIN "Enter your root domain (e.g. cloud.example.com)"
 
     local public_ip
@@ -386,31 +416,6 @@ configure_interactive() {
             2)
                 USE_BUNDLED_PG=false
                 prompt_value DATABASE_URL "Enter PostgreSQL connection URL (postgres://user:pass@host:5432/db)"
-                break
-                ;;
-            *)
-                log_warn "Please enter 1 or 2"
-                ;;
-        esac
-    done
-
-    echo ""
-    log_info "Control plane storage"
-    echo -e "  ${BOLD}1)${NC} Docker-managed volumes"
-    echo -e "  ${BOLD}2)${NC} Existing mounted host directory"
-    echo ""
-
-    local storage_choice
-    while true; do
-        read -rp "$(echo -e "${CYAN}Choose storage option [1]: ${NC}")" storage_choice
-        storage_choice="${storage_choice:-1}"
-        case "$storage_choice" in
-            1)
-                unset TECHULUS_CLOUD_DATA_DIR
-                break
-                ;;
-            2)
-                prompt_value TECHULUS_CLOUD_DATA_DIR "Enter the mounted data directory (e.g. /mnt/HC_Volume_123/control-plane)"
                 break
                 ;;
             *)
@@ -472,7 +477,7 @@ AWS_REGION=${AWS_REGION}"
 
 configure_from_file() {
     local src_file="$1"
-    local configured_compose_file
+    local configured_compose_file registry_data_dir
     log_header "Configuration (from file)"
 
     if [[ ! -f "$src_file" ]]; then
@@ -484,6 +489,11 @@ configure_from_file() {
     COMPOSE_FILE="${configured_compose_file:-compose.production.yml}"
     if [[ "$COMPOSE_FILE" != "compose.production.yml" && "$COMPOSE_FILE" != "compose.postgres.yml" ]]; then
         log_error "Unsupported COMPOSE_FILE: ${COMPOSE_FILE}"
+        exit 1
+    fi
+
+    registry_data_dir="$(grep -E '^TECHULUS_CLOUD_REGISTRY_DATA_DIR=' "$src_file" | tail -1 | cut -d= -f2- || true)"
+    if [[ -n "$registry_data_dir" ]] && ! validate_registry_data_directory "$registry_data_dir"; then
         exit 1
     fi
 
@@ -574,36 +584,31 @@ POSTGRES_DB=${POSTGRES_DB}
 EOF
     fi
 
-    if [[ -n "${TECHULUS_CLOUD_DATA_DIR:-}" ]]; then
-        printf '\nTECHULUS_CLOUD_DATA_DIR=%s\n' "$TECHULUS_CLOUD_DATA_DIR" >> "${DEPLOY_DIR}/.env"
+    if [[ -n "${TECHULUS_CLOUD_REGISTRY_DATA_DIR:-}" ]]; then
+        printf '\nTECHULUS_CLOUD_REGISTRY_DATA_DIR=%s\n' "$TECHULUS_CLOUD_REGISTRY_DATA_DIR" >> "${DEPLOY_DIR}/.env"
     fi
 
     chmod 600 "${DEPLOY_DIR}/.env"
     log_success "Configuration written"
 }
 
-prepare_data_directory() {
-    local data_dir mount_target mount_unit
-    data_dir="$(grep -E '^TECHULUS_CLOUD_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+validate_registry_data_directory() {
+    local registry_data_dir="$1" mount_target mount_unit
 
-    if [[ -z "$data_dir" ]]; then
-        unset TECHULUS_CLOUD_DATA_DIR
-        return
+    if [[ ! "$registry_data_dir" =~ ^/[A-Za-z0-9._/-]+$ || "$registry_data_dir" == "/" ]]; then
+        log_error "TECHULUS_CLOUD_REGISTRY_DATA_DIR must be an unquoted absolute path containing only letters, numbers, '.', '_', '-', and '/'."
+        return 1
     fi
-    if [[ ! "$data_dir" =~ ^/[A-Za-z0-9._/-]+$ || "$data_dir" == "/" ]]; then
-        log_error "TECHULUS_CLOUD_DATA_DIR must be an absolute path containing only letters, numbers, '.', '_', '-', and '/'."
-        exit 1
-    fi
-    if [[ ! -d "$data_dir" ]]; then
-        log_error "Data directory does not exist: ${data_dir}"
+    if [[ ! -d "$registry_data_dir" ]]; then
+        log_error "Registry data directory does not exist: ${registry_data_dir}"
         log_error "Attach and mount the volume, then create this directory before running the installer."
-        exit 1
+        return 1
     fi
 
-    mount_target="$(findmnt -n -o TARGET --target "$data_dir" 2>/dev/null || true)"
+    mount_target="$(findmnt --first-only -n -o TARGET --target "$registry_data_dir" 2>/dev/null || true)"
     if [[ -z "$mount_target" || "$mount_target" == "/" ]]; then
-        log_error "Data directory must be backed by a mounted filesystem separate from /: ${data_dir}"
-        exit 1
+        log_error "Registry data directory must be backed by a mounted filesystem separate from /: ${registry_data_dir}"
+        return 1
     fi
 
     mount_unit="$(systemd-escape --path --suffix=mount "$mount_target")"
@@ -611,23 +616,32 @@ prepare_data_directory() {
        ! systemctl is-enabled --quiet "$mount_unit" >/dev/null 2>&1; then
         log_error "The filesystem mounted at ${mount_target} is not configured to persist after reboot."
         log_error "Add it to /etc/fstab or enable ${mount_unit}, then run the installer again."
+        return 1
+    fi
+
+    REGISTRY_DATA_MOUNT_TARGET="$mount_target"
+}
+
+prepare_registry_data_directory() {
+    local registry_data_dir
+    registry_data_dir="$(grep -E '^TECHULUS_CLOUD_REGISTRY_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+
+    if [[ -z "$registry_data_dir" ]]; then
+        unset TECHULUS_CLOUD_REGISTRY_DATA_DIR
+        return
+    fi
+    if ! validate_registry_data_directory "$registry_data_dir"; then
         exit 1
     fi
 
-    export TECHULUS_CLOUD_DATA_DIR="$data_dir"
-    install -m 0755 -d \
-        "${data_dir}/letsencrypt" \
-        "${data_dir}/postgres" \
-        "${data_dir}/registry" \
-        "${data_dir}/victoria-logs" \
-        "${data_dir}/victoria-metrics" \
-        "${data_dir}/inngest"
+    export TECHULUS_CLOUD_REGISTRY_DATA_DIR="$registry_data_dir"
+    install -m 0700 -d "$registry_data_dir"
 
     install -m 0755 -d /etc/systemd/system/docker.service.d
-    printf '[Unit]\nRequiresMountsFor=%s\n' "$mount_target" > /etc/systemd/system/docker.service.d/techulus-cloud-storage.conf
+    printf '[Unit]\nRequiresMountsFor=%s\n' "$REGISTRY_DATA_MOUNT_TARGET" > /etc/systemd/system/docker.service.d/techulus-cloud-registry-storage.conf
     systemctl daemon-reload
 
-    log_success "Control plane data directory prepared at ${data_dir}"
+    log_success "Registry data directory prepared at ${registry_data_dir}"
 }
 
 build_and_start() {
@@ -641,9 +655,9 @@ build_and_start() {
     echo ""
     log_header "Deployment Complete"
 
-    local root_domain data_dir
+    local root_domain registry_data_dir
     root_domain="$(grep "^ROOT_DOMAIN=" "${DEPLOY_DIR}/.env" | cut -d'=' -f2)"
-    data_dir="$(grep -E '^TECHULUS_CLOUD_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+    registry_data_dir="$(grep -E '^TECHULUS_CLOUD_REGISTRY_DATA_DIR=' "${DEPLOY_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
 
     echo -e "${GREEN}${BOLD}Services are starting up!${NC}"
     echo ""
@@ -653,8 +667,8 @@ build_and_start() {
     echo ""
     echo -e "  ${BOLD}Config file:${NC}  ${DEPLOY_DIR}/.env"
     echo -e "  ${BOLD}Compose file:${NC} ${DEPLOY_DIR}/${COMPOSE_FILE}"
-    if [[ -n "$data_dir" ]]; then
-        echo -e "  ${BOLD}Data directory:${NC} ${data_dir}"
+    if [[ -n "$registry_data_dir" ]]; then
+        echo -e "  ${BOLD}Registry data:${NC} ${registry_data_dir}"
     fi
     echo ""
     echo -e "${YELLOW}It may take a few minutes for SSL certificates to be provisioned.${NC}"
@@ -697,7 +711,7 @@ main() {
         configure_interactive
     fi
 
-    prepare_data_directory
+    prepare_registry_data_directory
     build_and_start
 }
 

@@ -36,26 +36,31 @@ installer, which writes bounded `json-file` log settings on fresh Docker hosts.
 Prefer versioned or digest-pinned image references over mutable tags when you
 operate a long-lived deployment.
 
-### Separate data volume
+### Separate registry volume
 
-On a fresh install, the installer can place persistent control plane data on an
-existing mounted filesystem instead of Docker-managed volumes. Choose the custom
+On a fresh install, the installer can place registry data on an existing mounted
+filesystem instead of a Docker-managed volume. Choose the custom registry
 storage option interactively, or set this in the installer's `--env-file`:
 
 ```env
-TECHULUS_CLOUD_DATA_DIR=/mnt/HC_Volume_123/control-plane
+TECHULUS_CLOUD_REGISTRY_DATA_DIR=/mnt/HC_Volume_123/registry
 ```
 
 The directory must already exist on a persistent mount separate from `/`. The
-installer creates `letsencrypt`, `postgres`, `registry`, `victoria-logs`,
-`victoria-metrics`, and `inngest` beneath it and configures Docker to start after
-the backing mount. Docker images, container layers, and container logs remain in
-Docker's data root.
+installer sets it to mode `0700` and configures Docker to start after the backing
+mount. PostgreSQL, logs, metrics, Inngest, ACME data, Docker images, container
+layers, and container logs remain in their existing storage locations.
 
 This is an install-time choice. Do not add or change the setting on an existing
-deployment: the installer does not migrate existing named-volume data. Back up
-the attached volume independently because server snapshots or backups may not
-include it.
+deployment: the installer does not migrate existing `registry-data` content.
+Back up the attached volume independently because server snapshots or backups
+may not include it. If you intentionally stop using the mount, remove
+`/etc/systemd/system/docker.service.d/techulus-cloud-registry-storage.conf` and
+run `systemctl daemon-reload` before restarting Docker.
+
+Moving registry data does not limit its growth. Follow the
+[registry garbage collection](../docs/infrastructure/registry.mdx#garbage-collection)
+guidance to reclaim unreferenced blobs.
 
 Health checks in these Compose files are for visibility. Plain Compose reports
 unhealthy containers but does not restart them automatically.

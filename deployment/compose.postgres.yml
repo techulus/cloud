@@ -40,7 +40,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-letsencrypt}${TECHULUS_CLOUD_DATA_DIR:+/letsencrypt}:/letsencrypt${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - letsencrypt:/letsencrypt
     depends_on:
       docker-socket-proxy:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-postgres-data}${TECHULUS_CLOUD_DATA_DIR:+/postgres}:/var/lib/postgresql${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 30s
@@ -167,7 +167,7 @@ services:
     env_file:
       - ./.env
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-registry-data}${TECHULUS_CLOUD_DATA_DIR:+/registry}:/var/lib/registry${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - "${TECHULUS_CLOUD_REGISTRY_DATA_DIR:-registry-data}:/var/lib/registry${TECHULUS_CLOUD_REGISTRY_DATA_DIR:+:Z}"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.registry.rule=Host(`registry.${ROOT_DOMAIN}`)"
@@ -186,7 +186,7 @@ services:
     env_file:
       - ./.env
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-victoria-logs-data}${TECHULUS_CLOUD_DATA_DIR:+/victoria-logs}:/vlogs${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - victoria-logs-data:/vlogs
     command:
       - "-storageDataPath=/vlogs"
       - "-retentionPeriod=${VL_RETENTION:-7d}"
@@ -210,7 +210,7 @@ services:
     env_file:
       - ./.env
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-victoria-metrics-data}${TECHULUS_CLOUD_DATA_DIR:+/victoria-metrics}:/vmdata${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - victoria-metrics-data:/vmdata
     command:
       - "-storageDataPath=/vmdata"
       - "-retentionPeriod=${VM_RETENTION:-30d}"
@@ -237,7 +237,7 @@ services:
       INNGEST_LOG_LEVEL: info
       INNGEST_SQLITE_DIR: "/data"
     volumes:
-      - "${TECHULUS_CLOUD_DATA_DIR:-inngest-data}${TECHULUS_CLOUD_DATA_DIR:+/inngest}:/data${TECHULUS_CLOUD_DATA_DIR:+:Z}"
+      - inngest-data:/data
     command:
       - "inngest"
       - "start"

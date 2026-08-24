@@ -31,38 +31,37 @@ By default, the installer deploys the latest GitHub release and verifies its
 Compose files against the release manifest. Set `TECHULUS_CLOUD_VERSION` before
 running the script only when you need a specific release.
 
-## Separate control plane data volume
+## Separate registry data volume
 
-On a fresh install, you can store persistent control plane data on an existing
-mounted filesystem instead of Docker-managed volumes. Attach and persistently
-mount the volume first. Create a directory on it, then choose **Existing mounted
-host directory** when the installer asks about control plane storage.
+On a fresh install, you can store registry data on an existing mounted filesystem
+instead of a Docker-managed volume. Attach and persistently mount the volume
+first. Create a directory on it, then choose **Existing mounted host directory**
+when the installer asks about registry storage.
 
 For an unattended install, add the directory to the file passed through
 `--env-file`:
 
 ```env
-TECHULUS_CLOUD_DATA_DIR=/mnt/HC_Volume_123/control-plane
+TECHULUS_CLOUD_REGISTRY_DATA_DIR=/mnt/HC_Volume_123/registry
 ```
 
 The directory must exist on a mounted filesystem separate from `/`. The mount
 must have an `/etc/fstab` entry or an enabled systemd mount unit. The installer
-creates these subdirectories:
-
-- `letsencrypt`
-- `postgres`
-- `registry`
-- `victoria-logs`
-- `victoria-metrics`
-- `inngest`
-
-Docker images, container layers, and container logs remain in Docker's data
-root. This setting does not move all Docker storage.
+sets the directory to mode `0700` and configures Docker to start after the backing
+mount. PostgreSQL, logs, metrics, Inngest, ACME data, Docker images, container
+layers, and container logs remain in their existing storage locations.
 
 This is an install-time choice. Do not add or change the setting on an existing
-deployment. The installer does not migrate existing named-volume data. Back up
-the attached volume independently because your server provider may exclude it
-from server snapshots and backups.
+deployment. The installer does not migrate existing `registry-data` content.
+Back up the attached volume independently because your server provider may
+exclude it from server snapshots and backups. If you intentionally stop using
+the mount, remove
+`/etc/systemd/system/docker.service.d/techulus-cloud-registry-storage.conf` and
+run `systemctl daemon-reload` before restarting Docker.
+
+Moving registry data does not limit its growth. Follow the
+[registry garbage collection guide](/infrastructure/registry#garbage-collection)
+to reclaim unreferenced blobs.
 
 ## Manual Setup
 
@@ -276,7 +275,7 @@ Back up both PostgreSQL and continued access to the KMS key. Deleting the KMS ke
 | Variable | Description |
 | --- | --- |
 | `COMPOSE_FILE` | Compose file used by self-updates. Use `compose.production.yml` for external PostgreSQL or `compose.postgres.yml` for bundled PostgreSQL. |
-| `TECHULUS_CLOUD_DATA_DIR` | Optional existing mounted directory for persistent control plane data. Set only during a fresh install. |
+| `TECHULUS_CLOUD_REGISTRY_DATA_DIR` | Optional existing mounted directory for registry data. Set only during a fresh install. |
 | `TECHULUS_CLOUD_VERSION` | Installed release tag. The installer defaults to the latest GitHub release. |
 | `CONTROL_PLANE_UPDATER_TOKEN` | Random token used by the web app to call the internal updater service. Generate with `openssl rand -hex 32`. |
 
