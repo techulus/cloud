@@ -52,6 +52,11 @@ export type NodeMetricsSnapshot = {
 	diskUsedBytes: number | null;
 };
 
+export type NodeResourceUsageAverages = Pick<
+	NodeMetricsSnapshot,
+	"cpuUsagePercent" | "memoryUsagePercent" | "diskUsagePercent"
+>;
+
 export type NodeMetricPoint = {
 	timestamp: string;
 	value: number;
@@ -160,6 +165,44 @@ export async function queryNodeMetricsSnapshots(
 			memoryUsedBytes: memBytesMap.get(serverId) ?? null,
 			diskUsagePercent: diskPctMap.get(serverId) ?? null,
 			diskUsedBytes: diskBytesMap.get(serverId) ?? null,
+		});
+	}
+	return result;
+}
+
+export async function queryNodeResourceUsageAverages(
+	serverIds: string[],
+): Promise<Map<string, NodeResourceUsageAverages>> {
+	const endpoint = getQueryEndpoint();
+	if (!endpoint) return new Map();
+
+	let reportedError = false;
+	const recover = (metricName: string) =>
+		queryInstantMetricGroup(
+			endpoint,
+			`avg_over_time(${metricName}[5m]) and (count_over_time(${metricName}[5m]) >= 3)`,
+		).catch((error) => {
+			if (!reportedError) {
+				reportedError = true;
+				reportServerError(error, "metrics.nodes.resource-alerts", {
+					tags: { metricName },
+				});
+			}
+			return new Map<string, number | null>();
+		});
+
+	const [cpuMap, memoryMap, diskMap] = await Promise.all([
+		recover(METRIC_NAMES.cpuUsagePercent),
+		recover(METRIC_NAMES.memoryUsagePercent),
+		recover(METRIC_NAMES.diskUsagePercent),
+	]);
+
+	const result = new Map<string, NodeResourceUsageAverages>();
+	for (const serverId of serverIds) {
+		result.set(serverId, {
+			cpuUsagePercent: cpuMap.get(serverId) ?? null,
+			memoryUsagePercent: memoryMap.get(serverId) ?? null,
+			diskUsagePercent: diskMap.get(serverId) ?? null,
 		});
 	}
 	return result;
@@ -535,10 +578,10 @@ async function queryInstantMetric(
 
 async function queryInstantMetricGroup(
 	endpoint: EndpointConfig,
-	metricName: string,
+	query: string,
 ): Promise<Map<string, number | null>> {
 	const url = new URL(`${endpoint.url}/api/v1/query`);
-	url.searchParams.set("query", metricName);
+	url.searchParams.set("query", query);
 
 	const response = await fetch(url.toString(), buildFetchOptions(endpoint));
 	if (!response.ok) {

@@ -16,6 +16,16 @@ export type NotificationEvent =
 			serviceNames: string[];
 	  }
 	| {
+			kind: "server.resource_usage";
+			occurrenceId: string;
+			serverId: string;
+			serverName: string;
+			resource: "cpu" | "memory" | "disk";
+			usagePercent: number;
+			thresholdPercent: number;
+			detectedAt: string;
+	  }
+	| {
 			kind: "build.failed";
 			occurrenceId: string;
 			serviceId: string;

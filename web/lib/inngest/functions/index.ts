@@ -9,6 +9,7 @@ export {
 	controlPlaneUpdateCheck,
 	notificationRetention,
 	previewReconciliation,
+	resourceUsageCheck,
 	serviceCommandRetention,
 	serviceCronDispatcher,
 	oldBackupsCleanup,

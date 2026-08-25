@@ -8,8 +8,9 @@ import {
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
-import { cleanupReadNotifications } from "@/lib/notifications";
+import { cleanupReadNotifications, notify } from "@/lib/notifications";
 import { cleanupRegistryArtifactsDaily } from "@/lib/registry-retention";
+import { evaluateServerResourceAlerts } from "@/lib/server-resource-alerts";
 import { cleanupOldServiceCommands } from "@/lib/service-command-retention";
 import {
 	checkAndRecoverStaleServers,
@@ -67,6 +68,24 @@ export const autoscalingCheck = inngest.createFunction(
 	},
 	async ({ step }) => {
 		await step.run("evaluate-autoscaling-services", runAutoscalingController);
+	},
+);
+
+export const resourceUsageCheck = inngest.createFunction(
+	{
+		id: "cron-resource-usage-check",
+		triggers: [cron("* * * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => {
+		const notifications = await step.run(
+			"evaluate-server-resource-alerts",
+			() => evaluateServerResourceAlerts(),
+		);
+		if (notifications.length === 0) return;
+		await step.run("enqueue-server-resource-alerts", () =>
+			Promise.all(notifications.map((event) => notify(event))),
+		);
 	},
 );
 

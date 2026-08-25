@@ -9,6 +9,11 @@ type ClusterHealthData = {
 		onlineServers: number;
 		networkHealthy: number;
 		containerHealthy: number;
+		resourceWarnings: {
+			cpu: number;
+			memory: number;
+			disk: number;
+		};
 	};
 };
 
@@ -30,6 +35,7 @@ export function ClusterHealthSummary({
 
 	const stats = [
 		{
+			key: "servers",
 			label: "servers",
 			value: `${summary.onlineServers}/${summary.totalServers}`,
 			subtitle: "online",
@@ -38,17 +44,35 @@ export function ClusterHealthSummary({
 				summary.onlineServers === summary.totalServers,
 		},
 		{
+			key: "tunnels",
 			label: "tunnels",
 			value: `${summary.networkHealthy}/${summary.onlineServers}`,
 			subtitle: "connected",
 			healthy: anyOnline && summary.networkHealthy === summary.onlineServers,
 		},
 		{
+			key: "runtimes",
 			label: "runtimes",
 			value: `${summary.containerHealthy}/${summary.onlineServers}`,
 			subtitle: "responsive",
 			healthy: anyOnline && summary.containerHealthy === summary.onlineServers,
 		},
+		...(
+			[
+				["cpu", "CPU"],
+				["memory", "memory"],
+				["disk", "disk"],
+			] as const
+		).map(([key, label]) => {
+			const count = summary.resourceWarnings[key];
+			return {
+				key,
+				label: count === 1 ? "server" : "servers",
+				value: String(count),
+				subtitle: `at high ${label} usage`,
+				healthy: count === 0,
+			};
+		}),
 	];
 
 	const degraded = stats.filter((stat) => !stat.healthy);
@@ -65,7 +89,7 @@ export function ClusterHealthSummary({
 	return (
 		<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
 			{degraded.map((stat) => (
-				<div key={stat.label} className="flex items-center gap-1.5">
+				<div key={stat.key} className="flex items-center gap-1.5">
 					<span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
 					<span className="font-semibold tabular-nums text-foreground">
 						{stat.value}

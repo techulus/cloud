@@ -86,6 +86,7 @@ export type SmtpConfig = z.infer<typeof smtpConfigSchema>;
 
 export const emailAlertsConfigSchema = z.object({
 	serverOfflineAlert: z.boolean(),
+	resourceUsageAlert: z.boolean(),
 	buildFailure: z.boolean(),
 	deploymentFailure: z.boolean(),
 	deploymentMovedAlert: z.boolean(),

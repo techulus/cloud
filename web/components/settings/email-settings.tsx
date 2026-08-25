@@ -17,6 +17,7 @@ type Props = {
 
 type AlertField =
 	| "serverOfflineAlert"
+	| "resourceUsageAlert"
 	| "buildFailure"
 	| "deploymentFailure"
 	| "deploymentMovedAlert"
@@ -33,6 +34,12 @@ const ALERT_SETTINGS: AlertSetting[] = [
 		field: "serverOfflineAlert",
 		label: "Server Offline Alert",
 		description: "Receive a notification when a server goes offline",
+	},
+	{
+		field: "resourceUsageAlert",
+		label: "Resource Usage Alert",
+		description:
+			"Receive a notification when server CPU, memory, or disk usage is high",
 	},
 	{
 		field: "buildFailure",
@@ -59,6 +66,7 @@ const ALERT_SETTINGS: AlertSetting[] = [
 
 type State = {
 	serverOfflineAlert: boolean;
+	resourceUsageAlert: boolean;
 	buildFailure: boolean;
 	deploymentFailure: boolean;
 	deploymentMovedAlert: boolean;
@@ -74,6 +82,7 @@ function createInitialState(props: Props): State {
 	const { initialAlertsConfig: alertsConfig } = props;
 	return {
 		serverOfflineAlert: alertsConfig?.serverOfflineAlert ?? true,
+		resourceUsageAlert: alertsConfig?.resourceUsageAlert ?? true,
 		buildFailure: alertsConfig?.buildFailure ?? true,
 		deploymentFailure: alertsConfig?.deploymentFailure ?? true,
 		deploymentMovedAlert: alertsConfig?.deploymentMovedAlert ?? true,
@@ -104,6 +113,7 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 		try {
 			await updateEmailAlertsConfig({
 				serverOfflineAlert: state.serverOfflineAlert,
+				resourceUsageAlert: state.resourceUsageAlert,
 				buildFailure: state.buildFailure,
 				deploymentFailure: state.deploymentFailure,
 				deploymentMovedAlert: state.deploymentMovedAlert,
@@ -125,6 +135,8 @@ export function EmailSettings({ initialAlertsConfig }: Props) {
 	const hasAlertsChanges =
 		state.serverOfflineAlert !==
 			(initialAlertsConfig?.serverOfflineAlert ?? true) ||
+		state.resourceUsageAlert !==
+			(initialAlertsConfig?.resourceUsageAlert ?? true) ||
 		state.buildFailure !== (initialAlertsConfig?.buildFailure ?? true) ||
 		state.deploymentFailure !==
 			(initialAlertsConfig?.deploymentFailure ?? true) ||
