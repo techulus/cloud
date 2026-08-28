@@ -99,8 +99,8 @@ describe("notification pipeline", () => {
 		).resolves.toBeNull();
 	});
 
-	it("renders cron failures with the service deep link", async () => {
-		mocks.select.mockReturnValueOnce({
+	it("omits raw build and cron errors from in-app notifications", async () => {
+		mocks.select.mockReturnValue({
 			from: vi.fn(() => ({
 				innerJoin: vi.fn(() => ({
 					innerJoin: vi.fn(() => ({
@@ -121,6 +121,19 @@ describe("notification pipeline", () => {
 
 		await expect(
 			renderInAppNotification({
+				kind: "build.failed",
+				occurrenceId: "build-1",
+				serviceId: "service-1",
+				buildId: "build-1",
+				error: "buildctl failed\n".repeat(1_000),
+			}),
+		).resolves.toEqual({
+			title: "Build failed: API",
+			body: "A build for API failed.",
+			href: "/dashboard/projects/cloud/production/services/service-1/builds/build-1",
+		});
+		await expect(
+			renderInAppNotification({
 				kind: "cron.failed",
 				occurrenceId: "cron-1",
 				serviceId: "service-1",
@@ -130,7 +143,21 @@ describe("notification pipeline", () => {
 			}),
 		).resolves.toEqual({
 			title: "Cron failed: API",
-			body: "/jobs/nightly: HTTP status 500",
+			body: "/jobs/nightly failed with HTTP status 500.",
+			href: "/dashboard/projects/cloud/production/services/service-1",
+		});
+		await expect(
+			renderInAppNotification({
+				kind: "cron.failed",
+				occurrenceId: "cron-2",
+				serviceId: "service-1",
+				path: "/jobs/nightly",
+				statusCode: null,
+				error: "Connection refused",
+			}),
+		).resolves.toEqual({
+			title: "Cron failed: API",
+			body: "/jobs/nightly failed.",
 			href: "/dashboard/projects/cloud/production/services/service-1",
 		});
 	});
