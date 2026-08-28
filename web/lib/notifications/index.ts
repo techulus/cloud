@@ -79,14 +79,17 @@ export async function renderInAppNotification(event: NotificationEvent) {
 	if (event.kind === "build.failed") {
 		return {
 			title: `Build failed: ${context.serviceName}`,
-			body: event.error ?? `A build for ${context.serviceName} failed.`,
+			body: `A build for ${context.serviceName} failed.`,
 			href: `${serviceHref}/builds/${event.buildId}`,
 		};
 	}
 	if (event.kind === "cron.failed") {
 		return {
 			title: `Cron failed: ${context.serviceName}`,
-			body: `${event.path}: ${event.error ?? "Cron request failed"}`,
+			body:
+				event.statusCode === null
+					? `${event.path} failed.`
+					: `${event.path} failed with HTTP status ${event.statusCode}.`,
 			href: serviceHref,
 		};
 	}
