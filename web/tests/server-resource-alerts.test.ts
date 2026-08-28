@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 	updates: [] as unknown[],
 	queryUsage: vi.fn(),
 	transaction: vi.fn(),
+	notify: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -25,6 +26,10 @@ vi.mock("@/lib/victoria-metrics", () => ({
 	queryNodeResourceUsageAverages: mocks.queryUsage,
 }));
 
+vi.mock("@/lib/notifications", () => ({
+	notify: mocks.notify,
+}));
+
 import { evaluateServerResourceAlerts } from "@/lib/server-resource-alerts";
 
 describe("server resource alerts", () => {
@@ -32,6 +37,7 @@ describe("server resource alerts", () => {
 		vi.clearAllMocks();
 		mocks.serverRows.length = 0;
 		mocks.updates.length = 0;
+		mocks.notify.mockResolvedValue(undefined);
 		mocks.transaction.mockImplementation(async (operation) =>
 			operation({
 				update: vi.fn(() => ({
@@ -89,12 +95,23 @@ describe("server resource alerts", () => {
 			expect.objectContaining({
 				cpu: expect.objectContaining({
 					detectedAt: "2026-08-25T10:00:00.000Z",
+					notificationEnqueued: false,
 				}),
 				disk: expect.objectContaining({
 					detectedAt: "2026-08-25T10:00:00.000Z",
+					notificationEnqueued: false,
+				}),
+			}),
+			expect.objectContaining({
+				cpu: expect.objectContaining({
+					notificationEnqueued: true,
+				}),
+				disk: expect.objectContaining({
+					notificationEnqueued: true,
 				}),
 			}),
 		]);
+		expect(mocks.notify).toHaveBeenCalledTimes(2);
 	});
 
 	it("preserves an active alert when metrics are missing", async () => {
@@ -102,6 +119,7 @@ describe("server resource alerts", () => {
 			usagePercent: 92,
 			thresholdPercent: 90,
 			detectedAt: "2026-08-25T09:00:00.000Z",
+			notificationEnqueued: true,
 		};
 		mocks.serverRows.push({
 			id: "server-1",
@@ -136,6 +154,7 @@ describe("server resource alerts", () => {
 					usagePercent: 92,
 					thresholdPercent: 90,
 					detectedAt: "2026-08-25T09:00:00.000Z",
+					notificationEnqueued: true,
 				},
 			},
 		});
@@ -154,6 +173,67 @@ describe("server resource alerts", () => {
 
 		await expect(evaluateServerResourceAlerts()).resolves.toEqual([]);
 		expect(mocks.transaction).not.toHaveBeenCalled();
+		expect(mocks.notify).not.toHaveBeenCalled();
+	});
+
+	it("re-enqueues a committed pending alert with its stable occurrence ID", async () => {
+		mocks.serverRows.push({
+			id: "server-1",
+			name: "Edge",
+			status: "online",
+			resourceAlerts: {
+				cpu: {
+					usagePercent: 92,
+					thresholdPercent: 90,
+					detectedAt: "2026-08-25T09:00:00.000Z",
+					notificationEnqueued: false,
+				},
+			},
+		});
+		mocks.queryUsage.mockResolvedValue(new Map());
+
+		const notifications = await evaluateServerResourceAlerts(
+			new Date("2026-08-25T10:05:00.000Z"),
+		);
+
+		expect(notifications).toEqual([
+			expect.objectContaining({
+				occurrenceId: `server-resource-usage-server-1-cpu-${new Date(
+					"2026-08-25T09:00:00.000Z",
+				).getTime()}`,
+				usagePercent: 92,
+				detectedAt: "2026-08-25T09:00:00.000Z",
+			}),
+		]);
+		expect(mocks.notify).toHaveBeenCalledWith(notifications[0]);
+		expect(mocks.updates).toEqual([
+			expect.objectContaining({
+				cpu: expect.objectContaining({ notificationEnqueued: true }),
+			}),
+		]);
+	});
+
+	it("leaves a pending alert unmarked when enqueueing fails", async () => {
+		mocks.serverRows.push({
+			id: "server-1",
+			name: "Edge",
+			status: "online",
+			resourceAlerts: {
+				cpu: {
+					usagePercent: 92,
+					thresholdPercent: 90,
+					detectedAt: "2026-08-25T09:00:00.000Z",
+					notificationEnqueued: false,
+				},
+			},
+		});
+		mocks.queryUsage.mockResolvedValue(new Map());
+		mocks.notify.mockRejectedValue(new Error("Inngest unavailable"));
+
+		await expect(evaluateServerResourceAlerts()).rejects.toThrow(
+			"Inngest unavailable",
+		);
+		expect(mocks.updates).toEqual([]);
 	});
 
 	it("clears at the recovery threshold and can activate again", async () => {
@@ -166,6 +246,7 @@ describe("server resource alerts", () => {
 					usagePercent: 92,
 					thresholdPercent: 90,
 					detectedAt: "2026-08-25T09:00:00.000Z",
+					notificationEnqueued: true,
 				},
 			},
 		});
@@ -217,6 +298,7 @@ describe("server resource alerts", () => {
 					usagePercent: 90,
 					thresholdPercent: 85,
 					detectedAt: "2026-08-25T09:00:00.000Z",
+					notificationEnqueued: true,
 				},
 			},
 		});

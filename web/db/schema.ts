@@ -357,6 +357,7 @@ export type ServerResourceAlert = {
 	usagePercent: number;
 	thresholdPercent: number;
 	detectedAt: string;
+	notificationEnqueued: boolean;
 };
 
 export type ServerResourceAlerts = Partial<

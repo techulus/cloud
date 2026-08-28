@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { type ServerResourceAlerts, servers } from "@/db/schema";
 import type { NotificationEvent } from "@/lib/inngest/events/notification";
+import { notify } from "@/lib/notifications";
 import {
 	type NodeResourceUsageAverages,
 	queryNodeResourceUsageAverages,
@@ -20,6 +21,25 @@ const RESOURCES: Record<
 
 const RECOVERY_MARGIN_PERCENT = 5;
 
+type ResourceAlertUpdate = {
+	id: string;
+	resourceAlerts: ServerResourceAlerts | null;
+};
+
+async function persistResourceAlerts(updates: ResourceAlertUpdate[]) {
+	if (updates.length === 0) return;
+	await db.transaction((tx) =>
+		Promise.all(
+			updates.map((update) =>
+				tx
+					.update(servers)
+					.set({ resourceAlerts: update.resourceAlerts })
+					.where(eq(servers.id, update.id)),
+			),
+		),
+	);
+}
+
 export async function evaluateServerResourceAlerts(
 	now = new Date(),
 ): Promise<NotificationEvent[]> {
@@ -31,16 +51,15 @@ export async function evaluateServerResourceAlerts(
 			resourceAlerts: servers.resourceAlerts,
 		})
 		.from(servers);
-	const onlineServerIds = serverRows
-		.filter((server) => server.status === "online")
-		.map((server) => server.id);
+	const onlineServerIds: string[] = [];
+	for (const server of serverRows) {
+		if (server.status === "online") onlineServerIds.push(server.id);
+	}
 	const usageByServer = await queryNodeResourceUsageAverages(onlineServerIds);
 	const detectedAt = now.toISOString();
 	const notifications: NotificationEvent[] = [];
-	const updates: Array<{
-		id: string;
-		resourceAlerts: ServerResourceAlerts | null;
-	}> = [];
+	const updates: ResourceAlertUpdate[] = [];
+	const enqueuedUpdates: ResourceAlertUpdate[] = [];
 
 	// ponytail: move evaluation and routing to vmalert + Alertmanager if alert
 	// types expand enough to justify two more services.
@@ -54,31 +73,48 @@ export async function evaluateServerResourceAlerts(
 		}
 
 		const usage = usageByServer.get(server.id);
-		if (!usage) continue;
-
 		const next = { ...previous };
+		const pendingResources: Resource[] = [];
 		let changed = false;
 		for (const resource of Object.keys(RESOURCES) as Resource[]) {
 			const { metric, threshold } = RESOURCES[resource];
-			const usagePercent = usage[metric];
-			if (usagePercent === null) continue;
-
+			const usagePercent = usage?.[metric] ?? null;
 			const active = next[resource];
 			if (active) {
-				if (usagePercent <= threshold - RECOVERY_MARGIN_PERCENT) {
+				if (
+					usagePercent !== null &&
+					usagePercent <= threshold - RECOVERY_MARGIN_PERCENT
+				) {
 					delete next[resource];
 					changed = true;
+					continue;
+				}
+				if (!active.notificationEnqueued) {
+					pendingResources.push(resource);
+					notifications.push({
+						kind: "server.resource_usage",
+						occurrenceId: `server-resource-usage-${server.id}-${resource}-${new Date(active.detectedAt).getTime()}`,
+						serverId: server.id,
+						serverName: server.name,
+						resource,
+						usagePercent: active.usagePercent,
+						thresholdPercent: active.thresholdPercent,
+						detectedAt: active.detectedAt,
+					});
 				}
 				continue;
 			}
 
+			if (usagePercent === null) continue;
 			if (usagePercent < threshold) continue;
 			next[resource] = {
 				usagePercent,
 				thresholdPercent: threshold,
 				detectedAt,
+				notificationEnqueued: false,
 			};
 			changed = true;
+			pendingResources.push(resource);
 			notifications.push({
 				kind: "server.resource_usage",
 				occurrenceId: `server-resource-usage-${server.id}-${resource}-${now.getTime()}`,
@@ -97,17 +133,22 @@ export async function evaluateServerResourceAlerts(
 				resourceAlerts: Object.keys(next).length > 0 ? next : null,
 			});
 		}
+		if (pendingResources.length > 0) {
+			const enqueued = { ...next };
+			for (const resource of pendingResources) {
+				enqueued[resource] = {
+					...enqueued[resource]!,
+					notificationEnqueued: true,
+				};
+			}
+			enqueuedUpdates.push({ id: server.id, resourceAlerts: enqueued });
+		}
 	}
 
-	if (updates.length > 0) {
-		await db.transaction(async (tx) => {
-			for (const update of updates) {
-				await tx
-					.update(servers)
-					.set({ resourceAlerts: update.resourceAlerts })
-					.where(eq(servers.id, update.id));
-			}
-		});
+	await persistResourceAlerts(updates);
+	if (notifications.length > 0) {
+		await Promise.all(notifications.map((event) => notify(event)));
+		await persistResourceAlerts(enqueuedUpdates);
 	}
 
 	return notifications;
