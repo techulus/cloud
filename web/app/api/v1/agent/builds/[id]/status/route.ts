@@ -283,7 +283,7 @@ export async function POST(
 						update.status === "completed"
 							? "Preview image built; preparing deployment"
 							: update.status === "failed"
-								? update.error || "Preview build failed"
+								? "Preview build failed"
 								: `Preview build ${update.status}...`,
 					logUrl,
 				});
@@ -325,7 +325,7 @@ export async function POST(
 						build.githubDeploymentId,
 						"failure",
 						{
-							description: update.error || "Build failed",
+							description: "Build failed",
 							logUrl,
 							environmentUrl,
 						},

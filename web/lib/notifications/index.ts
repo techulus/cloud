@@ -29,6 +29,8 @@ export async function notificationEventIsEnabled(event: NotificationEvent) {
 
 	const config = await getEmailAlertsConfig();
 	switch (event.kind) {
+		case "server.resource_usage":
+			return config?.resourceUsageAlert !== false;
 		case "server.offline":
 			return config?.serverOfflineAlert !== false;
 		case "manual_recovery.required":
@@ -73,20 +75,34 @@ export async function renderInAppNotification(event: NotificationEvent) {
 			href: `/dashboard/servers/${event.serverId}`,
 		};
 	}
+	if (event.kind === "server.resource_usage") {
+		const resource =
+			event.resource === "cpu"
+				? "CPU"
+				: `${event.resource.charAt(0).toUpperCase()}${event.resource.slice(1)}`;
+		return {
+			title: `High ${resource} usage: ${event.serverName}`,
+			body: `${resource} usage is ${event.usagePercent.toFixed(1)}%, above the ${event.thresholdPercent}% threshold.`,
+			href: `/dashboard/servers/${event.serverId}`,
+		};
+	}
 	const context = await serviceContext(event.serviceId);
 	if (!context) return null;
 	const serviceHref = `/dashboard/projects/${context.projectSlug}/${context.environmentName}/services/${event.serviceId}`;
 	if (event.kind === "build.failed") {
 		return {
 			title: `Build failed: ${context.serviceName}`,
-			body: event.error ?? `A build for ${context.serviceName} failed.`,
+			body: `A build for ${context.serviceName} failed.`,
 			href: `${serviceHref}/builds/${event.buildId}`,
 		};
 	}
 	if (event.kind === "cron.failed") {
 		return {
 			title: `Cron failed: ${context.serviceName}`,
-			body: `${event.path}: ${event.error ?? "Cron request failed"}`,
+			body:
+				event.statusCode === null
+					? `${event.path} failed.`
+					: `${event.path} failed with HTTP status ${event.statusCode}.`,
 			href: serviceHref,
 		};
 	}

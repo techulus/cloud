@@ -208,6 +208,48 @@ async function sendManualRecoveryRequiredAlert(
 	});
 }
 
+type ServerResourceUsageAlertOptions = Extract<
+	NotificationEvent,
+	{ kind: "server.resource_usage" }
+> & { to: string };
+
+async function sendServerResourceUsageAlert(
+	options: ServerResourceUsageAlertOptions,
+): Promise<void> {
+	const baseUrl = getAppBaseUrl();
+	const serverUrl = baseUrl
+		? `${baseUrl}/dashboard/servers/${options.serverId}`
+		: undefined;
+	const resource =
+		options.resource === "cpu"
+			? "CPU"
+			: `${options.resource.charAt(0).toUpperCase()}${options.resource.slice(1)}`;
+	const usage = `${options.usagePercent.toFixed(1)}%`;
+
+	await sendAlert({
+		to: options.to,
+		subject: `Alert: High ${resource} usage on "${options.serverName}"`,
+		template: Alert({
+			bannerText: `HIGH ${resource.toUpperCase()} USAGE`,
+			heading: `${resource} Usage Alert`,
+			description: `${resource} usage on "${options.serverName}" has reached ${usage}, above the ${options.thresholdPercent}% threshold.`,
+			details: [
+				{ label: "Server", value: options.serverName },
+				{ label: "Resource", value: resource },
+				{ label: "Usage", value: usage },
+				{ label: "Threshold", value: `${options.thresholdPercent}%` },
+				{
+					label: "Detected At",
+					value: formatDateTimeUtc(new Date(options.detectedAt)),
+				},
+			],
+			buttonText: serverUrl ? "View Server" : undefined,
+			buttonUrl: serverUrl,
+			baseUrl,
+		}),
+	});
+}
+
 type BuildFailureAlertOptions = {
 	to: string;
 	serviceId: string;
@@ -450,6 +492,9 @@ export async function deliverNotificationEmail(
 			return;
 		case "manual_recovery.required":
 			await sendManualRecoveryRequiredAlert({ ...event, to });
+			return;
+		case "server.resource_usage":
+			await sendServerResourceUsageAlert({ ...event, to });
 			return;
 		case "build.failed":
 			await sendBuildFailureAlert({ ...event, to });

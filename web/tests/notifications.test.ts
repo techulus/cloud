@@ -99,8 +99,8 @@ describe("notification pipeline", () => {
 		).resolves.toBeNull();
 	});
 
-	it("renders cron failures with the service deep link", async () => {
-		mocks.select.mockReturnValueOnce({
+	it("omits raw build and cron errors from in-app notifications", async () => {
+		mocks.select.mockReturnValue({
 			from: vi.fn(() => ({
 				innerJoin: vi.fn(() => ({
 					innerJoin: vi.fn(() => ({
@@ -121,6 +121,19 @@ describe("notification pipeline", () => {
 
 		await expect(
 			renderInAppNotification({
+				kind: "build.failed",
+				occurrenceId: "build-1",
+				serviceId: "service-1",
+				buildId: "build-1",
+				error: "buildctl failed\n".repeat(1_000),
+			}),
+		).resolves.toEqual({
+			title: "Build failed: API",
+			body: "A build for API failed.",
+			href: "/dashboard/projects/cloud/production/services/service-1/builds/build-1",
+		});
+		await expect(
+			renderInAppNotification({
 				kind: "cron.failed",
 				occurrenceId: "cron-1",
 				serviceId: "service-1",
@@ -130,14 +143,48 @@ describe("notification pipeline", () => {
 			}),
 		).resolves.toEqual({
 			title: "Cron failed: API",
-			body: "/jobs/nightly: HTTP status 500",
+			body: "/jobs/nightly failed with HTTP status 500.",
 			href: "/dashboard/projects/cloud/production/services/service-1",
+		});
+		await expect(
+			renderInAppNotification({
+				kind: "cron.failed",
+				occurrenceId: "cron-2",
+				serviceId: "service-1",
+				path: "/jobs/nightly",
+				statusCode: null,
+				error: "Connection refused",
+			}),
+		).resolves.toEqual({
+			title: "Cron failed: API",
+			body: "/jobs/nightly failed.",
+			href: "/dashboard/projects/cloud/production/services/service-1",
+		});
+	});
+
+	it("renders resource usage alerts with the server deep link", async () => {
+		await expect(
+			renderInAppNotification({
+				kind: "server.resource_usage",
+				occurrenceId: "resource-1",
+				serverId: "server-1",
+				serverName: "Edge",
+				resource: "memory",
+				usagePercent: 93.25,
+				thresholdPercent: 90,
+				detectedAt: "2026-08-25T10:00:00.000Z",
+			}),
+		).resolves.toEqual({
+			title: "High Memory usage: Edge",
+			body: "Memory usage is 93.3%, above the 90% threshold.",
+			href: "/dashboard/servers/server-1",
 		});
 	});
 
 	it("maps every operational event to its alert toggle", async () => {
 		mocks.getAlertsConfig.mockResolvedValue({
 			serverOfflineAlert: false,
+			resourceUsageAlert: false,
 			buildFailure: false,
 			deploymentFailure: false,
 			deploymentMovedAlert: false,
@@ -150,6 +197,18 @@ describe("notification pipeline", () => {
 				occurrenceId: "offline-1",
 				serverId: "server-1",
 				serverName: "Edge",
+			}),
+		).resolves.toBe(false);
+		await expect(
+			notificationEventIsEnabled({
+				kind: "server.resource_usage",
+				occurrenceId: "resource-1",
+				serverId: "server-1",
+				serverName: "Edge",
+				resource: "cpu",
+				usagePercent: 95,
+				thresholdPercent: 90,
+				detectedAt: "2026-08-25T10:00:00.000Z",
 			}),
 		).resolves.toBe(false);
 		await expect(
@@ -208,6 +267,7 @@ describe("notification pipeline", () => {
 	it("skips in-app delivery when the event category is disabled", async () => {
 		mocks.getAlertsConfig.mockResolvedValue({
 			serverOfflineAlert: false,
+			resourceUsageAlert: true,
 			buildFailure: true,
 			deploymentFailure: true,
 			deploymentMovedAlert: true,
