@@ -165,6 +165,7 @@ export async function getClusterHealth() {
 			networkHealth: servers.networkHealth,
 			containerHealth: servers.containerHealth,
 			agentHealth: servers.agentHealth,
+			resourceAlerts: servers.resourceAlerts,
 		})
 		.from(servers);
 
@@ -176,6 +177,12 @@ export async function getClusterHealth() {
 	const containerHealthy = onlineServers.filter(
 		(s) => s.containerHealth?.runtimeResponsive,
 	).length;
+	const resourceWarnings = {
+		cpu: onlineServers.filter((server) => server.resourceAlerts?.cpu).length,
+		memory: onlineServers.filter((server) => server.resourceAlerts?.memory)
+			.length,
+		disk: onlineServers.filter((server) => server.resourceAlerts?.disk).length,
+	};
 
 	return {
 		summary: {
@@ -183,6 +190,7 @@ export async function getClusterHealth() {
 			onlineServers: onlineServers.length,
 			networkHealthy,
 			containerHealthy,
+			resourceWarnings,
 		},
 		servers: allServers.map((server) => ({
 			id: server.id,

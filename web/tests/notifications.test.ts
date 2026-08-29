@@ -162,9 +162,29 @@ describe("notification pipeline", () => {
 		});
 	});
 
+	it("renders resource usage alerts with the server deep link", async () => {
+		await expect(
+			renderInAppNotification({
+				kind: "server.resource_usage",
+				occurrenceId: "resource-1",
+				serverId: "server-1",
+				serverName: "Edge",
+				resource: "memory",
+				usagePercent: 93.25,
+				thresholdPercent: 90,
+				detectedAt: "2026-08-25T10:00:00.000Z",
+			}),
+		).resolves.toEqual({
+			title: "High Memory usage: Edge",
+			body: "Memory usage is 93.3%, above the 90% threshold.",
+			href: "/dashboard/servers/server-1",
+		});
+	});
+
 	it("maps every operational event to its alert toggle", async () => {
 		mocks.getAlertsConfig.mockResolvedValue({
 			serverOfflineAlert: false,
+			resourceUsageAlert: false,
 			buildFailure: false,
 			deploymentFailure: false,
 			deploymentMovedAlert: false,
@@ -177,6 +197,18 @@ describe("notification pipeline", () => {
 				occurrenceId: "offline-1",
 				serverId: "server-1",
 				serverName: "Edge",
+			}),
+		).resolves.toBe(false);
+		await expect(
+			notificationEventIsEnabled({
+				kind: "server.resource_usage",
+				occurrenceId: "resource-1",
+				serverId: "server-1",
+				serverName: "Edge",
+				resource: "cpu",
+				usagePercent: 95,
+				thresholdPercent: 90,
+				detectedAt: "2026-08-25T10:00:00.000Z",
 			}),
 		).resolves.toBe(false);
 		await expect(
@@ -235,6 +267,7 @@ describe("notification pipeline", () => {
 	it("skips in-app delivery when the event category is disabled", async () => {
 		mocks.getAlertsConfig.mockResolvedValue({
 			serverOfflineAlert: false,
+			resourceUsageAlert: true,
 			buildFailure: true,
 			deploymentFailure: true,
 			deploymentMovedAlert: true,

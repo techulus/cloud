@@ -29,6 +29,8 @@ export async function notificationEventIsEnabled(event: NotificationEvent) {
 
 	const config = await getEmailAlertsConfig();
 	switch (event.kind) {
+		case "server.resource_usage":
+			return config?.resourceUsageAlert !== false;
 		case "server.offline":
 			return config?.serverOfflineAlert !== false;
 		case "manual_recovery.required":
@@ -70,6 +72,17 @@ export async function renderInAppNotification(event: NotificationEvent) {
 		return {
 			title: `Manual recovery required: ${event.serverName}`,
 			body: `${event.impactedReplicas} active replica${event.impactedReplicas === 1 ? "" : "s"} require manual recovery.`,
+			href: `/dashboard/servers/${event.serverId}`,
+		};
+	}
+	if (event.kind === "server.resource_usage") {
+		const resource =
+			event.resource === "cpu"
+				? "CPU"
+				: `${event.resource.charAt(0).toUpperCase()}${event.resource.slice(1)}`;
+		return {
+			title: `High ${resource} usage: ${event.serverName}`,
+			body: `${resource} usage is ${event.usagePercent.toFixed(1)}%, above the ${event.thresholdPercent}% threshold.`,
 			href: `/dashboard/servers/${event.serverId}`,
 		};
 	}

@@ -353,6 +353,17 @@ export type AgentHealth = {
 	capabilities?: string[];
 };
 
+export type ServerResourceAlert = {
+	usagePercent: number;
+	thresholdPercent: number;
+	detectedAt: string;
+	notificationEnqueued: boolean;
+};
+
+export type ServerResourceAlerts = Partial<
+	Record<"cpu" | "memory" | "disk", ServerResourceAlert>
+>;
+
 export type CrowdSecDecision = {
 	scope: string;
 	value: string;
@@ -427,6 +438,7 @@ export const servers = pgTable("servers", {
 	networkHealth: jsonb("network_health").$type<NetworkHealth>(),
 	containerHealth: jsonb("container_health").$type<ContainerHealth>(),
 	agentHealth: jsonb("agent_health").$type<AgentHealth>(),
+	resourceAlerts: jsonb("resource_alerts").$type<ServerResourceAlerts>(),
 	crowdsecHealth: jsonb("crowdsec_health").$type<CrowdSecHealth>(),
 	agentUpgradeTargetVersion: text("agent_upgrade_target_version"),
 	agentUpgradeStatus: text("agent_upgrade_status", {
