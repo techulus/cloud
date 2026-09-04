@@ -48,12 +48,11 @@ mutable tags such as `latest` or `tip`.
 
 ## Services
 
-| Service    | Endpoint                          |
-| ---------- | --------------------------------- |
-| Web        | `https://${ROOT_DOMAIN}`          |
-| Registry   | `https://registry.${ROOT_DOMAIN}` |
-| Logs       | `https://logs.${ROOT_DOMAIN}`     |
-| PostgreSQL | Internal only                     |
+| Service    | Endpoint                      |
+| ---------- | ----------------------------- |
+| Web        | `https://${ROOT_DOMAIN}`      |
+| Logs       | `https://logs.${ROOT_DOMAIN}` |
+| PostgreSQL | Internal only                 |
 
 ## Environment Variables
 
@@ -71,6 +70,9 @@ mutable tags such as `latest` or `tip`.
 | `ENCRYPTION_KEY`         | 32 bytes as 64-character hex string. Required unless AWS KMS BYOK is configured. |
 | `ENCRYPTION_KMS_KEY_ARN` | Optional full ARN of a symmetric AWS KMS key. Enables BYOK.                      |
 | `AWS_REGION`             | Required with `ENCRYPTION_KMS_KEY_ARN`.                                          |
+| `GAR_REPOSITORY`         | Required GAR base: `<location>-docker.pkg.dev/<gcp-project>/<repository>`.       |
+| `GAR_AGENT_KEY_BASE64`   | Base64 JSON key for a repository-scoped Artifact Registry Writer.                |
+| `GAR_ADMIN_KEY_BASE64`   | Base64 JSON key for a repository-scoped Repository Administrator.                |
 
 For KMS BYOK, run the dedicated control plane in AWS with an instance profile or task role. The role needs `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey`. Do not put static AWS credentials in `.env`.
 
@@ -94,23 +96,23 @@ On a fresh KMS installation, omit `ENCRYPTION_KEY`. To migrate existing data, co
 | `VM_PASSWORD`  | Metrics service password                  |
 | `VM_RETENTION` | Metrics retention period (default: `30d`) |
 
-### Registry
+### Google Artifact Registry
 
-| Variable            | Description                         |
-| ------------------- | ----------------------------------- |
-| `REGISTRY_AUTH`     | htpasswd format auth string         |
-| `REGISTRY_URL`      | Registry URL for agents             |
-| `REGISTRY_USERNAME` | Registry username for agents        |
-| `REGISTRY_PASSWORD` | Registry password for agents        |
-| `REGISTRY_INSECURE` | Set to `true` for insecure registry |
+Source builds require a user-owned Google Artifact Registry Docker repository.
+The Writer key is distributed to agents for BuildKit pushes and Podman pulls;
+the Repository Administrator key stays in the control plane for protection-tag
+and package operations. TLS verification is always enabled.
 
-Generate registry auth:
+| Variable               | Description                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `GAR_REPOSITORY`       | GAR repository image base without a scheme                                        |
+| `GAR_AGENT_KEY_BASE64` | Complete Writer service-account JSON encoded as one base64 line                   |
+| `GAR_ADMIN_KEY_BASE64` | Complete Repository Administrator service-account JSON encoded as one base64 line |
 
-```bash
-htpasswd -nB admin
-```
-
-Escape `$` as `$$` in the `.env` file.
+Provision both accounts at repository scope and apply the tracked cleanup policy
+before startup. See [the complete GAR guide](../docs/infrastructure/registry.mdx).
+Existing images from the former bundled registry are not migrated; rebuild every
+source-backed service after upgrading.
 
 ### GitHub Integration (Optional)
 

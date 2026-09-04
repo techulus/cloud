@@ -31,10 +31,8 @@ import {
 	markDeploymentRemoved,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
-import {
-	cleanupRegistryArtifactsForService,
-	prepareRegistryArtifactCleanup,
-} from "@/lib/registry-retention";
+import { prepareGarPackageDeletion } from "@/lib/gar-retention";
+import { deleteGarServicePackage } from "@/lib/google-artifact-registry";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
@@ -746,7 +744,11 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 	async ({ step }) => {
 		await step.run("purge-expired-deleted-services", async () => {
 			const expiredServices = await db
-				.select({ id: services.id })
+				.select({
+					id: services.id,
+					projectId: services.projectId,
+					sourceType: services.sourceType,
+				})
 				.from(services)
 				.where(
 					and(
@@ -788,15 +790,14 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 						if (!claimed) return undefined;
 						return {
 							...claimed,
-							registryCleanupReady: await prepareRegistryArtifactCleanup(
-								tx,
-								service.id,
-							),
+							garDeletionReady: await prepareGarPackageDeletion(tx, service.id),
 						};
 					});
 					if (!claimed) continue;
-					if (!claimed.registryCleanupReady) continue;
-					await cleanupRegistryArtifactsForService(service.id);
+					if (!claimed.garDeletionReady) continue;
+					if (service.sourceType === "github") {
+						await deleteGarServicePackage(service.projectId, service.id);
+					}
 					const backups = await db
 						.select({ id: volumeBackups.id })
 						.from(volumeBackups)

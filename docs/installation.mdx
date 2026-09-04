@@ -8,13 +8,13 @@ description: "Deploy the Techulus Cloud control plane on your own infrastructure
 - Docker and Docker Compose
 - A domain name with DNS configured
 - Ports 80 and 443 available
+- A user-owned Google Artifact Registry Docker repository with the required service accounts and cleanup policy. Complete the [GAR setup](/infrastructure/registry) before installing.
 
-You need three DNS records pointing to your server:
+You need two DNS records pointing to your server:
 
-| Record | Purpose |
-| --- | --- |
-| `your-domain.com` | Control plane web UI |
-| `registry.your-domain.com` | Container image registry |
+| Record                 | Purpose                         |
+| ---------------------- | ------------------------------- |
+| `your-domain.com`      | Control plane web UI            |
 | `logs.your-domain.com` | Log aggregation (Victoria Logs) |
 
 ## Quick Start
@@ -42,7 +42,8 @@ openssl rand -hex 32
 ```
 
 Edit `.env` with your values. Set `CONTROL_PLANE_UPDATER_TOKEN` to
-the generated token.
+the generated token and configure `GAR_REPOSITORY`, `GAR_AGENT_KEY_BASE64`, and
+`GAR_ADMIN_KEY_BASE64` from the [GAR setup](/infrastructure/registry).
 
 For an external PostgreSQL database, keep:
 
@@ -78,6 +79,12 @@ rotation manually.
 
 Use the one-click upgrade flow in **Settings** when possible. If the updater
 cannot run, update the deployment from the host manually.
+
+<Warning>
+  The GAR release is a clean beta cutover. Images and persisted references from the old bundled
+  registry are not migrated. Provision GAR, add all three GAR variables to `.env`, and apply its
+  cleanup policy before upgrading. After the upgrade, rebuild every source-backed service.
+</Warning>
 
 Back up your `.env` file and database before upgrading. Then fetch the Compose
 files for the release, update `TECHULUS_CLOUD_VERSION`, pull images, and restart
@@ -116,13 +123,16 @@ use the common commands below when investigating a self-hosted service.
 
 ### Required
 
-| Variable | Description |
-| --- | --- |
-| `ROOT_DOMAIN` | Your domain (e.g., `cloud.example.com`) |
-| `ACME_EMAIL` | Email for Let's Encrypt certificates |
-| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`) |
-| `BETTER_AUTH_SECRET` | Secret key for authentication |
-| `ENCRYPTION_KEY` | 32 bytes as a 64-character hex string. Required unless you configure AWS KMS BYOK. |
+| Variable               | Description                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `ROOT_DOMAIN`          | Your domain (e.g., `cloud.example.com`)                                                                            |
+| `ACME_EMAIL`           | Email for Let's Encrypt certificates                                                                               |
+| `DATABASE_URL`         | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`)                                 |
+| `BETTER_AUTH_SECRET`   | Secret key for authentication                                                                                      |
+| `ENCRYPTION_KEY`       | 32 bytes as a 64-character hex string. Required unless you configure AWS KMS BYOK.                                 |
+| `GAR_REPOSITORY`       | GAR image base: `<location>-docker.pkg.dev/<gcp-project>/<repository>`                                             |
+| `GAR_AGENT_KEY_BASE64` | Base64 JSON key for the repository-scoped Artifact Registry Writer sent to agents                                  |
+| `GAR_ADMIN_KEY_BASE64` | Base64 JSON key for the repository-scoped Artifact Registry Repository Administrator retained by the control plane |
 
 ### AWS KMS BYOK
 
@@ -170,11 +180,7 @@ Merge statements like these into the KMS key policy in your AWS account. Replace
       "Principal": {
         "AWS": "arn:aws:iam::111122223333:role/techulus-control-plane-customer-name"
       },
-      "Action": [
-        "kms:GenerateDataKey",
-        "kms:Encrypt",
-        "kms:Decrypt"
-      ],
+      "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"],
       "Resource": "*",
       "Condition": {
         "StringEquals": {
@@ -201,11 +207,7 @@ The Techulus control-plane role also needs this identity policy. Set `Resource` 
     {
       "Sid": "UseCustomerEncryptionKey",
       "Effect": "Allow",
-      "Action": [
-        "kms:GenerateDataKey",
-        "kms:Encrypt",
-        "kms:Decrypt"
-      ],
+      "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"],
       "Resource": "arn:aws:kms:us-east-1:444455556666:key/your-key-id",
       "Condition": {
         "StringEquals": {
@@ -240,47 +242,51 @@ Back up both PostgreSQL and continued access to the KMS key. Deleting the KMS ke
 
 ### Control plane deployment
 
-| Variable | Description |
-| --- | --- |
-| `COMPOSE_FILE` | Compose file used by self-updates. Use `compose.production.yml` for external PostgreSQL or `compose.postgres.yml` for bundled PostgreSQL. |
-| `TECHULUS_CLOUD_VERSION` | Installed release tag. The installer defaults to the latest GitHub release. |
-| `CONTROL_PLANE_UPDATER_TOKEN` | Random token used by the web app to call the internal updater service. Generate with `openssl rand -hex 32`. |
+| Variable                      | Description                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `COMPOSE_FILE`                | Compose file used by self-updates. Use `compose.production.yml` for external PostgreSQL or `compose.postgres.yml` for bundled PostgreSQL. |
+| `TECHULUS_CLOUD_VERSION`      | Installed release tag. The installer defaults to the latest GitHub release.                                                               |
+| `CONTROL_PLANE_UPDATER_TOKEN` | Random token used by the web app to call the internal updater service. Generate with `openssl rand -hex 32`.                              |
 
 ### Victoria Logs
 
-| Variable | Description |
-| --- | --- |
-| `VL_USERNAME` | Logs service username |
-| `VL_PASSWORD` | Logs service password |
+| Variable       | Description                          |
+| -------------- | ------------------------------------ |
+| `VL_USERNAME`  | Logs service username                |
+| `VL_PASSWORD`  | Logs service password                |
 | `VL_RETENTION` | Log retention period (default: `7d`) |
 
 ### Victoria Metrics
 
-| Variable | Description |
-| --- | --- |
-| `VM_USERNAME` | Metrics service username |
-| `VM_PASSWORD` | Metrics service password |
+| Variable       | Description                               |
+| -------------- | ----------------------------------------- |
+| `VM_USERNAME`  | Metrics service username                  |
+| `VM_PASSWORD`  | Metrics service password                  |
 | `VM_RETENTION` | Metrics retention period (default: `30d`) |
 
-### Registry
+### Google Artifact Registry
 
-| Variable | Description |
-| --- | --- |
-| `REGISTRY_USERNAME` | Registry username for agents |
-| `REGISTRY_PASSWORD` | Registry password for agents |
-| `REGISTRY_HTTP_SECRET` | Internal registry secret |
+| Variable               | Description                                                               |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `GAR_REPOSITORY`       | Required GAR repository image base, with no scheme or trailing image path |
+| `GAR_AGENT_KEY_BASE64` | Required base64 Writer service-account JSON key                           |
+| `GAR_ADMIN_KEY_BASE64` | Required base64 Repository Administrator service-account JSON key         |
+
+The two service accounts must be scoped to the configured repository. Agents
+receive only the Writer credential. See [Google Artifact Registry](/infrastructure/registry)
+for provisioning, authentication, cleanup policy, and upgrade instructions.
 
 ### Inngest
 
-| Variable | Description |
-| --- | --- |
+| Variable              | Description                                            |
+| --------------------- | ------------------------------------------------------ |
 | `INNGEST_SIGNING_KEY` | Request verification key (prefix with `signkey-prod-`) |
-| `INNGEST_EVENT_KEY` | Event API key |
+| `INNGEST_EVENT_KEY`   | Event API key                                          |
 
 ### Control Plane Replicas
 
-| Variable | Description |
-| --- | --- |
+| Variable       | Description                                                  |
+| -------------- | ------------------------------------------------------------ |
 | `WEB_REPLICAS` | Number of control plane web containers to run (default: `1`) |
 
 When `WEB_REPLICAS` is greater than `1`, Traefik discovers the replicated web
@@ -291,11 +297,11 @@ migrations from every replica.
 
 ### GitHub Integration (Optional)
 
-| Variable | Description |
-| --- | --- |
-| `GITHUB_APP_ID` | GitHub App ID |
+| Variable                 | Description                             |
+| ------------------------ | --------------------------------------- |
+| `GITHUB_APP_ID`          | GitHub App ID                           |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
-| `GITHUB_WEBHOOK_SECRET` | Webhook secret |
+| `GITHUB_WEBHOOK_SECRET`  | Webhook secret                          |
 
 Configure the app with Contents read, Pull requests read and write, and
 Deployments read and write repository permissions. Subscribe it to Push and
@@ -323,13 +329,12 @@ openssl rand -hex 16
 
 Once running, the following services are available:
 
-| Service | Endpoint |
-| --- | --- |
-| Web | `https://<ROOT_DOMAIN>` |
-| Registry | `https://registry.<ROOT_DOMAIN>` |
-| Logs | `https://logs.<ROOT_DOMAIN>` |
-| PostgreSQL | Internal only |
-| Inngest | Internal only |
+| Service    | Endpoint                     |
+| ---------- | ---------------------------- |
+| Web        | `https://<ROOT_DOMAIN>`      |
+| Logs       | `https://logs.<ROOT_DOMAIN>` |
+| PostgreSQL | Internal only                |
+| Inngest    | Internal only                |
 
 Traefik handles TLS termination and automatic certificate renewal via Let's Encrypt.
 

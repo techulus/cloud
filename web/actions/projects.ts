@@ -46,14 +46,12 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { validateDockerImageInternal } from "@/lib/docker-image";
+import { prepareGarPackageDeletion } from "@/lib/gar-retention";
+import { deleteGarServicePackage } from "@/lib/google-artifact-registry";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
-import { resolveRegistryImageHost } from "@/lib/registry-reference";
-import {
-	cleanupRegistryArtifactsForService,
-	prepareRegistryArtifactCleanup,
-} from "@/lib/registry-retention";
+import { resolveGarConfiguration } from "@/lib/registry-reference";
 import { reportServerError } from "@/lib/server-errors";
 import {
 	deletePreviewService,
@@ -352,8 +350,8 @@ export async function createService(input: CreateServiceInput) {
 	let githubRootDir: string | null = null;
 
 	if (github) {
-		const registryHost = resolveRegistryImageHost();
-		finalImage = `${registryHost}/${projectId}/${id}:latest`;
+		const imageBase = resolveGarConfiguration().imageBase;
+		finalImage = `${imageBase}/${projectId}/${id}:latest`;
 		sourceType = "github";
 		githubRepoUrl = github.repoUrl;
 		githubBranch = github.branch || "main";
@@ -465,7 +463,7 @@ async function hardDeleteService(serviceId: string) {
 		if (!claimed) return undefined;
 		return {
 			service: claimed,
-			registryCleanupReady: await prepareRegistryArtifactCleanup(tx, serviceId),
+			garDeletionReady: await prepareGarPackageDeletion(tx, serviceId),
 		};
 	});
 	if (!service) {
@@ -473,9 +471,9 @@ async function hardDeleteService(serviceId: string) {
 			"Service not found or another service operation is in progress",
 		);
 	}
-	if (!service.registryCleanupReady) {
+	if (!service.garDeletionReady) {
 		throw new Error(
-			"Service deletion deferred while registry manifest work is processing",
+			"Service deletion deferred while image manifest work is processing",
 		);
 	}
 	const claimedService = service.service;
@@ -523,7 +521,9 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
-	await cleanupRegistryArtifactsForService(serviceId);
+	if (claimedService.sourceType === "github") {
+		await deleteGarServicePackage(claimedService.projectId, serviceId);
+	}
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
@@ -913,8 +913,8 @@ export async function updateServiceGithubRepo(
 		};
 
 		if (normalizedUrl) {
-			const registryHost = resolveRegistryImageHost();
-			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
+			const imageBase = resolveGarConfiguration().imageBase;
+			updateData.image = `${imageBase}/${service.projectId}/${serviceId}:latest`;
 		}
 
 		let reconcilePreviews = false;

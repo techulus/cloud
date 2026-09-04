@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
 		queryResults,
 		select: vi.fn(() => query(queryResults.shift() ?? [])),
 		deployServiceRevisionInternal: vi.fn(),
+		ensureGarProtectionTag: vi.fn(),
 		updatePreviewGitHubStatus: vi.fn(),
 	};
 });
@@ -25,6 +26,9 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/lib/deploy-service", () => ({
 	deployServiceRevisionInternal: mocks.deployServiceRevisionInternal,
+}));
+vi.mock("@/lib/google-artifact-registry", () => ({
+	ensureGarProtectionTag: mocks.ensureGarProtectionTag,
 }));
 vi.mock("@/lib/preview-deployments", () => ({
 	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
@@ -126,6 +130,10 @@ describe("revision-first build completion", () => {
 			rolloutId: "rollout-1",
 			created: true,
 		});
+		mocks.ensureGarProtectionTag.mockResolvedValue({
+			version: "version-1",
+			protectionTag: "protected-revision-1",
+		});
 		mocks.updatePreviewGitHubStatus.mockResolvedValue(false);
 	});
 
@@ -142,12 +150,36 @@ describe("revision-first build completion", () => {
 			"revision-new",
 			"registry/app:revision-new",
 		);
+		expect(mocks.ensureGarProtectionTag).toHaveBeenNthCalledWith(
+			1,
+			"registry/app:revision-new",
+		);
+		expect(mocks.ensureGarProtectionTag).toHaveBeenNthCalledWith(
+			2,
+			"registry/app:revision-old",
+		);
 		expect(mocks.deployServiceRevisionInternal).toHaveBeenNthCalledWith(
 			2,
 			"service-1",
 			"revision-old",
 			"registry/app:revision-old",
 		);
+	});
+
+	it("does not deploy when GAR cannot protect the completed image", async () => {
+		completedGroup(
+			"revision-unprotected",
+			"group-unprotected",
+			"registry/app:revision-unprotected",
+		);
+		mocks.ensureGarProtectionTag.mockRejectedValue(
+			new Error("GAR protection unavailable"),
+		);
+
+		await expect(
+			invoke("revision-unprotected", "group-unprotected").result,
+		).rejects.toThrow("GAR protection unavailable");
+		expect(mocks.deployServiceRevisionInternal).not.toHaveBeenCalled();
 	});
 
 	it("leaves a failed build revision without a rollout", async () => {

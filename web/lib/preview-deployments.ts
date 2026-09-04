@@ -18,7 +18,7 @@ import {
 	updateGitHubDeploymentStatus,
 	upsertGitHubPullRequestComment,
 } from "@/lib/github";
-import { resolveRegistryImageHost } from "@/lib/registry-reference";
+import { resolveGarConfiguration } from "@/lib/registry-reference";
 import {
 	getDefaultServiceHostname,
 	pullRequestMergeRef,
@@ -353,7 +353,7 @@ export async function createPreviewClone(input: {
 					`${base.name}-pr-${pullRequestNumber}`,
 					previewServiceId,
 				),
-			image: `${resolveRegistryImageHost()}/${base.projectId}/${previewServiceId}:latest`,
+			image: `${resolveGarConfiguration().imageBase}/${base.projectId}/${previewServiceId}:latest`,
 			sourceType: "github" as const,
 			githubRepoUrl: base.githubRepoUrl,
 			githubBranch: base.githubBranch,

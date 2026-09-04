@@ -15,24 +15,25 @@ Techulus Cloud is a stateless container deployment platform built around three c
 
 ## Tech Stack
 
-| Component | Choice | Rationale |
-| --- | --- | --- |
-| Control Plane | Next.js (full-stack) | Single deployment with React frontend and API routes |
-| Database | Postgres + Drizzle | Simple, low operational overhead, easy backup |
-| Background Jobs | Inngest (self-hosted) | Durable workflows, retries, event-driven orchestration |
-| Server Agent | Go | Single binary that shells out to Podman |
-| Container Runtime | Podman | Docker-compatible, daemonless, bridge networking with static IPs |
-| Reverse Proxy | Traefik | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only |
-| Private Network | WireGuard | Full mesh coordinated by the control plane |
-| Service Discovery | Built-in DNS | Agent serves `.internal` domains |
-| Agent Communication | Pull-based HTTP | Agent polls expected state, reports status, and long polls for queued-work wakeups |
+| Component             | Choice                   | Rationale                                                                          |
+| --------------------- | ------------------------ | ---------------------------------------------------------------------------------- |
+| Control Plane         | Next.js (full-stack)     | Single deployment with React frontend and API routes                               |
+| Database              | Postgres + Drizzle       | Simple, low operational overhead, easy backup                                      |
+| Background Jobs       | Inngest (self-hosted)    | Durable workflows, retries, event-driven orchestration                             |
+| Server Agent          | Go                       | Single binary that shells out to Podman                                            |
+| Container Runtime     | Podman                   | Docker-compatible, daemonless, bridge networking with static IPs                   |
+| Reverse Proxy         | Traefik                  | Automatic HTTPS via Let's Encrypt, runs on proxy nodes only                        |
+| Private Network       | WireGuard                | Full mesh coordinated by the control plane                                         |
+| Service Discovery     | Built-in DNS             | Agent serves `.internal` domains                                                   |
+| Agent Communication   | Pull-based HTTP          | Agent polls expected state, reports status, and long polls for queued-work wakeups |
+| Source Image Registry | Google Artifact Registry | User-owned storage and provider-managed artifact cleanup                           |
 
 ## Node Types
 
-| Type | Traefik | Public Traffic | Containers |
-| --- | --- | --- | --- |
-| Proxy | Yes | Handles TLS termination | Yes |
-| Worker | No | None | Yes |
+| Type   | Traefik | Public Traffic          | Containers |
+| ------ | ------- | ----------------------- | ---------- |
+| Proxy  | Yes     | Handles TLS termination | Yes        |
+| Worker | No      | None                    | Yes        |
 
 - **Proxy nodes** handle incoming public traffic, terminate TLS using HTTP-01 ACME, and route requests to containers over WireGuard.
 - **Worker nodes** run containers only and have no public exposure.
@@ -44,9 +45,14 @@ graph TD
     Internet["Internet"] -->|"DNS"| P1
 
     CP["Control Plane<br/>Next.js + API Routes + Postgres"]
+    GAR["User-owned Google Artifact Registry"]
     P1 -->|"HTTPS state, status, and work wait"| CP
     W1 -->|"HTTPS state, status, and work wait"| CP
     W2 -->|"HTTPS state, status, and work wait"| CP
+    CP -->|"Protection tags and package deletion"| GAR
+    P1 -->|"Build push and deployment pull"| GAR
+    W1 -->|"Build push and deployment pull"| GAR
+    W2 -->|"Build push and deployment pull"| GAR
 
     subgraph Servers
         P1["Proxy Node<br/>Agent · Podman · Traefik · DNS · WireGuard<br/>WG: 10.100.1.1 · Containers: 10.200.1.2-254"]
@@ -114,15 +120,15 @@ The agent uses hash comparisons for deterministic drift detection:
 queued -> preparing -> certificates -> deploying -> health_check -> dns_sync -> completed
 ```
 
-| Stage | Description |
-| --- | --- |
-| `queued` | Rollout is waiting for the previous rollout of the service to finish |
-| `preparing` | Placements and target servers are being validated |
-| `certificates` | Certificates for public domains are being provisioned |
-| `deploying` | Agents are creating and starting candidate containers |
-| `health_check` | Configured health checks are being evaluated; without one, a running container satisfies this stage |
-| `dns_sync` | Displayed as **Routing traffic**. Every frozen workload target must have matching DNS; every frozen proxy target must also have matching routes and certificates loaded by Traefik |
-| `completed` | Routing convergence is confirmed and old deployments can be stopped |
+| Stage          | Description                                                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queued`       | Rollout is waiting for the previous rollout of the service to finish                                                                                                               |
+| `preparing`    | Placements and target servers are being validated                                                                                                                                  |
+| `certificates` | Certificates for public domains are being provisioned                                                                                                                              |
+| `deploying`    | Agents are creating and starting candidate containers                                                                                                                              |
+| `health_check` | Configured health checks are being evaluated; without one, a running container satisfies this stage                                                                                |
+| `dns_sync`     | Displayed as **Routing traffic**. Every frozen workload target must have matching DNS; every frozen proxy target must also have matching routes and certificates loaded by Traefik |
+| `completed`    | Routing convergence is confirmed and old deployments can be stopped                                                                                                                |
 
 Special states:
 
@@ -144,7 +150,7 @@ The environment remains after its last preview closes and may also contain
 unrelated user-created services.
 
 Each copy has an independent service ID, revision, build, rollout, deployment
-set, registry path, and generated route while reusing the normal runtime
+set, GAR package, and generated route while reusing the normal runtime
 pipeline. It is copied from the base service only when first created, so later
 user edits to the visible preview service survive pull request updates.
 
@@ -153,15 +159,15 @@ build. The latest revision on the copy prevents superseded build and rollout
 callbacks from deploying or reporting success. GitHub reports the transient
 environment as ready only after health and routing convergence complete.
 Closing, merging, or drafting the pull request deletes the copied service after
-runtime and registry cleanup.
+runtime teardown and GAR package deletion.
 
 ## Networking
 
 ### IP Address Scheme
 
-| Range | Purpose |
-| --- | --- |
-| `10.100.X.1` | WireGuard IP for server `X` |
+| Range            | Purpose                     |
+| ---------------- | --------------------------- |
+| `10.100.X.1`     | WireGuard IP for server `X` |
 | `10.200.X.2-254` | Container IPs on server `X` |
 
 `X` is the server subnet ID from `1` to `255`.

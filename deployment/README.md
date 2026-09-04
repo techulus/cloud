@@ -2,6 +2,13 @@
 
 Docker Compose setup with Traefik for SSL termination via Let's Encrypt.
 
+A user-owned Google Artifact Registry Docker repository is mandatory. Complete
+the [GAR setup](../docs/infrastructure/registry.mdx), including its two
+repository-scoped service accounts and cleanup policy, before starting Compose.
+The recommended `setup-gar.sh` helper runs from Google Cloud Shell or a trusted
+workstation with an authenticated `gcloud` CLI, not from the control plane or
+production containers.
+
 ## Quick Start
 
 ```bash
@@ -41,23 +48,26 @@ unhealthy containers but does not restart them automatically.
 
 ## Services
 
-| Service | Endpoint |
-|---------|----------|
-| Web | `https://${ROOT_DOMAIN}` |
-| Registry | `https://registry.${ROOT_DOMAIN}` |
-| Logs | `https://logs.${ROOT_DOMAIN}` |
-| PostgreSQL | Internal only |
-| Inngest | Internal only |
+| Service    | Endpoint                      |
+| ---------- | ----------------------------- |
+| Web        | `https://${ROOT_DOMAIN}`      |
+| Logs       | `https://logs.${ROOT_DOMAIN}` |
+| PostgreSQL | Internal only                 |
+| Inngest    | Internal only                 |
 
 ## Environment Setup
 
-Generate registry auth:
-```bash
-htpasswd -nB admin
-# Escape $ as $$ in .env
-```
+Set `GAR_REPOSITORY`, `GAR_AGENT_KEY_BASE64`, and `GAR_ADMIN_KEY_BASE64` in
+`.env`. The installer reads key values without terminal echo. Agents receive
+only the Writer credential; the Repository Administrator key stays in the web
+service.
+
+Upgrades do not migrate images from the former bundled registry. Rebuild every
+source-backed service after upgrading. The old `registry-data` Docker volume is
+left untouched for explicit operator cleanup after the cutover is verified.
 
 Generate Inngest keys:
+
 ```bash
 # Signing key (for request verification)
 openssl rand -hex 32
@@ -68,6 +78,7 @@ openssl rand -hex 16
 ```
 
 Add to `.env`:
+
 ```
 INNGEST_SIGNING_KEY=signkey-prod-<your-signing-key>
 INNGEST_EVENT_KEY=<your-event-key>

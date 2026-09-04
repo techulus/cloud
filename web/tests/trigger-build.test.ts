@@ -11,6 +11,17 @@ const mocks = vi.hoisted(() => ({
 	cloneGitHubBuildServiceRevision: vi.fn(),
 }));
 
+const SERVICE_ACCOUNT_KEY = Buffer.from(
+	JSON.stringify({
+		type: "service_account",
+		project_id: "google-project",
+		private_key:
+			"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+		client_email: "techulus@google-project.iam.gserviceaccount.com",
+		token_uri: "https://oauth2.googleapis.com/token",
+	}),
+).toString("base64");
+
 vi.mock("@/db", () => ({
 	db: { select: mocks.select },
 }));
@@ -54,7 +65,10 @@ function queryReturning(rows: unknown[]) {
 describe("internal GitHub build trigger", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		process.env.REGISTRY_HOST = "registry.test";
+		process.env.GAR_REPOSITORY =
+			"us-central1-docker.pkg.dev/google-project/techulus-images";
+		process.env.GAR_AGENT_KEY_BASE64 = SERVICE_ACCOUNT_KEY;
+		process.env.GAR_ADMIN_KEY_BASE64 = SERVICE_ACCOUNT_KEY;
 		mocks.rows = [];
 		mocks.createGitHubBuildServiceRevision.mockResolvedValue({});
 		mocks.createPreviewSync.mockImplementation((data, options) => ({
@@ -107,7 +121,7 @@ describe("internal GitHub build trigger", () => {
 		expect(revision).toEqual(
 			expect.objectContaining({
 				serviceId: "service-1",
-				image: `registry.test/project-1/service-1:revision-${revision.id}`,
+				image: `us-central1-docker.pkg.dev/google-project/techulus-images/project-1/service-1:revision-${revision.id}`,
 				commitSha: "0123456789abcdef0123456789abcdef01234567",
 				expectedRepository: "https://github.com/acme/app",
 				expectedBranch: "production",

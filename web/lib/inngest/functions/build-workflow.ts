@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
+import { ensureGarProtectionTag } from "@/lib/google-artifact-registry";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { inngest } from "../client";
@@ -386,6 +387,9 @@ export const buildWorkflow = inngest.createFunction(
 
 		groupBuilds = await step.run("validate-group-before-deploy", readGroup);
 		validateCompletedGroup(groupBuilds, manifest);
+		await step.run("protect-group-image", () =>
+			ensureGarProtectionTag(manifest.finalImageUri),
+		);
 		const deployment = await step.run("trigger-deploy-group", () =>
 			deployServiceRevisionInternal(
 				serviceId,

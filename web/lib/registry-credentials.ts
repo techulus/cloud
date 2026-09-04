@@ -6,8 +6,8 @@ import type { RegistryCredential } from "@/db/types";
 import { encryptRegistryPassword } from "@/lib/crypto";
 import { resolveEncryptionKey } from "@/lib/kms";
 import {
-	parseRegistryEndpoint,
 	registryAuthKey,
+	resolveGarConfiguration,
 } from "@/lib/registry-reference";
 
 export type RegistryMetadata = {
@@ -45,34 +45,16 @@ type RegistryEnvironment = Record<string, string | undefined>;
 export function resolveSystemRegistryCredentials(
 	env: RegistryEnvironment = process.env,
 ): SystemCredential[] {
-	const endpointValues = [env.REGISTRY_HOST, env.REGISTRY_URL].filter(
-		(value): value is string => Boolean(value),
-	);
-	const username = env.REGISTRY_USERNAME;
-	const password = env.REGISTRY_PASSWORD;
-	const insecure = env.REGISTRY_INSECURE;
-	const configured =
-		endpointValues.length > 0 ||
-		username !== undefined ||
-		password !== undefined ||
-		insecure !== undefined;
-	if (!configured) return [];
-	if (
-		endpointValues.length === 0 ||
-		!username ||
-		!password ||
-		(insecure !== undefined && insecure !== "true" && insecure !== "false")
-	) {
-		throw new Error("Built-in registry configuration is incomplete");
-	}
-	const hosts = [...new Set(endpointValues.map(parseRegistryEndpoint))].sort();
-	return hosts.map((host) => ({
-		id: `system:${host}`,
-		host,
-		username,
-		password,
-		tlsVerify: insecure !== "true",
-	}));
+	const gar = resolveGarConfiguration(env);
+	return [
+		{
+			id: `system:${gar.host}`,
+			host: gar.host,
+			username: "_json_key_base64",
+			password: gar.agentKeyBase64,
+			tlsVerify: true,
+		},
+	];
 }
 
 async function readCustomCredentials(): Promise<RegistryCredential[]> {
@@ -90,7 +72,7 @@ function assertNoSystemCollisions(
 	const collision = custom.find((credential) => reserved.has(credential.host));
 	if (collision)
 		throw new Error(
-			"A custom registry collides with the built-in registry configuration",
+			"A custom registry collides with the managed GAR configuration",
 		);
 }
 

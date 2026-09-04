@@ -10,11 +10,11 @@ Techulus Cloud integrates with GitHub through a [GitHub App](https://docs.github
 1. Create a GitHub App and configure it with your control plane URL.
 2. Set the following environment variables on the control plane:
 
-| Variable | Description |
-| --- | --- |
-| `GITHUB_APP_ID` | Your GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | Private key (base64-encoded) |
-| `GITHUB_WEBHOOK_SECRET` | Webhook secret for verifying payloads |
+| Variable                 | Description                           |
+| ------------------------ | ------------------------------------- |
+| `GITHUB_APP_ID`          | Your GitHub App ID                    |
+| `GITHUB_APP_PRIVATE_KEY` | Private key (base64-encoded)          |
+| `GITHUB_WEBHOOK_SECRET`  | Webhook secret for verifying payloads |
 
 3. Install the GitHub App on your GitHub account or organization.
 
@@ -46,7 +46,8 @@ The flow:
 1. GitHub sends a push webhook to the control plane.
 2. The control plane creates a build for the new commit.
 3. An agent claims the build, clones the repository, and builds the image.
-4. On success, a rollout deploys the new image.
+4. The agent pushes the final multi-platform image to the installation's user-owned Google Artifact Registry repository.
+5. The control plane confirms a protection tag, then a rollout deploys the image.
 
 GitHub deployment statuses are updated on the commit so you can track progress from pull requests.
 
@@ -99,10 +100,10 @@ updates replace the same comment instead of adding new comments.
 
 Agents build images using one of two methods:
 
-| Method | When Used |
-| --- | --- |
-| Railpack | No Dockerfile present — Railpack auto-detects the framework and generates a build plan |
-| Dockerfile | A `Dockerfile` exists in the repository (or specified root directory) |
+| Method     | When Used                                                                              |
+| ---------- | -------------------------------------------------------------------------------------- |
+| Railpack   | No Dockerfile present — Railpack auto-detects the framework and generates a build plan |
+| Dockerfile | A `Dockerfile` exists in the repository (or specified root directory)                  |
 
 ### Custom Dockerfile Path
 
@@ -111,19 +112,19 @@ To use a Dockerfile at a different path or with a different name, set a `TECHULU
 - The path is relative to the build context (the repository root, or the service's root directory if set).
 - When set, the Dockerfile build method is always used — if the file doesn't exist, the build fails instead of falling back to Railpack.
 
-Images are built with BuildKit, tagged with the commit SHA, and pushed to the [private registry](/infrastructure/registry).
+Images are built with BuildKit, assigned an immutable `revision-<revision-id>` tag, and pushed to [Google Artifact Registry](/infrastructure/registry). Each successful final image receives a `protected-revision-<revision-id>` alias before rollout. The GAR Writer credential used by BuildKit is also used by agents for Podman pulls; the control plane's Repository Administrator credential is never sent to agents.
 
 Build statuses:
 
-| Status | Description |
-| --- | --- |
-| `pending` | Waiting for an available agent |
-| `claimed` | Agent has taken the build |
-| `cloning` | Cloning the repository |
-| `building` | Building the container image |
-| `pushing` | Pushing the image to the registry |
-| `completed` | Build succeeded |
-| `failed` | Build failed |
-| `cancelled` | Build was cancelled |
+| Status      | Description                                   |
+| ----------- | --------------------------------------------- |
+| `pending`   | Waiting for an available agent                |
+| `claimed`   | Agent has taken the build                     |
+| `cloning`   | Cloning the repository                        |
+| `building`  | Building the container image                  |
+| `pushing`   | Pushing the image to Google Artifact Registry |
+| `completed` | Build succeeded                               |
+| `failed`    | Build failed                                  |
+| `cancelled` | Build was cancelled                           |
 
 Build logs stream to [Victoria Logs](/infrastructure/logging) in real time and are viewable from the web UI.
