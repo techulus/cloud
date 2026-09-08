@@ -747,7 +747,6 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 				.select({
 					id: services.id,
 					projectId: services.projectId,
-					sourceType: services.sourceType,
 				})
 				.from(services)
 				.where(
@@ -795,9 +794,7 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 					});
 					if (!claimed) continue;
 					if (!claimed.garDeletionReady) continue;
-					if (service.sourceType === "github") {
-						await deleteGarServicePackage(service.projectId, service.id);
-					}
+					await deleteGarServicePackage(service.projectId, service.id);
 					const backups = await db
 						.select({ id: volumeBackups.id })
 						.from(volumeBackups)

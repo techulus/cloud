@@ -521,9 +521,7 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
-	if (claimedService.sourceType === "github") {
-		await deleteGarServicePackage(claimedService.projectId, serviceId);
-	}
+	await deleteGarServicePackage(claimedService.projectId, serviceId);
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 

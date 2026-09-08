@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ getAccessToken: vi.fn() }));
 
@@ -28,6 +28,8 @@ const IMAGE =
 	"us-central1-docker.pkg.dev/google-project/techulus-images/project-1/service-1:revision-123";
 const API_PACKAGE =
 	"https://artifactregistry.googleapis.com/v1/projects/google-project/locations/us-central1/repositories/techulus-images/packages/project-1%2Fservice-1";
+const OPERATION =
+	"projects/google-project/locations/us-central1/operations/delete-123";
 
 function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
@@ -37,6 +39,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("Google Artifact Registry client", () => {
+	afterEach(() => vi.useRealTimers());
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		mocks.getAccessToken.mockReset();
@@ -122,8 +125,96 @@ describe("Google Artifact Registry client", () => {
 		).resolves.toBeUndefined();
 		expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
 			`${API_PACKAGE}/tags/protected-revision-123`,
-			`${API_PACKAGE}?force=true`,
+			API_PACKAGE,
 		]);
+	});
+
+	it("accepts an immediately completed deletion", async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				jsonResponse({ name: OPERATION, done: true, response: {} }),
+			);
+		await expect(
+			deleteGarServicePackage("project-1", "service-1"),
+		).resolves.toBeUndefined();
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it.each([false, true])(
+		"waits for the deletion operation (failure: %s)",
+		async (fails) => {
+			vi.useFakeTimers();
+			const fetchMock = vi
+				.spyOn(globalThis, "fetch")
+				.mockResolvedValueOnce(jsonResponse({ name: OPERATION }))
+				.mockResolvedValueOnce(jsonResponse({ name: OPERATION, done: false }))
+				.mockResolvedValueOnce(
+					jsonResponse({
+						name: OPERATION,
+						done: true,
+						...(fails
+							? { error: { code: 13, message: "sensitive provider details" } }
+							: { response: {} }),
+					}),
+				);
+			const settled = vi.fn();
+			const deletion = deleteGarServicePackage("project-1", "service-1");
+			void deletion.then(settled, settled);
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(settled).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(2_000);
+			if (fails) {
+				await expect(deletion).rejects.toThrow(
+					"GAR package deletion operation failed",
+				);
+			} else {
+				await expect(deletion).resolves.toBeUndefined();
+			}
+			expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+				API_PACKAGE,
+				`https://artifactregistry.googleapis.com/v1/${OPERATION}`,
+				`https://artifactregistry.googleapis.com/v1/${OPERATION}`,
+			]);
+		},
+	);
+
+	it.each([
+		{},
+		{ name: "https://untrusted.example/operation" },
+		{ name: OPERATION, done: true },
+	])("rejects malformed deletion operations: %j", async (body) => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse(body));
+		await expect(
+			deleteGarServicePackage("project-1", "service-1"),
+		).rejects.toThrow("invalid operation");
+	});
+
+	it("bounds pending deletion polling to sixty seconds", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(async () => jsonResponse({ name: OPERATION }));
+		const deletion = deleteGarServicePackage("project-1", "service-1").catch(
+			(error) => error,
+		);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(await deletion).toEqual(new Error("GAR package deletion timed out"));
+		expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+		expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+	});
+
+	it("times out and aborts a stalled GAR request", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(() => new Promise(() => {}));
+		const deletion = deleteGarServicePackage("project-1", "service-1").catch(
+			(error) => error,
+		);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(await deletion).toEqual(new Error("GAR package deletion timed out"));
+		expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
 	});
 
 	it("rejects images outside the configured repository without network access", async () => {

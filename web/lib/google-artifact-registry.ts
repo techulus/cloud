@@ -1,4 +1,5 @@
 import { GoogleAuth } from "google-auth-library";
+import { z } from "zod";
 import {
 	parseImageReference,
 	resolveGarConfiguration,
@@ -7,6 +8,16 @@ import {
 
 const ARTIFACT_REGISTRY_API = "https://artifactregistry.googleapis.com/v1";
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const deletionOperationSchema = z.object({
+	name: z
+		.string()
+		.regex(
+			/^projects\/[a-zA-Z0-9-]+\/locations\/[a-z0-9-]+\/operations\/[a-zA-Z0-9_-]+$/,
+		),
+	done: z.boolean().optional(),
+	error: z.unknown().optional(),
+	response: z.record(z.string(), z.unknown()).optional(),
+});
 
 type GarRevision = {
 	packageId: string;
@@ -203,12 +214,66 @@ export async function deleteGarServicePackage(
 	) {
 		throw new Error("Invalid managed GAR service package");
 	}
-	const response = await garRequest(
-		"package deletion",
-		`${ARTIFACT_REGISTRY_API}/${packagePath(configuration, packageId)}?force=true`,
-		{ method: "DELETE" },
-	);
-	if (response.status !== 404 && !response.ok) {
-		throw new Error(`GAR package deletion failed (${response.status})`);
+	const controller = new AbortController();
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	let pollTimeout: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<never>((_, reject) => {
+		timeout = setTimeout(() => {
+			reject(new Error("GAR package deletion timed out"));
+			controller.abort();
+		}, 60_000);
+	});
+	async function deleteAndWait() {
+		let response = await garRequest(
+			"package deletion",
+			`${ARTIFACT_REGISTRY_API}/${packagePath(configuration, packageId)}`,
+			{ method: "DELETE", signal: controller.signal },
+		);
+		if (response.status === 404) return;
+		let operationName: string | undefined;
+		let delay = 1_000;
+		while (true) {
+			controller.signal.throwIfAborted();
+			if (!response.ok) {
+				throw new Error(`GAR package deletion failed (${response.status})`);
+			}
+			const operation = deletionOperationSchema.safeParse(
+				await response.json().catch(() => null),
+			);
+			controller.signal.throwIfAborted();
+			if (
+				!operation.success ||
+				(operationName && operation.data.name !== operationName)
+			) {
+				throw new Error("GAR package deletion returned an invalid operation");
+			}
+			if (operation.data.error !== undefined) {
+				throw new Error("GAR package deletion operation failed");
+			}
+			if (operation.data.done) {
+				if (!operation.data.response) {
+					throw new Error("GAR package deletion returned an invalid operation");
+				}
+				return;
+			}
+			operationName = operation.data.name;
+			await new Promise<void>((resolve) => {
+				pollTimeout = setTimeout(resolve, delay);
+			});
+			controller.signal.throwIfAborted();
+			delay = Math.min(delay * 2, 5_000);
+			response = await garRequest(
+				"package deletion operation lookup",
+				`${ARTIFACT_REGISTRY_API}/${operationName}`,
+				{ signal: controller.signal },
+			);
+		}
+	}
+	try {
+		await Promise.race([deleteAndWait(), deadline]);
+	} finally {
+		clearTimeout(timeout);
+		clearTimeout(pollTimeout);
+		controller.abort();
 	}
 }
