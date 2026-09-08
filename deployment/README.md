@@ -5,9 +5,8 @@ Docker Compose setup with Traefik for SSL termination via Let's Encrypt.
 A user-owned Google Artifact Registry Docker repository is mandatory. Complete
 the [GAR setup](../docs/infrastructure/registry.mdx), including its two
 repository-scoped service accounts and cleanup policy, before starting Compose.
-The recommended `setup-gar.sh` helper runs from Google Cloud Shell or a trusted
-workstation with an authenticated `gcloud` CLI, not from the control plane or
-production containers.
+Create the resources in Google Cloud Console, then encode the downloaded JSON
+keys on a trusted workstation using the commands in the guide.
 
 ## Quick Start
 
