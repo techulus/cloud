@@ -101,7 +101,8 @@ On a fresh KMS installation, omit `ENCRYPTION_KEY`. To migrate existing data, co
 Source builds require a user-owned Google Artifact Registry Docker repository.
 The Writer key is distributed to agents for BuildKit pushes and Podman pulls;
 the Repository Administrator key stays in the control plane for protection-tag
-and package operations. TLS verification is always enabled.
+management. GAR cleanup policies exclusively delete image versions and reclaim
+blobs; Techulus does not delete packages. TLS verification is always enabled.
 
 | Variable               | Description                                                                       |
 | ---------------------- | --------------------------------------------------------------------------------- |

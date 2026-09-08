@@ -46,8 +46,10 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { validateDockerImageInternal } from "@/lib/docker-image";
-import { prepareGarPackageDeletion } from "@/lib/gar-retention";
-import { deleteGarServicePackage } from "@/lib/google-artifact-registry";
+import {
+	prepareGarArtifactCleanup,
+	releaseGarServiceProtection,
+} from "@/lib/gar-retention";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
@@ -463,7 +465,7 @@ async function hardDeleteService(serviceId: string) {
 		if (!claimed) return undefined;
 		return {
 			service: claimed,
-			garDeletionReady: await prepareGarPackageDeletion(tx, serviceId),
+			garDeletionReady: await prepareGarArtifactCleanup(tx, serviceId),
 		};
 	});
 	if (!service) {
@@ -521,7 +523,7 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
-	await deleteGarServicePackage(claimedService.projectId, serviceId);
+	await releaseGarServiceProtection(serviceId);
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 

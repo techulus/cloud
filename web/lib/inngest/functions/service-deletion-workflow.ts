@@ -31,8 +31,10 @@ import {
 	markDeploymentRemoved,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
-import { prepareGarPackageDeletion } from "@/lib/gar-retention";
-import { deleteGarServicePackage } from "@/lib/google-artifact-registry";
+import {
+	prepareGarArtifactCleanup,
+	releaseGarServiceProtection,
+} from "@/lib/gar-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
@@ -746,7 +748,6 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 			const expiredServices = await db
 				.select({
 					id: services.id,
-					projectId: services.projectId,
 				})
 				.from(services)
 				.where(
@@ -789,12 +790,12 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 						if (!claimed) return undefined;
 						return {
 							...claimed,
-							garDeletionReady: await prepareGarPackageDeletion(tx, service.id),
+							garDeletionReady: await prepareGarArtifactCleanup(tx, service.id),
 						};
 					});
 					if (!claimed) continue;
 					if (!claimed.garDeletionReady) continue;
-					await deleteGarServicePackage(service.projectId, service.id);
+					await releaseGarServiceProtection(service.id);
 					const backups = await db
 						.select({ id: volumeBackups.id })
 						.from(volumeBackups)

@@ -1,7 +1,10 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { serviceRevisions, workQueue } from "@/db/schema";
-import { deleteGarProtectionTag } from "@/lib/google-artifact-registry";
+import { serviceRevisions, services, workQueue } from "@/db/schema";
+import {
+	deleteGarProtectionTag,
+	ensureGarProtectionTag,
+} from "@/lib/google-artifact-registry";
 import { reportServerError } from "@/lib/server-errors";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 
@@ -20,7 +23,7 @@ type RevisionArtifact = {
 
 type ArtifactCandidate = RevisionArtifact & { image: string };
 
-export async function prepareGarPackageDeletion(
+export async function prepareGarArtifactCleanup(
 	tx: GarRetentionTransaction,
 	serviceId: string,
 ): Promise<boolean> {
@@ -48,6 +51,40 @@ export async function prepareGarPackageDeletion(
 	return processing.length === 0;
 }
 
+export async function protectGarRevision(
+	serviceId: string,
+	revisionId: string,
+	image: string,
+) {
+	return db.transaction(async (tx) => {
+		// Serialize with deletion claims and daily protection release.
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
+		const revision = await tx
+			.select({ specification: serviceRevisions.specification })
+			.from(serviceRevisions)
+			.innerJoin(services, eq(services.id, serviceRevisions.serviceId))
+			.where(
+				and(
+					eq(serviceRevisions.id, revisionId),
+					eq(services.id, serviceId),
+					isNull(services.deletedAt),
+					isNull(serviceRevisions.artifactDeletedAt),
+				),
+			)
+			.then((rows) => rows[0]);
+		if (!revision) return false;
+		const specification = parseServiceRevisionSpec(revision.specification);
+		if (
+			specification.source.type !== "github" ||
+			specification.image !== image
+		) {
+			throw new Error("Built artifact does not match the service revision");
+		}
+		await ensureGarProtectionTag(image);
+		return true;
+	});
+}
+
 async function releaseArtifactProtection(revision: RevisionArtifact) {
 	if (revision.artifactDeletedAt) return false;
 	const specification = parseServiceRevisionSpec(revision.specification);
@@ -70,6 +107,30 @@ export async function releaseGarRevisionProtection(revision: RevisionArtifact) {
 			),
 		);
 	return true;
+}
+
+export async function releaseGarServiceProtection(serviceId: string) {
+	// Callers have claimed permanent deletion before reaching this boundary.
+	const revisions = await db
+		.select()
+		.from(serviceRevisions)
+		.where(
+			and(
+				eq(serviceRevisions.serviceId, serviceId),
+				isNull(serviceRevisions.artifactDeletedAt),
+			),
+		);
+	const released = new Set<string>();
+	for (const revision of revisions) {
+		const specification = parseServiceRevisionSpec(revision.specification);
+		if (
+			specification.source.type !== "github" ||
+			released.has(specification.image)
+		)
+			continue;
+		await releaseGarRevisionProtection(revision);
+		released.add(specification.image);
+	}
 }
 
 export async function releaseGarProtectionDaily() {

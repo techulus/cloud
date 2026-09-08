@@ -47,8 +47,8 @@ const mocks = vi.hoisted(() => {
 		txSelectResults,
 		dbSelectResults,
 		db,
-		prepareGarPackageDeletion: vi.fn(),
-		deleteGarServicePackage: vi.fn(),
+		prepareGarArtifactCleanup: vi.fn(),
+		releaseGarServiceProtection: vi.fn(),
 		inactivatePreviewGitHubDeployments: vi.fn(),
 		enqueueReconcileForAllOnlineServers: vi.fn(),
 	};
@@ -68,10 +68,8 @@ vi.mock("@/lib/preview-deployments", () => ({
 	inactivatePreviewGitHubDeployments: mocks.inactivatePreviewGitHubDeployments,
 }));
 vi.mock("@/lib/gar-retention", () => ({
-	prepareGarPackageDeletion: mocks.prepareGarPackageDeletion,
-}));
-vi.mock("@/lib/google-artifact-registry", () => ({
-	deleteGarServicePackage: mocks.deleteGarServicePackage,
+	prepareGarArtifactCleanup: mocks.prepareGarArtifactCleanup,
+	releaseGarServiceProtection: mocks.releaseGarServiceProtection,
 }));
 vi.mock("@/lib/work-queue", () => ({
 	enqueueReconcileForAllOnlineServers:
@@ -86,10 +84,24 @@ describe("preview deletion", () => {
 		vi.clearAllMocks();
 		mocks.txSelectResults.length = 0;
 		mocks.dbSelectResults.length = 0;
-		mocks.prepareGarPackageDeletion.mockResolvedValue(true);
-		mocks.deleteGarServicePackage.mockResolvedValue(undefined);
+		mocks.prepareGarArtifactCleanup.mockResolvedValue(true);
+		mocks.releaseGarServiceProtection.mockResolvedValue(undefined);
 	});
 	afterEach(() => vi.restoreAllMocks());
+
+	it("keeps the preview record when protection release fails", async () => {
+		mocks.txSelectResults.push([{ service: { id: "preview-service" } }]);
+		mocks.releaseGarServiceProtection.mockRejectedValue(
+			new Error("GAR unavailable"),
+		);
+		await expect(
+			deletePreviewService("base-service", "refs/pull/42/merge"),
+		).rejects.toThrow("GAR unavailable");
+		expect(mocks.releaseGarServiceProtection).toHaveBeenCalledWith(
+			"preview-service",
+		);
+		expect(mocks.db.delete).not.toHaveBeenCalledWith(services);
+	});
 
 	it("hard-deletes the service when GitHub inactivation fails", async () => {
 		mocks.txSelectResults.push([
@@ -110,8 +122,7 @@ describe("preview deletion", () => {
 				"pull request closed",
 			),
 		).resolves.toMatchObject({ service: { id: "preview-service" } });
-		expect(mocks.deleteGarServicePackage).toHaveBeenCalledWith(
-			"project-1",
+		expect(mocks.releaseGarServiceProtection).toHaveBeenCalledWith(
 			"preview-service",
 		);
 		expect(mocks.db.delete).toHaveBeenCalledTimes(2);

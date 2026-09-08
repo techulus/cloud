@@ -10,15 +10,6 @@
     }
   },
   {
-    "name": "keep-ten-most-recent",
-    "action": {
-      "type": "Keep"
-    },
-    "mostRecentVersions": {
-      "keepCount": 10
-    }
-  },
-  {
     "name": "delete-unprotected-after-thirty-days",
     "action": {
       "type": "Delete"

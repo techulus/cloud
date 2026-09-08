@@ -236,6 +236,13 @@ test_partial_key_failure_revokes_created_key() {
         fail "temporary key files remain after failure"
 }
 
+jq -e '
+    length == 2 and
+    all(.[]; has("mostRecentVersions") | not) and
+    any(.[]; .action.type == "Keep" and .condition == {tagState: "tagged", tagPrefixes: ["protected-"]}) and
+    any(.[]; .action.type == "Delete" and .condition == {tagState: "any", olderThan: "30d"})
+' "${SCRIPT_DIR}/gar-cleanup-policy.json" >/dev/null || fail "invalid lifecycle cleanup policy"
+
 test_fresh_provisioning
 test_existing_resources_are_preserved
 test_existing_output_is_not_overwritten

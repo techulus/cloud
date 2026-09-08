@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { builds, workQueue } from "@/db/schema";
 import { deployServiceRevisionInternal } from "@/lib/deploy-service";
-import { ensureGarProtectionTag } from "@/lib/google-artifact-registry";
+import { protectGarRevision } from "@/lib/gar-retention";
 import { updatePreviewGitHubStatus } from "@/lib/preview-deployments";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { inngest } from "../client";
@@ -387,9 +387,15 @@ export const buildWorkflow = inngest.createFunction(
 
 		groupBuilds = await step.run("validate-group-before-deploy", readGroup);
 		validateCompletedGroup(groupBuilds, manifest);
-		await step.run("protect-group-image", () =>
-			ensureGarProtectionTag(manifest.finalImageUri),
+		const protectedImage = await step.run("protect-group-image", () =>
+			protectGarRevision(serviceId, serviceRevisionId, manifest.finalImageUri),
 		);
+		if (!protectedImage)
+			return {
+				status: "skipped",
+				reason: "revision_unavailable",
+				buildGroupId,
+			};
 		const deployment = await step.run("trigger-deploy-group", () =>
 			deployServiceRevisionInternal(
 				serviceId,

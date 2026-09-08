@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const mocks = vi.hoisted(() => {
 	let selectRows: unknown[] = [];
 	const selectQuery = {
 		from: vi.fn(),
+		innerJoin: vi.fn(),
 		where: vi.fn(),
 		limit: vi.fn(),
 		// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => {
 			Promise.resolve(selectRows).then(resolve),
 	};
 	selectQuery.from.mockReturnValue(selectQuery);
+	selectQuery.innerJoin.mockReturnValue(selectQuery);
 	selectQuery.where.mockReturnValue(selectQuery);
 	selectQuery.limit.mockReturnValue(selectQuery);
 	const updateQuery = { set: vi.fn(), where: vi.fn() };
@@ -20,6 +23,8 @@ const mocks = vi.hoisted(() => {
 		transaction: vi.fn(),
 		execute: vi.fn(),
 		deleteGarProtectionTag: vi.fn(),
+		ensureGarProtectionTag: vi.fn(),
+		selectQuery,
 		db: {
 			select: vi.fn(() => selectQuery),
 			update: vi.fn(() => updateQuery),
@@ -36,13 +41,16 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/google-artifact-registry", () => ({
 	deleteGarProtectionTag: mocks.deleteGarProtectionTag,
+	ensureGarProtectionTag: mocks.ensureGarProtectionTag,
 }));
 vi.mock("@/lib/service-revision-changes", () => ({
 	parseServiceRevisionSpec: (value: unknown) => value,
 }));
 
 import {
-	prepareGarPackageDeletion,
+	prepareGarArtifactCleanup,
+	protectGarRevision,
+	releaseGarServiceProtection,
 	releaseGarProtectionDaily,
 	releaseGarRevisionProtection,
 } from "@/lib/gar-retention";
@@ -61,6 +69,7 @@ describe("GAR retention", () => {
 		mocks.execute.mockReset();
 		mocks.transaction.mockReset();
 		mocks.deleteGarProtectionTag.mockResolvedValue(undefined);
+		mocks.ensureGarProtectionTag.mockReset();
 	});
 
 	it.each([
@@ -86,7 +95,7 @@ describe("GAR retention", () => {
 				select: vi.fn(() => select),
 			} as never;
 
-			await expect(prepareGarPackageDeletion(tx, "service-1")).resolves.toBe(
+			await expect(prepareGarArtifactCleanup(tx, "service-1")).resolves.toBe(
 				ready,
 			);
 			expect(update.set).toHaveBeenCalledWith({ status: "failed" });
@@ -119,6 +128,105 @@ describe("GAR retention", () => {
 			),
 		).rejects.toThrow("GAR unavailable");
 		expect(mocks.db.update).not.toHaveBeenCalled();
+	});
+
+	it("releases each historical GitHub image once, not user-supplied images", async () => {
+		mocks.setSelectRows([
+			githubRevision("managed/service:revision-1"),
+			{ ...githubRevision("managed/service:revision-1"), id: "revision-2" },
+			githubRevision("managed/service:revision-3"),
+			{
+				...githubRevision("external/app:latest"),
+				specification: {
+					image: "external/app:latest",
+					source: { type: "image" },
+				},
+			},
+		]);
+		await releaseGarServiceProtection("service-1");
+		expect(mocks.deleteGarProtectionTag.mock.calls).toEqual([
+			["managed/service:revision-1"],
+			["managed/service:revision-3"],
+		]);
+		expect(mocks.db.update).toHaveBeenCalledTimes(2);
+	});
+
+	it("marks only successful releases and retries the remaining image", async () => {
+		const first = githubRevision("managed/service:revision-1");
+		const second = githubRevision("managed/service:revision-2");
+		mocks.setSelectRows([first, second]);
+		mocks.deleteGarProtectionTag
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(new Error("GAR unavailable"));
+		await expect(releaseGarServiceProtection("service-1")).rejects.toThrow(
+			"GAR unavailable",
+		);
+		expect(mocks.db.update).toHaveBeenCalledOnce();
+		mocks.setSelectRows([second]);
+		await releaseGarServiceProtection("service-1");
+		expect(mocks.deleteGarProtectionTag.mock.calls).toEqual([
+			[first.specification.image],
+			[second.specification.image],
+			[second.specification.image],
+		]);
+		expect(mocks.db.update).toHaveBeenCalledTimes(2);
+	});
+
+	it("creates protection inside the service lock transaction", async () => {
+		const image = "managed/service:revision-1";
+		mocks.setSelectRows([githubRevision(image)]);
+		let inTransaction = false;
+		mocks.transaction.mockImplementation(async (callback) => {
+			inTransaction = true;
+			try {
+				return await callback(mocks.db);
+			} finally {
+				inTransaction = false;
+			}
+		});
+		mocks.ensureGarProtectionTag.mockImplementation(async () => {
+			expect(inTransaction).toBe(true);
+			const lock = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0]);
+			expect(lock.sql).toContain("pg_advisory_xact_lock");
+			expect(lock.params).toEqual(["service-1"]);
+		});
+		await expect(
+			protectGarRevision("service-1", "revision-1", image),
+		).resolves.toBe(true);
+		expect(mocks.ensureGarProtectionTag).toHaveBeenCalledWith(image);
+	});
+
+	it("does not recreate tags for deleted services or released revisions", async () => {
+		mocks.transaction.mockImplementation((callback) => callback(mocks.db));
+		await expect(
+			protectGarRevision(
+				"service-1",
+				"revision-1",
+				"managed/service:revision-1",
+			),
+		).resolves.toBe(false);
+		const query = new PgDialect().sqlToQuery(
+			mocks.selectQuery.where.mock.calls[0][0],
+		);
+		expect(query.sql).toContain('"services"."deleted_at" is null');
+		expect(query.sql).toContain(
+			'"service_revisions"."artifact_deleted_at" is null',
+		);
+		expect(query.params).toEqual(["revision-1", "service-1"]);
+		expect(mocks.ensureGarProtectionTag).not.toHaveBeenCalled();
+	});
+
+	it("rejects a mismatched artifact before protecting it", async () => {
+		mocks.transaction.mockImplementation((callback) => callback(mocks.db));
+		mocks.setSelectRows([githubRevision("managed/service:revision-1")]);
+		await expect(
+			protectGarRevision(
+				"service-1",
+				"revision-1",
+				"managed/service:revision-other",
+			),
+		).rejects.toThrow("does not match");
+		expect(mocks.ensureGarProtectionTag).not.toHaveBeenCalled();
 	});
 
 	it("keeps a candidate when the locked eligibility recheck rejects it", async () => {

@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => {
 			),
 			delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
 		},
-		deleteGarServicePackage: vi.fn(),
+		releaseGarServiceProtection: vi.fn(),
 	};
 });
 
@@ -60,10 +60,8 @@ vi.mock("@/lib/backups/delete-backup", () => ({
 	deleteBackupInternal: vi.fn(),
 }));
 vi.mock("@/lib/gar-retention", () => ({
-	prepareGarPackageDeletion: vi.fn(async () => true),
-}));
-vi.mock("@/lib/google-artifact-registry", () => ({
-	deleteGarServicePackage: mocks.deleteGarServicePackage,
+	prepareGarArtifactCleanup: vi.fn(async () => true),
+	releaseGarServiceProtection: mocks.releaseGarServiceProtection,
 }));
 vi.mock("@/lib/server-errors", () => ({ reportServerError: vi.fn() }));
 vi.mock("@/lib/work-queue", () => ({ enqueueWork: vi.fn() }));
@@ -97,9 +95,9 @@ describe.each(["hard deletion", "expiry purge"])(
 		});
 		afterEach(() => vi.restoreAllMocks());
 
-		it("awaits historical package deletion after GitHub is disconnected", async () => {
+		it("awaits historical protection release after GitHub is disconnected", async () => {
 			let complete!: () => void;
-			mocks.deleteGarServicePackage.mockImplementation(
+			mocks.releaseGarServiceProtection.mockImplementation(
 				() =>
 					new Promise<void>((resolve) => {
 						complete = resolve;
@@ -107,8 +105,7 @@ describe.each(["hard deletion", "expiry purge"])(
 			);
 			const deletion = invoke(path);
 			await vi.waitFor(() =>
-				expect(mocks.deleteGarServicePackage).toHaveBeenCalledWith(
-					"project-1",
+				expect(mocks.releaseGarServiceProtection).toHaveBeenCalledWith(
 					"service-1",
 				),
 			);
@@ -118,16 +115,15 @@ describe.each(["hard deletion", "expiry purge"])(
 			expect(mocks.db.delete).toHaveBeenLastCalledWith(services);
 		});
 
-		it("preserves the service for retry if GAR deletion fails", async () => {
-			mocks.deleteGarServicePackage.mockRejectedValue(
-				new Error("GAR package deletion operation failed"),
+		it("preserves the service for retry if protection release fails", async () => {
+			mocks.releaseGarServiceProtection.mockRejectedValue(
+				new Error("GAR protection release failed"),
 			);
 			const deletion = invoke(path);
 			if (path === "hard deletion")
-				await expect(deletion).rejects.toThrow("operation failed");
+				await expect(deletion).rejects.toThrow("release failed");
 			else await deletion; // The purge reports errors and retries retained rows next run.
-			expect(mocks.deleteGarServicePackage).toHaveBeenCalledWith(
-				"project-1",
+			expect(mocks.releaseGarServiceProtection).toHaveBeenCalledWith(
 				"service-1",
 			);
 			expect(mocks.db.delete).not.toHaveBeenCalledWith(services);

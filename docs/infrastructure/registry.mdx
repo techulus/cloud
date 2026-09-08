@@ -5,7 +5,7 @@ description: "Provision and operate the required user-owned image registry."
 
 Techulus Cloud requires a user-owned [Google Artifact Registry](https://cloud.google.com/artifact-registry/docs) (GAR) Docker repository for images built from GitHub sources. Techulus does not provision or own the repository.
 
-Agents push and pull image data directly. The control plane uses the GAR API only to manage protection tags and delete packages. User-supplied images can still use credentials configured under **Settings → Registries**.
+Agents push and pull image data directly. The control plane uses the GAR API only to manage protection tags; GAR cleanup policies exclusively delete image versions and reclaim blobs. User-supplied images can still use credentials configured under **Settings → Registries**.
 
 ## Image layout
 
@@ -68,7 +68,7 @@ gcloud artifacts repositories create "$GAR_REPOSITORY_ID" \
   --description="Techulus Cloud source images"
 ```
 
-Create two dedicated service accounts. The agent account can upload and download artifacts. The control-plane account can additionally create/delete tags and delete packages, but cannot create or reconfigure repositories.
+Create two dedicated service accounts. The agent account can upload and download artifacts. The control-plane account uses its Repository Administrator role to create/delete protection tags, not to delete images or packages. It cannot create or reconfigure repositories.
 
 ```bash
 export GAR_AGENT_SA="techulus-agent@${GAR_PROJECT_ID}.iam.gserviceaccount.com"
@@ -136,13 +136,14 @@ The Repository Administrator key stays in the control plane and is never sent to
 
 ## Cleanup policy
 
-The tracked [`deployment/gar-cleanup-policy.json`](https://github.com/techulus/cloud/blob/main/deployment/gar-cleanup-policy.json) defines three repository policies:
+The tracked [`deployment/gar-cleanup-policy.json`](https://github.com/techulus/cloud/blob/main/deployment/gar-cleanup-policy.json) defines two repository policies:
 
 - keep every version carrying a `protected-` tag;
-- keep the 10 most recent versions of every package;
 - delete tagged or untagged versions older than 30 days when no keep policy matches.
 
 Keep policies win over delete policies. For Docker images, GAR does not delete child manifests while a retained parent manifest references them.
+
+Do not retain an unconditional newest-ten-versions Keep policy: it would preserve deleted-service images indefinitely. Techulus implements retention of the newest 10 completed rollouts through protection tags instead. On an existing repository, review and apply the tracked policy, removing any blanket recent-version Keep rule. The setup helper preserves existing policies; upgrading Techulus does not change them automatically.
 
 The operator applying policies needs Artifact Registry Administrator permissions. The helper applies this file in dry-run mode when the repository has no existing policies. For manual setup, or after reviewing policies already present on an existing repository, apply the file in dry-run mode explicitly:
 
@@ -166,7 +167,9 @@ gcloud artifacts repositories set-cleanup-policies "$GAR_REPOSITORY_ID" \
 
 Techulus retains protection for active deployments, queued or in-progress work, and the newest 10 completed rollouts. Its daily job removes only the `protected-revision-*` tag after a locked final eligibility check. GAR then owns version deletion and physical blob reclamation. The 30-day condition is measured from upload time, not from when Techulus removes protection.
 
-Deleting a stateless service or preview force-deletes its GAR package. A deleted stateful service keeps its package through the seven-day restore window; expiry purge then deletes it.
+Deleting a stateless service or preview releases all its historical GitHub-image protection tags before removing its database records, including images built before GitHub was disconnected. A deleted stateful service retains protection through the seven-day restore window; expiry purge then releases it. Failed tag releases leave the service records available for retry, and late build callbacks cannot recreate protection after deletion.
+
+Techulus never directly deletes GAR packages or versions. Unprotected images already older than 30 days become eligible for the next cleanup cycle; younger images remain until they reach that age. This is not a new 30-day grace period from service deletion. Cleanup must be activated explicitly after dry-run review; dry-run alone reclaims no storage. Empty package metadata may remain after GAR removes its versions.
 
 ## Upgrading from the bundled registry
 
