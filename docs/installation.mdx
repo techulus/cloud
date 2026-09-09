@@ -8,7 +8,7 @@ description: "Deploy the Techulus Cloud control plane on your own infrastructure
 - Docker and Docker Compose
 - A domain name with DNS configured
 - Ports 80 and 443 available
-- A user-owned Google Artifact Registry Docker repository with the required service accounts and cleanup policy. Complete the [GAR setup](/infrastructure/registry) before installing.
+- A user-owned Google Artifact Registry Docker repository with a repository-scoped Writer account and cleanup policy. Complete the [GAR setup](/infrastructure/registry) before installing.
 
 You need two DNS records pointing to your server:
 
@@ -42,8 +42,8 @@ openssl rand -hex 32
 ```
 
 Edit `.env` with your values. Set `CONTROL_PLANE_UPDATER_TOKEN` to
-the generated token and configure `GAR_REPOSITORY`, `GAR_AGENT_KEY_BASE64`, and
-`GAR_ADMIN_KEY_BASE64` from the [GAR setup](/infrastructure/registry).
+the generated token and configure `GAR_REPOSITORY` and `GAR_AGENT_KEY_BASE64`
+from the [GAR setup](/infrastructure/registry).
 
 For an external PostgreSQL database, keep:
 
@@ -82,7 +82,7 @@ cannot run, update the deployment from the host manually.
 
 <Warning>
   The GAR release is a clean beta cutover. Images and persisted references from the old bundled
-  registry are not migrated. Provision GAR, add all three GAR variables to `.env`, and apply its
+  registry are not migrated. Provision GAR, add both GAR variables to `.env`, and apply its
   cleanup policy before upgrading. After the upgrade, rebuild every source-backed service.
 </Warning>
 
@@ -123,16 +123,15 @@ use the common commands below when investigating a self-hosted service.
 
 ### Required
 
-| Variable               | Description                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `ROOT_DOMAIN`          | Your domain (e.g., `cloud.example.com`)                                                                            |
-| `ACME_EMAIL`           | Email for Let's Encrypt certificates                                                                               |
-| `DATABASE_URL`         | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`)                                 |
-| `BETTER_AUTH_SECRET`   | Secret key for authentication                                                                                      |
-| `ENCRYPTION_KEY`       | 32 bytes as a 64-character hex string. Required unless you configure AWS KMS BYOK.                                 |
-| `GAR_REPOSITORY`       | GAR image base: `<location>-docker.pkg.dev/<gcp-project>/<repository>`                                             |
-| `GAR_AGENT_KEY_BASE64` | Base64 JSON key for the repository-scoped Artifact Registry Writer sent to agents                                  |
-| `GAR_ADMIN_KEY_BASE64` | Base64 JSON key for the repository-scoped Artifact Registry Repository Administrator retained by the control plane |
+| Variable               | Description                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `ROOT_DOMAIN`          | Your domain (e.g., `cloud.example.com`)                                              |
+| `ACME_EMAIL`           | Email for Let's Encrypt certificates                                                 |
+| `DATABASE_URL`         | PostgreSQL connection string (e.g., `postgres://user:pass@postgres:5432/techulus`)   |
+| `BETTER_AUTH_SECRET`   | Secret key for authentication                                                        |
+| `ENCRYPTION_KEY`       | 32 bytes as a 64-character hex string. Required unless you configure AWS KMS BYOK.   |
+| `GAR_REPOSITORY`       | GAR image base: `<location>-docker.pkg.dev/<gcp-project>/<repository>`               |
+| `GAR_AGENT_KEY_BASE64` | Base64 JSON key for the repository-scoped Artifact Registry Writer sent to agents    |
 
 ### AWS KMS BYOK
 
@@ -270,11 +269,21 @@ Back up both PostgreSQL and continued access to the KMS key. Deleting the KMS ke
 | ---------------------- | ------------------------------------------------------------------------- |
 | `GAR_REPOSITORY`       | Required GAR repository image base, with no scheme or trailing image path |
 | `GAR_AGENT_KEY_BASE64` | Required base64 Writer service-account JSON key                           |
-| `GAR_ADMIN_KEY_BASE64` | Required base64 Repository Administrator service-account JSON key         |
 
-The two service accounts must be scoped to the configured repository. Agents
-receive only the Writer credential. See [Google Artifact Registry](/infrastructure/registry)
+The Writer account must be scoped to the configured repository. See
+[Google Artifact Registry](/infrastructure/registry)
 for provisioning, authentication, cleanup policy, and upgrade instructions.
+
+The policy keeps the newest 10 versions per package and deletes versions in any
+tag state after 30 days. An active or rollback image can disappear. Failed
+builds count, and multi-platform images mean 10 versions is not 10 builds or
+rollouts. Deleted services retain their newest versions. A seven-day data
+restore does not guarantee that its image remains available.
+
+After deploying Writer-only code, existing operators must replace the old
+protected-tag Keep rule with the tracked policy. Then remove
+`GAR_ADMIN_KEY_BASE64` from `.env` and revoke its unused admin key. Techulus
+does not automate this migration.
 
 ### Inngest
 

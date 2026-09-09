@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => {
 		const query = {
 			from: vi.fn(() => query),
 			where: vi.fn(() => query),
+			orderBy: vi.fn(() => query),
+			limit: vi.fn(() => query),
 			// oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are awaitable.
 			then: (
 				resolve: (value: unknown[]) => unknown,
@@ -60,6 +62,7 @@ vi.mock("@/lib/public-api", () => ({
 import {
 	cloneGitHubBuildServiceRevision,
 	createGitHubBuildServiceRevision,
+	createRolloutForServiceRevision,
 	createRolloutWithServiceRevision,
 } from "@/lib/service-revisions";
 
@@ -107,6 +110,41 @@ describe("GitHub build service revisions", () => {
 		mocks.insertedValues.length = 0;
 		mocks.returningResults.length = 0;
 	});
+
+	it.each(["deleted", "superseded preview", "no placements", "eligible"])(
+		"handles a completed build for an %s service without registry management",
+		async (state) => {
+			const specification = sourceSpecification();
+			if (state === "no placements") specification.placements = [];
+			const revision = { id: "revision-original", specification };
+			mocks.selectResults.push(
+				[revision],
+				state === "deleted"
+					? []
+					: [
+							{
+								id: "service-1",
+								previewOfService:
+									state === "superseded preview" ? "base-1" : null,
+							},
+						],
+				[{ id: "revision-newer" }],
+			);
+			mocks.returningResults.push([{ id: "rollout-1" }]);
+			const result = await createRolloutForServiceRevision(
+				"service-1",
+				revision.id,
+				specification.image,
+			);
+			expect(result).toMatchObject({
+				created: state === "eligible",
+				rolloutId: state === "eligible" ? "rollout-1" : null,
+			});
+			expect(mocks.tx.insert).toHaveBeenCalledTimes(
+				state === "eligible" ? 1 : 0,
+			);
+		},
+	);
 
 	it("clones immutable source and config while reserving a new artifact", async () => {
 		const original = sourceSpecification();
@@ -171,7 +209,7 @@ describe("GitHub build service revisions", () => {
 	it("combines current runtime config with a GitHub base artifact", async () => {
 		const base = sourceSpecification();
 		mocks.selectResults.push(
-			[{ specification: base, artifactDeletedAt: null }],
+			[{ specification: base }],
 			[],
 			[
 				{
@@ -219,23 +257,5 @@ describe("GitHub build service revisions", () => {
 			placements: [{ serverId: "server-target", count: 1 }],
 		});
 		expect(inserted.specification.image).not.toContain(":latest");
-	});
-
-	it("rejects a redeployment whose managed artifact was deleted", async () => {
-		mocks.selectResults.push([
-			{
-				specification: sourceSpecification(),
-				artifactDeletedAt: new Date("2026-07-31T00:00:00.000Z"),
-			},
-		]);
-
-		await expect(
-			createRolloutWithServiceRevision(
-				"service-1",
-				{ type: "system" },
-				"revision-expired",
-			),
-		).rejects.toThrow("Service revision artifact is no longer available");
-		expect(mocks.tx.insert).not.toHaveBeenCalled();
 	});
 });

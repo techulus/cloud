@@ -213,7 +213,6 @@ describe("preview service cloning", () => {
 		process.env.GAR_REPOSITORY =
 			"us-central1-docker.pkg.dev/google-project/techulus-images";
 		process.env.GAR_AGENT_KEY_BASE64 = SERVICE_ACCOUNT_KEY;
-		process.env.GAR_ADMIN_KEY_BASE64 = SERVICE_ACCOUNT_KEY;
 	});
 
 	it("copies runtime configuration and secrets but not automation", async () => {

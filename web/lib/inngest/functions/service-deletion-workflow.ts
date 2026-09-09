@@ -31,10 +31,6 @@ import {
 	markDeploymentRemoved,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
-import {
-	prepareGarArtifactCleanup,
-	releaseGarServiceProtection,
-} from "@/lib/gar-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
@@ -787,15 +783,9 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 							)
 							.returning({ id: services.id })
 							.then((rows) => rows[0]);
-						if (!claimed) return undefined;
-						return {
-							...claimed,
-							garDeletionReady: await prepareGarArtifactCleanup(tx, service.id),
-						};
+						return claimed;
 					});
 					if (!claimed) continue;
-					if (!claimed.garDeletionReady) continue;
-					await releaseGarServiceProtection(service.id);
 					const backups = await db
 						.select({ id: volumeBackups.id })
 						.from(volumeBackups)

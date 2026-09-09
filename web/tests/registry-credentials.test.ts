@@ -27,7 +27,6 @@ describe("registry credential bundles", () => {
 			GAR_REPOSITORY:
 				"us-central1-docker.pkg.dev/google-project/techulus-images",
 			GAR_AGENT_KEY_BASE64: SERVICE_ACCOUNT_KEY,
-			GAR_ADMIN_KEY_BASE64: SERVICE_ACCOUNT_KEY,
 		});
 		expect(credentials).toHaveLength(1);
 		expect(credentials[0]).toMatchObject({

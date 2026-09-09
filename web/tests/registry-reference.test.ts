@@ -52,16 +52,11 @@ describe("registry references", () => {
 				GAR_REPOSITORY:
 					"us-central1-docker.pkg.dev/google-project/techulus-images",
 				GAR_AGENT_KEY_BASE64: key,
-				GAR_ADMIN_KEY_BASE64: key,
 			}),
 		).toMatchObject({
 			host: "us-central1-docker.pkg.dev",
-			location: "us-central1",
-			googleProjectId: "google-project",
-			repositoryId: "techulus-images",
 			imageBase: "us-central1-docker.pkg.dev/google-project/techulus-images",
-			agentCredentials: { type: "service_account" },
-			adminCredentials: { type: "service_account" },
+			agentKeyBase64: key,
 		});
 	});
 	it.each([
@@ -76,7 +71,6 @@ describe("registry references", () => {
 			resolveGarConfiguration({
 				GAR_REPOSITORY: repository,
 				GAR_AGENT_KEY_BASE64: key,
-				GAR_ADMIN_KEY_BASE64: key,
 			}),
 		).toThrow("GAR_REPOSITORY");
 	});
@@ -88,7 +82,6 @@ describe("registry references", () => {
 			resolveGarConfiguration({
 				GAR_REPOSITORY: "us-central1-docker.pkg.dev/google-project/techulus",
 				GAR_AGENT_KEY_BASE64: malformed,
-				GAR_ADMIN_KEY_BASE64: serviceAccount("google-project"),
 			}),
 		).toThrow(
 			"GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key",

@@ -49,7 +49,6 @@ graph TD
     P1 -->|"HTTPS state, status, and work wait"| CP
     W1 -->|"HTTPS state, status, and work wait"| CP
     W2 -->|"HTTPS state, status, and work wait"| CP
-    CP -->|"Protection tag management"| GAR
     P1 -->|"Build push and deployment pull"| GAR
     W1 -->|"Build push and deployment pull"| GAR
     W2 -->|"Build push and deployment pull"| GAR
@@ -159,8 +158,9 @@ build. The latest revision on the copy prevents superseded build and rollout
 callbacks from deploying or reporting success. GitHub reports the transient
 environment as ready only after health and routing convergence complete.
 Closing, merging, or drafting the pull request deletes the copied service after
-runtime teardown and release of its GAR protection tags. GAR cleanup policies
-remove unprotected image versions asynchronously.
+runtime teardown. [GAR cleanup policies](/infrastructure/registry) manage image
+retention independently of service deletion, retaining the newest 10 versions
+per package and deleting other versions older than 30 days.
 
 ## Networking
 

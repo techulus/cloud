@@ -9,31 +9,13 @@ const DIGEST = /^[A-Za-z][A-Za-z0-9_+.-]*:[0-9a-fA-F]{32,256}$/;
 const GAR_REPOSITORY =
 	/^([a-z0-9-]+)-docker\.pkg\.dev\/([a-z][a-z0-9-]{4,28}[a-z0-9])\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)$/;
 
-export type GoogleServiceAccountCredentials = {
-	type: "service_account";
-	project_id: string;
-	private_key: string;
-	client_email: string;
-	token_uri: string;
-	[key: string]: unknown;
-};
-
 export type GarConfiguration = {
 	host: string;
-	location: string;
-	googleProjectId: string;
-	repositoryId: string;
 	imageBase: string;
 	agentKeyBase64: string;
-	adminKeyBase64: string;
-	agentCredentials: GoogleServiceAccountCredentials;
-	adminCredentials: GoogleServiceAccountCredentials;
 };
 
-function parseServiceAccountKey(
-	name: "GAR_AGENT_KEY_BASE64" | "GAR_ADMIN_KEY_BASE64",
-	value: string | undefined,
-): GoogleServiceAccountCredentials {
+function parseServiceAccountKey(value: string | undefined): string {
 	try {
 		if (
 			!value ||
@@ -67,10 +49,10 @@ function parseServiceAccountKey(
 		) {
 			throw new Error("invalid service account");
 		}
-		return credentials as GoogleServiceAccountCredentials;
+		return value;
 	} catch {
 		throw new Error(
-			`${name} must be a base64-encoded service-account JSON key`,
+			"GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key",
 		);
 	}
 }
@@ -97,20 +79,8 @@ export function resolveGarConfiguration(
 		throw new Error("Invalid GAR_REPOSITORY");
 	return {
 		host: `${location}-docker.pkg.dev`,
-		location,
-		googleProjectId,
-		repositoryId,
 		imageBase,
-		agentKeyBase64: env.GAR_AGENT_KEY_BASE64 ?? "",
-		adminKeyBase64: env.GAR_ADMIN_KEY_BASE64 ?? "",
-		agentCredentials: parseServiceAccountKey(
-			"GAR_AGENT_KEY_BASE64",
-			env.GAR_AGENT_KEY_BASE64,
-		),
-		adminCredentials: parseServiceAccountKey(
-			"GAR_ADMIN_KEY_BASE64",
-			env.GAR_ADMIN_KEY_BASE64,
-		),
+		agentKeyBase64: parseServiceAccountKey(env.GAR_AGENT_KEY_BASE64),
 	};
 }
 

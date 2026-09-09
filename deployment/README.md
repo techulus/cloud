@@ -3,10 +3,10 @@
 Docker Compose setup with Traefik for SSL termination via Let's Encrypt.
 
 A user-owned Google Artifact Registry Docker repository is mandatory. Complete
-the [GAR setup](../docs/infrastructure/registry.mdx), including its two
-repository-scoped service accounts and cleanup policy, before starting Compose.
+the [GAR setup](../docs/infrastructure/registry.mdx), including its
+repository-scoped Writer account and cleanup policy, before starting Compose.
 Create the resources in Google Cloud Console, then encode the downloaded JSON
-keys on a trusted workstation using the commands in the guide.
+key on a trusted workstation using the commands in the guide.
 
 ## Quick Start
 
@@ -56,10 +56,21 @@ unhealthy containers but does not restart them automatically.
 
 ## Environment Setup
 
-Set `GAR_REPOSITORY`, `GAR_AGENT_KEY_BASE64`, and `GAR_ADMIN_KEY_BASE64` in
-`.env`. The installer reads key values without terminal echo. Agents receive
-only the Writer credential; the Repository Administrator key stays in the web
-service.
+Set `GAR_REPOSITORY` and `GAR_AGENT_KEY_BASE64` in `.env`. The installer reads
+the Writer key without terminal echo. Follow the registry guide to encode the
+complete JSON key as one portable base64 line and keep credential files mode
+`600`. Base64 is not encryption.
+
+The GAR policy keeps the 10 most recent versions per package without a prefix
+filter and deletes versions in any tag state after 30 days. This can delete an
+active or rollback image. Failed builds count, and multi-platform images mean
+10 versions is not 10 builds or rollouts. Deleted services retain their newest
+versions. A seven-day data restore does not guarantee its image remains.
+
+Existing operators must deploy the Writer-only code before replacing the old
+protected-tag Keep rule with the tracked policy. Then remove the obsolete
+`GAR_ADMIN_KEY_BASE64` environment value and revoke the unused admin key. No
+compatibility automation updates policies or credentials.
 
 Upgrades do not migrate images from the former bundled registry. Rebuild every
 source-backed service after upgrading. The old `registry-data` Docker volume is

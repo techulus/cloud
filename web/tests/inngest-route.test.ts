@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => {
 		challengeCleanup: { id: "challenge-cleanup" },
 		controlPlaneUpdateCheck: { id: "control-plane-update-check" },
 		expiredDeletedServicesPurge: { id: "expired-deleted-services-purge" },
-		garArtifactRetention: { id: "gar-artifact-retention" },
 		migrationWorkflow: { id: "migration-workflow" },
 		notificationDelivery: { id: "notification-delivery" },
 		notificationRetention: { id: "notification-retention" },

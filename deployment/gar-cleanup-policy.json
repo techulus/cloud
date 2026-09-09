@@ -1,16 +1,15 @@
 [
   {
-    "name": "keep-techulus-protected",
+    "name": "keep-most-recent-ten-versions",
     "action": {
       "type": "Keep"
     },
-    "condition": {
-      "tagState": "tagged",
-      "tagPrefixes": ["protected-"]
+    "mostRecentVersions": {
+      "keepCount": 10
     }
   },
   {
-    "name": "delete-unprotected-after-thirty-days",
+    "name": "delete-versions-after-thirty-days",
     "action": {
       "type": "Delete"
     },

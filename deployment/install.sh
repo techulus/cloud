@@ -370,25 +370,22 @@ validate_gar_configuration() {
         return 1
     fi
 
-    local key_name key_value decoded
-    for key_name in GAR_AGENT_KEY_BASE64 GAR_ADMIN_KEY_BASE64; do
-        key_value="${!key_name:-}"
-        if [[ -z "$key_value" ]] || ! decoded="$(printf '%s' "$key_value" | base64 --decode 2>/dev/null)"; then
-            log_error "${key_name} must be a base64-encoded service-account JSON key"
-            return 1
-        fi
-        if ! jq -e '
-            type == "object" and
-            .type == "service_account" and
-            (.project_id | type == "string" and length > 0) and
-            (.private_key | type == "string" and contains("BEGIN PRIVATE KEY")) and
-            (.client_email | type == "string" and length > 0) and
-            (.token_uri | type == "string" and length > 0)
-        ' >/dev/null 2>&1 <<<"$decoded"; then
-            log_error "${key_name} must be a base64-encoded service-account JSON key"
-            return 1
-        fi
-    done
+    local decoded
+    if [[ -z "${GAR_AGENT_KEY_BASE64:-}" ]] || ! decoded="$(printf '%s' "$GAR_AGENT_KEY_BASE64" | base64 --decode 2>/dev/null)"; then
+        log_error "GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key"
+        return 1
+    fi
+    if ! jq -e '
+        type == "object" and
+        .type == "service_account" and
+        (.project_id | type == "string" and length > 0) and
+        (.private_key | type == "string" and contains("BEGIN PRIVATE KEY")) and
+        (.client_email | type == "string" and length > 0) and
+        (.token_uri | type == "string" and length > 0)
+    ' >/dev/null 2>&1 <<<"$decoded"; then
+        log_error "GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key"
+        return 1
+    fi
 }
 
 configure_interactive() {
@@ -480,7 +477,6 @@ AWS_REGION=${AWS_REGION}"
     log_warn "After an upgrade, rebuild every source-backed service to publish it to GAR."
     prompt_value GAR_REPOSITORY "Enter GAR repository (<location>-docker.pkg.dev/<project>/<repository>)"
     prompt_secret GAR_AGENT_KEY_BASE64 "Paste the base64 Writer service-account JSON key"
-    prompt_secret GAR_ADMIN_KEY_BASE64 "Paste the base64 Repository Administrator service-account JSON key"
     validate_gar_configuration
 
     VL_USERNAME="admin"
@@ -519,7 +515,6 @@ configure_from_file() {
 
     GAR_REPOSITORY="$(read_env_value GAR_REPOSITORY "$src_file")"
     GAR_AGENT_KEY_BASE64="$(read_env_value GAR_AGENT_KEY_BASE64 "$src_file")"
-    GAR_ADMIN_KEY_BASE64="$(read_env_value GAR_ADMIN_KEY_BASE64 "$src_file")"
     validate_gar_configuration
 
     local temp_path
@@ -576,7 +571,6 @@ VM_RETENTION=30d
 
 GAR_REPOSITORY=${GAR_REPOSITORY}
 GAR_AGENT_KEY_BASE64=${GAR_AGENT_KEY_BASE64}
-GAR_ADMIN_KEY_BASE64=${GAR_ADMIN_KEY_BASE64}
 
 INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
 INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}

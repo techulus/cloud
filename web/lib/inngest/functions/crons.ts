@@ -8,7 +8,6 @@ import {
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
-import { releaseGarProtectionDaily } from "@/lib/gar-retention";
 import { cleanupReadNotifications } from "@/lib/notifications";
 import { evaluateServerResourceAlerts } from "@/lib/server-resource-alerts";
 import { cleanupOldServiceCommands } from "@/lib/service-command-retention";
@@ -191,20 +190,6 @@ export const agentUpgradeTimeoutCheck = inngest.createFunction(
 		await step.run("fail-timed-out-agent-upgrades", async () => {
 			console.log("[cron] checking timed out agent upgrades");
 			await failTimedOutAgentUpgrades();
-		});
-	},
-);
-
-export const garArtifactRetention = inngest.createFunction(
-	{
-		id: "cron-gar-artifact-retention",
-		triggers: [cron("0 5 * * *")],
-		singleton: { mode: "skip" },
-	},
-	async ({ step }) => {
-		await step.run("release-gar-protection-tags", async () => {
-			console.log("[cron] releasing GAR protection tags");
-			await releaseGarProtectionDaily();
 		});
 	},
 );

@@ -9,10 +9,6 @@ import {
 	services,
 } from "@/db/schema";
 import { markDeploymentRemoved } from "@/lib/deployment-status";
-import {
-	prepareGarArtifactCleanup,
-	releaseGarServiceProtection,
-} from "@/lib/gar-retention";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { inactivatePreviewGitHubDeployments } from "@/lib/preview-deployments";
@@ -166,11 +162,6 @@ export async function deletePreviewService(
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${context.service.id}))`,
 		);
-		if (!(await prepareGarArtifactCleanup(tx, context.service.id))) {
-			throw new Error(
-				"Preview deletion deferred while image manifest work is processing",
-			);
-		}
 		await tx
 			.update(services)
 			.set({
@@ -217,7 +208,6 @@ export async function deletePreviewService(
 	await db.transaction((tx) =>
 		enqueueReconcileForAllOnlineServers("preview_deleted", tx),
 	);
-	await releaseGarServiceProtection(claimed.service.id);
 	if (options.reportGitHubDeployment !== false) {
 		try {
 			await inactivatePreviewGitHubDeployments({

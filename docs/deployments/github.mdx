@@ -47,7 +47,7 @@ The flow:
 2. The control plane creates a build for the new commit.
 3. An agent claims the build, clones the repository, and builds the image.
 4. The agent pushes the final multi-platform image to the installation's user-owned Google Artifact Registry repository.
-5. The control plane confirms a protection tag, then a rollout deploys the image.
+5. A rollout deploys the image.
 
 GitHub deployment statuses are updated on the commit so you can track progress from pull requests.
 
@@ -112,7 +112,7 @@ To use a Dockerfile at a different path or with a different name, set a `TECHULU
 - The path is relative to the build context (the repository root, or the service's root directory if set).
 - When set, the Dockerfile build method is always used — if the file doesn't exist, the build fails instead of falling back to Railpack.
 
-Images are built with BuildKit, assigned an immutable `revision-<revision-id>` tag, and pushed to [Google Artifact Registry](/infrastructure/registry). Each successful final image receives a `protected-revision-<revision-id>` alias before rollout. The GAR Writer credential used by BuildKit is also used by agents for Podman pulls; the control plane's Repository Administrator credential is never sent to agents.
+Images are built with BuildKit, assigned a unique `revision-<revision-id>` tag, and pushed to [Google Artifact Registry](/infrastructure/registry). The same repository-scoped GAR Writer credential is used for BuildKit pushes and Podman pulls. Repository cleanup policies alone control retention: keep the newest 10 versions per package and delete other versions older than 30 days, regardless of deployment status. See the registry guide for retention and rollback limitations.
 
 Build statuses:
 

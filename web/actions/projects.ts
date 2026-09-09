@@ -46,10 +46,6 @@ import {
 	runtimeExpectedStates,
 } from "@/lib/deployment-status";
 import { validateDockerImageInternal } from "@/lib/docker-image";
-import {
-	prepareGarArtifactCleanup,
-	releaseGarServiceProtection,
-} from "@/lib/gar-retention";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
@@ -434,7 +430,7 @@ async function hardDeleteService(serviceId: string) {
 		return { success: true };
 	}
 
-	const service = await db.transaction(async (tx) => {
+	const claimedService = await db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const freshService = await tx
 			.select()
@@ -462,23 +458,13 @@ async function hardDeleteService(serviceId: string) {
 			.where(eq(services.id, serviceId))
 			.returning()
 			.then((rows) => rows[0]);
-		if (!claimed) return undefined;
-		return {
-			service: claimed,
-			garDeletionReady: await prepareGarArtifactCleanup(tx, serviceId),
-		};
+		return claimed;
 	});
-	if (!service) {
+	if (!claimedService) {
 		throw new Error(
 			"Service not found or another service operation is in progress",
 		);
 	}
-	if (!service.garDeletionReady) {
-		throw new Error(
-			"Service deletion deferred while image manifest work is processing",
-		);
-	}
-	const claimedService = service.service;
 	await deletePreviewsForBaseService(serviceId, "base service deleted");
 
 	const allDeployments = await db
@@ -523,7 +509,6 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
-	await releaseGarServiceProtection(serviceId);
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 

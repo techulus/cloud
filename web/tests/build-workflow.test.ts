@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
 		queryResults,
 		select: vi.fn(() => query(queryResults.shift() ?? [])),
 		deployServiceRevisionInternal: vi.fn(),
-		protectGarRevision: vi.fn(),
 		updatePreviewGitHubStatus: vi.fn(),
 	};
 });
@@ -26,9 +25,6 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/lib/deploy-service", () => ({
 	deployServiceRevisionInternal: mocks.deployServiceRevisionInternal,
-}));
-vi.mock("@/lib/gar-retention", () => ({
-	protectGarRevision: mocks.protectGarRevision,
 }));
 vi.mock("@/lib/preview-deployments", () => ({
 	updatePreviewGitHubStatus: mocks.updatePreviewGitHubStatus,
@@ -130,7 +126,6 @@ describe("revision-first build completion", () => {
 			rolloutId: "rollout-1",
 			created: true,
 		});
-		mocks.protectGarRevision.mockResolvedValue(true);
 		mocks.updatePreviewGitHubStatus.mockResolvedValue(false);
 	});
 
@@ -147,49 +142,12 @@ describe("revision-first build completion", () => {
 			"revision-new",
 			"registry/app:revision-new",
 		);
-		expect(mocks.protectGarRevision).toHaveBeenNthCalledWith(
-			1,
-			"service-1",
-			"revision-new",
-			"registry/app:revision-new",
-		);
-		expect(mocks.protectGarRevision).toHaveBeenNthCalledWith(
-			2,
-			"service-1",
-			"revision-old",
-			"registry/app:revision-old",
-		);
 		expect(mocks.deployServiceRevisionInternal).toHaveBeenNthCalledWith(
 			2,
 			"service-1",
 			"revision-old",
 			"registry/app:revision-old",
 		);
-	});
-
-	it("does not deploy when GAR cannot protect the completed image", async () => {
-		completedGroup(
-			"revision-unprotected",
-			"group-unprotected",
-			"registry/app:revision-unprotected",
-		);
-		mocks.protectGarRevision.mockRejectedValue(
-			new Error("GAR protection unavailable"),
-		);
-
-		await expect(
-			invoke("revision-unprotected", "group-unprotected").result,
-		).rejects.toThrow("GAR protection unavailable");
-		expect(mocks.deployServiceRevisionInternal).not.toHaveBeenCalled();
-	});
-
-	it("skips deployment when deletion or retention made the revision unavailable", async () => {
-		completedGroup("revision-1", "group-1", "registry/app:revision-1");
-		mocks.protectGarRevision.mockResolvedValue(false);
-		await expect(invoke("revision-1", "group-1").result).resolves.toMatchObject(
-			{ status: "skipped", reason: "revision_unavailable" },
-		);
-		expect(mocks.deployServiceRevisionInternal).not.toHaveBeenCalled();
 	});
 
 	it("leaves a failed build revision without a rollout", async () => {

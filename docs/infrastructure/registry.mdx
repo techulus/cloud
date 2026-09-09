@@ -3,9 +3,7 @@ title: "Google Artifact Registry"
 description: "Provision and operate the required user-owned image registry."
 ---
 
-Techulus Cloud requires a user-owned [Google Artifact Registry](https://cloud.google.com/artifact-registry/docs) (GAR) Docker repository for images built from GitHub sources. Techulus does not provision or own the repository.
-
-Agents push and pull image data directly. The control plane uses the GAR API only to manage protection tags; GAR cleanup policies exclusively delete image versions and reclaim blobs. User-supplied images can still use credentials configured under **Settings → Registries**.
+Techulus Cloud requires a user-owned [Google Artifact Registry](https://cloud.google.com/artifact-registry/docs) (GAR) Docker repository for images built from GitHub sources. Techulus does not provision or own the repository. Agents use one repository-scoped Writer credential to push and pull images. User-supplied images can still use credentials configured under **Settings → Registries**.
 
 ## Image layout
 
@@ -15,13 +13,11 @@ Each source-backed service has one GAR package:
 <location>-docker.pkg.dev/<gcp-project>/<repository>/<techulus-project-id>/<service-id>:revision-<revision-id>
 ```
 
-The final multi-platform version receives both its immutable `revision-*` tag and a deterministic `protected-revision-*` tag before rollout begins. A GAR failure at this boundary prevents deployment of an unprotected image.
-
 ## Provision GAR
 
-Create the repository and service accounts in [Google Cloud Console](https://console.cloud.google.com/). No setup script is required. Use a billing-enabled project and enable the Artifact Registry and IAM APIs if prompted.
+Create the repository and Writer service account in [Google Cloud Console](https://console.cloud.google.com/). Use a billing-enabled project and enable the Artifact Registry and IAM APIs if prompted.
 
-The operator needs permission to enable APIs, administer Artifact Registry repositories and their IAM policies, create service accounts, and create service-account keys. The predefined roles that supply these permissions are Service Usage Admin, Artifact Registry Administrator, Service Account Admin, and Service Account Key Admin, or custom roles with the equivalent permissions.
+The operator needs permission to enable APIs, administer Artifact Registry repositories and their IAM policies, create service accounts, and create service-account keys. The predefined roles that supply these permissions are Service Usage Admin, Artifact Registry Administrator, Service Account Admin, and Service Account Key Admin, or custom roles with equivalent permissions.
 
 ### Create the repository
 
@@ -33,24 +29,21 @@ Open **Artifact Registry → Repositories → Create repository**:
 | Format | **Docker** |
 | Mode | **Standard**, not remote or virtual |
 | Location | A region close to your deployment agents |
-| Immutable tags | **Disabled** so Techulus can remove protection tags |
+| Immutable tags | **Disabled** so cleanup can delete tagged versions |
 | Encryption | Google-managed key unless you require CMEK |
 | Cleanup policy mode | **Dry run**, not **Delete artifacts** yet |
 
-Keep the repository private; do not grant public access. Configure the two [cleanup rules](#cleanup-policy) before activating deletion.
+Keep the repository private. Configure the [cleanup policy](#cleanup-policy) before activating deletion.
 
-Alternatively, use the following commands in [Google Cloud Shell](https://cloud.google.com/shell/docs) or a trusted workstation with an authenticated [gcloud CLI](https://cloud.google.com/sdk/docs/install). Skip resource-creation commands for resources you already created in Console.
+Alternatively, use Google Cloud Shell or an authenticated `gcloud` CLI:
 
 ```bash
 export GAR_PROJECT_ID=google-project-id
 export GAR_LOCATION=us-central1
 export GAR_REPOSITORY_ID=techulus-images
 
-gcloud services enable \
-  artifactregistry.googleapis.com \
-  iam.googleapis.com \
+gcloud services enable artifactregistry.googleapis.com iam.googleapis.com \
   --project="$GAR_PROJECT_ID"
-
 gcloud artifacts repositories create "$GAR_REPOSITORY_ID" \
   --project="$GAR_PROJECT_ID" \
   --location="$GAR_LOCATION" \
@@ -58,117 +51,85 @@ gcloud artifacts repositories create "$GAR_REPOSITORY_ID" \
   --description="Techulus Cloud source images"
 ```
 
-### Create service accounts
+### Create the Writer account
 
-Open **IAM & Admin → Service Accounts** and create the following accounts without granting project-wide roles. Open your repository's **Permissions** panel and grant each account its role on that repository only:
+Open **IAM & Admin → Service Accounts** and create `techulus-agent` without granting a project-wide role. In the repository's **Permissions** panel, grant it Artifact Registry Writer (`roles/artifactregistry.writer`) on that repository only. The account pushes and pulls images; Techulus does not need repository administration access.
 
-| Service account | Repository role |
-| --- | --- |
-| `techulus-agent` | Artifact Registry Writer (`roles/artifactregistry.writer`) |
-| `techulus-control-plane` | Artifact Registry Repository Administrator (`roles/artifactregistry.repoAdmin`) |
-
-The agent account pushes and pulls images. The control plane reads, adds, and removes protection tags. Writer allows adding tags but lacks `artifactregistry.tags.delete`; Repository Administrator includes it. That role also permits image deletion, but Techulus does not use it to delete images or packages. It cannot create or reconfigure repositories.
-
-For the equivalent gcloud setup, using the variables above:
+For the equivalent gcloud setup:
 
 ```bash
 export GAR_AGENT_SA="techulus-agent@${GAR_PROJECT_ID}.iam.gserviceaccount.com"
-export GAR_ADMIN_SA="techulus-control-plane@${GAR_PROJECT_ID}.iam.gserviceaccount.com"
-
 gcloud iam service-accounts create techulus-agent \
   --project="$GAR_PROJECT_ID" \
   --display-name="Techulus agents"
-gcloud iam service-accounts create techulus-control-plane \
-  --project="$GAR_PROJECT_ID" \
-  --display-name="Techulus control plane"
-
 gcloud artifacts repositories add-iam-policy-binding "$GAR_REPOSITORY_ID" \
   --project="$GAR_PROJECT_ID" \
   --location="$GAR_LOCATION" \
   --member="serviceAccount:${GAR_AGENT_SA}" \
   --role="roles/artifactregistry.writer"
-
-gcloud artifacts repositories add-iam-policy-binding "$GAR_REPOSITORY_ID" \
-  --project="$GAR_PROJECT_ID" \
-  --location="$GAR_LOCATION" \
-  --member="serviceAccount:${GAR_ADMIN_SA}" \
-  --role="roles/artifactregistry.repoAdmin"
 ```
 
-### Download and encode JSON keys
+### Download and encode the JSON key
 
-For each account, open **Keys → Add key → Create new key → JSON** and download the key to a trusted workstation. Use the Writer account's file as `agent-key.json` and the Repository Administrator account's file as `admin-key.json` in the commands below.
+For the Writer account, open **Keys → Add key → Create new key → JSON** and download the key to a trusted workstation as `agent-key.json`. Service-account key creation can be prohibited by the `iam.disableServiceAccountKeyCreation` organization policy. If blocked, ask your organization administrator to approve an exemption. Google does not allow an existing private key to be downloaded again.
 
-Service-account key creation can be prohibited by the `iam.disableServiceAccountKeyCreation` organization policy. If blocked, ask your organization administrator to approve and configure an exemption before proceeding. Google does not allow an existing private key to be downloaded again.
-
-If using gcloud instead of Console, create the keys with:
+With gcloud, create the key using:
 
 ```bash
 umask 077
 gcloud iam service-accounts keys create agent-key.json \
   --iam-account="$GAR_AGENT_SA" --project="$GAR_PROJECT_ID"
-gcloud iam service-accounts keys create admin-key.json \
-  --iam-account="$GAR_ADMIN_SA" --project="$GAR_PROJECT_ID"
 ```
 
-From the directory containing the downloaded or generated keys, encode each **complete JSON document**. These commands work on macOS and Linux. Use a new output filename if `gar-credentials.env` already exists:
+Encode the **complete JSON document** as one line. These commands work on macOS and Linux; use a new output filename if `gar-credentials.env` already exists:
 
 ```bash
 umask 077
-{
-  printf 'GAR_AGENT_KEY_BASE64=%s\n' \
-    "$(base64 < agent-key.json | tr -d '\r\n')"
-  printf 'GAR_ADMIN_KEY_BASE64=%s\n' \
-    "$(base64 < admin-key.json | tr -d '\r\n')"
-} > gar-credentials.env
+printf 'GAR_AGENT_KEY_BASE64=%s\n' \
+  "$(base64 < agent-key.json | tr -d '\r\n')" > gar-credentials.env
 chmod 600 gar-credentials.env
 ```
 
-`umask 077` makes new files private to your user in the current shell; it does not change existing files. `chmod 600` explicitly restricts the output file to owner read/write access. Base64 is not encryption: treat the output as a private key, never commit it or paste it into chat.
+`umask 077` makes newly created files private to your user; `chmod 600` explicitly restricts the output to owner read/write access. Base64 is not encryption. Treat both files as private keys: never commit them or paste them into chat.
 
 ### Configure Techulus
 
-Securely copy the two encoded values into the deployment `.env` or installer and add the repository path. Configure every control-plane web replica:
+Securely copy the encoded value into the deployment `.env` or installer and add the repository path:
 
 ```env
 GAR_REPOSITORY=us-central1-docker.pkg.dev/google-project-id/techulus-images
 GAR_AGENT_KEY_BASE64=<base64 Writer service-account JSON>
-GAR_ADMIN_KEY_BASE64=<base64 Repository Administrator service-account JSON>
 ```
 
-`GAR_REPOSITORY` must not include a scheme, image path, tag, or digest. The health endpoint returns 503 when any mandatory GAR value is missing or malformed.
-
-After securely transferring the credentials, delete the temporary JSON and environment files from your workstation or Cloud Shell:
+`GAR_REPOSITORY` must not include a scheme, image path, tag, or digest. The health endpoint returns 503 when a mandatory GAR value is missing or malformed. After securely transferring the credential, delete temporary files:
 
 ```bash
-rm agent-key.json admin-key.json gar-credentials.env
+rm agent-key.json gar-credentials.env
 ```
 
-## Agent authentication
-
-The control plane includes exactly one system GAR credential in each agent's encrypted registry bundle. It uses GAR's `_json_key_base64` Docker login and the Writer key. BuildKit uses it to push platform images and manifests; Podman uses it to pull deployments. TLS verification is always enabled.
-
-The Repository Administrator key stays in the control plane and is never sent to agents. Static repository-scoped keys are intentional: an agent can lease one credential snapshot for a build lasting up to 120 minutes, while GAR OAuth access tokens expire after 60 minutes.
+The control plane includes this credential in each agent's encrypted registry bundle. BuildKit uses it to push images and Podman uses it to pull deployments. TLS verification is always enabled. Static repository-scoped keys are intentional because builds can outlast GAR OAuth access tokens.
 
 ## Cleanup policy
 
-The tracked [`deployment/gar-cleanup-policy.json`](https://github.com/techulus/cloud/blob/main/deployment/gar-cleanup-policy.json) defines two repository policies:
+The tracked [`deployment/gar-cleanup-policy.json`](https://github.com/techulus/cloud/blob/main/deployment/gar-cleanup-policy.json) defines exactly two repository-wide rules:
 
-- keep every version carrying a `protected-` tag;
-- delete tagged or untagged versions older than 30 days when no keep policy matches.
+- keep the 10 most recent versions of every package, with no package-prefix filter;
+- delete versions in any tag state once they are older than 30 days.
 
-Keep policies win over delete policies. For Docker images, GAR does not delete child manifests while a retained parent manifest references them.
+Keep policies take precedence over delete policies. A version outside the newest 10 remains available until it is older than 30 days. GAR evaluates age from version creation time.
 
-In your repository's cleanup policy settings, select **Dry run** and add these rules:
+<Warning>
+  This policy is intentionally independent of deployments. An active or rollback image can disappear when it falls outside a package's newest 10 versions and becomes older than 30 days. Failed and undeployed builds count toward version history. Multi-platform images create multiple registry versions, so 10 versions does not mean 10 builds or rollouts. The newest versions of deleted services remain, and a seven-day service/data restore does not guarantee that its image is still available.
+</Warning>
 
-| Name | Action | Tag state | Condition |
-| --- | --- | --- | --- |
-| `keep-techulus-protected` | Keep by condition | Tagged | Tag prefix `protected-` |
-| `delete-unprotected-after-thirty-days` | Delete | Any | Older than 30 days |
+In the repository's cleanup settings, use **Dry run** and configure:
 
-Do not retain an unconditional newest-ten-versions Keep policy: it would preserve deleted-service images indefinitely. Techulus implements retention of the newest 10 completed rollouts through protection tags instead. On an existing repository, review the policies and remove any blanket recent-version Keep rule. Upgrading Techulus does not change policies automatically.
+| Name | Action | Condition |
+| --- | --- | --- |
+| `keep-most-recent-ten-versions` | Keep most recent versions | Keep count `10`, no package prefixes |
+| `delete-versions-after-thirty-days` | Delete | Tag state `Any`, older than `30 days` |
 
-The operator applying policies needs Artifact Registry Administrator permissions. As an alternative to Console, use `deployment/gar-cleanup-policy.json` from your Techulus checkout. Run from the checkout root with `GAR_PROJECT_ID`, `GAR_LOCATION`, and `GAR_REPOSITORY_ID` set as above:
+The operator applying policies needs Artifact Registry Administrator permissions. From a Techulus checkout, the equivalent gcloud command is:
 
 ```bash
 gcloud artifacts repositories set-cleanup-policies "$GAR_REPOSITORY_ID" \
@@ -178,27 +139,17 @@ gcloud artifacts repositories set-cleanup-policies "$GAR_REPOSITORY_ID" \
   --dry-run
 ```
 
-GAR evaluates cleanup asynchronously, generally within one day. Enable Artifact Registry Data Write audit logs, wait for a dry-run cycle, and inspect the proposed `BatchDeleteVersions` operations. When the keep/delete set is correct, switch from **Dry run** to **Delete artifacts** in Console, or activate deletion with:
+GAR evaluates cleanup asynchronously, generally within one day. Enable Artifact Registry Data Write audit logs, wait for a dry-run cycle, and inspect proposed `BatchDeleteVersions` operations. When correct, switch to **Delete artifacts** in Console or run the same command with `--no-dry-run`.
 
-```bash
-gcloud artifacts repositories set-cleanup-policies "$GAR_REPOSITORY_ID" \
-  --project="$GAR_PROJECT_ID" \
-  --location="$GAR_LOCATION" \
-  --policy=deployment/gar-cleanup-policy.json \
-  --no-dry-run
-```
+### Updating an existing repository
 
-Techulus retains protection for active deployments, queued or in-progress work, and the newest 10 completed rollouts. Its daily job removes only the `protected-revision-*` tag after a locked final eligibility check. GAR then owns version deletion and physical blob reclamation. The 30-day condition is measured from upload time, not from when Techulus removes protection.
-
-Deleting a stateless service or preview releases all its historical GitHub-image protection tags before removing its database records, including images built before GitHub was disconnected. A deleted stateful service retains protection through the seven-day restore window; expiry purge then releases it. Failed tag releases leave the service records available for retry, and late build callbacks cannot recreate protection after deletion.
-
-Techulus never directly deletes GAR packages or versions. Unprotected images already older than 30 days become eligible for the next cleanup cycle; younger images remain until they reach that age. This is not a new 30-day grace period from service deletion. Cleanup must be activated explicitly after dry-run review; dry-run alone reclaims no storage. Empty package metadata may remain after GAR removes its versions.
+After deploying the code that no longer manages GAR tags, replace the old protected-tag Keep rule with the tracked policy; Techulus does not update cloud policies automatically. Then remove `GAR_ADMIN_KEY_BASE64` from the deployment environment and revoke/delete the unused Repository Administrator service-account key. Remove the account or its repository role if it has no other purpose. There is no compatibility or migration automation.
 
 ## Upgrading from the bundled registry
 
-This is a clean beta cutover. Techulus does not copy old images or rewrite persisted image references. Configure GAR and both keys before upgrading. Existing source-built revisions then point to an unavailable old registry and every source-backed service must be rebuilt before it can deploy from GAR.
+This is a clean beta cutover. Techulus does not copy old images or rewrite persisted image references. Configure GAR and the Writer key before upgrading. Existing source-built revisions then point to an unavailable old registry and every source-backed service must be rebuilt before it can deploy from GAR.
 
-The upgrade removes the old registry container but deliberately leaves its Docker volume. After the upgrade is verified and you no longer need rollback data, inspect and explicitly remove the orphaned volume:
+The upgrade removes the old registry container but leaves its Docker volume. After verifying the upgrade and deciding rollback data is no longer needed, inspect and explicitly remove the orphaned volume:
 
 ```bash
 docker volume ls --filter name=registry-data

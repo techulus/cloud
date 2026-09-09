@@ -72,7 +72,6 @@ mutable tags such as `latest` or `tip`.
 | `AWS_REGION`             | Required with `ENCRYPTION_KMS_KEY_ARN`.                                          |
 | `GAR_REPOSITORY`         | Required GAR base: `<location>-docker.pkg.dev/<gcp-project>/<repository>`.       |
 | `GAR_AGENT_KEY_BASE64`   | Base64 JSON key for a repository-scoped Artifact Registry Writer.                |
-| `GAR_ADMIN_KEY_BASE64`   | Base64 JSON key for a repository-scoped Repository Administrator.                |
 
 For KMS BYOK, run the dedicated control plane in AWS with an instance profile or task role. The role needs `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey`. Do not put static AWS credentials in `.env`.
 
@@ -99,21 +98,28 @@ On a fresh KMS installation, omit `ENCRYPTION_KEY`. To migrate existing data, co
 ### Google Artifact Registry
 
 Source builds require a user-owned Google Artifact Registry Docker repository.
-The Writer key is distributed to agents for BuildKit pushes and Podman pulls;
-the Repository Administrator key stays in the control plane for protection-tag
-management. GAR cleanup policies exclusively delete image versions and reclaim
-blobs; Techulus does not delete packages. TLS verification is always enabled.
+The Writer key is distributed to agents for BuildKit pushes and Podman pulls.
+TLS verification is always enabled.
 
-| Variable               | Description                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `GAR_REPOSITORY`       | GAR repository image base without a scheme                                        |
-| `GAR_AGENT_KEY_BASE64` | Complete Writer service-account JSON encoded as one base64 line                   |
-| `GAR_ADMIN_KEY_BASE64` | Complete Repository Administrator service-account JSON encoded as one base64 line |
+| Variable               | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `GAR_REPOSITORY`       | GAR repository image base without a scheme                      |
+| `GAR_AGENT_KEY_BASE64` | Complete Writer service-account JSON encoded as one base64 line |
 
-Provision both accounts at repository scope and apply the tracked cleanup policy
+Provision the Writer account at repository scope and apply the tracked cleanup policy
 before startup. See [the complete GAR guide](../docs/infrastructure/registry.mdx).
 Existing images from the former bundled registry are not migrated; rebuild every
 source-backed service after upgrading.
+
+The policy keeps the newest 10 versions per package and deletes any-tag-state
+versions older than 30 days. An active old image can disappear. Failed builds
+count, and multi-platform images mean 10 versions is not 10 builds or rollouts.
+Deleted services retain their newest versions. A seven-day data restore does not
+guarantee that its image remains available.
+
+After deploying Writer-only code, existing operators should replace the old
+protected-tag Keep rule, remove `GAR_ADMIN_KEY_BASE64`, and revoke its unused
+admin key. Techulus does not automate this change.
 
 ### GitHub Integration (Optional)
 

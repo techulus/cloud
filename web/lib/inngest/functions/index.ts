@@ -7,7 +7,6 @@ export {
 	certificateRenewal,
 	challengeCleanup,
 	controlPlaneUpdateCheck,
-	garArtifactRetention,
 	notificationRetention,
 	previewReconciliation,
 	resourceUsageCheck,
