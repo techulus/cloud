@@ -49,11 +49,7 @@ import { validateDockerImageInternal } from "@/lib/docker-image";
 import { inngest } from "@/lib/inngest/client";
 import { inngestEvents } from "@/lib/inngest/events";
 import { allocatePort } from "@/lib/port-allocation";
-import { resolveRegistryImageHost } from "@/lib/registry-reference";
-import {
-	cleanupRegistryArtifactsForService,
-	prepareRegistryArtifactCleanup,
-} from "@/lib/registry-retention";
+import { resolveGarConfiguration } from "@/lib/registry-reference";
 import { reportServerError } from "@/lib/server-errors";
 import {
 	deletePreviewService,
@@ -352,8 +348,8 @@ export async function createService(input: CreateServiceInput) {
 	let githubRootDir: string | null = null;
 
 	if (github) {
-		const registryHost = resolveRegistryImageHost();
-		finalImage = `${registryHost}/${projectId}/${id}:latest`;
+		const imageBase = resolveGarConfiguration().imageBase;
+		finalImage = `${imageBase}/${projectId}/${id}:latest`;
 		sourceType = "github";
 		githubRepoUrl = github.repoUrl;
 		githubBranch = github.branch || "main";
@@ -434,7 +430,7 @@ async function hardDeleteService(serviceId: string) {
 		return { success: true };
 	}
 
-	const service = await db.transaction(async (tx) => {
+	const claimedService = await db.transaction(async (tx) => {
 		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${serviceId}))`);
 		const freshService = await tx
 			.select()
@@ -462,23 +458,13 @@ async function hardDeleteService(serviceId: string) {
 			.where(eq(services.id, serviceId))
 			.returning()
 			.then((rows) => rows[0]);
-		if (!claimed) return undefined;
-		return {
-			service: claimed,
-			registryCleanupReady: await prepareRegistryArtifactCleanup(tx, serviceId),
-		};
+		return claimed;
 	});
-	if (!service) {
+	if (!claimedService) {
 		throw new Error(
 			"Service not found or another service operation is in progress",
 		);
 	}
-	if (!service.registryCleanupReady) {
-		throw new Error(
-			"Service deletion deferred while registry manifest work is processing",
-		);
-	}
-	const claimedService = service.service;
 	await deletePreviewsForBaseService(serviceId, "base service deleted");
 
 	const allDeployments = await db
@@ -523,7 +509,6 @@ async function hardDeleteService(serviceId: string) {
 		await deleteBackup(backup.id, { revalidate: false });
 	}
 
-	await cleanupRegistryArtifactsForService(serviceId);
 	await db.delete(secrets).where(eq(secrets.serviceId, serviceId));
 	await db.delete(services).where(eq(services.id, serviceId));
 
@@ -913,8 +898,8 @@ export async function updateServiceGithubRepo(
 		};
 
 		if (normalizedUrl) {
-			const registryHost = resolveRegistryImageHost();
-			updateData.image = `${registryHost}/${service.projectId}/${serviceId}:latest`;
+			const imageBase = resolveGarConfiguration().imageBase;
+			updateData.image = `${imageBase}/${service.projectId}/${serviceId}:latest`;
 		}
 
 		let reconcilePreviews = false;

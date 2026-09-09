@@ -1,0 +1,21 @@
+[
+  {
+    "name": "keep-most-recent-ten-versions",
+    "action": {
+      "type": "Keep"
+    },
+    "mostRecentVersions": {
+      "keepCount": 10
+    }
+  },
+  {
+    "name": "delete-versions-after-thirty-days",
+    "action": {
+      "type": "Delete"
+    },
+    "condition": {
+      "tagState": "any",
+      "olderThan": "30d"
+    }
+  }
+]

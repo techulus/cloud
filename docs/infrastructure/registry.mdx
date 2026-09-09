@@ -1,143 +1,165 @@
 ---
-title: "Registry"
-description: "Private container image registry."
+title: "Google Artifact Registry"
+description: "Provision and operate the required user-owned image registry."
 ---
 
-Techulus Cloud runs a private [Docker Distribution Registry](https://distribution.github.io/distribution/) for storing container images built from source.
+Techulus Cloud requires a user-owned [Google Artifact Registry](https://cloud.google.com/artifact-registry/docs) (GAR) Docker repository for images built from GitHub sources. Techulus does not provision or own the repository. Agents use one repository-scoped Writer credential to push and pull images. User-supplied images can still use credentials configured under **Settings → Registries**.
 
-## How It Works
+## Image layout
 
-When you deploy from a GitHub repository, an agent builds the container image using BuildKit and pushes it to the registry. Other agents pull the image from the registry during deployment.
+Each source-backed service has one GAR package:
 
-Images are tagged with the commit SHA:
-
-```
-registry.example.com/{project_id}/{service_id}:{commit_sha}
+```text
+<location>-docker.pkg.dev/<gcp-project>/<repository>/<techulus-project-id>/<service-id>:revision-<revision-id>
 ```
 
-## Configuration
+## Provision GAR
 
-The registry runs as a Docker container alongside the control plane, available at `https://registry.<ROOT_DOMAIN>`.
+Create the repository and Writer service account in [Google Cloud Console](https://console.cloud.google.com/). Use a billing-enabled project and enable the Artifact Registry and IAM APIs if prompted.
 
-| Variable | Description |
+The operator needs permission to enable APIs, administer Artifact Registry repositories and their IAM policies, create service accounts, and create service-account keys. The predefined roles that supply these permissions are Service Usage Admin, Artifact Registry Administrator, Service Account Admin, and Service Account Key Admin, or custom roles with equivalent permissions.
+
+### Create the repository
+
+Open **Artifact Registry → Repositories → Create repository**:
+
+| Setting | Value |
 | --- | --- |
-| `REGISTRY_HOST` / `REGISTRY_URL` | Registry endpoint aliases (an optional `http://` or `https://` scheme is accepted; paths are not) |
-| `REGISTRY_USERNAME` | Basic auth username |
-| `REGISTRY_PASSWORD` | Basic auth password |
-| `REGISTRY_INSECURE` | Set to `true` to disable TLS certificate verification on agents |
-| `REGISTRY_HTTP_SECRET` | Internal HTTP signing secret |
+| Name | `techulus-images` |
+| Format | **Docker** |
+| Mode | **Standard**, not remote or virtual |
+| Location | A region close to your deployment agents |
+| Immutable tags | **Disabled** so cleanup can delete tagged versions |
+| Encryption | Google-managed key unless you require CMEK |
+| Cleanup policy mode | **Dry run**, not **Delete artifacts** yet |
 
-The built-in credentials are included in the same encrypted registry bundle as custom credentials. Registered agents fetch that complete bundle over a signed, non-cacheable endpoint; registration itself does not return registry passwords.
+Keep the repository private. Configure the [cleanup policy](#cleanup-policy) before activating deletion.
+
+Alternatively, use Google Cloud Shell or an authenticated `gcloud` CLI:
+
+```bash
+export GAR_PROJECT_ID=google-project-id
+export GAR_LOCATION=us-central1
+export GAR_REPOSITORY_ID=techulus-images
+
+gcloud services enable artifactregistry.googleapis.com iam.googleapis.com \
+  --project="$GAR_PROJECT_ID"
+gcloud artifacts repositories create "$GAR_REPOSITORY_ID" \
+  --project="$GAR_PROJECT_ID" \
+  --location="$GAR_LOCATION" \
+  --repository-format=docker \
+  --description="Techulus Cloud source images"
+```
+
+### Create the Writer account
+
+Open **IAM & Admin → Service Accounts** and create `techulus-agent` without granting a project-wide role. In the repository's **Permissions** panel, grant it Artifact Registry Writer (`roles/artifactregistry.writer`) on that repository only. The account pushes and pulls images; Techulus does not need repository administration access.
+
+For the equivalent gcloud setup:
+
+```bash
+export GAR_AGENT_SA="techulus-agent@${GAR_PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts create techulus-agent \
+  --project="$GAR_PROJECT_ID" \
+  --display-name="Techulus agents"
+gcloud artifacts repositories add-iam-policy-binding "$GAR_REPOSITORY_ID" \
+  --project="$GAR_PROJECT_ID" \
+  --location="$GAR_LOCATION" \
+  --member="serviceAccount:${GAR_AGENT_SA}" \
+  --role="roles/artifactregistry.writer"
+```
+
+### Download and encode the JSON key
+
+For the Writer account, open **Keys → Add key → Create new key → JSON** and download the key to a trusted workstation as `agent-key.json`. Service-account key creation can be prohibited by the `iam.disableServiceAccountKeyCreation` organization policy. If blocked, ask your organization administrator to approve an exemption. Google does not allow an existing private key to be downloaded again.
+
+With gcloud, create the key using:
+
+```bash
+umask 077
+gcloud iam service-accounts keys create agent-key.json \
+  --iam-account="$GAR_AGENT_SA" --project="$GAR_PROJECT_ID"
+```
+
+Encode the **complete JSON document** as one line. These commands work on macOS and Linux; use a new output filename if `gar-credentials.env` already exists:
+
+```bash
+umask 077
+printf 'GAR_AGENT_KEY_BASE64=%s\n' \
+  "$(base64 < agent-key.json | tr -d '\r\n')" > gar-credentials.env
+chmod 600 gar-credentials.env
+```
+
+`umask 077` makes newly created files private to your user; `chmod 600` explicitly restricts the output to owner read/write access. Base64 is not encryption. Treat both files as private keys: never commit them or paste them into chat.
+
+### Configure Techulus
+
+Securely copy the encoded value into the deployment `.env` or installer and add the repository path:
+
+```env
+GAR_REPOSITORY=us-central1-docker.pkg.dev/google-project-id/techulus-images
+GAR_AGENT_KEY_BASE64=<base64 Writer service-account JSON>
+```
+
+`GAR_REPOSITORY` must not include a scheme, image path, tag, or digest. The health endpoint returns 503 when a mandatory GAR value is missing or malformed. After securely transferring the credential, delete temporary files:
+
+```bash
+rm agent-key.json gar-credentials.env
+```
+
+The control plane includes this credential in each agent's encrypted registry bundle. BuildKit uses it to push images and Podman uses it to pull deployments. TLS verification is always enabled. Static repository-scoped keys are intentional because builds can outlast GAR OAuth access tokens.
+
+## Cleanup policy
+
+The tracked [`deployment/gar-cleanup-policy.json`](https://github.com/techulus/cloud/blob/main/deployment/gar-cleanup-policy.json) defines exactly two repository-wide rules:
+
+- keep the 10 most recent versions of every package, with no package-prefix filter;
+- delete versions in any tag state once they are older than 30 days.
+
+Keep policies take precedence over delete policies. A version outside the newest 10 remains available until it is older than 30 days. GAR evaluates age from version creation time.
+
+<Warning>
+  This policy is intentionally independent of deployments. An active or rollback image can disappear when it falls outside a package's newest 10 versions and becomes older than 30 days. Failed and undeployed builds count toward version history. Multi-platform images create multiple registry versions, so 10 versions does not mean 10 builds or rollouts. The newest versions of deleted services remain, and a seven-day service/data restore does not guarantee that its image is still available.
+</Warning>
+
+In the repository's cleanup settings, use **Dry run** and configure:
+
+| Name | Action | Condition |
+| --- | --- | --- |
+| `keep-most-recent-ten-versions` | Keep most recent versions | Keep count `10`, no package prefixes |
+| `delete-versions-after-thirty-days` | Delete | Tag state `Any`, older than `30 days` |
+
+The operator applying policies needs Artifact Registry Administrator permissions. From a Techulus checkout, the equivalent gcloud command is:
+
+```bash
+gcloud artifacts repositories set-cleanup-policies "$GAR_REPOSITORY_ID" \
+  --project="$GAR_PROJECT_ID" \
+  --location="$GAR_LOCATION" \
+  --policy=deployment/gar-cleanup-policy.json \
+  --dry-run
+```
+
+GAR evaluates cleanup asynchronously, generally within one day. Enable Artifact Registry Data Write audit logs, wait for a dry-run cycle, and inspect proposed `BatchDeleteVersions` operations. When correct, switch to **Delete artifacts** in Console or run the same command with `--no-dry-run`.
+
+### Updating an existing repository
+
+After deploying the code that no longer manages GAR tags, replace the old protected-tag Keep rule with the tracked policy; Techulus does not update cloud policies automatically. Then remove `GAR_ADMIN_KEY_BASE64` from the deployment environment and revoke/delete the unused Repository Administrator service-account key. Remove the account or its repository role if it has no other purpose. There is no compatibility or migration automation.
+
+## Upgrading from the bundled registry
+
+This is a clean beta cutover. Techulus does not copy old images or rewrite persisted image references. Configure GAR and the Writer key before upgrading. Existing source-built revisions then point to an unavailable old registry and every source-backed service must be rebuilt before it can deploy from GAR.
+
+The upgrade removes the old registry container but leaves its Docker volume. After verifying the upgrade and deciding rollback data is no longer needed, inspect and explicitly remove the orphaned volume:
+
+```bash
+docker volume ls --filter name=registry-data
+docker volume rm <exact-volume-name>
+```
+
+Volume deletion is irreversible and is never performed automatically.
 
 ## Global custom registries
 
-Administrators can add private registry credentials under **Settings → Registries**. A registry host (including an explicit port, when required) is globally unique and cannot include a scheme or path. Docker Hub aliases are treated as the same host, and hosts used by the built-in registry configuration are reserved.
+Administrators can add credentials for user-supplied private images under **Settings → Registries**. A host, including an explicit port when needed, is globally unique and cannot include a scheme or path. The GAR system host is reserved.
 
-Registry changes are transactionally queued for every registered agent, including offline agents. Registry entries cannot be edited after creation. To change a username, password, or TLS setting, delete the registry and add it again. Deleting an entry removes it from the next complete bundle. Use pull-only robot or service-account tokens wherever possible.
-
-Passwords are write-only in the control plane UI. The control plane validates image reference syntax but neither decrypts custom registry passwords nor contacts registries to test them. An agent's actual image pull is the authoritative credential and image availability check.
-
-TLS certificate verification is enabled by default. Disable it only for a deliberately trusted registry using a private or self-signed certificate: doing so allows credential interception if the network is compromised.
-
-The TLS setting applies to agent-managed Podman pulls, build exports, and manifest operations. Dockerfile `FROM` pulls are resolved by the separate BuildKit daemon; using an insecure registry there also requires configuring that host in BuildKit's daemon configuration. Credentials for TLS-verified registries are forwarded to BuildKit automatically.
-
-## Storage
-
-Images are stored on the local filesystem in a persistent Docker volume (`registry-data`). Delete operations are enabled for garbage collection.
-
-### Garbage collection
-
-Garbage collection removes blobs that are no longer referenced by a manifest. It does not choose which tagged images to retain. Delete unwanted tags first, then run garbage collection to reclaim their storage.
-
-Registry 3 is required because its `--delete-untagged` behavior safely preserves manifests referenced by retained multi-platform indexes. Failed or interrupted builds can leave digest-only artifacts until the next weekly collection (between 0 and 7 days). Techulus Cloud does not install or schedule garbage collection automatically.
-
-#### Preview garbage collection
-
-You can run a dry run while the registry is serving traffic:
-
-```bash
-REGISTRY=techulus-cloud-registry-1
-
-docker exec "$REGISTRY" \
-  /bin/registry garbage-collect \
-  --dry-run \
-  --delete-untagged \
-  /etc/distribution/config.yml
-```
-
-`--delete-untagged` removes untagged manifests so that their unreferenced blobs can also be collected.
-
-#### Run garbage collection
-
-Garbage collection must not race with image pushes. The following maintenance script stops the registry while collecting, so the registry is briefly unavailable. It prevents overlapping runs and restarts the registry if garbage collection fails. Builds overlapping this window may fail, and transient platform manifests not yet referenced by an index can be collected; retry the build after maintenance. Snapshot registry storage before the first Registry 3 collection.
-
-Install it as `/usr/local/sbin/techulus-registry-gc` on the control-plane server:
-
-```bash
-cat >/usr/local/sbin/techulus-registry-gc <<'EOF'
-#!/bin/sh
-set -eu
-
-exec 9>/run/lock/techulus-registry-gc.lock
-/usr/bin/flock -n 9 || exit 0
-
-REGISTRY=${REGISTRY_CONTAINER:-techulus-cloud-registry-1}
-IMAGE=$(/usr/bin/docker inspect --format '{{.Config.Image}}' "$REGISTRY")
-
-restart_registry() {
-    /usr/bin/docker start "$REGISTRY" >/dev/null 2>&1 || true
-}
-
-trap restart_registry EXIT
-trap 'exit 1' HUP INT TERM
-
-/usr/bin/docker stop "$REGISTRY"
-/usr/bin/docker run --rm \
-    --volumes-from "$REGISTRY" \
-    --entrypoint /bin/registry \
-    "$IMAGE" \
-    garbage-collect \
-    --delete-untagged \
-    /etc/distribution/config.yml
-
-restart_registry
-trap - EXIT HUP INT TERM
-EOF
-
-chmod 0755 /usr/local/sbin/techulus-registry-gc
-```
-
-Run it manually with:
-
-```bash
-/usr/local/sbin/techulus-registry-gc
-```
-
-#### Schedule weekly garbage collection
-
-To run garbage collection every Sunday at 03:00, create `/etc/cron.d/techulus-registry-gc` manually:
-
-```cron
-SHELL=/bin/sh
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-0 3 * * 0 root /usr/local/sbin/techulus-registry-gc 2>&1 | /usr/bin/logger -t techulus-registry-gc
-```
-
-View scheduled-run output with:
-
-```bash
-journalctl -t techulus-registry-gc
-```
-
-#### Verify garbage collection
-
-After garbage collection, wait for the registry to report `healthy`, pull a known retained multi-platform tag on every supported platform, inspect its index, and check storage usage:
-
-```bash
-docker inspect --format '{{.State.Health.Status}}' techulus-cloud-registry-1
-docker pull --platform linux/amd64 REGISTRY/IMAGE:TAG
-docker pull --platform linux/arm64 REGISTRY/IMAGE:TAG
-docker buildx imagetools inspect REGISTRY/IMAGE:TAG
-docker run --rm --volumes-from techulus-cloud-registry-1 alpine du -sh /var/lib/registry
-```
+Changes are queued for every registered agent, including offline agents. Entries cannot be edited; delete and recreate one to change its username, password, or TLS setting. Use pull-only robot or service-account credentials where possible. Passwords are write-only in the UI, and an actual agent pull remains the authoritative availability check.

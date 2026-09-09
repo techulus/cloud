@@ -9,7 +9,7 @@ import {
 	canonicalGitHubRepository,
 	resolvePersistedSourceFromRows,
 } from "@/lib/public-api";
-import { resolveRegistryImageHost } from "@/lib/registry-reference";
+import { resolveGarConfiguration } from "@/lib/registry-reference";
 import type { ServiceRevisionActor } from "@/lib/service-revision-actor";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import {
@@ -115,11 +115,11 @@ async function queueResolvedBuild(
 		throw new Error("Build Git ref does not match the service");
 	}
 
-	const registryHost = resolveRegistryImageHost();
+	const imageBase = resolveGarConfiguration().imageBase;
 	const serviceRevisionId = input.idempotencyKey
 		? deterministicRevisionId(input.idempotencyKey)
 		: randomUUID();
-	const image = `${registryHost}/${service.projectId}/${service.id}:revision-${serviceRevisionId}`;
+	const image = `${imageBase}/${service.projectId}/${service.id}:revision-${serviceRevisionId}`;
 
 	await createGitHubBuildServiceRevision({
 		id: serviceRevisionId,

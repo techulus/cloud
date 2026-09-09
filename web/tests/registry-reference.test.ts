@@ -4,8 +4,21 @@ import {
 	normalizeImageReference,
 	parseRegistryEndpoint,
 	registryAuthKey,
-	resolveRegistryImageHost,
+	resolveGarConfiguration,
 } from "@/lib/registry-reference";
+
+function serviceAccount(projectId: string) {
+	return Buffer.from(
+		JSON.stringify({
+			type: "service_account",
+			project_id: projectId,
+			private_key:
+				"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+			client_email: `techulus@${projectId}.iam.gserviceaccount.com`,
+			token_uri: "https://oauth2.googleapis.com/token",
+		}),
+	).toString("base64");
+}
 
 describe("registry references", () => {
 	it.each([
@@ -32,12 +45,48 @@ describe("registry references", () => {
 		expect(parseRegistryEndpoint("https://REGISTRY.example:5443")).toBe(
 			"registry.example:5443",
 		));
-	it("canonicalizes the configured public image host", () =>
+	it("parses a complete GAR configuration", () => {
+		const key = serviceAccount("google-project");
 		expect(
-			resolveRegistryImageHost({
-				REGISTRY_HOST: "https://REGISTRY.example:5443",
+			resolveGarConfiguration({
+				GAR_REPOSITORY:
+					"us-central1-docker.pkg.dev/google-project/techulus-images",
+				GAR_AGENT_KEY_BASE64: key,
 			}),
-		).toBe("registry.example:5443"));
+		).toMatchObject({
+			host: "us-central1-docker.pkg.dev",
+			imageBase: "us-central1-docker.pkg.dev/google-project/techulus-images",
+			agentKeyBase64: key,
+		});
+	});
+	it.each([
+		"https://us-central1-docker.pkg.dev/google-project/techulus",
+		"us-central1-docker.pkg.dev/google-project",
+		"us-central1-docker.pkg.dev/google-project/techulus/extra",
+		"registry.example.com/google-project/techulus",
+		"us-central1-docker.pkg.dev/Google-Project/techulus",
+	])("rejects invalid GAR repository %s", (repository) => {
+		const key = serviceAccount("google-project");
+		expect(() =>
+			resolveGarConfiguration({
+				GAR_REPOSITORY: repository,
+				GAR_AGENT_KEY_BASE64: key,
+			}),
+		).toThrow("GAR_REPOSITORY");
+	});
+	it("rejects malformed or non-service-account keys without exposing content", () => {
+		const malformed = Buffer.from('{"type":"authorized_user"}').toString(
+			"base64",
+		);
+		expect(() =>
+			resolveGarConfiguration({
+				GAR_REPOSITORY: "us-central1-docker.pkg.dev/google-project/techulus",
+				GAR_AGENT_KEY_BASE64: malformed,
+			}),
+		).toThrow(
+			"GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key",
+		);
+	});
 	it("uses Docker's special auth key", () =>
 		expect(registryAuthKey("docker.io")).toBe("https://index.docker.io/v1/"));
 	it.each([

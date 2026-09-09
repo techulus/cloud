@@ -15,24 +15,6 @@ services:
       timeout: 5s
       retries: 5
 
-  registry:
-    build:
-      context: ./registry
-      dockerfile: Dockerfile
-    environment:
-      REGISTRY_USERNAME: docker
-      REGISTRY_PASSWORD: docker
-    ports:
-      - "5002:5000"
-    volumes:
-      - registry-data:/var/lib/registry
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/debug/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
   victoria-logs:
     image: victoriametrics/victoria-logs:v1.51.0
     ports:
@@ -83,7 +65,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  registry-data:
   victoria-logs-data:
   victoria-metrics-data:
   postgres_data:

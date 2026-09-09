@@ -75,6 +75,17 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
+const SERVICE_ACCOUNT_KEY = Buffer.from(
+	JSON.stringify({
+		type: "service_account",
+		project_id: "google-project",
+		private_key:
+			"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+		client_email: "techulus@google-project.iam.gserviceaccount.com",
+		token_uri: "https://oauth2.googleapis.com/token",
+	}),
+).toString("base64");
+
 vi.mock("@/db", () => ({ db: mocks.db }));
 vi.mock("@/db/queries", () => ({ getSetting: mocks.getSetting }));
 vi.mock("@/lib/github", () => ({
@@ -199,7 +210,9 @@ describe("preview service cloning", () => {
 		mocks.getSetting.mockResolvedValue("apps.example.com");
 		mocks.updateGitHubDeploymentStatus.mockResolvedValue(undefined);
 		mocks.upsertGitHubPullRequestComment.mockResolvedValue(501);
-		process.env.REGISTRY_HOST = "registry.example.com";
+		process.env.GAR_REPOSITORY =
+			"us-central1-docker.pkg.dev/google-project/techulus-images";
+		process.env.GAR_AGENT_KEY_BASE64 = SERVICE_ACCOUNT_KEY;
 	});
 
 	it("copies runtime configuration and secrets but not automation", async () => {

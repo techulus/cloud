@@ -62,7 +62,7 @@ var composeManifestPaths = []string{
 	"deployment/compose.postgres.yml",
 }
 
-var imageNames = []string{"web", "registry", "updater"}
+var imageNames = []string{"web", "updater"}
 
 const maxReleaseManifestSize = 1024 * 1024
 
@@ -275,7 +275,6 @@ func manifestEnvSettings(targetVersion string, manifest *releaseManifest) []envS
 	return []envSetting{
 		{key: "TECHULUS_CLOUD_VERSION", value: targetVersion},
 		{key: "TECHULUS_CLOUD_WEB_IMAGE", value: imageReference("web", manifest.Images["web"])},
-		{key: "TECHULUS_CLOUD_REGISTRY_IMAGE", value: imageReference("registry", manifest.Images["registry"])},
 		{key: "TECHULUS_CLOUD_UPDATER_IMAGE", value: imageReference("updater", manifest.Images["updater"])},
 	}
 }

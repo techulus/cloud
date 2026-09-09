@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => {
 		previewSyncWorkflow: { id: "preview-sync-workflow" },
 		restoreTriggerWorkflow: { id: "restore-trigger-workflow" },
 		restoreWorkflow: { id: "restore-workflow" },
-		registryArtifactRetention: { id: "registry-artifact-retention" },
 		resourceUsageCheck: { id: "resource-usage-check" },
 		rolloutWorkflow: { id: "rollout-workflow" },
 		scheduledBackupsCheck: { id: "scheduled-backups-check" },

@@ -64,7 +64,6 @@ services:
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
       - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
-      - REGISTRY_HOST=registry.${ROOT_DOMAIN}
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
@@ -88,8 +87,8 @@ services:
       - VICTORIA_LOGS_PRIVATE_URL=http://${VL_USERNAME}:${VL_PASSWORD}@victoria-logs:9428
       - VICTORIA_METRICS_URL=https://${VM_USERNAME}:${VM_PASSWORD}@metrics.${ROOT_DOMAIN}
       - VICTORIA_METRICS_PRIVATE_URL=http://${VM_USERNAME}:${VM_PASSWORD}@victoria-metrics:8428
-      - REGISTRY_URL=${REGISTRY_URL:-registry:5000}
-      - REGISTRY_HOST=registry.${ROOT_DOMAIN}
+      - GAR_REPOSITORY=${GAR_REPOSITORY:?GAR_REPOSITORY is required}
+      - GAR_AGENT_KEY_BASE64=${GAR_AGENT_KEY_BASE64:?GAR_AGENT_KEY_BASE64 is required}
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
@@ -102,8 +101,6 @@ services:
       victoria-logs:
         condition: service_started
       victoria-metrics:
-        condition: service_started
-      registry:
         condition: service_started
     labels:
       - "traefik.enable=true"
@@ -138,25 +135,6 @@ services:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s
       timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  registry:
-    image: "${TECHULUS_CLOUD_REGISTRY_IMAGE:-ghcr.io/techulus/cloud/registry:${TECHULUS_CLOUD_VERSION:?TECHULUS_CLOUD_VERSION is required}}"
-    env_file:
-      - ./.env
-    volumes:
-      - registry-data:/var/lib/registry
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.registry.rule=Host(`registry.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.registry.entrypoints=websecure"
-      - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
-      - "traefik.http.services.registry.loadbalancer.server.port=5000"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/debug/health"]
-      interval: 30s
-      timeout: 10s
       retries: 3
     restart: unless-stopped
 
@@ -235,7 +213,6 @@ services:
 
 volumes:
   letsencrypt:
-  registry-data:
   victoria-logs-data:
   victoria-metrics-data:
   inngest-data:

@@ -6,6 +6,83 @@ const HOST_PATTERN =
 const NAME_SEGMENT = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const TAG = /^[\w][\w.-]{0,127}$/;
 const DIGEST = /^[A-Za-z][A-Za-z0-9_+.-]*:[0-9a-fA-F]{32,256}$/;
+const GAR_REPOSITORY =
+	/^([a-z0-9-]+)-docker\.pkg\.dev\/([a-z][a-z0-9-]{4,28}[a-z0-9])\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)$/;
+
+export type GarConfiguration = {
+	host: string;
+	imageBase: string;
+	agentKeyBase64: string;
+};
+
+function parseServiceAccountKey(value: string | undefined): string {
+	try {
+		if (
+			!value ||
+			value !== value.trim() ||
+			!/^[A-Za-z0-9+/]+={0,2}$/.test(value)
+		)
+			throw new Error("invalid base64");
+		const decoded = Buffer.from(value, "base64");
+		if (
+			decoded.length === 0 ||
+			decoded.toString("base64").replace(/=+$/, "") !== value.replace(/=+$/, "")
+		)
+			throw new Error("invalid base64");
+		const credentials: unknown = JSON.parse(decoded.toString("utf8"));
+		if (
+			!credentials ||
+			typeof credentials !== "object" ||
+			(credentials as Record<string, unknown>).type !== "service_account" ||
+			typeof (credentials as Record<string, unknown>).project_id !== "string" ||
+			!(credentials as Record<string, string>).project_id ||
+			typeof (credentials as Record<string, unknown>).private_key !==
+				"string" ||
+			!(credentials as Record<string, string>).private_key.includes(
+				"BEGIN PRIVATE KEY",
+			) ||
+			typeof (credentials as Record<string, unknown>).client_email !==
+				"string" ||
+			!(credentials as Record<string, string>).client_email ||
+			typeof (credentials as Record<string, unknown>).token_uri !== "string" ||
+			!(credentials as Record<string, string>).token_uri
+		) {
+			throw new Error("invalid service account");
+		}
+		return value;
+	} catch {
+		throw new Error(
+			"GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key",
+		);
+	}
+}
+
+export function resolveGarConfiguration(
+	env: Record<string, string | undefined> = process.env,
+): GarConfiguration {
+	const imageBase = env.GAR_REPOSITORY;
+	if (!imageBase)
+		throw new Error("GAR_REPOSITORY environment variable is required");
+	if (imageBase !== imageBase.trim() || imageBase.includes("://")) {
+		throw new Error(
+			"GAR_REPOSITORY must be <location>-docker.pkg.dev/<project>/<repository>",
+		);
+	}
+	const match = GAR_REPOSITORY.exec(imageBase);
+	if (!match) {
+		throw new Error(
+			"GAR_REPOSITORY must be <location>-docker.pkg.dev/<project>/<repository>",
+		);
+	}
+	const [, location, googleProjectId, repositoryId] = match;
+	if (!location || !googleProjectId || !repositoryId)
+		throw new Error("Invalid GAR_REPOSITORY");
+	return {
+		host: `${location}-docker.pkg.dev`,
+		imageBase,
+		agentKeyBase64: parseServiceAccountKey(env.GAR_AGENT_KEY_BASE64),
+	};
+}
 
 export function canonicalizeRegistryHost(host: string): string {
 	const value = host.trim();
@@ -59,14 +136,6 @@ export function parseRegistryEndpoint(endpoint: string): string {
 		);
 	}
 	return canonicalizeRegistryHost(url.host);
-}
-
-export function resolveRegistryImageHost(
-	env: Record<string, string | undefined> = process.env,
-): string {
-	const host = env.REGISTRY_HOST;
-	if (!host) throw new Error("REGISTRY_HOST environment variable is required");
-	return parseRegistryEndpoint(host);
 }
 
 export function registryAuthKey(host: string): string {
