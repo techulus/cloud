@@ -54,7 +54,7 @@ Agents can build container images directly from GitHub sources:
 3. Clone the repository using a GitHub App installation token.
 4. Run Railpack to generate a build plan, or use the existing Dockerfile.
 5. Build the image with BuildKit.
-6. Push the image to the registry.
+6. Push the image to the installation's user-owned Google Artifact Registry repository using the Writer credential supplied by the control plane.
 7. Update build status.
 
 Build logs stream to VictoriaLogs in real time.
@@ -78,13 +78,13 @@ The agent continues periodic status reports while long polling. If the wait
 endpoint or PostgreSQL notification listener is unavailable, the agent backs off
 and queued work is still discovered through the next status report.
 
-| Type | Description |
-| --- | --- |
-| `restart` | Restart a specific container |
-| `stop` | Stop a specific container |
-| `force_cleanup` | Force remove containers for a service |
-| `cleanup_volumes` | Remove volume directories for a service |
-| `deploy` | Handled through expected-state reconciliation |
+| Type              | Description                                   |
+| ----------------- | --------------------------------------------- |
+| `restart`         | Restart a specific container                  |
+| `stop`            | Stop a specific container                     |
+| `force_cleanup`   | Force remove containers for a service         |
+| `cleanup_volumes` | Remove volume directories for a service       |
+| `deploy`          | Handled through expected-state reconciliation |
 
 ## Serverless Gateway
 

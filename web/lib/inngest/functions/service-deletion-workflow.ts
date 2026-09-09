@@ -31,10 +31,6 @@ import {
 	markDeploymentRemoved,
 	observedReadyPhases,
 } from "@/lib/deployment-status";
-import {
-	cleanupRegistryArtifactsForService,
-	prepareRegistryArtifactCleanup,
-} from "@/lib/registry-retention";
 import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
 import { enqueueWork } from "@/lib/work-queue";
@@ -746,7 +742,9 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 	async ({ step }) => {
 		await step.run("purge-expired-deleted-services", async () => {
 			const expiredServices = await db
-				.select({ id: services.id })
+				.select({
+					id: services.id,
+				})
 				.from(services)
 				.where(
 					and(
@@ -785,18 +783,9 @@ export const expiredDeletedServicesPurge = inngest.createFunction(
 							)
 							.returning({ id: services.id })
 							.then((rows) => rows[0]);
-						if (!claimed) return undefined;
-						return {
-							...claimed,
-							registryCleanupReady: await prepareRegistryArtifactCleanup(
-								tx,
-								service.id,
-							),
-						};
+						return claimed;
 					});
 					if (!claimed) continue;
-					if (!claimed.registryCleanupReady) continue;
-					await cleanupRegistryArtifactsForService(service.id);
 					const backups = await db
 						.select({ id: volumeBackups.id })
 						.from(volumeBackups)

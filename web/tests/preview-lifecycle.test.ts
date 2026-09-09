@@ -47,8 +47,6 @@ const mocks = vi.hoisted(() => {
 		txSelectResults,
 		dbSelectResults,
 		db,
-		prepareRegistryArtifactCleanup: vi.fn(),
-		cleanupRegistryArtifactsForService: vi.fn(),
 		inactivatePreviewGitHubDeployments: vi.fn(),
 		enqueueReconcileForAllOnlineServers: vi.fn(),
 	};
@@ -67,10 +65,6 @@ vi.mock("@/lib/inngest/events", () => ({
 vi.mock("@/lib/preview-deployments", () => ({
 	inactivatePreviewGitHubDeployments: mocks.inactivatePreviewGitHubDeployments,
 }));
-vi.mock("@/lib/registry-retention", () => ({
-	prepareRegistryArtifactCleanup: mocks.prepareRegistryArtifactCleanup,
-	cleanupRegistryArtifactsForService: mocks.cleanupRegistryArtifactsForService,
-}));
 vi.mock("@/lib/work-queue", () => ({
 	enqueueReconcileForAllOnlineServers:
 		mocks.enqueueReconcileForAllOnlineServers,
@@ -84,13 +78,13 @@ describe("preview deletion", () => {
 		vi.clearAllMocks();
 		mocks.txSelectResults.length = 0;
 		mocks.dbSelectResults.length = 0;
-		mocks.prepareRegistryArtifactCleanup.mockResolvedValue(true);
-		mocks.cleanupRegistryArtifactsForService.mockResolvedValue(undefined);
 	});
 	afterEach(() => vi.restoreAllMocks());
 
 	it("hard-deletes the service when GitHub inactivation fails", async () => {
-		mocks.txSelectResults.push([{ service: { id: "preview-service" } }]);
+		mocks.txSelectResults.push([
+			{ service: { id: "preview-service", projectId: "project-1" } },
+		]);
 		mocks.dbSelectResults.push([]);
 		mocks.inactivatePreviewGitHubDeployments.mockRejectedValue(
 			new Error("GitHub unavailable"),

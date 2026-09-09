@@ -32,9 +32,8 @@ func validManifest() releaseManifest {
 			"deployment/compose.postgres.yml":   checksum,
 		},
 		Images: map[string]string{
-			"web":      digest,
-			"registry": digest,
-			"updater":  digest,
+			"web":     digest,
+			"updater": digest,
 		},
 	}
 }
@@ -211,7 +210,6 @@ func TestUpdateEnvWritesManifestImageReferences(t *testing.T) {
 		"ROOT_DOMAIN=cloud.example.com",
 		"TECHULUS_CLOUD_VERSION=" + testVersion,
 		"TECHULUS_CLOUD_WEB_IMAGE=ghcr.io/techulus/cloud/web@" + manifest.Images["web"],
-		"TECHULUS_CLOUD_REGISTRY_IMAGE=ghcr.io/techulus/cloud/registry@" + manifest.Images["registry"],
 		"TECHULUS_CLOUD_UPDATER_IMAGE=ghcr.io/techulus/cloud/updater@" + manifest.Images["updater"],
 	}
 	for _, line := range expected {

@@ -51,7 +51,7 @@ verify_dns() {
     local timeout=300
     local interval=10
     local elapsed=0
-    local domains=("$domain" "registry.$domain" "logs.$domain")
+    local domains=("$domain" "logs.$domain")
 
     if ! command -v dig &>/dev/null; then
         log_info "Installing dnsutils..."
@@ -279,7 +279,7 @@ download_compose_files() {
 
     local manifest_path commit
     local production_checksum postgres_checksum
-    local web_digest registry_digest updater_digest
+    local web_digest updater_digest
     temp_dir="$(mktemp -d "${DEPLOY_DIR}/.install-staging.XXXXXX")"
     trap 'rm -rf "${temp_dir:-}"' EXIT
     manifest_path="${temp_dir}/release-manifest.json"
@@ -290,7 +290,7 @@ download_compose_files() {
         .version == $version and
         (.commit | test("^[0-9a-f]{40}$")) and
         ([.composeFiles["deployment/compose.production.yml"], .composeFiles["deployment/compose.postgres.yml"]] | all(test("^[0-9a-f]{64}$"))) and
-        ([.images.web, .images.registry, .images.updater] | all(test("^sha256:[0-9a-f]{64}$")))
+        ([.images.web, .images.updater] | all(test("^sha256:[0-9a-f]{64}$")))
     ' "$manifest_path" >/dev/null; then
         log_error "Release manifest is missing required or valid fields"
         exit 1
@@ -300,7 +300,6 @@ download_compose_files() {
     production_checksum="$(jq -r '.composeFiles["deployment/compose.production.yml"]' "$manifest_path")"
     postgres_checksum="$(jq -r '.composeFiles["deployment/compose.postgres.yml"]' "$manifest_path")"
     web_digest="$(jq -r '.images.web' "$manifest_path")"
-    registry_digest="$(jq -r '.images.registry' "$manifest_path")"
     updater_digest="$(jq -r '.images.updater' "$manifest_path")"
 
     curl -fsSL "${RAW_BASE_URL}/${commit}/deployment/compose.production.yml" -o "${temp_dir}/compose.production.yml"
@@ -311,7 +310,6 @@ download_compose_files() {
     mv "${temp_dir}/compose.production.yml" "${DEPLOY_DIR}/compose.production.yml"
     mv "${temp_dir}/compose.postgres.yml" "${DEPLOY_DIR}/compose.postgres.yml"
     TECHULUS_CLOUD_WEB_IMAGE="ghcr.io/techulus/cloud/web@${web_digest}"
-    TECHULUS_CLOUD_REGISTRY_IMAGE="ghcr.io/techulus/cloud/registry@${registry_digest}"
     TECHULUS_CLOUD_UPDATER_IMAGE="ghcr.io/techulus/cloud/updater@${updater_digest}"
 
     rm -rf "$temp_dir"
@@ -341,6 +339,55 @@ prompt_value() {
     eval "$var_name='$value'"
 }
 
+prompt_secret() {
+    local var_name="$1"
+    local prompt_text="$2"
+    local value=""
+
+    while [[ -z "$value" ]]; do
+        read -rsp "$(echo -e "${CYAN}${prompt_text}: ${NC}")" value
+        echo ""
+        if [[ -z "$value" ]]; then
+            log_warn "This value is required"
+        fi
+    done
+
+    printf -v "$var_name" '%s' "$value"
+}
+
+read_env_value() {
+    local key="$1"
+    local path="$2"
+    awk -v key="$key" '
+        index($0, key "=") == 1 { value = substr($0, length(key) + 2) }
+        END { print value }
+    ' "$path"
+}
+
+validate_gar_configuration() {
+    if [[ ! "$GAR_REPOSITORY" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[a-z][a-z0-9-]{4,28}[a-z0-9]/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+        log_error "GAR_REPOSITORY must be <location>-docker.pkg.dev/<project>/<repository>"
+        return 1
+    fi
+
+    local decoded
+    if [[ -z "${GAR_AGENT_KEY_BASE64:-}" ]] || ! decoded="$(printf '%s' "$GAR_AGENT_KEY_BASE64" | base64 --decode 2>/dev/null)"; then
+        log_error "GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key"
+        return 1
+    fi
+    if ! jq -e '
+        type == "object" and
+        .type == "service_account" and
+        (.project_id | type == "string" and length > 0) and
+        (.private_key | type == "string" and contains("BEGIN PRIVATE KEY")) and
+        (.client_email | type == "string" and length > 0) and
+        (.token_uri | type == "string" and length > 0)
+    ' >/dev/null 2>&1 <<<"$decoded"; then
+        log_error "GAR_AGENT_KEY_BASE64 must be a base64-encoded service-account JSON key"
+        return 1
+    fi
+}
+
 configure_interactive() {
     log_header "Configuration"
 
@@ -352,9 +399,8 @@ configure_interactive() {
     echo ""
     log_info "Please add the following DNS A records pointing to this server:"
     echo ""
-    echo -e "  ${BOLD}${ROOT_DOMAIN}${NC}            →  A  →  ${GREEN}${public_ip}${NC}"
-    echo -e "  ${BOLD}registry.${ROOT_DOMAIN}${NC}   →  A  →  ${GREEN}${public_ip}${NC}"
-    echo -e "  ${BOLD}logs.${ROOT_DOMAIN}${NC}       →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}${ROOT_DOMAIN}${NC}       →  A  →  ${GREEN}${public_ip}${NC}"
+    echo -e "  ${BOLD}logs.${ROOT_DOMAIN}${NC}  →  A  →  ${GREEN}${public_ip}${NC}"
     echo ""
     read -rp "$(echo -e "${YELLOW}Press Enter once you have configured DNS records...${NC}")"
     echo ""
@@ -425,13 +471,18 @@ AWS_REGION=${AWS_REGION}"
         esac
     done
 
+    echo ""
+    log_info "Google Artifact Registry configuration"
+    log_warn "GAR is required. Existing images from the bundled registry are not migrated."
+    log_warn "After an upgrade, rebuild every source-backed service to publish it to GAR."
+    prompt_value GAR_REPOSITORY "Enter GAR repository (<location>-docker.pkg.dev/<project>/<repository>)"
+    prompt_secret GAR_AGENT_KEY_BASE64 "Paste the base64 Writer service-account JSON key"
+    validate_gar_configuration
+
     VL_USERNAME="admin"
     VL_PASSWORD="$(openssl rand -hex 16)"
     VM_USERNAME="admin"
     VM_PASSWORD="$(openssl rand -hex 16)"
-    REGISTRY_USERNAME="admin"
-    REGISTRY_PASSWORD="$(openssl rand -hex 16)"
-    REGISTRY_HTTP_SECRET="$(openssl rand -hex 32)"
     INNGEST_SIGNING_KEY="$(openssl rand -hex 32)"
     INNGEST_EVENT_KEY="$(openssl rand -hex 16)"
     CONTROL_PLANE_UPDATER_TOKEN="$(openssl rand -hex 32)"
@@ -462,13 +513,16 @@ configure_from_file() {
         exit 1
     fi
 
+    GAR_REPOSITORY="$(read_env_value GAR_REPOSITORY "$src_file")"
+    GAR_AGENT_KEY_BASE64="$(read_env_value GAR_AGENT_KEY_BASE64 "$src_file")"
+    validate_gar_configuration
+
     local temp_path
     temp_path="$(mktemp "${DEPLOY_DIR}/.env.tmp.XXXXXX")"
 
     awk \
         -v version="$TECHULUS_CLOUD_VERSION" \
         -v web_image="$TECHULUS_CLOUD_WEB_IMAGE" \
-        -v registry_image="$TECHULUS_CLOUD_REGISTRY_IMAGE" \
         -v updater_image="$TECHULUS_CLOUD_UPDATER_IMAGE" '
         /^TECHULUS_CLOUD_VERSION=/ {
             if (!version_written++) print "TECHULUS_CLOUD_VERSION=" version
@@ -476,10 +530,6 @@ configure_from_file() {
         }
         /^TECHULUS_CLOUD_WEB_IMAGE=/ {
             if (!web_written++) print "TECHULUS_CLOUD_WEB_IMAGE=" web_image
-            next
-        }
-        /^TECHULUS_CLOUD_REGISTRY_IMAGE=/ {
-            if (!registry_written++) print "TECHULUS_CLOUD_REGISTRY_IMAGE=" registry_image
             next
         }
         /^TECHULUS_CLOUD_UPDATER_IMAGE=/ {
@@ -490,7 +540,6 @@ configure_from_file() {
         END {
             if (!version_written) print "TECHULUS_CLOUD_VERSION=" version
             if (!web_written) print "TECHULUS_CLOUD_WEB_IMAGE=" web_image
-            if (!registry_written) print "TECHULUS_CLOUD_REGISTRY_IMAGE=" registry_image
             if (!updater_written) print "TECHULUS_CLOUD_UPDATER_IMAGE=" updater_image
         }
     ' "$src_file" > "$temp_path"
@@ -520,10 +569,8 @@ VM_USERNAME=${VM_USERNAME}
 VM_PASSWORD=${VM_PASSWORD}
 VM_RETENTION=30d
 
-REGISTRY_URL=registry:5000
-REGISTRY_USERNAME=${REGISTRY_USERNAME}
-REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
-REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
+GAR_REPOSITORY=${GAR_REPOSITORY}
+GAR_AGENT_KEY_BASE64=${GAR_AGENT_KEY_BASE64}
 
 INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
 INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
@@ -534,7 +581,6 @@ WEB_REPLICAS=1
 ALLOW_SIGNUP=true
 TECHULUS_CLOUD_VERSION=${TECHULUS_CLOUD_VERSION}
 TECHULUS_CLOUD_WEB_IMAGE=${TECHULUS_CLOUD_WEB_IMAGE}
-TECHULUS_CLOUD_REGISTRY_IMAGE=${TECHULUS_CLOUD_REGISTRY_IMAGE}
 TECHULUS_CLOUD_UPDATER_IMAGE=${TECHULUS_CLOUD_UPDATER_IMAGE}
 
 COMPOSE_FILE=${COMPOSE_FILE}
@@ -570,7 +616,6 @@ build_and_start() {
     echo -e "${GREEN}${BOLD}Services are starting up!${NC}"
     echo ""
     echo -e "  ${BOLD}Application:${NC}  https://${root_domain}"
-    echo -e "  ${BOLD}Registry:${NC}     https://registry.${root_domain}"
     echo -e "  ${BOLD}Logs:${NC}         https://logs.${root_domain}"
     echo ""
     echo -e "  ${BOLD}Config file:${NC}  ${DEPLOY_DIR}/.env"
@@ -609,6 +654,9 @@ main() {
 
     install_docker
     download_compose_files
+
+    log_warn "This release requires a user-owned Google Artifact Registry repository."
+    log_warn "Images in the old bundled registry are not migrated; rebuild every source-backed service after upgrading."
 
     if [[ -n "$ENV_FILE" ]]; then
         configure_from_file "$ENV_FILE"

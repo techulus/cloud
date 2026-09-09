@@ -16,7 +16,7 @@ An open container deployment platform. See README.md for architecture.
 - `agent/` — Go server agent (Podman, Traefik, WireGuard)
 - `cli/` — Go CLI
 - `deployment/` — production Compose files and updater
-- `proxy/`, `registry/`, `logging/` — supporting service configs
+- `proxy/`, `logging/` — supporting service configs
 - `docs/` — documentation
 
 ## Commands

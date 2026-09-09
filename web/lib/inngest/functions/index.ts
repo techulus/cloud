@@ -13,7 +13,6 @@ export {
 	serviceCommandRetention,
 	serviceCronDispatcher,
 	oldBackupsCleanup,
-	registryArtifactRetention,
 	scheduledBackupsCheck,
 	scheduledDeploymentsCheck,
 	staleItemsCleanup,

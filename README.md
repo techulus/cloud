@@ -15,14 +15,15 @@ A container deployment platform with private-first networking.
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Control Plane | Next.js (full-stack) |
-| Database | PostgreSQL + Drizzle |
-| Server Agent | Go |
-| Container Runtime | Podman |
-| Reverse Proxy | Traefik |
-| Private Network | WireGuard |
+| Component             | Technology                          |
+| --------------------- | ----------------------------------- |
+| Control Plane         | Next.js (full-stack)                |
+| Database              | PostgreSQL + Drizzle                |
+| Server Agent          | Go                                  |
+| Container Runtime     | Podman                              |
+| Reverse Proxy         | Traefik                             |
+| Private Network       | WireGuard                           |
+| Source Image Registry | User-owned Google Artifact Registry |
 
 ## How It Works
 
@@ -47,12 +48,16 @@ flowchart LR
 ```
 
 **Traffic Flow:**
+
 - **Public**: Internet → Proxy Node → Traefik (TLS) → WireGuard → Container
 - **Internal**: Container → DNS (.internal) → WireGuard → Container
 
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed documentation.
+
+Self-hosted installations require a user-owned Google Artifact Registry Docker
+repository. See the [registry setup guide](docs/infrastructure/registry.mdx).
 
 ## TODO
 

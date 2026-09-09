@@ -807,7 +807,6 @@ export const serviceRevisions = pgTable(
 			.$type<ServiceRevisionSpec>()
 			.notNull(),
 		actor: jsonb("actor").$type<ServiceRevisionActor | null>(),
-		artifactDeletedAt: timestamp("artifact_deleted_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
 			.notNull(),

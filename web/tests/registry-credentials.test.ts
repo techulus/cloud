@@ -5,33 +5,45 @@ import {
 	resolveSystemRegistryCredentials,
 } from "@/lib/registry-credentials";
 
+const SERVICE_ACCOUNT_KEY = Buffer.from(
+	JSON.stringify({
+		type: "service_account",
+		project_id: "google-project",
+		private_key:
+			"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+		client_email: "techulus@google-project.iam.gserviceaccount.com",
+		token_uri: "https://oauth2.googleapis.com/token",
+	}),
+).toString("base64");
+
 describe("registry credential bundles", () => {
 	afterEach(() => {
 		delete process.env.ENCRYPTION_KEY;
 		resetEncryptionKeyCacheForTests();
 	});
 
-	it("deduplicates built-in endpoint aliases and canonicalizes Docker Hub", () => {
+	it("creates one TLS-only GAR writer credential", () => {
 		const credentials = resolveSystemRegistryCredentials({
-			REGISTRY_HOST: "docker.io",
-			REGISTRY_URL: "https://index.docker.io",
-			REGISTRY_USERNAME: "robot",
-			REGISTRY_PASSWORD: "token",
-			REGISTRY_INSECURE: "false",
+			GAR_REPOSITORY:
+				"us-central1-docker.pkg.dev/google-project/techulus-images",
+			GAR_AGENT_KEY_BASE64: SERVICE_ACCOUNT_KEY,
 		});
 		expect(credentials).toHaveLength(1);
 		expect(credentials[0]).toMatchObject({
-			host: "docker.io",
+			host: "us-central1-docker.pkg.dev",
+			username: "_json_key_base64",
+			password: SERVICE_ACCOUNT_KEY,
 			tlsVerify: true,
 		});
 	});
 
-	it("rejects partial built-in configuration", () => {
+	it("rejects partial GAR configuration", () => {
 		expect(() =>
 			resolveSystemRegistryCredentials({
-				REGISTRY_URL: "registry.example.com",
+				GAR_REPOSITORY:
+					"us-central1-docker.pkg.dev/google-project/techulus-images",
 			}),
-		).toThrow("incomplete");
+		).toThrow("GAR_AGENT_KEY_BASE64");
 	});
 
 	it("produces a deterministic opaque version independent of row ordering", async () => {

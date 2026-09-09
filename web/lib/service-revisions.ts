@@ -324,7 +324,6 @@ export async function createRolloutWithServiceRevision(
 			const baseRevision = await tx
 				.select({
 					specification: serviceRevisions.specification,
-					artifactDeletedAt: serviceRevisions.artifactDeletedAt,
 				})
 				.from(serviceRevisions)
 				.where(
@@ -342,9 +341,6 @@ export async function createRolloutWithServiceRevision(
 			);
 			if (baseSpecification.source.type !== "github") {
 				throw new Error("GitHub runtime base revision is not a GitHub build");
-			}
-			if (baseRevision.artifactDeletedAt) {
-				throw new Error("Service revision artifact is no longer available");
 			}
 			overrides = {
 				image: baseSpecification.image,
@@ -624,9 +620,6 @@ export async function createRolloutForServiceRevision(
 		}
 
 		const specification = parseServiceRevisionSpec(revision.specification);
-		if (specification.source.type === "github" && revision.artifactDeletedAt) {
-			throw new Error("Service revision artifact is no longer available");
-		}
 		if (specification.image !== artifactImageUri) {
 			throw new Error("Built artifact does not match the service revision");
 		}
