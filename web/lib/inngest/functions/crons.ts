@@ -8,6 +8,7 @@ import {
 } from "@/lib/acme-manager";
 import { cleanupOldBackups, runScheduledBackups } from "@/lib/backup-scheduler";
 import { checkAndPersistControlPlaneUpdate } from "@/lib/control-plane-updates";
+import { pruneInngestHistory } from "@/lib/inngest-retention";
 import { cleanupReadNotifications } from "@/lib/notifications";
 import { evaluateServerResourceAlerts } from "@/lib/server-resource-alerts";
 import { cleanupOldServiceCommands } from "@/lib/service-command-retention";
@@ -213,6 +214,15 @@ export const serviceCommandRetention = inngest.createFunction(
 	},
 	async ({ step }) =>
 		step.run("cleanup-service-commands", cleanupOldServiceCommands),
+);
+
+export const inngestHistoryRetention = inngest.createFunction(
+	{
+		id: "cron-inngest-history-retention",
+		triggers: [cron("30 5 * * *")],
+		singleton: { mode: "skip" },
+	},
+	async ({ step }) => step.run("prune-inngest-history", pruneInngestHistory),
 );
 
 export const previewReconciliation = inngest.createFunction(
