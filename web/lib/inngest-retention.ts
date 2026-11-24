@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Client } from "pg";
 
 export const INNGEST_RETENTION_DAYS = 30;
 
@@ -34,17 +34,29 @@ const PRUNE_STATEMENTS: [table: string, sql: string][] = [
 	],
 ];
 
-let pool: Pool | undefined;
-
 export async function pruneInngestHistory() {
 	const connectionString = process.env.INNGEST_DATABASE_URL;
 	if (!connectionString) return { skipped: true as const };
 
-	pool ??= new Pool({ connectionString, max: 1 });
-	const deleted: Record<string, number> = {};
-	for (const [table, sql] of PRUNE_STATEMENTS) {
-		const result = await pool.query(sql, [INNGEST_RETENTION_DAYS]);
-		deleted[table] = result.rowCount ?? 0;
+	const client = new Client({ connectionString });
+	client.on("error", (error) => {
+		console.error("[inngest-retention] connection error", error);
+	});
+	await client.connect();
+	try {
+		// One transaction so now() — and therefore the cutoff — is identical for every statement.
+		await client.query("BEGIN");
+		const deleted: Record<string, number> = {};
+		for (const [table, sql] of PRUNE_STATEMENTS) {
+			const result = await client.query(sql, [INNGEST_RETENTION_DAYS]);
+			deleted[table] = result.rowCount ?? 0;
+		}
+		await client.query("COMMIT");
+		return { skipped: false as const, deleted };
+	} catch (error) {
+		await client.query("ROLLBACK").catch(() => {});
+		throw error;
+	} finally {
+		await client.end();
 	}
-	return { skipped: false as const, deleted };
 }
