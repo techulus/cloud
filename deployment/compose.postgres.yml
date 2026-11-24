@@ -113,6 +113,7 @@ services:
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_SIGNING_KEY=${INNGEST_SIGNING_KEY}
       - INNGEST_EVENT_KEY=${INNGEST_EVENT_KEY}
+      - INNGEST_DATABASE_URL=postgres://inngest:${INNGEST_SIGNING_KEY}@inngest-postgres:5432/inngest
       - CONTROL_PLANE_UPDATER_URL=http://control-plane-updater:8080
       - CONTROL_PLANE_UPDATER_TOKEN=${CONTROL_PLANE_UPDATER_TOKEN}
       - ALLOW_SIGNUP=${ALLOW_SIGNUP:-false}
@@ -207,22 +208,39 @@ services:
       retries: 3
     restart: unless-stopped
 
+  inngest-postgres:
+    image: postgres:18
+    environment:
+      - POSTGRES_USER=inngest
+      - POSTGRES_PASSWORD=${INNGEST_SIGNING_KEY:?INNGEST_SIGNING_KEY is required}
+      - POSTGRES_DB=inngest
+    volumes:
+      - inngest-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inngest -d inngest"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   inngest:
     image: inngest/inngest:v1.37.0
     env_file:
       - ./.env
     environment:
       INNGEST_LOG_LEVEL: info
-      INNGEST_SQLITE_DIR: "/data"
-    volumes:
-      - inngest-data:/data
     command:
       - "inngest"
       - "start"
       - "--sdk-url"
       - "http://web:3000/api/inngest"
+      - "--postgres-uri"
+      - "postgres://inngest:${INNGEST_SIGNING_KEY}@inngest-postgres:5432/inngest"
     depends_on:
       web:
+        condition: service_healthy
+      inngest-postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "inngest", "alpha", "doctor", "healthcheck"]
@@ -237,4 +255,4 @@ volumes:
   postgres-data:
   victoria-logs-data:
   victoria-metrics-data:
-  inngest-data:
+  inngest-postgres-data:

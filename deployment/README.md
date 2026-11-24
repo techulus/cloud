@@ -94,6 +94,15 @@ INNGEST_SIGNING_KEY=signkey-prod-<your-signing-key>
 INNGEST_EVENT_KEY=<your-event-key>
 ```
 
+Inngest stores run history in a dedicated internal `inngest-postgres` container,
+using `INNGEST_SIGNING_KEY` as its password. The control plane deletes finished
+run history older than 30 days daily. Rotating `INNGEST_SIGNING_KEY` requires
+updating the `inngest` role password in that container to match.
+
+Upgrading from the earlier SQLite setup starts Inngest with empty history; update
+while no rollouts or builds are running. The old `inngest-data` volume is no
+longer used and can be removed with `docker volume rm`.
+
 ### Edge Domain
 
 After signing in as an admin, configure **Edge Domain** under
