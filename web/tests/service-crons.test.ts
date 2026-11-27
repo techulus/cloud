@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => value),
 			innerJoin: vi.fn(() => value),
 			where: vi.fn(() => value),
+			orderBy: vi.fn(() => value),
 			limit: vi.fn(() => value),
 			set: vi.fn(() => value),
 			returning: vi.fn(() => value),
@@ -201,8 +202,13 @@ describe("service cron scheduling and requests", () => {
 			],
 			[
 				{
-					key: "CRON_BASE_URL",
-					encryptedValue: "encrypted-sensitive-value",
+					specification: revisionSpec([
+						{
+							key: "CRON_BASE_URL",
+							encryptedValue: "encrypted-sensitive-value",
+							updatedAt: "2026-08-01T00:00:00.000Z",
+						},
+					]),
 				},
 			],
 		);
@@ -238,7 +244,55 @@ describe("service cron scheduling and requests", () => {
 		expect(captured).not.toContain("/private/job");
 		expect(captured).not.toContain("encrypted-sensitive-value");
 	});
+
+	it("skips the run when the service has no active deployment", async () => {
+		const scheduledFor = new Date("2026-08-06T10:05:00Z");
+		mocks.selectResults.push(
+			[
+				{
+					cron: { schedule: "* * * * *", path: "/job" },
+					serviceId: "service-1",
+				},
+			],
+			[],
+		);
+		mocks.updateResults.push([{ id: "cron-1" }], []);
+
+		await expect(
+			executeServiceCron("cron-1", "* * * * *", scheduledFor, "scheduled"),
+		).resolves.toMatchObject({
+			stale: false,
+			status: "skipped",
+			error: "Service has no active deployment",
+		});
+		expect(mocks.decryptSecret).not.toHaveBeenCalled();
+		expect(mocks.notify).not.toHaveBeenCalled();
+	});
 });
+
+function revisionSpec(
+	secrets: { key: string; encryptedValue: string; updatedAt: string }[],
+) {
+	return {
+		schemaVersion: 2,
+		image: "nginx:1.27",
+		source: { type: "image", image: "nginx:1.27" },
+		hostname: "hello-service",
+		stateful: false,
+		serverless: {
+			enabled: false,
+			sleepAfterSeconds: 300,
+			wakeTimeoutSeconds: 300,
+		},
+		healthCheck: null,
+		startCommand: null,
+		resourceLimits: { cpuCores: null, memoryMb: null },
+		placements: [{ serverId: "server-1", count: 1 }],
+		ports: [],
+		secrets,
+		volumes: [],
+	};
+}
 
 function fakeRequest(
 	statusCode: number,

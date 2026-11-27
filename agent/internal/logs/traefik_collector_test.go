@@ -28,7 +28,11 @@ func TestTraefikCollectorProcessLineQueuesRetainedFields(t *testing.T) {
 		"msg":"ignored"
 	}`))
 
+	if len(collector.queue) != 1 || !isPublicEventID(collector.queue[0].EventID) {
+		t.Fatalf("queued entries missing a valid event ID: %#v", collector.queue)
+	}
 	want := []HTTPLogEntry{{
+		EventID:   collector.queue[0].EventID,
 		ServiceId: "service-42",
 		Host:      "api.example.com",
 		Method:    "POST",

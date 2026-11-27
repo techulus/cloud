@@ -1,6 +1,12 @@
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { builds, deployments, rollouts, servers } from "@/db/schema";
+import {
+	builds,
+	deployments,
+	rollouts,
+	servers,
+	serviceCrons,
+} from "@/db/schema";
 import { requireApiKeyDeveloperRole, requireApiKeyRole } from "@/lib/api-auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
@@ -287,30 +293,44 @@ export async function getStatus(
 	const scope = await readScope(request, context);
 	if ("response" in scope) return scope.response;
 	try {
-		const [latestRollout, latestBuild, persisted, source] = await Promise.all([
-			db
-				.select(safeRollout)
-				.from(rollouts)
-				.where(eq(rollouts.serviceId, scope.service.id))
-				.orderBy(desc(rollouts.createdAt), desc(rollouts.id))
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-			db
-				.select(safeBuild)
-				.from(builds)
-				.where(eq(builds.serviceId, scope.service.id))
-				.orderBy(desc(builds.createdAt), desc(builds.id))
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-			db
-				.select(safeDeployment)
-				.from(deployments)
-				.innerJoin(servers, eq(servers.id, deployments.serverId))
-				.where(eq(deployments.serviceId, scope.service.id))
-				.orderBy(desc(deployments.createdAt))
-				.limit(100),
-			resolvePersistedSource(scope.service),
-		]);
+		const [latestRollout, latestBuild, persisted, source, crons] =
+			await Promise.all([
+				db
+					.select(safeRollout)
+					.from(rollouts)
+					.where(eq(rollouts.serviceId, scope.service.id))
+					.orderBy(desc(rollouts.createdAt), desc(rollouts.id))
+					.limit(1)
+					.then((rows) => rows[0] ?? null),
+				db
+					.select(safeBuild)
+					.from(builds)
+					.where(eq(builds.serviceId, scope.service.id))
+					.orderBy(desc(builds.createdAt), desc(builds.id))
+					.limit(1)
+					.then((rows) => rows[0] ?? null),
+				db
+					.select(safeDeployment)
+					.from(deployments)
+					.innerJoin(servers, eq(servers.id, deployments.serverId))
+					.where(eq(deployments.serviceId, scope.service.id))
+					.orderBy(desc(deployments.createdAt))
+					.limit(100),
+				resolvePersistedSource(scope.service),
+				db
+					.select({
+						path: serviceCrons.path,
+						schedule: serviceCrons.schedule,
+						nextScheduledFor: serviceCrons.nextScheduledFor,
+						lastFinishedAt: serviceCrons.lastFinishedAt,
+						lastStatus: serviceCrons.lastStatus,
+						lastStatusCode: serviceCrons.lastStatusCode,
+						lastError: serviceCrons.lastError,
+					})
+					.from(serviceCrons)
+					.where(eq(serviceCrons.serviceId, scope.service.id))
+					.orderBy(asc(serviceCrons.path)),
+			]);
 		return Response.json({
 			target: {
 				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
@@ -328,6 +348,7 @@ export async function getStatus(
 			latestBuild: scope.service.sourceType === "github" ? latestBuild : null,
 			latestRollout,
 			deployments: persisted,
+			crons,
 		});
 	} catch (error) {
 		return internalError(error, "read status");
@@ -537,9 +558,45 @@ export function nextServiceLogCursor(
 	});
 }
 
-export async function getServiceLogs(
+// VictoriaLogs returns every field value as a string.
+function logNumber(value: number | string | null | undefined): number | null {
+	if (value === null || value === undefined || value === "") return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function publicRequestLog(log: StoredLog) {
+	return {
+		method: log.method || null,
+		path: log.path || null,
+		status: logNumber(log.status),
+		durationMs: logNumber(log.duration_ms),
+		size: logNumber(log.size),
+		clientIp: log.client_ip || null,
+		host: log.host || null,
+		timestamp: log._time,
+	};
+}
+
+export function getServiceLogs(
 	request: Request,
 	context: PublicServiceContext,
+) {
+	return serviceLogsResponse(request, context, "container", publicServiceLog);
+}
+
+export function getServiceRequests(
+	request: Request,
+	context: PublicServiceContext,
+) {
+	return serviceLogsResponse(request, context, "http", publicRequestLog);
+}
+
+async function serviceLogsResponse<T>(
+	request: Request,
+	context: PublicServiceContext,
+	logType: "container" | "http",
+	mapLog: (log: StoredLog) => T,
 ) {
 	const scope = await readScope(request, context);
 	if ("response" in scope) return scope.response;
@@ -565,7 +622,7 @@ export async function getServiceLogs(
 		const query = () =>
 			queryPublicServiceLogs({
 				serviceId: scope.service.id,
-				logType: "container",
+				logType,
 				limit: options.limit,
 				cursor: options.cursor
 					? ({
@@ -594,7 +651,7 @@ export async function getServiceLogs(
 				service: { id: scope.service.id, name: scope.service.name },
 			},
 			provider: "enabled",
-			logs: result.logs.map(publicServiceLog),
+			logs: result.logs.map(mapLog),
 			nextCursor: nextServiceLogCursor(result.logs, options.rawCursor),
 			hasMore: result.hasMore,
 			pollAfterMs: result.hasMore ? 0 : result.logs.length > 0 ? 250 : 1000,
@@ -606,7 +663,7 @@ export async function getServiceLogs(
 		}
 		if (error instanceof RangeError) return invalidLogQuery(error);
 		reportServerError(error, "public-api.service-logs.query", {
-			tags: { serviceId: scope.service.id },
+			tags: { serviceId: scope.service.id, logType },
 		});
 		return apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
 	}

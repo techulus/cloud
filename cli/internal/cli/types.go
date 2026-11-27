@@ -118,6 +118,17 @@ type statusResponse struct {
 	LatestBuild   map[string]any   `json:"latestBuild"`
 	LatestRollout map[string]any   `json:"latestRollout"`
 	Deployments   []map[string]any `json:"deployments"`
+	Crons         []cronStatus     `json:"crons"`
+}
+
+type cronStatus struct {
+	Path             string  `json:"path"`
+	Schedule         string  `json:"schedule"`
+	NextScheduledFor *string `json:"nextScheduledFor"`
+	LastFinishedAt   *string `json:"lastFinishedAt"`
+	LastStatus       *string `json:"lastStatus"`
+	LastStatusCode   *int    `json:"lastStatusCode"`
+	LastError        *string `json:"lastError"`
 }
 type serviceLog struct {
 	DeploymentID *string `json:"deploymentId"`
@@ -126,10 +137,21 @@ type serviceLog struct {
 	Timestamp    string  `json:"timestamp"`
 }
 
-type logsResponse struct {
+type requestLog struct {
+	Method     *string  `json:"method"`
+	Path       *string  `json:"path"`
+	Status     *int     `json:"status"`
+	DurationMS *float64 `json:"durationMs"`
+	Size       *int     `json:"size"`
+	ClientIP   *string  `json:"clientIp"`
+	Host       *string  `json:"host"`
+	Timestamp  string   `json:"timestamp"`
+}
+
+type logsResponse[T any] struct {
 	Target      targetContext `json:"target"`
 	Provider    string        `json:"provider"`
-	Logs        []serviceLog  `json:"logs"`
+	Logs        []T           `json:"logs"`
 	NextCursor  string        `json:"nextCursor"`
 	HasMore     bool          `json:"hasMore"`
 	PollAfterMS int           `json:"pollAfterMs"`

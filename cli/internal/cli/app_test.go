@@ -870,7 +870,7 @@ func TestCompletionAgentHelpArguments(t *testing.T) {
 
 func TestMissingIDsFailLocally(t *testing.T) {
 	writeConfig(t, "http://unused")
-	for _, command := range []string{"apply", "deploy", "status", "logs"} {
+	for _, command := range []string{"apply", "deploy", "status", "logs", "requests"} {
 		t.Run(command, func(t *testing.T) {
 			d := t.TempDir()
 			writeManifest(t, d, strings.ReplaceAll(imageManifest, "target: {serviceId: s}\n", ""))
@@ -944,7 +944,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 			var gotPath, gotQuery string
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-				w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
+				w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"crons":[{"path":"/api/cron/blob-cleanup","schedule":"0 * * * *","nextScheduledFor":"2026-11-28T09:00:00.000Z","lastFinishedAt":"2026-11-28T08:00:01.000Z","lastStatus":"failed","lastStatusCode":401,"lastError":"HTTP status 401"},{"path":"/api/cron/digest","schedule":"0 9 * * *","nextScheduledFor":"2026-11-28T09:00:00.000Z","lastFinishedAt":null,"lastStatus":null,"lastStatusCode":null,"lastError":null}],"items":[]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
@@ -966,7 +966,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 				if err := execute(app, args...); err != nil {
 					t.Fatal(err)
 				}
-				assertHumanOutput(t, out.String(), "app/prod/web", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
+				assertHumanOutput(t, out.String(), "app/prod/web", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "Crons (2)", "* /api/cron/blob-cleanup  0 * * * *  failed 401 at 2026-11-28T08:00:01.000Z", "error: HTTP status 401", "* /api/cron/digest  0 9 * * *  never run")
 			}
 			base := "/api/v1/services/s"
 			if gotPath != base+tc.path || gotQuery != tc.query {
@@ -1016,7 +1016,7 @@ func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "a868807a-42ee-4a40-99fe-cd8303036b02: 1 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deployment", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
+	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "a868807a-42ee-4a40-99fe-cd8303036b02: 1 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deploy schedule", "Deployment", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
 }
 
 func TestMetricsHumanOutputIsFormatted(t *testing.T) {
@@ -1159,6 +1159,25 @@ func TestLogsDrainAvailablePagesWithoutSleeping(t *testing.T) {
 	if !strings.Contains(out.String(), "app/prod/web") || !strings.Contains(out.String(), "same-time-a") || !strings.Contains(out.String(), "same-time-b") {
 		t.Fatalf("missing equal-timestamp logs in output:\n%s", out.String())
 	}
+}
+
+func TestRequestsFetchesHTTPLogs(t *testing.T) {
+	var path, query string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, query = r.URL.Path, r.URL.RawQuery
+		w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"provider":"enabled","logs":[{"method":"POST","path":"/v1/items","status":201,"durationMs":12.5,"clientIp":"192.0.2.10","timestamp":"2026-01-01T00:00:00Z"}],"nextCursor":"c"}`))
+	}))
+	defer s.Close()
+
+	app, out := testApp(t, t.TempDir(), s.Client())
+	err := app.runRequests(context.Background(), &auth.Config{Host: s.URL, APIKey: "secret"}, targetManifest(), 5, false, "404", "1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/v1/services/s/requests" || !strings.Contains(query, "tail=5") || !strings.Contains(query, "q=404") || !strings.Contains(query, "range=1h") {
+		t.Fatalf("path=%q query=%q", path, query)
+	}
+	assertHumanOutput(t, out.String(), "Requests (1)", "POST", "201", "12.5ms", "/v1/items", "192.0.2.10")
 }
 
 func assertHumanOutput(t *testing.T, got string, want ...string) {

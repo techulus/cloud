@@ -1,13 +1,19 @@
 import * as http from "node:http";
 import * as https from "node:https";
-import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { db } from "@/db";
-import { secrets, serviceCrons, services } from "@/db/schema";
+import {
+	deployments,
+	serviceCrons,
+	serviceRevisions,
+	services,
+} from "@/db/schema";
 import { decryptSecret } from "@/lib/crypto";
 import { notify } from "@/lib/notifications";
 import { isSafeCronPath, nextOccurrenceAfter } from "@/lib/public-api";
 import { reportOperationFailure, reportServerError } from "@/lib/server-errors";
+import { parseServiceRevisionSpec } from "@/lib/service-revision-changes";
 import { ingestCronLog, type CronLog } from "@/lib/victoria-logs";
 
 const MAX_ERROR = 500;
@@ -186,27 +192,46 @@ export async function executeServiceCron(
 	let error: string | null = null;
 	let base = "";
 	let secret: string | undefined;
+	let hasActiveDeployment = false;
 	let failureReason: "configuration_load_failed" | "request_failed" =
 		"request_failed";
 	try {
-		const values = await db
-			.select()
-			.from(secrets)
+		// Read cron settings from the active revision's secret snapshot so the
+		// caller always matches the env the running containers were deployed with.
+		const active = await db
+			.select({ specification: serviceRevisions.specification })
+			.from(deployments)
+			.innerJoin(
+				serviceRevisions,
+				and(
+					eq(serviceRevisions.id, deployments.serviceRevisionId),
+					eq(serviceRevisions.serviceId, deployments.serviceId),
+				),
+			)
 			.where(
 				and(
-					eq(secrets.serviceId, row.serviceId),
-					inArray(secrets.key, ["CRON_BASE_URL", "CRON_SECRET"]),
+					eq(deployments.serviceId, row.serviceId),
+					eq(deployments.trafficState, "active"),
 				),
+			)
+			.orderBy(desc(deployments.createdAt), desc(deployments.id))
+			.limit(1)
+			.then((rows) => rows[0]);
+		if (active) {
+			hasActiveDeployment = true;
+			const encrypted = new Map(
+				parseServiceRevisionSpec(active.specification).secrets.map((value) => [
+					value.key,
+					value.encryptedValue,
+				]),
 			);
-		const encrypted = new Map(
-			values.map((value) => [value.key, value.encryptedValue]),
-		);
-		base = encrypted.get("CRON_BASE_URL")
-			? await decryptSecret(encrypted.get("CRON_BASE_URL")!)
-			: "";
-		secret = encrypted.get("CRON_SECRET")
-			? await decryptSecret(encrypted.get("CRON_SECRET")!)
-			: undefined;
+			base = encrypted.get("CRON_BASE_URL")
+				? await decryptSecret(encrypted.get("CRON_BASE_URL")!)
+				: "";
+			secret = encrypted.get("CRON_SECRET")
+				? await decryptSecret(encrypted.get("CRON_SECRET")!)
+				: undefined;
+		}
 	} catch (cause) {
 		reportServerError(cause, "service-cron.configuration.load", {
 			tags: { cronId, serviceId: row.serviceId },
@@ -215,7 +240,10 @@ export async function executeServiceCron(
 		error = "Cron configuration could not be loaded";
 		failureReason = "configuration_load_failed";
 	}
-	if (error === null) {
+	if (error === null && !hasActiveDeployment) {
+		error = "Service has no active deployment";
+		status = "skipped";
+	} else if (error === null) {
 		try {
 			if (!base.trim()) throw new Error("CRON_BASE_URL is not configured");
 			const url = parseCronUrl(base.trim(), row.cron.path);

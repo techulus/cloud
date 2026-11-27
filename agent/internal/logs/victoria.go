@@ -126,6 +126,7 @@ func (v *VictoriaLogsSender) SendLogs(batch *LogBatch) error {
 type victoriaHTTPLogEntry struct {
 	Msg       string  `json:"_msg"`
 	Time      string  `json:"_time"`
+	EventID   string  `json:"event_id"`
 	ServiceID string  `json:"service_id"`
 	ServerID  string  `json:"server_id"`
 	Host      string  `json:"host"`
@@ -145,6 +146,7 @@ func (v *VictoriaLogsSender) SendHTTPLogs(logs []HTTPLogEntry) error {
 		entry := victoriaHTTPLogEntry{
 			Msg:       msg,
 			Time:      l.Timestamp,
+			EventID:   l.EventID,
 			ServiceID: l.ServiceId,
 			ServerID:  v.serverID,
 			Host:      l.Host,

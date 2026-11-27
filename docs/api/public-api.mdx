@@ -111,9 +111,10 @@ The paths in this table are relative to `/api/v1/services/{serviceId}`.
 | --- | --- | --- |
 | `GET`, `PUT` | `/configuration` | Read safe current/active configuration or atomically replace all managed configuration |
 | `POST` | `/configuration/plan` | Validate and plan a complete managed configuration replacement |
-| `GET` | `/status` | Read source, latest build and rollout, and persisted deployments |
+| `GET` | `/status` | Read source, latest build and rollout, persisted deployments, and service crons with their latest result |
 | `POST` | `/deploy` | Queue an image rollout or GitHub build |
 | `GET` | `/logs` | Search logs and optionally long poll |
+| `GET` | `/requests` | Search HTTP request logs and optionally long poll |
 | `GET` | `/rollouts` | List rollouts with cursor pagination |
 | `GET` | `/rollouts/{rolloutId}` | Read a contained rollout and its deployments |
 | `GET` | `/rollouts/{rolloutId}/logs` | Search bounded rollout logs |
@@ -130,7 +131,7 @@ Rollout and build collections accept `limit` from 1 through 100 and an opaque `c
 - `current` is the mutable configuration stored for the service.
 - `active` is the immutable specification used by the active deployment.
 - `activeRevisionId` and `activeDeploymentId` identify that active state.
-- `hasPendingChanges` and `changes` compare current and active state.
+- `hasPendingChanges` and `changes` compare current and active state. If any secret was added, removed, or updated since the active deployment, `changes` includes a single `secrets` entry without naming the secrets.
 - `management.patchable` and `management.blockers` explain whether the API can safely manage the service.
 
 A GitHub service keeps mutable repository settings in `current.source`. Its `active.source` comes from the immutable service revision used by the active deployment. The public projection includes the snapshotted repository, branch, and root directory. It omits repository IDs and authentication details.
@@ -318,6 +319,33 @@ Round-trip `nextCursor` without decoding or modifying it. When `hasMore` is `tru
 
 When logging is not configured, the response uses `provider: "disabled"` with an empty list. An upstream failure returns `502 LOG_PROVIDER_ERROR`. Log following returns `409 LOG_CURSOR_UNAVAILABLE` if an agent must be upgraded before it can provide deterministic cursors.
 
+### Request logs
+
+`/requests` returns HTTP request logs for the service. It accepts the same parameters and follows the same cursor, long-poll, and provider rules as service logs. `q` matches the method, path, status, client IP, or request line.
+
+```json
+{
+  "provider": "enabled",
+  "logs": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "durationMs": 1.4,
+      "size": 2,
+      "clientIp": "192.0.2.10",
+      "host": "app.example.com",
+      "timestamp": "2026-07-20T00:00:00.123456789Z"
+    }
+  ],
+  "nextCursor": "eyJ2IjoxLCJ0IjoiLi4uIiwiZSI6Ii4uLiJ9",
+  "hasMore": false,
+  "pollAfterMs": 250
+}
+```
+
+### Rollout logs
+
 Rollout logs accept `q` and `limit`. Their response includes bounded stage messages for the contained rollout.
 
 ## Metrics
@@ -342,6 +370,7 @@ The CLI uses the same endpoints documented above:
 | `tc services` | List environment services |
 | `tc status` | Show build, rollout, and deployment status |
 | `tc logs -q <text>` | Search or follow service logs |
+| `tc requests -q <text>` | Search or follow HTTP request logs |
 | `tc rollouts` | List rollout history |
 | `tc rollout <id>` | Show rollout detail |
 | `tc rollout logs <id>` | Fetch rollout logs |

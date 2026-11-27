@@ -160,6 +160,7 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(a.deployCommand())
 	root.AddCommand(a.statusCommand())
 	root.AddCommand(a.logsCommand())
+	root.AddCommand(a.requestsCommand())
 	root.AddCommand(a.projectsCommand())
 	root.AddCommand(a.environmentsCommand())
 	root.AddCommand(a.servicesCommand())
@@ -751,19 +752,41 @@ func (a *App) statusCommand() *cobra.Command {
 }
 
 func (a *App) logsCommand() *cobra.Command {
+	return a.logFeedCommand(
+		"logs",
+		"Show service logs",
+		"Without --service, tc reads the target from techulus.yml in the current directory.\nFor agent use outside a linked directory, pass --service.\nIn --agent or --json mode, logs are one-shot JSON output; --follow=true is not supported.",
+		"log lines",
+		a.runLogs,
+	)
+}
+
+func (a *App) requestsCommand() *cobra.Command {
+	return a.logFeedCommand(
+		"requests",
+		"Show service HTTP request logs",
+		"Without --service, tc reads the target from techulus.yml in the current directory.\nFor agent use outside a linked directory, pass --service.\n--query matches method, path, status, client IP, or the request line.\nIn --agent or --json mode, requests are one-shot JSON output; --follow=true is not supported.",
+		"requests",
+		a.runRequests,
+	)
+}
+
+type logFeedRunner func(ctx context.Context, config *auth.Config, value manifest.Manifest, tail int, follow bool, search, logRange string) error
+
+func (a *App) logFeedCommand(use, short, notes, noun string, run logFeedRunner) *cobra.Command {
 	var tail int
 	var follow bool
 	var query, logRange string
 	var target serviceTargetFlags
 	cmd := &cobra.Command{
-		Use:   "logs",
-		Short: "Show service logs",
+		Use:   use,
+		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "Without --service, tc reads the target from techulus.yml in the current directory.\nFor agent use outside a linked directory, pass --service.\nIn --agent or --json mode, logs are one-shot JSON output; --follow=true is not supported.",
+			"agent_notes": notes,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if tail < 1 || tail > 1000 {
-				return errors.New("log line count must be between 1 and 1000")
+				return fmt.Errorf("%s count must be between 1 and 1000", noun)
 			}
 			if a.isMachineOutput() {
 				if cmd.Flags().Changed("follow") && follow {
@@ -782,12 +805,12 @@ func (a *App) logsCommand() *cobra.Command {
 			if logRange != "" && !slices.Contains([]string{"1h", "6h", "24h", "7d"}, logRange) {
 				return errors.New("invalid log range")
 			}
-			return a.runLogs(cmd.Context(), config, value, tail, follow, query, logRange)
+			return run(cmd.Context(), config, value, tail, follow, query, logRange)
 		},
 	}
-	cmd.Flags().IntVarP(&tail, "tail", "n", defaultLogTail, "Number of log lines to fetch")
-	cmd.Flags().BoolVar(&follow, "follow", true, "Continue polling for new log lines")
-	cmd.Flags().StringVarP(&query, "query", "q", "", "Search log messages")
+	cmd.Flags().IntVarP(&tail, "tail", "n", defaultLogTail, "Number of "+noun+" to fetch")
+	cmd.Flags().BoolVar(&follow, "follow", true, "Continue polling for new "+noun)
+	cmd.Flags().StringVarP(&query, "query", "q", "", "Search "+noun)
 	cmd.Flags().StringVar(&logRange, "range", "", "Time range (1h, 6h, 24h, 7d)")
 	addServiceTargetFlags(cmd, &target)
 	return cmd
@@ -1439,44 +1462,58 @@ func cliAPIKeyName(machineName string) string {
 	return name
 }
 
+type logFeed[T any] struct {
+	path  string
+	label string
+	print func(io.Writer, []T)
+}
+
 func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.Manifest, tail int, follow bool, search, logRange string) error {
+	return runLogFeed(ctx, a, logFeed[serviceLog]{"/logs", "Logs", printLogs}, config, value, tail, follow, search, logRange)
+}
+
+func (a *App) runRequests(ctx context.Context, config *auth.Config, value manifest.Manifest, tail int, follow bool, search, logRange string) error {
+	return runLogFeed(ctx, a, logFeed[requestLog]{"/requests", "Requests", printRequestLogs}, config, value, tail, follow, search, logRange)
+}
+
+func runLogFeed[T any](ctx context.Context, a *App, feed logFeed[T], config *auth.Config, value manifest.Manifest, tail int, follow bool, search, logRange string) error {
 	client := a.client(config)
-	result, err := fetchLogs(ctx, client, value, tail, "", search, logRange)
+	result, err := fetchLogs[T](ctx, client, feed.path, value, tail, "", search, logRange)
 	if err != nil {
 		return err
 	}
 	if a.isMachineOutput() {
-		return a.writeData(result, "Logs")
+		return a.writeData(result, feed.label)
 	}
 	fmt.Fprintf(a.Out, "%s/%s/%s\n", result.Target.Project.Slug, result.Target.Environment.Name, result.Target.Service.Name)
 	if result.Provider == "disabled" {
-		output.Section(a.Out, "Logs")
+		output.Section(a.Out, feed.label)
 		output.Field(a.Out, "Status", "disabled")
 		return nil
 	}
 	if !follow && len(result.Logs) == 0 {
-		output.Section(a.Out, "Logs")
+		output.Section(a.Out, feed.label)
 		output.Field(a.Out, "Lines", "none")
 		return nil
 	}
 	if !follow {
-		output.Section(a.Out, fmt.Sprintf("Logs (%d)", len(result.Logs)))
-		printLogs(a.Out, result.Logs)
+		output.Section(a.Out, fmt.Sprintf("%s (%d)", feed.label, len(result.Logs)))
+		feed.print(a.Out, result.Logs)
 		return nil
 	}
-	output.Section(a.Out, "Logs")
+	output.Section(a.Out, feed.label)
 	if len(result.Logs) > 0 {
-		printLogs(a.Out, result.Logs)
+		feed.print(a.Out, result.Logs)
 	} else {
-		output.Field(a.Out, "Waiting", "new log lines")
+		output.Field(a.Out, "Waiting", "new "+strings.ToLower(feed.label))
 	}
 
 	cursor := result.NextCursor
 	if cursor == "" {
-		return fmt.Errorf("logs API did not return nextCursor")
+		return fmt.Errorf("%s API did not return nextCursor", strings.TrimPrefix(feed.path, "/"))
 	}
 	for {
-		next, err := fetchLogs(ctx, client, value, defaultLogTail, cursor, search, logRange)
+		next, err := fetchLogs[T](ctx, client, feed.path, value, defaultLogTail, cursor, search, logRange)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -1484,10 +1521,10 @@ func (a *App) runLogs(ctx context.Context, config *auth.Config, value manifest.M
 			return err
 		}
 		if len(next.Logs) > 0 {
-			printLogs(a.Out, next.Logs)
+			feed.print(a.Out, next.Logs)
 		}
 		if next.NextCursor == "" {
-			return fmt.Errorf("logs API did not return nextCursor")
+			return fmt.Errorf("%s API did not return nextCursor", strings.TrimPrefix(feed.path, "/"))
 		}
 		cursor = next.NextCursor
 		if next.HasMore {
@@ -1524,10 +1561,10 @@ func (a *App) sleep(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest, tail int, cursor, search, logRange string) (logsResponse, error) {
+func fetchLogs[T any](ctx context.Context, client *api.Client, path string, value manifest.Manifest, tail int, cursor, search, logRange string) (logsResponse[T], error) {
 	base, err := serviceBase(value)
 	if err != nil {
-		return logsResponse{}, err
+		return logsResponse[T]{}, err
 	}
 	query := url.Values{}
 	query.Set("tail", strconv.Itoa(tail))
@@ -1541,8 +1578,8 @@ func fetchLogs(ctx context.Context, client *api.Client, value manifest.Manifest,
 		query.Set("cursor", cursor)
 		query.Set("wait", "20")
 	}
-	var result logsResponse
-	err = client.RequestJSON(ctx, http.MethodGet, base+"/logs", query, nil, &result)
+	var result logsResponse[T]
+	err = client.RequestJSON(ctx, http.MethodGet, base+path, query, nil, &result)
 	return result, err
 }
 
@@ -1616,10 +1653,35 @@ func printStatus(w io.Writer, value manifest.Manifest, status statusResponse) {
 	output.Section(w, fmt.Sprintf("Deployments (%d)", len(status.Deployments)))
 	if len(status.Deployments) == 0 {
 		output.Field(w, "Current", "none")
-		return
 	}
 	for _, deployment := range status.Deployments {
 		printMapSummary(w, deployment)
+	}
+
+	printCronStatuses(w, status.Crons)
+}
+
+func printCronStatuses(w io.Writer, crons []cronStatus) {
+	output.Section(w, fmt.Sprintf("Crons (%d)", len(crons)))
+	if len(crons) == 0 {
+		output.Field(w, "Items", "none")
+		return
+	}
+	for _, cron := range crons {
+		result := "never run"
+		if cron.LastStatus != nil {
+			result = *cron.LastStatus
+			if cron.LastStatusCode != nil {
+				result += fmt.Sprintf(" %d", *cron.LastStatusCode)
+			}
+			if cron.LastFinishedAt != nil {
+				result += " at " + *cron.LastFinishedAt
+			}
+		}
+		fmt.Fprintf(w, "    * %s  %s  %s\n", cron.Path, cron.Schedule, result)
+		if cron.LastError != nil && *cron.LastError != "" {
+			fmt.Fprintf(w, "      error: %s\n", *cron.LastError)
+		}
 	}
 }
 
@@ -1872,11 +1934,11 @@ func printSchedules(w io.Writer, value any) {
 	if !ok {
 		return
 	}
-	printOptionalField(w, "Deploy cron", schedules["deployment"])
+	printOptionalField(w, "Deploy schedule", schedules["deployment"])
 	if backup, ok := schedules["backup"].(map[string]any); ok {
 		enabled, _ := backup["enabled"].(bool)
 		if enabled {
-			printOptionalField(w, "Backup cron", backup["schedule"])
+			printOptionalField(w, "Backup schedule", backup["schedule"])
 		} else {
 			output.Field(w, "Backups", "disabled")
 		}
@@ -2183,6 +2245,26 @@ func printLogs(w io.Writer, logs []serviceLog) {
 		message := strings.TrimRight(log.Message, "\n")
 		fmt.Fprintf(w, "%s %-9s %s\n", output.Timestamp(log.Timestamp), "["+stream+"]", message)
 	}
+}
+
+func printRequestLogs(w io.Writer, logs []requestLog) {
+	for _, log := range logs {
+		status, duration := "-", "-"
+		if log.Status != nil {
+			status = strconv.Itoa(*log.Status)
+		}
+		if log.DurationMS != nil {
+			duration = strconv.FormatFloat(*log.DurationMS, 'f', 1, 64) + "ms"
+		}
+		fmt.Fprintf(w, "%s %-7s %s %8s %s %s\n", output.Timestamp(log.Timestamp), stringOr(log.Method, "-"), status, duration, stringOr(log.Path, "-"), stringOr(log.ClientIP, ""))
+	}
+}
+
+func stringOr(value *string, fallback string) string {
+	if value == nil || *value == "" {
+		return fallback
+	}
+	return *value
 }
 
 func selectFromList[T any](

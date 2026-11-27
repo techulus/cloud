@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+var publicEventIDPattern = regexp.MustCompile(`^e[0-9]{19}[a-z]{26}$`)
+
+func isPublicEventID(id string) bool { return publicEventIDPattern.MatchString(id) }
+
 func TestNewLogEventIDIsSortableAndUnique(t *testing.T) {
 	now := time.Date(2026, time.July, 20, 12, 0, 0, 123456789, time.UTC)
 	first, err := newLogEventID(now)
@@ -22,11 +26,10 @@ func TestNewLogEventIDIsSortableAndUnique(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pattern := regexp.MustCompile(`^e[0-9]{19}[a-z]{26}$`)
-	if !pattern.MatchString(first) {
+	if !isPublicEventID(first) {
 		t.Fatalf("event ID %q does not match the public cursor format", first)
 	}
-	if !pattern.MatchString(second) {
+	if !isPublicEventID(second) {
 		t.Fatalf("event ID %q does not match the public cursor format", second)
 	}
 	if first == second {
@@ -48,23 +51,40 @@ func TestVictoriaLogsSenderPreservesEventID(t *testing.T) {
 	defer server.Close()
 
 	sender := NewVictoriaLogsSender(server.URL, "server-1")
-	err := sender.SendLogs(&LogBatch{Logs: []LogEntry{{
-		EventID:      eventID,
-		DeploymentID: "deployment-1",
-		ServiceID:    "service-1",
-		Stream:       "stdout",
-		Message:      "ready",
-		Timestamp:    "2026-07-20T12:00:00Z",
-	}}})
-	if err != nil {
-		t.Fatal(err)
+	sends := map[string]func() error{
+		"container": func() error {
+			return sender.SendLogs(&LogBatch{Logs: []LogEntry{{
+				EventID:      eventID,
+				DeploymentID: "deployment-1",
+				ServiceID:    "service-1",
+				Stream:       "stdout",
+				Message:      "ready",
+				Timestamp:    "2026-07-20T12:00:00Z",
+			}}})
+		},
+		"http": func() error {
+			return sender.SendHTTPLogs([]HTTPLogEntry{{
+				EventID:   eventID,
+				ServiceId: "service-1",
+				Method:    "GET",
+				Path:      "/",
+				Status:    200,
+				Timestamp: "2026-07-20T12:00:00Z",
+			}})
+		},
 	}
-
-	var entry map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &entry); err != nil {
-		t.Fatal(err)
-	}
-	if got := entry["event_id"]; got != eventID {
-		t.Fatalf("event_id = %v, want %s", got, eventID)
+	for name, send := range sends {
+		t.Run(name, func(t *testing.T) {
+			if err := send(); err != nil {
+				t.Fatal(err)
+			}
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if got := entry["event_id"]; got != eventID {
+				t.Fatalf("event_id = %v, want %s", got, eventID)
+			}
+		})
 	}
 }
