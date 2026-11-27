@@ -17,6 +17,7 @@ import {
 	environments,
 	githubRepos,
 	projects,
+	secrets,
 	servers,
 	serviceCrons,
 	servicePorts,
@@ -377,55 +378,88 @@ function sanitizeSpec(specification: unknown) {
 	};
 }
 
+// Public API responses never include secret names or values, so this only
+// reports whether any secret differs from the active revision's snapshot.
+function hasSecretChanges(
+	deployed: { key: string; encryptedValue: string; updatedAt: string }[],
+	current: { key: string; encryptedValue: string; updatedAt: Date }[],
+): boolean {
+	if (deployed.length !== current.length) return true;
+	const deployedByKey = new Map(deployed.map((secret) => [secret.key, secret]));
+	return current.some((after) => {
+		const before = deployedByKey.get(after.key);
+		return (
+			!before ||
+			before.encryptedValue !== after.encryptedValue ||
+			before.updatedAt !== after.updatedAt.toISOString()
+		);
+	});
+}
+
 export async function safeConfiguration(service: NestedService) {
-	const [repo, ports, crons, volumes, placements, activeDeployment] =
-		await Promise.all([
-			db
-				.select()
-				.from(githubRepos)
-				.where(eq(githubRepos.serviceId, service.id))
-				.limit(1)
-				.then((rows) => rows[0]),
-			db
-				.select()
-				.from(servicePorts)
-				.where(eq(servicePorts.serviceId, service.id)),
-			db
-				.select({ path: serviceCrons.path, schedule: serviceCrons.schedule })
-				.from(serviceCrons)
-				.where(eq(serviceCrons.serviceId, service.id)),
-			db
-				.select({
-					name: serviceVolumes.name,
-					containerPath: serviceVolumes.containerPath,
-				})
-				.from(serviceVolumes)
-				.where(eq(serviceVolumes.serviceId, service.id)),
-			db
-				.select({
-					serverId: serviceReplicas.serverId,
-					serverName: servers.name,
-					count: serviceReplicas.count,
-				})
-				.from(serviceReplicas)
-				.innerJoin(servers, eq(servers.id, serviceReplicas.serverId))
-				.where(eq(serviceReplicas.serviceId, service.id)),
-			db
-				.select({
-					id: deployments.id,
-					revisionId: deployments.serviceRevisionId,
-				})
-				.from(deployments)
-				.where(
-					and(
-						eq(deployments.serviceId, service.id),
-						eq(deployments.trafficState, "active"),
-					),
-				)
-				.orderBy(desc(deployments.createdAt), desc(deployments.id))
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-		]);
+	const [
+		repo,
+		ports,
+		crons,
+		volumes,
+		placements,
+		activeDeployment,
+		currentSecrets,
+	] = await Promise.all([
+		db
+			.select()
+			.from(githubRepos)
+			.where(eq(githubRepos.serviceId, service.id))
+			.limit(1)
+			.then((rows) => rows[0]),
+		db
+			.select()
+			.from(servicePorts)
+			.where(eq(servicePorts.serviceId, service.id)),
+		db
+			.select({ path: serviceCrons.path, schedule: serviceCrons.schedule })
+			.from(serviceCrons)
+			.where(eq(serviceCrons.serviceId, service.id)),
+		db
+			.select({
+				name: serviceVolumes.name,
+				containerPath: serviceVolumes.containerPath,
+			})
+			.from(serviceVolumes)
+			.where(eq(serviceVolumes.serviceId, service.id)),
+		db
+			.select({
+				serverId: serviceReplicas.serverId,
+				serverName: servers.name,
+				count: serviceReplicas.count,
+			})
+			.from(serviceReplicas)
+			.innerJoin(servers, eq(servers.id, serviceReplicas.serverId))
+			.where(eq(serviceReplicas.serviceId, service.id)),
+		db
+			.select({
+				id: deployments.id,
+				revisionId: deployments.serviceRevisionId,
+			})
+			.from(deployments)
+			.where(
+				and(
+					eq(deployments.serviceId, service.id),
+					eq(deployments.trafficState, "active"),
+				),
+			)
+			.orderBy(desc(deployments.createdAt), desc(deployments.id))
+			.limit(1)
+			.then((rows) => rows[0] ?? null),
+		db
+			.select({
+				key: secrets.key,
+				encryptedValue: secrets.encryptedValue,
+				updatedAt: secrets.updatedAt,
+			})
+			.from(secrets)
+			.where(eq(secrets.serviceId, service.id)),
+	]);
 
 	const source = resolvePersistedSourceFromRows(service, repo);
 	const sortedPlacements = placements.toSorted((a, b) =>
@@ -515,6 +549,11 @@ export async function safeConfiguration(service: NestedService) {
 	};
 
 	let active: ReturnType<typeof sanitizeSpec> | null = null;
+	let activeSecrets: {
+		key: string;
+		encryptedValue: string;
+		updatedAt: string;
+	}[] = [];
 	if (activeDeployment) {
 		const revision = await db
 			.select({ specification: serviceRevisions.specification })
@@ -529,6 +568,9 @@ export async function safeConfiguration(service: NestedService) {
 			.then((rows) => rows[0]);
 		try {
 			active = revision ? sanitizeSpec(revision.specification) : null;
+			activeSecrets = revision
+				? parseServiceRevisionSpec(revision.specification).secrets
+				: [];
 		} catch {
 			active = null;
 		}
@@ -555,13 +597,25 @@ export async function safeConfiguration(service: NestedService) {
 		serverless: current.serverless,
 	};
 	const pendingChanges = active
-		? Object.keys(comparableCurrent).flatMap((field) =>
-				JSON.stringify(
-					comparableCurrent[field as keyof typeof comparableCurrent],
-				) === JSON.stringify(active[field as keyof typeof active])
-					? []
-					: [{ field, from: "active revision", to: "current configuration" }],
-			)
+		? Object.keys(comparableCurrent)
+				.flatMap((field) =>
+					JSON.stringify(
+						comparableCurrent[field as keyof typeof comparableCurrent],
+					) === JSON.stringify(active[field as keyof typeof active])
+						? []
+						: [{ field, from: "active revision", to: "current configuration" }],
+				)
+				.concat(
+					hasSecretChanges(activeSecrets, currentSecrets)
+						? [
+								{
+									field: "secrets",
+									from: "active revision",
+									to: "current configuration",
+								},
+							]
+						: [],
+				)
 		: [
 				{
 					field: "deployment",

@@ -944,7 +944,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 			var gotPath, gotQuery string
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-				w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"items":[]}`))
+				w.Write([]byte(`{"target":{"project":{"id":"p","slug":"app"},"environment":{"id":"e","name":"prod"},"service":{"id":"s","name":"web"}},"service":{"id":"0400075c-69aa-46c2-bccc-fc172b8c6b28","name":"web","source":{"type":"image","image":"nginx"}},"latestBuild":null,"latestRollout":null,"deployments":[],"crons":[{"path":"/api/cron/blob-cleanup","schedule":"0 * * * *","nextScheduledFor":"2026-11-28T09:00:00.000Z","lastFinishedAt":"2026-11-28T08:00:01.000Z","lastStatus":"failed","lastStatusCode":401,"lastError":"HTTP status 401"},{"path":"/api/cron/digest","schedule":"0 9 * * *","nextScheduledFor":"2026-11-28T09:00:00.000Z","lastFinishedAt":null,"lastStatus":null,"lastStatusCode":null,"lastError":null}],"items":[]}`))
 			}))
 			defer s.Close()
 			writeConfig(t, s.URL)
@@ -966,7 +966,7 @@ func TestStatusAndResourceRoutesAndOutput(t *testing.T) {
 				if err := execute(app, args...); err != nil {
 					t.Fatal(err)
 				}
-				assertHumanOutput(t, out.String(), "app/prod/web", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28")
+				assertHumanOutput(t, out.String(), "app/prod/web", "ID", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "Crons (2)", "* /api/cron/blob-cleanup  0 * * * *  failed 401 at 2026-11-28T08:00:01.000Z", "error: HTTP status 401", "* /api/cron/digest  0 9 * * *  never run")
 			}
 			base := "/api/v1/services/s"
 			if gotPath != base+tc.path || gotQuery != tc.query {
@@ -1016,7 +1016,7 @@ func TestConfigurationHumanOutputIsFormatted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "a868807a-42ee-4a40-99fe-cd8303036b02: 1 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deployment", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
+	assertHumanOutput(t, out.String(), "Configuration", "https://github.com/acme/app @ main (cmd/api)", "api.example.com", "ubuntu-2: 2 replica(s)", "a868807a-42ee-4a40-99fe-cd8303036b02: 1 replica(s)", "3000/http public", "data: /data", "curl localhost:3000", "Deploy schedule", "Deployment", "0400075c-69aa-46c2-bccc-fc172b8c6b28", "2c917d90-4bc1-4274-b3bf-34fed009fc12", "replicas: active revision -> current configuration", "Management", "Patchable", "yes")
 }
 
 func TestMetricsHumanOutputIsFormatted(t *testing.T) {

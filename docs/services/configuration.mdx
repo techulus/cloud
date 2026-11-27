@@ -44,9 +44,11 @@ Add these service secrets from the web UI:
 | `CRON_BASE_URL` | Yes | HTTP or HTTPS origin joined with each configured path |
 | `CRON_SECRET` | No | Sent as `Authorization: Bearer <value>`; requires an HTTPS base URL |
 
+Crons read these secrets from the active deployment, so the `CRON_SECRET` they send always matches the value your running containers received. After adding or changing `CRON_BASE_URL` or `CRON_SECRET`, redeploy the service to apply it. A service with no active deployment skips its cron runs.
+
 The destination must be reachable from the control plane. Cron requests do not follow redirects or retry, and each request has a 10-second deadline. If the control plane misses multiple intervals, it sends only the latest due occurrence instead of backfilling every missed run.
 
-Missing or invalid configuration produces a skipped run. Redirects and non-2xx responses produce failed runs. The **Crons** section in service configuration shows the latest result. Full history is available in [service logs](/infrastructure/logging) and follows the configured log retention period.
+Missing or invalid configuration produces a skipped run. Redirects and non-2xx responses produce failed runs. The **Crons** section in service configuration and `tc status` show the latest result. Full history is available in [service logs](/infrastructure/logging) and follows the configured log retention period.
 
 `tc apply` treats `service.crons` as the complete desired list. Removing the field or setting it to an empty list removes all cron definitions. Cron-only changes take effect without creating a deployment revision.
 

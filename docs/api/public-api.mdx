@@ -111,7 +111,7 @@ The paths in this table are relative to `/api/v1/services/{serviceId}`.
 | --- | --- | --- |
 | `GET`, `PUT` | `/configuration` | Read safe current/active configuration or atomically replace all managed configuration |
 | `POST` | `/configuration/plan` | Validate and plan a complete managed configuration replacement |
-| `GET` | `/status` | Read source, latest build and rollout, and persisted deployments |
+| `GET` | `/status` | Read source, latest build and rollout, persisted deployments, and service crons with their latest result |
 | `POST` | `/deploy` | Queue an image rollout or GitHub build |
 | `GET` | `/logs` | Search logs and optionally long poll |
 | `GET` | `/requests` | Search HTTP request logs and optionally long poll |
@@ -131,7 +131,7 @@ Rollout and build collections accept `limit` from 1 through 100 and an opaque `c
 - `current` is the mutable configuration stored for the service.
 - `active` is the immutable specification used by the active deployment.
 - `activeRevisionId` and `activeDeploymentId` identify that active state.
-- `hasPendingChanges` and `changes` compare current and active state.
+- `hasPendingChanges` and `changes` compare current and active state. If any secret was added, removed, or updated since the active deployment, `changes` includes a single `secrets` entry without naming the secrets.
 - `management.patchable` and `management.blockers` explain whether the API can safely manage the service.
 
 A GitHub service keeps mutable repository settings in `current.source`. Its `active.source` comes from the immutable service revision used by the active deployment. The public projection includes the snapshotted repository, branch, and root directory. It omits repository IDs and authentication details.
