@@ -22,6 +22,7 @@ const (
 )
 
 type HTTPLogEntry struct {
+	EventID   string  `json:"event_id"`
 	ServiceId string  `json:"service_id"`
 	Host      string  `json:"host"`
 	Method    string  `json:"method"`
@@ -202,7 +203,14 @@ func (c *TraefikCollector) processLine(line []byte) {
 
 	durationMs := float64(entry.Duration) / 1e6
 
+	eventID, err := newLogEventID(time.Now())
+	if err != nil {
+		log.Printf("[traefik-logs] failed to identify log: %v", err)
+		return
+	}
+
 	httpEntry := HTTPLogEntry{
+		EventID:   eventID,
 		ServiceId: serviceId,
 		Host:      entry.RequestHost,
 		Method:    entry.RequestMethod,

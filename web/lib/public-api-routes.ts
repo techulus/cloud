@@ -537,9 +537,38 @@ export function nextServiceLogCursor(
 	});
 }
 
-export async function getServiceLogs(
+function publicRequestLog(log: StoredLog) {
+	return {
+		method: log.method ?? null,
+		path: log.path ?? null,
+		status: log.status ?? null,
+		durationMs: log.duration_ms ?? null,
+		size: log.size ?? null,
+		clientIp: log.client_ip ?? null,
+		host: log.host ?? null,
+		timestamp: log._time,
+	};
+}
+
+export function getServiceLogs(
 	request: Request,
 	context: PublicServiceContext,
+) {
+	return serviceLogsResponse(request, context, "container", publicServiceLog);
+}
+
+export function getServiceRequests(
+	request: Request,
+	context: PublicServiceContext,
+) {
+	return serviceLogsResponse(request, context, "http", publicRequestLog);
+}
+
+async function serviceLogsResponse<T>(
+	request: Request,
+	context: PublicServiceContext,
+	logType: "container" | "http",
+	mapLog: (log: StoredLog) => T,
 ) {
 	const scope = await readScope(request, context);
 	if ("response" in scope) return scope.response;
@@ -565,7 +594,7 @@ export async function getServiceLogs(
 		const query = () =>
 			queryPublicServiceLogs({
 				serviceId: scope.service.id,
-				logType: "container",
+				logType,
 				limit: options.limit,
 				cursor: options.cursor
 					? ({
@@ -594,7 +623,7 @@ export async function getServiceLogs(
 				service: { id: scope.service.id, name: scope.service.name },
 			},
 			provider: "enabled",
-			logs: result.logs.map(publicServiceLog),
+			logs: result.logs.map(mapLog),
 			nextCursor: nextServiceLogCursor(result.logs, options.rawCursor),
 			hasMore: result.hasMore,
 			pollAfterMs: result.hasMore ? 0 : result.logs.length > 0 ? 250 : 1000,
@@ -606,7 +635,7 @@ export async function getServiceLogs(
 		}
 		if (error instanceof RangeError) return invalidLogQuery(error);
 		reportServerError(error, "public-api.service-logs.query", {
-			tags: { serviceId: scope.service.id },
+			tags: { serviceId: scope.service.id, logType },
 		});
 		return apiError("Log provider unavailable", "LOG_PROVIDER_ERROR", 502);
 	}
