@@ -179,11 +179,12 @@ describe("rollout certificate retries", () => {
 		expect(mocks.issueCertificatesForRevision).toHaveBeenCalledTimes(3);
 		expect(step.sleep).toHaveBeenCalledTimes(2);
 		expect(mocks.handleRolloutFailure).toHaveBeenCalledOnce();
-		expect(mocks.handleRolloutFailure).toHaveBeenCalledWith(
-			"rollout-1",
-			"service-1",
-			"certificate_provisioning_failed",
-			false,
-		);
+		expect(mocks.handleRolloutFailure).toHaveBeenCalledWith({
+			rolloutId: "rollout-1",
+			serviceId: "service-1",
+			reason: "certificate_provisioning_failed",
+			failureStage: "certificate_provisioning_failed",
+			isRollingUpdate: false,
+		});
 	});
 });
