@@ -92,7 +92,7 @@ describe("public API configuration state", () => {
 		expect(configuration.changes).toEqual([]);
 	});
 
-	it("reports secret changes since the active revision by key only", async () => {
+	it("reports secret changes since the active revision without naming them", async () => {
 		const deployedSecret = {
 			key: "CRON_SECRET",
 			encryptedValue: "encrypted-old-value",
@@ -171,12 +171,15 @@ describe("public API configuration state", () => {
 		expect(configuration.hasPendingChanges).toBe(true);
 		expect(configuration.changes).toEqual([
 			{
-				field: "secrets.CRON_SECRET",
+				field: "secrets",
 				from: "active revision",
 				to: "current configuration",
 			},
 		]);
-		expect(JSON.stringify(configuration)).not.toContain("encrypted-");
+		const serialized = JSON.stringify(configuration);
+		expect(serialized).not.toContain("encrypted-");
+		expect(serialized).not.toContain("CRON_SECRET");
+		expect(serialized).not.toContain("UNCHANGED");
 	});
 
 	it("serializes automatic placement from desired service replicas", async () => {

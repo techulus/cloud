@@ -378,25 +378,22 @@ function sanitizeSpec(specification: unknown) {
 	};
 }
 
-// Returns only key names; secret values never leave this function.
-function diffSecretKeys(
+// Public API responses never include secret names or values, so this only
+// reports whether any secret differs from the active revision's snapshot.
+function hasSecretChanges(
 	deployed: { key: string; encryptedValue: string; updatedAt: string }[],
 	current: { key: string; encryptedValue: string; updatedAt: Date }[],
-): string[] {
+): boolean {
+	if (deployed.length !== current.length) return true;
 	const deployedByKey = new Map(deployed.map((secret) => [secret.key, secret]));
-	const currentByKey = new Map(current.map((secret) => [secret.key, secret]));
-	return [...new Set([...deployedByKey.keys(), ...currentByKey.keys()])]
-		.filter((key) => {
-			const before = deployedByKey.get(key);
-			const after = currentByKey.get(key);
-			return (
-				!before ||
-				!after ||
-				before.encryptedValue !== after.encryptedValue ||
-				before.updatedAt !== after.updatedAt.toISOString()
-			);
-		})
-		.toSorted((a, b) => a.localeCompare(b, "en"));
+	return current.some((after) => {
+		const before = deployedByKey.get(after.key);
+		return (
+			!before ||
+			before.encryptedValue !== after.encryptedValue ||
+			before.updatedAt !== after.updatedAt.toISOString()
+		);
+	});
 }
 
 export async function safeConfiguration(service: NestedService) {
@@ -609,11 +606,15 @@ export async function safeConfiguration(service: NestedService) {
 						: [{ field, from: "active revision", to: "current configuration" }],
 				)
 				.concat(
-					diffSecretKeys(activeSecrets, currentSecrets).map((key) => ({
-						field: `secrets.${key}`,
-						from: "active revision",
-						to: "current configuration",
-					})),
+					hasSecretChanges(activeSecrets, currentSecrets)
+						? [
+								{
+									field: "secrets",
+									from: "active revision",
+									to: "current configuration",
+								},
+							]
+						: [],
 				)
 		: [
 				{
