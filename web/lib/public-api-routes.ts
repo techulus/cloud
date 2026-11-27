@@ -1,6 +1,12 @@
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { builds, deployments, rollouts, servers } from "@/db/schema";
+import {
+	builds,
+	deployments,
+	rollouts,
+	servers,
+	serviceCrons,
+} from "@/db/schema";
 import { requireApiKeyDeveloperRole, requireApiKeyRole } from "@/lib/api-auth";
 import { deployServiceInternal } from "@/lib/deploy-service";
 import {
@@ -287,30 +293,44 @@ export async function getStatus(
 	const scope = await readScope(request, context);
 	if ("response" in scope) return scope.response;
 	try {
-		const [latestRollout, latestBuild, persisted, source] = await Promise.all([
-			db
-				.select(safeRollout)
-				.from(rollouts)
-				.where(eq(rollouts.serviceId, scope.service.id))
-				.orderBy(desc(rollouts.createdAt), desc(rollouts.id))
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-			db
-				.select(safeBuild)
-				.from(builds)
-				.where(eq(builds.serviceId, scope.service.id))
-				.orderBy(desc(builds.createdAt), desc(builds.id))
-				.limit(1)
-				.then((rows) => rows[0] ?? null),
-			db
-				.select(safeDeployment)
-				.from(deployments)
-				.innerJoin(servers, eq(servers.id, deployments.serverId))
-				.where(eq(deployments.serviceId, scope.service.id))
-				.orderBy(desc(deployments.createdAt))
-				.limit(100),
-			resolvePersistedSource(scope.service),
-		]);
+		const [latestRollout, latestBuild, persisted, source, crons] =
+			await Promise.all([
+				db
+					.select(safeRollout)
+					.from(rollouts)
+					.where(eq(rollouts.serviceId, scope.service.id))
+					.orderBy(desc(rollouts.createdAt), desc(rollouts.id))
+					.limit(1)
+					.then((rows) => rows[0] ?? null),
+				db
+					.select(safeBuild)
+					.from(builds)
+					.where(eq(builds.serviceId, scope.service.id))
+					.orderBy(desc(builds.createdAt), desc(builds.id))
+					.limit(1)
+					.then((rows) => rows[0] ?? null),
+				db
+					.select(safeDeployment)
+					.from(deployments)
+					.innerJoin(servers, eq(servers.id, deployments.serverId))
+					.where(eq(deployments.serviceId, scope.service.id))
+					.orderBy(desc(deployments.createdAt))
+					.limit(100),
+				resolvePersistedSource(scope.service),
+				db
+					.select({
+						path: serviceCrons.path,
+						schedule: serviceCrons.schedule,
+						nextScheduledFor: serviceCrons.nextScheduledFor,
+						lastFinishedAt: serviceCrons.lastFinishedAt,
+						lastStatus: serviceCrons.lastStatus,
+						lastStatusCode: serviceCrons.lastStatusCode,
+						lastError: serviceCrons.lastError,
+					})
+					.from(serviceCrons)
+					.where(eq(serviceCrons.serviceId, scope.service.id))
+					.orderBy(asc(serviceCrons.path)),
+			]);
 		return Response.json({
 			target: {
 				project: { id: scope.target.projectId, slug: scope.target.projectSlug },
@@ -328,6 +348,7 @@ export async function getStatus(
 			latestBuild: scope.service.sourceType === "github" ? latestBuild : null,
 			latestRollout,
 			deployments: persisted,
+			crons,
 		});
 	} catch (error) {
 		return internalError(error, "read status");

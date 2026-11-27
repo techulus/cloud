@@ -37,6 +37,7 @@ describe("public API configuration state", () => {
 			[],
 			[{ serverId: "server-1", serverName: "Sydney", count: 1 }],
 			[{ id: "deployment-1", revisionId: "revision-1" }],
+			[],
 			[
 				{
 					specification: {
@@ -89,6 +90,93 @@ describe("public API configuration state", () => {
 		expect(configuration.active?.hostname).toBe("hello-service");
 		expect(configuration.hasPendingChanges).toBe(false);
 		expect(configuration.changes).toEqual([]);
+	});
+
+	it("reports secret changes since the active revision by key only", async () => {
+		const deployedSecret = {
+			key: "CRON_SECRET",
+			encryptedValue: "encrypted-old-value",
+			updatedAt: "2026-08-01T00:00:00.000Z",
+		};
+		mocks.rows.push(
+			[],
+			[],
+			[],
+			[],
+			[{ serverId: "server-1", serverName: "Sydney", count: 1 }],
+			[{ id: "deployment-1", revisionId: "revision-1" }],
+			[
+				{
+					key: "CRON_SECRET",
+					encryptedValue: "encrypted-new-value",
+					updatedAt: new Date("2026-08-02T00:00:00.000Z"),
+				},
+				{
+					key: "UNCHANGED",
+					encryptedValue: "encrypted-same",
+					updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+				},
+			],
+			[
+				{
+					specification: {
+						schemaVersion: 2,
+						image: "nginx:1.27",
+						source: { type: "image", image: "nginx:1.27" },
+						hostname: "hello-service",
+						stateful: false,
+						serverless: {
+							enabled: false,
+							sleepAfterSeconds: 300,
+							wakeTimeoutSeconds: 300,
+						},
+						healthCheck: null,
+						startCommand: null,
+						resourceLimits: { cpuCores: null, memoryMb: null },
+						placements: [{ serverId: "server-1", count: 1 }],
+						ports: [],
+						secrets: [
+							deployedSecret,
+							{
+								key: "UNCHANGED",
+								encryptedValue: "encrypted-same",
+								updatedAt: "2026-08-01T00:00:00.000Z",
+							},
+						],
+						volumes: [],
+					},
+				},
+			],
+		);
+
+		const configuration = await safeConfiguration({
+			id: "service-1",
+			name: "Hello Service",
+			sourceType: "image",
+			image: "nginx:1.27",
+			hostname: "hello-service",
+			stateful: false,
+			healthCheckCmd: null,
+			startCommand: null,
+			resourceCpuLimit: null,
+			resourceMemoryLimitMb: null,
+			serverlessEnabled: false,
+			serverlessSleepAfterSeconds: 300,
+			serverlessWakeTimeoutSeconds: 300,
+			deploymentSchedule: null,
+			backupEnabled: false,
+			backupSchedule: null,
+		} as never);
+
+		expect(configuration.hasPendingChanges).toBe(true);
+		expect(configuration.changes).toEqual([
+			{
+				field: "secrets.CRON_SECRET",
+				from: "active revision",
+				to: "current configuration",
+			},
+		]);
+		expect(JSON.stringify(configuration)).not.toContain("encrypted-");
 	});
 
 	it("serializes automatic placement from desired service replicas", async () => {

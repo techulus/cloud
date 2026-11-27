@@ -1653,10 +1653,35 @@ func printStatus(w io.Writer, value manifest.Manifest, status statusResponse) {
 	output.Section(w, fmt.Sprintf("Deployments (%d)", len(status.Deployments)))
 	if len(status.Deployments) == 0 {
 		output.Field(w, "Current", "none")
-		return
 	}
 	for _, deployment := range status.Deployments {
 		printMapSummary(w, deployment)
+	}
+
+	printCronStatuses(w, status.Crons)
+}
+
+func printCronStatuses(w io.Writer, crons []cronStatus) {
+	output.Section(w, fmt.Sprintf("Crons (%d)", len(crons)))
+	if len(crons) == 0 {
+		output.Field(w, "Items", "none")
+		return
+	}
+	for _, cron := range crons {
+		result := "never run"
+		if cron.LastStatus != nil {
+			result = *cron.LastStatus
+			if cron.LastStatusCode != nil {
+				result += fmt.Sprintf(" %d", *cron.LastStatusCode)
+			}
+			if cron.LastFinishedAt != nil {
+				result += " at " + *cron.LastFinishedAt
+			}
+		}
+		fmt.Fprintf(w, "    * %s  %s  %s\n", cron.Path, cron.Schedule, result)
+		if cron.LastError != nil && *cron.LastError != "" {
+			fmt.Fprintf(w, "      error: %s\n", *cron.LastError)
+		}
 	}
 }
 
@@ -1909,11 +1934,11 @@ func printSchedules(w io.Writer, value any) {
 	if !ok {
 		return
 	}
-	printOptionalField(w, "Deploy cron", schedules["deployment"])
+	printOptionalField(w, "Deploy schedule", schedules["deployment"])
 	if backup, ok := schedules["backup"].(map[string]any); ok {
 		enabled, _ := backup["enabled"].(bool)
 		if enabled {
-			printOptionalField(w, "Backup cron", backup["schedule"])
+			printOptionalField(w, "Backup schedule", backup["schedule"])
 		} else {
 			output.Field(w, "Backups", "disabled")
 		}

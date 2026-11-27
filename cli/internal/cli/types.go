@@ -118,6 +118,17 @@ type statusResponse struct {
 	LatestBuild   map[string]any   `json:"latestBuild"`
 	LatestRollout map[string]any   `json:"latestRollout"`
 	Deployments   []map[string]any `json:"deployments"`
+	Crons         []cronStatus     `json:"crons"`
+}
+
+type cronStatus struct {
+	Path             string  `json:"path"`
+	Schedule         string  `json:"schedule"`
+	NextScheduledFor *string `json:"nextScheduledFor"`
+	LastFinishedAt   *string `json:"lastFinishedAt"`
+	LastStatus       *string `json:"lastStatus"`
+	LastStatusCode   *int    `json:"lastStatusCode"`
+	LastError        *string `json:"lastError"`
 }
 type serviceLog struct {
 	DeploymentID *string `json:"deploymentId"`
