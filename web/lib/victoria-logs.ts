@@ -42,9 +42,9 @@ export type StoredLog = {
 	host?: string;
 	method?: string;
 	path?: string;
-	status?: number | null;
-	duration_ms?: number;
-	size?: number;
+	status?: number | string | null;
+	duration_ms?: number | string;
+	size?: number | string;
 	client_ip?: string;
 	cron_id?: string;
 	error?: string | null;

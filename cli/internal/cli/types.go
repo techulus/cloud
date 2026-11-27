@@ -126,10 +126,21 @@ type serviceLog struct {
 	Timestamp    string  `json:"timestamp"`
 }
 
-type logsResponse struct {
+type requestLog struct {
+	Method     *string  `json:"method"`
+	Path       *string  `json:"path"`
+	Status     *int     `json:"status"`
+	DurationMS *float64 `json:"durationMs"`
+	Size       *int     `json:"size"`
+	ClientIP   *string  `json:"clientIp"`
+	Host       *string  `json:"host"`
+	Timestamp  string   `json:"timestamp"`
+}
+
+type logsResponse[T any] struct {
 	Target      targetContext `json:"target"`
 	Provider    string        `json:"provider"`
-	Logs        []serviceLog  `json:"logs"`
+	Logs        []T           `json:"logs"`
 	NextCursor  string        `json:"nextCursor"`
 	HasMore     bool          `json:"hasMore"`
 	PollAfterMS int           `json:"pollAfterMs"`
