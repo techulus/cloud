@@ -537,15 +537,22 @@ export function nextServiceLogCursor(
 	});
 }
 
-function publicRequestLog(log: StoredLog) {
+// VictoriaLogs returns every field value as a string.
+function logNumber(value: number | string | null | undefined): number | null {
+	if (value === null || value === undefined || value === "") return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function publicRequestLog(log: StoredLog) {
 	return {
-		method: log.method ?? null,
-		path: log.path ?? null,
-		status: log.status ?? null,
-		durationMs: log.duration_ms ?? null,
-		size: log.size ?? null,
-		clientIp: log.client_ip ?? null,
-		host: log.host ?? null,
+		method: log.method || null,
+		path: log.path || null,
+		status: logNumber(log.status),
+		durationMs: logNumber(log.duration_ms),
+		size: logNumber(log.size),
+		clientIp: log.client_ip || null,
+		host: log.host || null,
 		timestamp: log._time,
 	};
 }
